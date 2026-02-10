@@ -1,15 +1,16 @@
 name: Deploy Frontend
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI Frontend"]
+    types:
+      - completed
     branches: [main]
-    paths:
-      - 'frontend/**'
-      - 'scripts/deploy-frontend.sh'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1

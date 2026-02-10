@@ -1,15 +1,16 @@
 name: Deploy Backend
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI Backend"]
+    types:
+      - completed
     branches: [main]
-    paths:
-      - 'backend/**'
-      - 'scripts/deploy-backend.sh'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
@@ -18,7 +19,6 @@ jobs:
           username: ${{ secrets.VM_USER }}
           password: ${{ secrets.VM_PASSWORD }}
           script: |
-            # Generate .env from GitHub Secrets
             cat > ~/apps/.env << 'ENVEOF'
             POSTGRES_DB=${{ secrets.POSTGRES_DB }}
             POSTGRES_USER=${{ secrets.POSTGRES_USER }}
