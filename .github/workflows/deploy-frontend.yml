@@ -16,7 +16,7 @@ jobs:
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
+          password: ${{ secrets.VM_PASSWORD }}
           script: |
             cat > ~/apps/.env << 'ENVEOF'
             POSTGRES_DB=${{ secrets.POSTGRES_DB }}
