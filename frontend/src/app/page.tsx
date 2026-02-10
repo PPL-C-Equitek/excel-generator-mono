@@ -2,8 +2,13 @@
 import { useEffect, useState } from "react";
 import { getHealth } from "@/services/health";
 
+interface HealthResponse {
+  status: string;
+  message: string;
+}
+
 export default function Home() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
