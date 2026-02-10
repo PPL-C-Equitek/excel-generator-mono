@@ -1,16 +1,48 @@
-name: Deploy Frontend
+name: Frontend
 
 on:
-  workflow_run:
-    workflows: ["CI Frontend"]
-    types:
-      - completed
+  push:
     branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'scripts/deploy-frontend.sh'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/**'
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Lint
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+        run: |
+          cd frontend
+          npm run build
+
   deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    needs: test
+    if: github.event_name == 'push'
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
