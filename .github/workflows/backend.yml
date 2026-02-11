@@ -45,6 +45,26 @@ jobs:
           cd backend
           pip install -r requirements.txt
 
+      - name: Lint
+        run: |
+          cd backend
+          pip install ruff
+          ruff check .
+
+      - name: Check migrations
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          DJANGO_SECRET_KEY: test-secret-key
+          DJANGO_DEBUG: 'True'
+          DJANGO_ALLOWED_HOSTS: localhost
+        run: |
+          cd backend
+          python manage.py makemigrations --check --dry-run
+
       - name: Run unit tests with coverage
         env:
           POSTGRES_DB: test_db
@@ -58,15 +78,25 @@ jobs:
         run: |
           cd backend
           coverage run --rcfile=.coveragerc manage.py test api
-          echo "BACKEND_COVERAGE=$(coverage report --format=total)" >> $GITHUB_ENV
           coverage report
           coverage xml
+          coverage json -o coverage.json
+          BACKEND_LINES_COVERAGE=$(python -c "import json; t=json.load(open('coverage.json'))['totals']; print(round((t['covered_lines']/t['num_statements']*100) if t['num_statements'] else 100))")
+          BACKEND_BRANCHES_COVERAGE=$(python -c "import json; t=json.load(open('coverage.json'))['totals']; nb=t.get('num_branches',0); cb=t.get('covered_branches',0); print(round((cb/nb*100) if nb else 100))")
+          if [ "$BACKEND_LINES_COVERAGE" -le "$BACKEND_BRANCHES_COVERAGE" ]; then
+            BACKEND_COVERAGE="$BACKEND_LINES_COVERAGE"
+          else
+            BACKEND_COVERAGE="$BACKEND_BRANCHES_COVERAGE"
+          fi
+          echo "BACKEND_COVERAGE=${BACKEND_COVERAGE}" >> $GITHUB_ENV
 
       - name: Upload backend coverage artifact
         uses: actions/upload-artifact@v4
         with:
           name: backend-coverage
-          path: backend/coverage.xml
+          path: |
+            backend/coverage.xml
+            backend/coverage.json
 
       - name: Update backend coverage badge
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

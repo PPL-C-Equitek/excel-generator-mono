@@ -15,4 +15,3 @@ def about(request):
 def members(request):
     data = list(GroupMember.objects.values("npm", "name"))
     return Response({"group": "Kelompok 7", "members": data})
-
