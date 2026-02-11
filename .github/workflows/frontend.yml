@@ -46,7 +46,13 @@ jobs:
         run: |
           cd frontend
           npm run test:coverage
-          FRONTEND_COVERAGE=$(node -e "const fs=require('fs'); const summary=JSON.parse(fs.readFileSync('coverage/coverage-summary.json','utf8')); console.log(Math.round(summary.total.lines.pct));")
+          FRONTEND_LINES_COVERAGE=$(node -e "const fs=require('fs'); const summary=JSON.parse(fs.readFileSync('coverage/coverage-summary.json','utf8')); console.log(Math.round(summary.total.lines.pct));")
+          FRONTEND_BRANCHES_COVERAGE=$(node -e "const fs=require('fs'); const summary=JSON.parse(fs.readFileSync('coverage/coverage-summary.json','utf8')); console.log(Math.round(summary.total.branches.pct));")
+          if [ "$FRONTEND_LINES_COVERAGE" -le "$FRONTEND_BRANCHES_COVERAGE" ]; then
+            FRONTEND_COVERAGE="$FRONTEND_LINES_COVERAGE"
+          else
+            FRONTEND_COVERAGE="$FRONTEND_BRANCHES_COVERAGE"
+          fi
           echo "FRONTEND_COVERAGE=${FRONTEND_COVERAGE}" >> $GITHUB_ENV
 
       - name: Upload frontend coverage artifact
@@ -69,14 +75,14 @@ jobs:
             mkdir -p .github/badges
             LABEL="frontend coverage"
             MESSAGE="${FRONTEND_COVERAGE}%"
-            COLOR="#e05d44"
-            if [ "$FRONTEND_COVERAGE" -ge 90 ]; then
-              COLOR="#4c1"
-            elif [ "$FRONTEND_COVERAGE" -ge 75 ]; then
-              COLOR="#dfb317"
-            elif [ "$FRONTEND_COVERAGE" -ge 60 ]; then
-              COLOR="#fe7d37"
+            SCORE="$FRONTEND_COVERAGE"
+            if [ "$SCORE" -lt 0 ]; then
+              SCORE=0
+            elif [ "$SCORE" -gt 100 ]; then
+              SCORE=100
             fi
+            HUE=$(( SCORE * 120 / 100 ))
+            COLOR="hsl(${HUE}, 85%, 40%)"
 
             LABEL_WIDTH=$(( ${#LABEL} * 6 + 10 ))
             MESSAGE_WIDTH=$(( ${#MESSAGE} * 7 + 10 ))

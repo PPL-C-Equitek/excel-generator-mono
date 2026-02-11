@@ -82,14 +82,14 @@ jobs:
             mkdir -p .github/badges
             LABEL="backend coverage"
             MESSAGE="${BACKEND_COVERAGE}%"
-            COLOR="#e05d44"
-            if [ "$BACKEND_COVERAGE" -ge 90 ]; then
-              COLOR="#4c1"
-            elif [ "$BACKEND_COVERAGE" -ge 75 ]; then
-              COLOR="#dfb317"
-            elif [ "$BACKEND_COVERAGE" -ge 60 ]; then
-              COLOR="#fe7d37"
+            SCORE="$BACKEND_COVERAGE"
+            if [ "$SCORE" -lt 0 ]; then
+              SCORE=0
+            elif [ "$SCORE" -gt 100 ]; then
+              SCORE=100
             fi
+            HUE=$(( SCORE * 120 / 100 ))
+            COLOR="hsl(${HUE}, 85%, 40%)"
 
             LABEL_WIDTH=$(( ${#LABEL} * 6 + 10 ))
             MESSAGE_WIDTH=$(( ${#MESSAGE} * 7 + 10 ))
