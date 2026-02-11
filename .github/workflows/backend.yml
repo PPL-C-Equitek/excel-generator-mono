@@ -68,54 +68,72 @@ jobs:
           name: backend-coverage
           path: backend/coverage.xml
 
-      - name: Generate backend coverage badge
+      - name: Update backend coverage badge
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          mkdir -p .github/badges
-          LABEL="backend coverage"
-          MESSAGE="${BACKEND_COVERAGE}%"
-          COLOR="#e05d44"
-          if [ "$BACKEND_COVERAGE" -ge 90 ]; then
-            COLOR="#4c1"
-          elif [ "$BACKEND_COVERAGE" -ge 75 ]; then
-            COLOR="#dfb317"
-          elif [ "$BACKEND_COVERAGE" -ge 60 ]; then
-            COLOR="#fe7d37"
-          fi
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          LABEL_WIDTH=$(( ${#LABEL} * 6 + 10 ))
-          MESSAGE_WIDTH=$(( ${#MESSAGE} * 7 + 10 ))
-          TOTAL_WIDTH=$(( LABEL_WIDTH + MESSAGE_WIDTH ))
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B main origin/main
 
-          cat > .github/badges/backend-coverage.svg <<EOF
-          <svg xmlns="http://www.w3.org/2000/svg" width="${TOTAL_WIDTH}" height="20" role="img" aria-label="${LABEL}: ${MESSAGE}">
-            <linearGradient id="s" x2="0" y2="100%">
-              <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
-              <stop offset="1" stop-opacity=".1"/>
-            </linearGradient>
-            <clipPath id="r">
-              <rect width="${TOTAL_WIDTH}" height="20" rx="3" fill="#fff"/>
-            </clipPath>
-            <g clip-path="url(#r)">
-              <rect width="${LABEL_WIDTH}" height="20" fill="#555"/>
-              <rect x="${LABEL_WIDTH}" width="${MESSAGE_WIDTH}" height="20" fill="${COLOR}"/>
-              <rect width="${TOTAL_WIDTH}" height="20" fill="url(#s)"/>
-            </g>
-            <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
-              <text x="$(( LABEL_WIDTH / 2 ))" y="15" fill="#010101" fill-opacity=".3">${LABEL}</text>
-              <text x="$(( LABEL_WIDTH / 2 ))" y="14">${LABEL}</text>
-              <text x="$(( LABEL_WIDTH + MESSAGE_WIDTH / 2 ))" y="15" fill="#010101" fill-opacity=".3">${MESSAGE}</text>
-              <text x="$(( LABEL_WIDTH + MESSAGE_WIDTH / 2 ))" y="14">${MESSAGE}</text>
-            </g>
-          </svg>
-          EOF
+            mkdir -p .github/badges
+            LABEL="backend coverage"
+            MESSAGE="${BACKEND_COVERAGE}%"
+            COLOR="#e05d44"
+            if [ "$BACKEND_COVERAGE" -ge 90 ]; then
+              COLOR="#4c1"
+            elif [ "$BACKEND_COVERAGE" -ge 75 ]; then
+              COLOR="#dfb317"
+            elif [ "$BACKEND_COVERAGE" -ge 60 ]; then
+              COLOR="#fe7d37"
+            fi
 
-      - name: Commit backend coverage badge
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "ci: update backend coverage badge"
-          file_pattern: .github/badges/backend-coverage.svg
+            LABEL_WIDTH=$(( ${#LABEL} * 6 + 10 ))
+            MESSAGE_WIDTH=$(( ${#MESSAGE} * 7 + 10 ))
+            TOTAL_WIDTH=$(( LABEL_WIDTH + MESSAGE_WIDTH ))
+
+            cat > .github/badges/backend-coverage.svg <<EOF
+            <svg xmlns="http://www.w3.org/2000/svg" width="${TOTAL_WIDTH}" height="20" role="img" aria-label="${LABEL}: ${MESSAGE}">
+              <linearGradient id="s" x2="0" y2="100%">
+                <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+                <stop offset="1" stop-opacity=".1"/>
+              </linearGradient>
+              <clipPath id="r">
+                <rect width="${TOTAL_WIDTH}" height="20" rx="3" fill="#fff"/>
+              </clipPath>
+              <g clip-path="url(#r)">
+                <rect width="${LABEL_WIDTH}" height="20" fill="#555"/>
+                <rect x="${LABEL_WIDTH}" width="${MESSAGE_WIDTH}" height="20" fill="${COLOR}"/>
+                <rect width="${TOTAL_WIDTH}" height="20" fill="url(#s)"/>
+              </g>
+              <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
+                <text x="$(( LABEL_WIDTH / 2 ))" y="15" fill="#010101" fill-opacity=".3">${LABEL}</text>
+                <text x="$(( LABEL_WIDTH / 2 ))" y="14">${LABEL}</text>
+                <text x="$(( LABEL_WIDTH + MESSAGE_WIDTH / 2 ))" y="15" fill="#010101" fill-opacity=".3">${MESSAGE}</text>
+                <text x="$(( LABEL_WIDTH + MESSAGE_WIDTH / 2 ))" y="14">${MESSAGE}</text>
+              </g>
+            </svg>
+            EOF
+
+            if git diff --quiet -- .github/badges/backend-coverage.svg; then
+              echo "No backend badge changes."
+              exit 0
+            fi
+
+            git add .github/badges/backend-coverage.svg
+            git commit -m "ci: update backend coverage badge" || true
+            if git push origin main; then
+              echo "Backend coverage badge updated."
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}), retrying..."
+            sleep 2
+          done
+
+          echo "Badge update skipped after retries."
 
   deploy:
     runs-on: ubuntu-latest
