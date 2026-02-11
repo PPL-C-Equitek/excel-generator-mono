@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchAPI } from "@/lib/api";
 
 describe("fetchAPI", () => {
   afterEach(() => {
@@ -14,7 +15,6 @@ describe("fetchAPI", () => {
     });
     vi.stubGlobal("fetch", mockedFetch);
 
-    const { fetchAPI } = await import("./api");
     const result = await fetchAPI("health/");
 
     expect(mockedFetch).toHaveBeenCalledWith("http://localhost:8000/api/health/", {
@@ -33,7 +33,6 @@ describe("fetchAPI", () => {
     });
     vi.stubGlobal("fetch", mockedFetch);
 
-    const { fetchAPI } = await import("./api");
     await expect(fetchAPI("health/")).rejects.toThrow("API error: 500");
   });
 });

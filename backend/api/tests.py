@@ -3,6 +3,7 @@ from django.core.management import call_command
 from rest_framework.test import APIClient
 from .models import GroupMember
 
+
 class HealthCheckTest(TestCase):
     def test_health_endpoint_returns_200(self):
         client = APIClient()
@@ -14,6 +15,12 @@ class HealthCheckTest(TestCase):
         response = client.get('/api/health/')
         self.assertEqual(response.data['status'], 'ok')
         self.assertEqual(response.data['message'], 'Backend is running!')
+
+    def test_health_endpoint_rejects_post(self):
+        client = APIClient()
+        response = client.post('/api/health/')
+        self.assertEqual(response.status_code, 405)
+
 
 class AboutTest(TestCase):
     def test_about_endpoint_returns_200(self):
@@ -27,11 +34,16 @@ class AboutTest(TestCase):
         self.assertEqual(response.data['team'], 'PPL C - Equitek')
         self.assertEqual(response.data['project'], 'Excel Generator')
 
+    def test_about_endpoint_rejects_post(self):
+        client = APIClient()
+        response = client.post('/api/about/')
+        self.assertEqual(response.status_code, 405)
+
 
 class MembersTest(TestCase):
     def setUp(self):
-        GroupMember.objects.create(npm='2306152172', name='Siti Shofi Nadhifa')
         GroupMember.objects.create(npm='2306152260', name='Steven Setiawan')
+        GroupMember.objects.create(npm='2306152172', name='Siti Shofi Nadhifa')
 
     def test_members_endpoint_returns_200(self):
         client = APIClient()
@@ -45,6 +57,15 @@ class MembersTest(TestCase):
         self.assertEqual(len(response.data['members']), 2)
         self.assertEqual(response.data['members'][0]['npm'], '2306152172')
         self.assertEqual(response.data['members'][0]['name'], 'Siti Shofi Nadhifa')
+
+    def test_members_endpoint_rejects_post(self):
+        client = APIClient()
+        response = client.post('/api/members/')
+        self.assertEqual(response.status_code, 405)
+
+    def test_group_member_string_representation(self):
+        member = GroupMember.objects.get(npm='2306152172')
+        self.assertEqual(str(member), '2306152172 - Siti Shofi Nadhifa')
 
 
 class SeedMembersCommandTest(TestCase):

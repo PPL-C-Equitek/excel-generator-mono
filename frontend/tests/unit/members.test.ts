@@ -7,7 +7,7 @@ vi.mock("@/lib/api", () => ({
 describe("getMembers", () => {
   it("calls fetchAPI with members endpoint", async () => {
     const { fetchAPI } = await import("@/lib/api");
-    const { getMembers } = await import("./members");
+    const { getMembers } = await import("@/services/members");
 
     vi.mocked(fetchAPI).mockResolvedValue({
       group: "Kelompok 7",

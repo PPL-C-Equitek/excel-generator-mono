@@ -3,9 +3,13 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    environment: "jsdom",
+    setupFiles: ["./tests/setup.ts"],
     coverage: {
       provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["**/*.d.ts", "**/*.test.ts", "**/*.test.tsx"],
       reporter: ["text", "lcov", "cobertura", "json-summary"],
       reportsDirectory: "coverage",
     },

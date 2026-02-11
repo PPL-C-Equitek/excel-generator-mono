@@ -7,7 +7,7 @@ vi.mock("@/lib/api", () => ({
 describe("getHealth", () => {
   it("calls fetchAPI with health endpoint", async () => {
     const { fetchAPI } = await import("@/lib/api");
-    const { getHealth } = await import("./health");
+    const { getHealth } = await import("@/services/health");
 
     vi.mocked(fetchAPI).mockResolvedValue({ status: "ok" });
     const result = await getHealth();
