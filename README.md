@@ -13,7 +13,7 @@ Monorepo for `Excel Generator` project (`backend` Django + `frontend` Next.js).
 - [x] Menyiapkan library untuk menghitung unit test code-coverage
 - [x] Menampilkan badge hasil unit test & code-coverage pada berkas `README.md` dalam repository
 - [x] Menyiapkan script provisioning server, deployment, siap install dan run on staging server
-- [ ] Sediakan data seeding
+- [x] Sediakan data seeding
 
 ## Test dan Coverage
 
@@ -32,6 +32,12 @@ Frontend (Next.js):
 cd frontend
 npm run test
 npm run test:coverage
+```
+
+Init DB + seed data dummy anggota:
+
+```bash
+bash scripts/init-db.sh
 ```
 
 Catatan:

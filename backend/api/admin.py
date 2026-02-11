@@ -1,3 +1,7 @@
 from django.contrib import admin
+from .models import GroupMember
 
-# Register your models here.
+@admin.register(GroupMember)
+class GroupMemberAdmin(admin.ModelAdmin):
+    list_display = ("npm", "name")
+    search_fields = ("npm", "name")
