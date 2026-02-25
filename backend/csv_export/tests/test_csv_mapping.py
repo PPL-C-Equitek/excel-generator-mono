@@ -17,3 +17,7 @@ class CSVMappingServiceTest(SimpleTestCase):
         result = CSVMappingService().map_rows(headers=headers, rows=rows)
 
         self.assertEqual(result, [["Zufar", 21, "Depok"]])
+
+    def test_map_rows_raises_error_when_headers_are_empty(self):
+        with self.assertRaises(ValueError):
+            CSVMappingService().map_rows(headers=[], rows=[{"name": "Zufar"}])
