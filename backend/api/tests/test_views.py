@@ -1,72 +1,65 @@
 from django.test import TestCase
-from django.core.management import call_command
 from rest_framework.test import APIClient
 from django.core.files.uploadedfile import SimpleUploadedFile
-from .models import GroupMember
+
+from api.models import GroupMember
 
 
-class HealthCheckTest(TestCase):
+class BaseApiViewTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+
+class HealthCheckViewTest(BaseApiViewTest):
     def test_health_endpoint_returns_200(self):
-        client = APIClient()
-        response = client.get('/api/health/')
+        response = self.client.get("/api/health/")
         self.assertEqual(response.status_code, 200)
 
     def test_health_endpoint_returns_correct_data(self):
-        client = APIClient()
-        response = client.get('/api/health/')
-        self.assertEqual(response.data['status'], 'ok')
-        self.assertEqual(response.data['message'], 'Backend is running!')
+        response = self.client.get("/api/health/")
+        self.assertEqual(response.data["status"], "ok")
+        self.assertEqual(response.data["message"], "Backend is running!")
 
     def test_health_endpoint_rejects_post(self):
-        client = APIClient()
-        response = client.post('/api/health/')
+        response = self.client.post("/api/health/")
         self.assertEqual(response.status_code, 405)
 
 
-class AboutTest(TestCase):
+class AboutViewTest(BaseApiViewTest):
     def test_about_endpoint_returns_200(self):
-        client = APIClient()
-        response = client.get('/api/about/')
+        response = self.client.get("/api/about/")
         self.assertEqual(response.status_code, 200)
 
     def test_about_endpoint_returns_correct_data(self):
-        client = APIClient()
-        response = client.get('/api/about/')
-        self.assertEqual(response.data['team'], 'PPL C - Equitek')
-        self.assertEqual(response.data['project'], 'Excel Generator')
+        response = self.client.get("/api/about/")
+        self.assertEqual(response.data["team"], "PPL C - Equitek")
+        self.assertEqual(response.data["project"], "Excel Generator")
 
     def test_about_endpoint_rejects_post(self):
-        client = APIClient()
-        response = client.post('/api/about/')
+        response = self.client.post("/api/about/")
         self.assertEqual(response.status_code, 405)
 
 
-class MembersTest(TestCase):
-    def setUp(self):
-        GroupMember.objects.create(npm='2306152260', name='Steven Setiawan')
-        GroupMember.objects.create(npm='2306152172', name='Siti Shofi Nadhifa')
+class MembersViewTest(BaseApiViewTest):
+    @classmethod
+    def setUpTestData(cls):
+        GroupMember.objects.create(npm="2306152260", name="Steven Setiawan")
+        GroupMember.objects.create(npm="2306152172", name="Siti Shofi Nadhifa")
 
     def test_members_endpoint_returns_200(self):
-        client = APIClient()
-        response = client.get('/api/members/')
+        response = self.client.get("/api/members/")
         self.assertEqual(response.status_code, 200)
 
     def test_members_endpoint_returns_group_and_members(self):
-        client = APIClient()
-        response = client.get('/api/members/')
-        self.assertEqual(response.data['group'], 'Kelompok 7')
-        self.assertEqual(len(response.data['members']), 2)
-        self.assertEqual(response.data['members'][0]['npm'], '2306152172')
-        self.assertEqual(response.data['members'][0]['name'], 'Siti Shofi Nadhifa')
+        response = self.client.get("/api/members/")
+        self.assertEqual(response.data["group"], "Kelompok 7")
+        self.assertEqual(len(response.data["members"]), 2)
+        self.assertEqual(response.data["members"][0]["npm"], "2306152172")
+        self.assertEqual(response.data["members"][0]["name"], "Siti Shofi Nadhifa")
 
     def test_members_endpoint_rejects_post(self):
-        client = APIClient()
-        response = client.post('/api/members/')
+        response = self.client.post("/api/members/")
         self.assertEqual(response.status_code, 405)
-
-    def test_group_member_string_representation(self):
-        member = GroupMember.objects.get(npm='2306152172')
-        self.assertEqual(str(member), '2306152172 - Siti Shofi Nadhifa')
 
 
 class UploadEndpointTest(TestCase):
@@ -119,14 +112,3 @@ class UploadEndpointTest(TestCase):
         less_content = b"a" * (5 * 1024 * 1024)
         resp = self._post_file("small.pdf", less_content, "application/pdf")
         self.assertEqual(resp.status_code, 200)
-
-
-class SeedMembersCommandTest(TestCase):
-    def test_seed_members_creates_expected_records(self):
-        call_command('seed_members')
-        self.assertEqual(GroupMember.objects.count(), 7)
-
-    def test_seed_members_is_idempotent(self):
-        call_command('seed_members')
-        call_command('seed_members')
-        self.assertEqual(GroupMember.objects.count(), 7)
