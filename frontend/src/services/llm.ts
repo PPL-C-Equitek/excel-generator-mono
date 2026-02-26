@@ -1,24 +1,55 @@
 import { fetchAPI } from "@/lib/api";
 
-export async function generateJson(inputJson: any): Promise<any> {
+export interface LLMRequest {
+    input_json: Record<string, unknown>;
+    model?: string;
+}
+
+export interface LLMResponse {
+    output_json: Record<string, unknown>;
+}
+
+const ERROR_MESSAGES: Record<number, string> = {
+    401: "API Key tidak valid",
+    429: "Quota LLM habis, coba lagi nanti",
+    504: "Request timeout, coba lagi",
+};
+
+export async function generateJson(
+    inputJson: Record<string, unknown>
+): Promise<LLMResponse> {
     if (Object.keys(inputJson).length === 0) {
         throw new Error("Input tidak boleh kosong");
     }
 
+    let data: unknown;
+
     try {
-        const data = await fetchAPI("llm/generate/", {
+        data = await fetchAPI("llm/generate/", {
             method: "POST",
             body: JSON.stringify({ input_json: inputJson }),
         });
-
-        if (!data || !data.output_json) {
-            throw new Error("Respons tidak sesuai skema");
+    } catch (err: unknown) {
+        if (err instanceof Error) {
+            const statusMatch = err.message.match(/API error: (\d+)/);
+            if (statusMatch) {
+                const status = parseInt(statusMatch[1], 10);
+                const userMessage = ERROR_MESSAGES[status];
+                if (userMessage) {
+                    throw new Error(userMessage);
+                }
+            }
         }
-        return data;
-    } catch (err: any) {
-        if (err.message.includes("401")) throw new Error("API Key tidak valid");
-        if (err.message.includes("429")) throw new Error("Quota LLM habis, coba lagi nanti");
-        if (err.message.includes("504")) throw new Error("Request timeout, coba lagi");
         throw err;
     }
+
+    if (
+        typeof data !== "object" ||
+        data === null ||
+        !("output_json" in data)
+    ) {
+        throw new Error("Respons tidak sesuai skema");
+    }
+
+    return data as LLMResponse;
 }
