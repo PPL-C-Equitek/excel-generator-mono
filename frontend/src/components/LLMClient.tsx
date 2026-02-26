@@ -1,50 +1,72 @@
 "use client";
 
 import { useState } from "react";
-import { generateJson } from "@/services/llm";
+import { generateJson, LLMResponse } from "@/services/llm";
 
 export default function LLMClient() {
     const [input, setInput] = useState("");
-    const [result, setResult] = useState<any>(null);
+    const [result, setResult] = useState<LLMResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
-    const handleGenerate = async () => {
+    async function handleSubmit() {
         setError(null);
-        
-        if (!input) {
+        setResult(null);
+
+        if (!input.trim()) {
             setError("Input tidak boleh kosong");
+            return;
+        }
+
+        let parsedInput: Record<string, unknown>;
+        try {
+            parsedInput = JSON.parse(input);
+        } catch {
+            setError("Input harus berupa JSON yang valid");
             return;
         }
 
         setLoading(true);
         try {
-            const body = JSON.parse(input);
-            const res = await generateJson(body);
-            setResult(res);
-        } catch (e: any) {
-            setError(e.message || "Error");
+            const response = await generateJson(parsedInput);
+            setResult(response);
+        } catch (err: unknown) {
+            if (err instanceof Error) {
+                setError(err.message);
+            } else {
+                setError("Terjadi kesalahan tidak diketahui");
+            }
         } finally {
             setLoading(false);
         }
-    };
+    }
 
     return (
         <div>
-            <textarea 
+            <textarea
                 aria-label="input"
-                value={input} 
-                onChange={(e) => setInput(e.target.value)} 
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder='Masukkan JSON, contoh: {"key": "value"}'
+                rows={6}
+                style={{ width: "100%", fontFamily: "monospace" }}
             />
-            <button onClick={handleGenerate} disabled={loading}>
-                {loading ? "Loading..." : "Generate"}
+
+            <button onClick={handleSubmit} disabled={loading}>
+                Generate
             </button>
-            
-            {error && <p role="alert">{error}</p>}
-            
+
+            {loading && <p>Loading...</p>}
+
+            {error && (
+                <p role="alert" style={{ color: "red" }}>
+                    {error}
+                </p>
+            )}
+
             {result && (
                 <pre data-testid="llm-result">
-                    {JSON.stringify(result.output_json)}
+                    {JSON.stringify(result.output_json, null, 2)}
                 </pre>
             )}
         </div>
