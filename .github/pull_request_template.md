@@ -50,7 +50,7 @@
 - [ ] Added/updated tests for new functionality
 - [ ] All tests pass locally
 - [ ] Code is properly documented
-- [ ] Synced with latest `develop` branch
+- [ ] Synced with latest `main` branch
 - [ ] PR title follows conventional commit format
 - [ ] Meaningful commit messages used
 
