@@ -1,4 +1,5 @@
 import unittest
+from copy import deepcopy
 
 from csv_export.services.validate_output_llm import (
     OutputLLMValidationError,
@@ -10,15 +11,18 @@ class ValidateOutputLLMServiceTest(unittest.TestCase):
     def setUp(self):
         self.service = ValidateOutputLLMService()
 
-    def test_validate_output_llm_accepts_valid_ok_payload_single_sheet(self):
-        output_json = {
+    def _build_valid_payload(self):
+        return {
             "status": "ok",
-            "summary": "Successfully extracted 2 rows.",
+            "summary": "Successfully extracted rows.",
             "sheets": [
                 {
                     "name": "Sheet1",
                     "columns": ["name", "age"],
-                    "rows": [{"name": "Zufar", "age": 21}, {"name": "Siti", "age": 22}],
+                    "rows": [
+                        {"name": "Zufar", "age": 21},
+                        {"name": "Siti", "age": 22},
+                    ],
                 }
             ],
             "validations": [
@@ -26,6 +30,9 @@ class ValidateOutputLLMServiceTest(unittest.TestCase):
             ],
             "errors": [],
         }
+
+    def test_validate_output_llm_accepts_valid_ok_payload_single_sheet(self):
+        output_json = self._build_valid_payload()
 
         result = self.service.validate_output_llm(output_json)
 
@@ -45,24 +52,12 @@ class ValidateOutputLLMServiceTest(unittest.TestCase):
         self.assertEqual(result, output_json)
 
     def test_validate_output_llm_accepts_valid_multiple_sheets_payload(self):
-        output_json = {
-            "status": "ok",
-            "summary": "Successfully extracted 2 sheets.",
-            "sheets": [
-                {
-                    "name": "Employees",
-                    "columns": ["name", "age"],
-                    "rows": [{"name": "Zufar", "age": 21}],
-                },
-                {
-                    "name": "Products",
-                    "columns": ["sku", "price"],
-                    "rows": [{"sku": "A-1", "price": 15000}],
-                },
-            ],
-            "validations": [],
-            "errors": [],
-        }
+        output_json = self._build_valid_payload()
+        output_json["sheets"] = [
+            {"name": "Employees", "columns": ["name", "age"], "rows": [{"name": "Zufar", "age": 21}]},
+            {"name": "Products", "columns": ["sku", "price"], "rows": [{"sku": "A-1", "price": 15000}]},
+        ]
+        output_json["validations"] = [{"sheet": "Employees", "rule": "row_count>0", "level": "warning"}]
 
         result = self.service.validate_output_llm(output_json)
 
@@ -72,227 +67,172 @@ class ValidateOutputLLMServiceTest(unittest.TestCase):
         with self.assertRaises(OutputLLMValidationError):
             self.service.validate_output_llm("not-valid")
 
-    def test_validate_output_llm_rejects_non_object_root(self):
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm([{"status": "ok"}])
-
     def test_validate_output_llm_rejects_missing_required_top_level_keys(self):
-        output_json = {
-            "status": "ok",
-            "summary": "missing sheets, validations, errors",
-        }
+        required_keys = ("status", "summary", "sheets", "validations", "errors")
+        for key in required_keys:
+            with self.subTest(missing_key=key):
+                payload = self._build_valid_payload()
+                payload.pop(key)
+                with self.assertRaises(OutputLLMValidationError):
+                    self.service.validate_output_llm(payload)
 
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
+    def test_validate_output_llm_rejects_invalid_top_level_values(self):
+        cases = [
+            ("status_non_string", {"status": 1}),
+            ("status_not_allowed", {"status": "partial"}),
+            ("summary_non_string", {"summary": 123}),
+            ("sheets_non_list", {"sheets": {}}),
+            ("validations_non_list", {"validations": {}}),
+            ("errors_non_list", {"errors": {}}),
+        ]
+        for case_name, mutation in cases:
+            with self.subTest(case=case_name):
+                payload = self._build_valid_payload()
+                payload.update(mutation)
+                with self.assertRaises(OutputLLMValidationError):
+                    self.service.validate_output_llm(payload)
 
-    def test_validate_output_llm_rejects_invalid_status_value(self):
-        output_json = {
-            "status": "partial",
-            "summary": "invalid status",
-            "sheets": [],
-            "validations": [],
-            "errors": [],
-        }
+    def test_validate_output_llm_rejects_invalid_sheet_structure(self):
+        cases = [
+            ("sheet_non_object", ["x"]),
+            ("missing_name", [{"columns": ["name"], "rows": [{"name": "Zufar"}]}]),
+            ("missing_columns", [{"name": "Sheet1", "rows": [{"name": "Zufar"}]}]),
+            ("missing_rows", [{"name": "Sheet1", "columns": ["name"]}]),
+            ("sheet_name_non_string", [{"name": 123, "columns": ["name"], "rows": [{"name": "Zufar"}]}]),
+            ("sheet_name_blank", [{"name": "   ", "columns": ["name"], "rows": [{"name": "Zufar"}]}]),
+            (
+                "duplicate_sheet_name",
+                [
+                    {"name": "Sheet1", "columns": ["name"], "rows": [{"name": "Zufar"}]},
+                    {"name": "Sheet1", "columns": ["name"], "rows": [{"name": "Siti"}]},
+                ],
+            ),
+        ]
+        for case_name, sheets in cases:
+            with self.subTest(case=case_name):
+                payload = self._build_valid_payload()
+                payload["sheets"] = sheets
+                with self.assertRaises(OutputLLMValidationError):
+                    self.service.validate_output_llm(payload)
 
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
+    def test_validate_output_llm_rejects_invalid_columns(self):
+        cases = [
+            ("columns_non_list", {"columns": "name"}),
+            ("columns_empty", {"columns": []}),
+            ("column_non_string", {"columns": ["name", 1]}),
+            ("column_blank", {"columns": ["name", "   "]}),
+            ("column_duplicate_case_insensitive", {"columns": ["Name", "name"]}),
+        ]
+        for case_name, mutation in cases:
+            with self.subTest(case=case_name):
+                payload = self._build_valid_payload()
+                payload["sheets"][0].update(mutation)
+                if case_name == "column_duplicate_case_insensitive":
+                    payload["sheets"][0]["rows"] = [{"Name": "Zufar", "name": "Zufar"}]
+                with self.assertRaises(OutputLLMValidationError):
+                    self.service.validate_output_llm(payload)
 
-    def test_validate_output_llm_rejects_non_string_summary(self):
-        output_json = {
-            "status": "ok",
-            "summary": 123,
-            "sheets": [],
-            "validations": [],
-            "errors": [],
-        }
+    def test_validate_output_llm_rejects_invalid_rows_container_and_row_type(self):
+        cases = [
+            ("rows_non_list", "not-list"),
+            ("row_non_object", ["not-dict"]),
+        ]
+        for case_name, rows_value in cases:
+            with self.subTest(case=case_name):
+                payload = self._build_valid_payload()
+                payload["sheets"][0]["rows"] = rows_value
+                with self.assertRaises(OutputLLMValidationError):
+                    self.service.validate_output_llm(payload)
 
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
+    def test_validate_output_llm_rejects_row_column_mismatch_and_invalid_values(self):
+        cases = [
+            ("missing_required_column", [{"name": "Zufar"}]),
+            ("unknown_extra_column", [{"name": "Zufar", "age": 21, "city": "Depok"}]),
+            ("nested_dict_value", [{"name": "Zufar", "age": {"raw": 21}}]),
+            ("nested_list_value", [{"name": "Zufar", "age": [21]}]),
+            ("non_scalar_value_type", [{"name": "Zufar", "age": {21}}]),
+        ]
+        for case_name, rows in cases:
+            with self.subTest(case=case_name):
+                payload = self._build_valid_payload()
+                payload["sheets"][0]["rows"] = rows
+                with self.assertRaises(OutputLLMValidationError):
+                    self.service.validate_output_llm(payload)
 
-    def test_validate_output_llm_rejects_sheet_missing_required_fields(self):
-        output_json = {
-            "status": "ok",
-            "summary": "invalid sheet payload",
-            "sheets": [{"name": "Sheet1", "rows": []}],
-            "validations": [],
-            "errors": [],
-        }
+    def test_validate_output_llm_rejects_invalid_validation_item_structure(self):
+        cases = [
+            ("validation_non_object", ["bad-item"]),
+            ("validation_missing_sheet", [{"rule": "must_have_name", "level": "info"}]),
+            ("validation_missing_rule", [{"sheet": "Sheet1", "level": "info"}]),
+            ("validation_missing_level", [{"sheet": "Sheet1", "rule": "must_have_name"}]),
+        ]
+        for case_name, validations in cases:
+            with self.subTest(case=case_name):
+                payload = self._build_valid_payload()
+                payload["validations"] = validations
+                with self.assertRaises(OutputLLMValidationError):
+                    self.service.validate_output_llm(payload)
 
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
+    def test_validate_output_llm_rejects_invalid_validation_fields(self):
+        cases = [
+            ("validation_sheet_non_string", [{"sheet": 1, "rule": "r", "level": "info"}]),
+            ("validation_sheet_blank", [{"sheet": "  ", "rule": "r", "level": "info"}]),
+            ("validation_sheet_unknown", [{"sheet": "Unknown", "rule": "r", "level": "info"}]),
+            ("validation_rule_non_string", [{"sheet": "Sheet1", "rule": 1, "level": "info"}]),
+            ("validation_rule_blank", [{"sheet": "Sheet1", "rule": " ", "level": "info"}]),
+            ("validation_level_non_string", [{"sheet": "Sheet1", "rule": "r", "level": 1}]),
+            ("validation_level_not_allowed", [{"sheet": "Sheet1", "rule": "r", "level": "critical"}]),
+        ]
+        for case_name, validations in cases:
+            with self.subTest(case=case_name):
+                payload = self._build_valid_payload()
+                payload["validations"] = validations
+                with self.assertRaises(OutputLLMValidationError):
+                    self.service.validate_output_llm(payload)
 
-    def test_validate_output_llm_rejects_duplicate_columns_case_insensitive(self):
-        output_json = {
-            "status": "ok",
-            "summary": "invalid duplicate columns",
-            "sheets": [
-                {
-                    "name": "Sheet1",
-                    "columns": ["Name", "name"],
-                    "rows": [{"Name": "Zufar", "name": "Zufar"}],
-                }
-            ],
-            "validations": [],
-            "errors": [],
-        }
-
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
-
-    def test_validate_output_llm_rejects_row_missing_required_column(self):
-        output_json = {
-            "status": "ok",
-            "summary": "missing required column in row",
-            "sheets": [
-                {
-                    "name": "Sheet1",
-                    "columns": ["name", "age"],
-                    "rows": [{"name": "Zufar"}],
-                }
-            ],
-            "validations": [],
-            "errors": [],
-        }
-
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
-
-    def test_validate_output_llm_rejects_row_with_unknown_column(self):
-        output_json = {
-            "status": "ok",
-            "summary": "unknown extra column in row",
-            "sheets": [
-                {
-                    "name": "Sheet1",
-                    "columns": ["name", "age"],
-                    "rows": [{"name": "Zufar", "age": 21, "city": "Depok"}],
-                }
-            ],
-            "validations": [],
-            "errors": [],
-        }
-
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
-
-    def test_validate_output_llm_rejects_nested_cell_value(self):
-        output_json = {
-            "status": "ok",
-            "summary": "nested value is invalid",
-            "sheets": [
-                {
-                    "name": "Sheet1",
-                    "columns": ["name", "meta"],
-                    "rows": [{"name": "Zufar", "meta": {"city": "Depok"}}],
-                }
-            ],
-            "validations": [],
-            "errors": [],
-        }
-
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
-
-    def test_validate_output_llm_rejects_invalid_validation_level(self):
-        output_json = {
-            "status": "ok",
-            "summary": "invalid validation level",
-            "sheets": [
-                {
-                    "name": "Sheet1",
-                    "columns": ["name"],
-                    "rows": [{"name": "Zufar"}],
-                }
-            ],
-            "validations": [
-                {"sheet": "Sheet1", "rule": "must_have_name", "level": "critical"},
-            ],
-            "errors": [],
-        }
-
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
-
-    def test_validate_output_llm_rejects_non_string_error_item(self):
-        output_json = {
-            "status": "error",
-            "summary": "error list has invalid type",
-            "sheets": [],
-            "validations": [],
-            "errors": ["one", 2],
-        }
-
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
-
-    def test_validate_output_llm_rejects_blank_sheet_name(self):
-        output_json = {
-            "status": "ok",
-            "summary": "blank sheet name",
-            "sheets": [{"name": "   ", "columns": ["name"], "rows": [{"name": "Zufar"}]}],
-            "validations": [],
-            "errors": [],
-        }
-
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
+    def test_validate_output_llm_rejects_non_string_error_items(self):
+        cases = [
+            ["error-1", 2],
+            [False],
+            [None],
+        ]
+        for errors in cases:
+            with self.subTest(errors=errors):
+                payload = self._build_valid_payload()
+                payload["status"] = "error"
+                payload["errors"] = errors
+                with self.assertRaises(OutputLLMValidationError):
+                    self.service.validate_output_llm(payload)
 
     def test_validate_output_llm_allows_empty_rows_per_sheet(self):
-        output_json = {
-            "status": "ok",
-            "summary": "sheet has no rows",
-            "sheets": [{"name": "Sheet1", "columns": ["name", "age"], "rows": []}],
-            "validations": [],
-            "errors": [],
-        }
+        output_json = self._build_valid_payload()
+        output_json["sheets"][0]["rows"] = []
 
         result = self.service.validate_output_llm(output_json)
 
         self.assertEqual(result, output_json)
 
     def test_validate_output_llm_accepts_unicode_and_formula_like_strings(self):
-        output_json = {
-            "status": "ok",
-            "summary": "unicode and formula-like values",
-            "sheets": [
-                {
-                    "name": "Sheet1",
-                    "columns": ["name", "note"],
-                    "rows": [{"name": "शोफ़ी", "note": "=SUM(A1:A2)"}],
-                }
-            ],
-            "validations": [],
-            "errors": [],
+        output_json = self._build_valid_payload()
+        output_json["sheets"][0] = {
+            "name": "Sheet1",
+            "columns": ["name", "note"],
+            "rows": [{"name": "शोफ़ी", "note": "=SUM(A1:A2)"}],
         }
+        output_json["validations"] = []
 
         result = self.service.validate_output_llm(output_json)
 
         self.assertEqual(result, output_json)
-
-    def test_validate_output_llm_rejects_validation_sheet_not_found(self):
-        output_json = {
-            "status": "ok",
-            "summary": "validation references unknown sheet",
-            "sheets": [{"name": "Sheet1", "columns": ["name"], "rows": [{"name": "Zufar"}]}],
-            "validations": [{"sheet": "Sheet2", "rule": "rule", "level": "warning"}],
-            "errors": [],
-        }
-
-        with self.assertRaises(OutputLLMValidationError):
-            self.service.validate_output_llm(output_json)
 
     def test_validate_output_llm_handles_large_payload_smoke(self):
         rows = []
         for index in range(1000):
             rows.append({"name": f"user-{index}", "age": index})
 
-        output_json = {
-            "status": "ok",
-            "summary": "large payload",
-            "sheets": [{"name": "Sheet1", "columns": ["name", "age"], "rows": rows}],
-            "validations": [],
-            "errors": [],
-        }
+        output_json = self._build_valid_payload()
+        output_json["sheets"][0]["rows"] = rows
+        output_json["validations"] = []
 
         result = self.service.validate_output_llm(output_json)
 
