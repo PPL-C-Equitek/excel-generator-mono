@@ -1,7 +1,7 @@
 import unittest
 from copy import deepcopy
 
-from csv_export.services.mapping_output_csv import (
+from csv_export.services.csv_mapping import (
     MappingOutputCSVService,
     OutputCSVMappingError,
 )
