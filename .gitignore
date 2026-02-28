@@ -2,3 +2,4 @@
 pgdata/
 .coverage
 .coverage.*
+.DS_Store
