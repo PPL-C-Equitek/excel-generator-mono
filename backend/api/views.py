@@ -7,6 +7,11 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
 
+from file_processing.services.upload_service import (
+    validate_extension,
+    save_temp_file,
+)
+
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
 
 @api_view(['GET'])
@@ -38,32 +43,24 @@ def upload(request):
         )
 
     uploaded_file = request.FILES["file"]
-    filename = uploaded_file.name
-    ext = os.path.splitext(filename)[1].lower()
 
-    if ext not in ALLOWED_EXTENSIONS:
+    is_valid, error = validate_extension(uploaded_file)
+    if not is_valid:
         return Response(
             {
                 "status": "error",
-                "message": "Unsupported file type. Only PDF, XLS, and XLSX are allowed."
+                "message": error
             },
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    os.makedirs(settings.UPLOAD_TEMP_DIR, exist_ok=True)
-
-    unique_name = f"{uuid4()}_{filename}"
-    file_path = os.path.join(settings.UPLOAD_TEMP_DIR, unique_name)
-
-    with open(file_path, "wb+") as destination:
-        for chunk in uploaded_file.chunks():
-            destination.write(chunk)
+    file_path = save_temp_file(uploaded_file)
 
     return Response(
         {
             "status": "success",
             "message": "File uploaded successfully",
-            "filename": filename,
+            "filename": uploaded_file.name,
             "path": file_path
         },
         status=status.HTTP_200_OK
