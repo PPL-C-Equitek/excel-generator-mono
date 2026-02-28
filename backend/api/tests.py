@@ -1,6 +1,7 @@
 from django.test import TestCase
 from django.core.management import call_command
 from rest_framework.test import APIClient
+from django.core.files.uploadedfile import SimpleUploadedFile
 from .models import GroupMember
 
 
@@ -66,6 +67,41 @@ class MembersTest(TestCase):
     def test_group_member_string_representation(self):
         member = GroupMember.objects.get(npm='2306152172')
         self.assertEqual(str(member), '2306152172 - Siti Shofi Nadhifa')
+
+
+class UploadEndpointTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def _post_file(self, name, content, content_type):
+        f = SimpleUploadedFile(name, content, content_type=content_type)
+        return self.client.post('/api/upload/', {'file': f}, format='multipart')
+
+    def test_upload_pdf_success(self):
+        resp = self._post_file('doc.pdf', b'hello', 'application/pdf')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('path', resp.data)
+        self.assertTrue(resp.data['path'].endswith('doc.pdf'))
+
+    def test_upload_xls_success(self):
+        resp = self._post_file('sheet.xls', b'data', 'application/vnd.ms-excel')
+        self.assertEqual(resp.status_code, 200)
+
+    def test_upload_xlsx_success(self):
+        resp = self._post_file('sheet.xlsx', b'data', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertEqual(resp.status_code, 200)
+
+    def test_upload_unsupported_type(self):
+        resp = self._post_file('note.txt', b'hello', 'text/plain')
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_upload_no_file(self):
+        resp = self.client.post('/api/upload/', {}, format='multipart')
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
 
 
 class SeedMembersCommandTest(TestCase):
