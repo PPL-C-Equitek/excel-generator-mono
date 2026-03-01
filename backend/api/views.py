@@ -13,6 +13,7 @@ from file_processing.services.upload_service import (
 )
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
+MAX_FILE_SIZE = 10 * 1024 * 1024  #10MB
 
 @api_view(['GET'])
 def health(request):
@@ -50,6 +51,15 @@ def upload(request):
             {
                 "status": "error",
                 "message": error
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    if uploaded_file.size > MAX_FILE_SIZE:
+        return Response(
+            {
+                "status": "error",
+                "message": "File too large. Maximum allowed size is 10MB."
             },
             status=status.HTTP_400_BAD_REQUEST
         )
