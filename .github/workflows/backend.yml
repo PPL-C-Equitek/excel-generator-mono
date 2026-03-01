@@ -188,6 +188,9 @@ jobs:
             DJANGO_ALLOWED_HOSTS=${{ secrets.DJANGO_ALLOWED_HOSTS }}
             DJANGO_CORS_ALLOWED_ORIGINS=${{ secrets.DJANGO_CORS_ALLOWED_ORIGINS }}
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            OPENAI_MODEL=${{ secrets.OPENAI_MODEL }}
+            OPENAI_SYSTEM_PROMPT=${{ secrets.OPENAI_SYSTEM_PROMPT }}
             ENVEOF
 
             cd ~/apps/excel-generator-mono
