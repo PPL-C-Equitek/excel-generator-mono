@@ -3,6 +3,8 @@ from rest_framework.test import APIClient
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from api.models import GroupMember
+from io import BytesIO
+from reportlab.pdfgen import canvas
 
 
 class BaseApiViewTest(TestCase):
@@ -68,30 +70,58 @@ class UploadEndpointTest(TestCase):
 
     def _post_file(self, name, content, content_type):
         f = SimpleUploadedFile(name, content, content_type=content_type)
-        return self.client.post('/api/upload/', {'file': f}, format='multipart')
+        return self.client.post("/api/upload/", {"file": f}, format="multipart")
+
+    def generate_valid_pdf_bytes(self):
+        buffer = BytesIO()
+        p = canvas.Canvas(buffer)
+        p.drawString(100, 750, "Hello PDF")
+        p.save()
+        buffer.seek(0)
+        return buffer.read()
 
     def test_upload_pdf_success(self):
-        resp = self._post_file('doc.pdf', b'hello', 'application/pdf')
+        pdf_doc = self.generate_valid_pdf_bytes()
+        resp = self._post_file("doc.pdf", pdf_doc, "application/pdf")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn('path', resp.data)
-        self.assertTrue(resp.data['path'].endswith('doc.pdf'))
+        self.assertIn("path", resp.data)
+        self.assertTrue(resp.data["path"].endswith("doc.pdf"))
 
     def test_upload_xls_success(self):
-        resp = self._post_file('sheet.xls', b'data', 'application/vnd.ms-excel')
+        resp = self._post_file("sheet.xls", b"data", "application/vnd.ms-excel")
         self.assertEqual(resp.status_code, 200)
 
     def test_upload_xlsx_success(self):
-        resp = self._post_file('sheet.xlsx', b'data', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        resp = self._post_file(
+            "sheet.xlsx",
+            b"data",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
         self.assertEqual(resp.status_code, 200)
 
     def test_upload_unsupported_type(self):
-        resp = self._post_file('note.txt', b'hello', 'text/plain')
+        resp = self._post_file("note.txt", b"hello", "text/plain")
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
 
     def test_upload_no_file(self):
-        resp = self.client.post('/api/upload/', {}, format='multipart')
+        resp = self.client.post("/api/upload/", {}, format="multipart")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_file_header_not_pdf_with_extension_pdf(self):
+        resp = self._post_file("doc.pdf", b"data", "application/pdf")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_file_is_corrupt_pdf(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+        corrupt_pdf = pdf_doc[:20]
+
+        resp = self._post_file("corrupt.pdf", corrupt_pdf, "application/pdf")
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
