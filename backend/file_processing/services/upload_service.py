@@ -2,9 +2,12 @@ import os
 from uuid import uuid4
 from django.conf import settings
 from django.utils.text import get_valid_filename
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
-MAX_FILE_SIZE = 10 * 1024 * 1024  #10MB
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
 
 def validate_file(uploaded_file):
     filename = uploaded_file.name
@@ -13,12 +16,30 @@ def validate_file(uploaded_file):
     # Validate extension
     if ext not in ALLOWED_EXTENSIONS:
         return False, "Unsupported file type. Only PDF, XLS, and XLSX are allowed."
-    
+
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
         return False, "File too large. Maximum allowed size is 10MB."
 
     return True, None
+
+
+def validate_pdf_not_corrupt(uploaded_file):
+    try:
+        uploaded_file.seek(0)
+        header = uploaded_file.read(5)
+
+        if not header.startswith(b"%PDF"):
+            return False, "The file does not have a valid PDF header."
+
+        uploaded_file.seek(0)
+        reader = PdfReader(uploaded_file)
+        _ = len(reader.pages)
+
+        return True, None
+
+    except (PdfReadError, Exception):
+        return False, "The PDF file is corrupt."
 
 
 def save_temp_file(uploaded_file):
