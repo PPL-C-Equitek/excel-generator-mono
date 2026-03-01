@@ -103,6 +103,23 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
 
+    def test_upload_file_too_large(self):
+        big_content = b"a" * (11 * 1024 * 1024)
+        resp = self._post_file("big.pdf", big_content, "application/pdf")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_upload_file_exact_10mb_allowed(self):
+        exact_content = b"a" * (10 * 1024 * 1024)
+        resp = self._post_file("exact.pdf", exact_content, "application/pdf")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_upload_file_less_than_10mb_allowed(self):
+        less_content = b"a" * (5 * 1024 * 1024)
+        resp = self._post_file("small.pdf", less_content, "application/pdf")
+        self.assertEqual(resp.status_code, 200)
+    
 
 class SeedMembersCommandTest(TestCase):
     def test_seed_members_creates_expected_records(self):
