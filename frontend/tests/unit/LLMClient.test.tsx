@@ -10,6 +10,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import LLMClient from "@/components/LLMClient";
 import { generateJson } from "@/services/llm";
 
+// Setiap modul dengan Prism/SyntaxHighlighter mungkin menggunakan Worker — mock agar aman di jsdom
+vi.mock("react-syntax-highlighter", () => ({
+    Prism: ({ children }: { children: string }) => <pre data-testid="syntax-hl">{children}</pre>,
+}));
+vi.mock("react-syntax-highlighter/dist/esm/styles/prism", () => ({
+    atomDark: {},
+}));
+
 vi.mock("@/services/llm", () => ({
     generateJson: vi.fn(),
 }));
@@ -51,7 +59,10 @@ describe("LLMClient — Positive", () => {
         fillTextarea(VALID_INPUT);
         await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
-        expect(screen.getByText(/loading/i)).toBeInTheDocument();
+        // Tombol berubah jadi "Generating…" dan di-disabled
+        expect(screen.getByRole("button", { name: /generating/i })).toBeDisabled();
+        // Skeleton screen (animate-pulse) harus tampil
+        expect(document.querySelector(".animate-pulse")).toBeInTheDocument();
     });
 });
 
@@ -104,6 +115,33 @@ describe("LLMClient — Edge Cases", () => {
         await waitFor(() => {
             expect(
                 screen.getByText("Input tidak boleh kosong")
+            ).toBeInTheDocument();
+        });
+        expect(generateJson).not.toHaveBeenCalled();
+    });
+
+    it("menampilkan skeleton screen (animate-pulse) saat loading", async () => {
+        // Promise yang tidak resolve → loading state tetap aktif
+        vi.mocked(generateJson).mockReturnValue(new Promise(() => { }));
+
+        render(<LLMClient />);
+        fillTextarea(VALID_INPUT);
+        await userEvent.click(screen.getByRole("button", { name: /generate/i }));
+
+        // Skeleton harus menggunakan Tailwind animate-pulse
+        await waitFor(() => {
+            expect(document.querySelector(".animate-pulse")).toBeInTheDocument();
+        });
+    });
+
+    it("menampilkan error saat input bukan JSON valid", async () => {
+        render(<LLMClient />);
+        fillTextarea("ini bukan json { tidak valid");
+        await userEvent.click(screen.getByRole("button", { name: /generate/i }));
+
+        await waitFor(() => {
+            expect(
+                screen.getByText("Input harus berupa JSON yang valid")
             ).toBeInTheDocument();
         });
         expect(generateJson).not.toHaveBeenCalled();
