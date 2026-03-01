@@ -1,4 +1,8 @@
 import { fetchAPI } from "@/lib/api";
+import { ERROR_MESSAGES } from "@/constants/errorMessages";
+
+// Re-export agar import yang sudah ada tidak rusak
+export { ERROR_MESSAGES };
 
 export interface LLMRequest {
     input_json: Record<string, unknown>;
@@ -9,11 +13,7 @@ export interface LLMResponse {
     output_json: Record<string, unknown>;
 }
 
-const ERROR_MESSAGES: Record<number, string> = {
-    401: "API Key tidak valid",
-    429: "Quota LLM habis, coba lagi nanti",
-    504: "Request timeout, coba lagi",
-};
+// ERROR_MESSAGES dipindahkan ke @/constants/errorMessages
 
 export async function generateJson(
     inputJson: Record<string, unknown>
