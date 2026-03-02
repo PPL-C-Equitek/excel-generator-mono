@@ -1,3 +1,4 @@
+from PyPDF2 import PdfReader, PdfWriter
 from django.test import TestCase
 from rest_framework.test import APIClient
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -80,6 +81,24 @@ class UploadEndpointTest(TestCase):
         buffer.seek(0)
         return buffer.read()
 
+    def generate_private_pdf_bytes(self, password="secret"):
+        valid_pdf_bytes = self.generate_valid_pdf_bytes()
+
+        input_buffer = BytesIO(valid_pdf_bytes)
+        output_buffer = BytesIO()
+
+        reader = PdfReader(input_buffer)
+        writer = PdfWriter()
+
+        for page in reader.pages:
+            writer.add_page(page)
+
+        writer.encrypt(password)
+        writer.write(output_buffer)
+
+        output_buffer.seek(0)
+        return output_buffer.read()
+
     def test_upload_pdf_success(self):
         pdf_doc = self.generate_valid_pdf_bytes()
         resp = self._post_file("doc.pdf", pdf_doc, "application/pdf")
@@ -129,6 +148,12 @@ class UploadEndpointTest(TestCase):
     def test_upload_file_too_large(self):
         big_content = b"a" * (11 * 1024 * 1024)
         resp = self._post_file("big.pdf", big_content, "application/pdf")
+
+    def test_file_is_private_pdf(self):
+        private_pdf = self.generate_private_pdf_bytes(password="1234")
+
+        resp = self._post_file("private.pdf", private_pdf, "application/pdf")
+
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
