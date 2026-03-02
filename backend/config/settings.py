@@ -45,7 +45,6 @@ INSTALLED_APPS = [
     'api',
     'llm',
     'file_processing',
-    'llm',
 ]
 
 MIDDLEWARE = [
