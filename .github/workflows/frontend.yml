@@ -54,7 +54,7 @@ jobs:
           echo "FRONTEND_COVERAGE=${FRONTEND_COVERAGE}" >> $GITHUB_ENV
 
       - name: Upload frontend coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-coverage
           path: frontend/coverage

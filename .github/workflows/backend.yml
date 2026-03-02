@@ -89,7 +89,7 @@ jobs:
           echo "BACKEND_COVERAGE=${BACKEND_COVERAGE}" >> $GITHUB_ENV
 
       - name: Upload backend coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
           path: |
