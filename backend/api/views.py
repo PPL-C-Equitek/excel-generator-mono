@@ -5,7 +5,7 @@ from rest_framework import status
 from .models import GroupMember
 
 from file_processing.services.upload_service import (
-    validate_extension,
+    validate_file,
     save_temp_file,
 )
 
@@ -42,21 +42,12 @@ def upload(request):
 
     uploaded_file = request.FILES["file"]
 
-    is_valid, error = validate_extension(uploaded_file)
+    is_valid, error = validate_file(uploaded_file)
     if not is_valid:
         return Response(
             {
                 "status": "error",
                 "message": error
-            },
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    if uploaded_file.size > MAX_FILE_SIZE:
-        return Response(
-            {
-                "status": "error",
-                "message": "File too large. Maximum allowed size is 10MB."
             },
             status=status.HTTP_400_BAD_REQUEST
         )
