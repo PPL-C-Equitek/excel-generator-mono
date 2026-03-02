@@ -175,7 +175,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: backend-coverage
-          path: .
+          path: backend
 
       - name: SonarCloud scan (backend)
         uses: SonarSource/sonarqube-scan-action@v6
@@ -188,6 +188,10 @@ jobs:
             -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY_BACKEND }}
+            -Dsonar.sources=api,config,file_processing
+            -Dsonar.exclusions=**/tests.py,**/tests/**/*.py,**/test_*.py,**/*_test.py
+            -Dsonar.tests=api,file_processing
+            -Dsonar.test.inclusions=**/tests.py,**/tests/**/*.py,**/test_*.py,**/*_test.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
