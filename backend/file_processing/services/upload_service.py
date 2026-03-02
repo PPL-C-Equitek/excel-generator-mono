@@ -2,8 +2,8 @@ import os
 from uuid import uuid4
 from django.conf import settings
 from django.utils.text import get_valid_filename
-from pypdf import PdfReader
-from pypdf.errors import PdfReadError
+from PyPDF2 import PdfReader
+from PyPDF2.errors import PdfReadError
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
