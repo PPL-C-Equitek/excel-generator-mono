@@ -3,6 +3,7 @@ from django.test import SimpleTestCase
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory
+from unittest.mock import patch
 
 from api.decorators import rate_limit
 
@@ -63,3 +64,63 @@ class RateLimitDecoratorTest(SimpleTestCase):
         req_b = self.factory.get("/limited/")
         req_b.META["REMOTE_ADDR"] = "10.0.0.2"
         self.assertEqual(view(req_b).status_code, 200)
+
+    @patch("api.decorators.time", side_effect=[0, 0, 61])
+    def test_resets_limit_when_window_changes(self, _mock_time):
+        view = self._build_view(max_requests=1, per="minute")
+
+        first = self.factory.get("/limited/")
+        first.META["REMOTE_ADDR"] = "10.0.0.1"
+        self.assertEqual(view(first).status_code, 200)
+
+        second = self.factory.get("/limited/")
+        second.META["REMOTE_ADDR"] = "10.0.0.1"
+        self.assertEqual(view(second).status_code, 429)
+
+        third = self.factory.get("/limited/")
+        third.META["REMOTE_ADDR"] = "10.0.0.1"
+        allowed_again = view(third)
+        self.assertEqual(allowed_again.status_code, 200)
+        self.assertEqual(allowed_again["X-RateLimit-Remaining"], "0")
+
+    @patch("api.decorators.time", return_value=0)
+    @patch("api.decorators.cache")
+    def test_falls_back_when_cache_incr_key_missing(self, mock_cache, _mock_time):
+        view = self._build_view(max_requests=2, per="minute")
+
+        mock_cache.add.side_effect = [False, True]
+        mock_cache.incr.side_effect = ValueError("key does not exist")
+
+        req = self.factory.get("/limited/")
+        req.META["REMOTE_ADDR"] = "10.10.10.10"
+        response = view(req)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-RateLimit-Limit"], "2")
+        self.assertEqual(response["X-RateLimit-Remaining"], "1")
+        self.assertEqual(mock_cache.incr.call_count, 1)
+        self.assertEqual(mock_cache.add.call_count, 2)
+
+    def test_uses_first_forwarded_ip_when_present(self):
+        view = self._build_view(max_requests=1, per="minute")
+
+        forwarded = self.factory.get("/limited/")
+        forwarded.META["HTTP_X_FORWARDED_FOR"] = "203.0.113.1, 10.0.0.2"
+        forwarded.META["REMOTE_ADDR"] = "10.0.0.9"
+        self.assertEqual(view(forwarded).status_code, 200)
+
+        same_forwarded = self.factory.get("/limited/")
+        same_forwarded.META["HTTP_X_FORWARDED_FOR"] = "203.0.113.1, 10.0.0.2"
+        same_forwarded.META["REMOTE_ADDR"] = "10.0.0.7"
+        blocked = view(same_forwarded)
+        self.assertEqual(blocked.status_code, 429)
+
+
+class RateLimitDecoratorValidationTest(SimpleTestCase):
+    def test_rejects_invalid_window(self):
+        with self.assertRaises(ValueError):
+            rate_limit(max_requests=1, per="hour")
+
+    def test_rejects_non_positive_limit(self):
+        with self.assertRaises(ValueError):
+            rate_limit(max_requests=0, per="minute")

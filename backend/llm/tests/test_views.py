@@ -81,6 +81,16 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from OpenAI.")
 
+    @patch("llm.views.generate_json")
+    def test_llm_generate_returns_400_for_value_error(self, mock_generate_json):
+        mock_generate_json.side_effect = ValueError("input_json must be an object or array.")
+        client = APIClient()
+
+        response = client.post("/api/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "input_json must be an object or array.")
+
     def test_llm_generate_rejects_get(self):
         client = APIClient()
         response = client.get("/api/llm/generate/")
