@@ -149,6 +149,10 @@ class UploadEndpointTest(TestCase):
         big_content = b"a" * (11 * 1024 * 1024)
         resp = self._post_file("big.pdf", big_content, "application/pdf")
 
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("password", resp.data["message"].lower())
+
     def test_file_is_private_pdf(self):
         private_pdf = self.generate_private_pdf_bytes(password="1234")
 
