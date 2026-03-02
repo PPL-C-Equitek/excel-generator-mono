@@ -217,7 +217,7 @@ class RateLimitHelperFunctionTest(SimpleTestCase):
 
         request = self.factory.get("/api/upload/")
         key = _build_cache_key(sample_view, request, "client-x", 12)
-        self.assertIn("api.tests.test_decorators.sample_view", key)
+        self.assertIn(f"api.tests.test_decorators.{sample_view.__name__}", key)
         self.assertIn("GET:/api/upload/:client-x:12", key)
 
     @patch("api.decorators.cache")
