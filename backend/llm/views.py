@@ -1,3 +1,4 @@
+from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
@@ -5,6 +6,7 @@ from .serializers import LlmGenerateRequestSerializer, LlmGenerateResponseSerial
 from .services.openai_client import OpenAIServiceError, generate_json
 
 
+@api_view(["POST"])
 @require_http_methods(["POST"])
 def llm_generate(request):
     request_serializer = LlmGenerateRequestSerializer(data=request.data)
