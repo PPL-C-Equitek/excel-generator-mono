@@ -1,7 +1,7 @@
 interface SidebarProps {
-    activeMenu: 'convert' | 'history'
-    username: string
-    onLogout?: () => void
+    readonly activeMenu: 'convert' | 'history'
+    readonly username: string
+    readonly onLogout?: () => void
 }
 
 export default function Sidebar({ activeMenu, username, onLogout }: SidebarProps) {
