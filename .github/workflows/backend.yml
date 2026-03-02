@@ -8,6 +8,10 @@ on:
       - 'scripts/deploy-backend.sh'
   pull_request:
     branches: [main]
+    paths:
+      - 'backend/**'
+      - 'scripts/deploy-backend.sh'
+      - '.github/workflows/backend.yml'
 
 permissions:
   contents: write
@@ -75,7 +79,7 @@ jobs:
           DJANGO_ALLOWED_HOSTS: localhost
         run: |
           cd backend
-          coverage run --rcfile=.coveragerc manage.py test api
+          coverage run --rcfile=.coveragerc manage.py test
           coverage report
           coverage xml
           coverage json -o coverage.json
@@ -175,7 +179,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: backend-coverage
-          path: .
+          path: backend
 
       - name: SonarCloud scan (backend)
         uses: SonarSource/sonarqube-scan-action@v6
@@ -188,6 +192,12 @@ jobs:
             -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY_BACKEND }}
+            -Dsonar.sources=.
+            -Dsonar.tests=.
+            -Dsonar.inclusions=**/*.py
+            -Dsonar.test.inclusions=**/tests/**/*.py,**/tests.py,**/test_*.py,**/*_test.py
+            -Dsonar.exclusions=**/migrations/**
+            -Dsonar.coverage.exclusions=**/tests/**,**/tests.py,**/test_*.py,**/*_test.py,**/migrations/**,config/**/*.py,manage.py,**/apps.py,**/admin.py,**/urls.py,**/wsgi.py,**/asgi.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300

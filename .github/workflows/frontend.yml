@@ -8,6 +8,10 @@ on:
       - 'scripts/deploy-frontend.sh'
   pull_request:
     branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'scripts/deploy-frontend.sh'
+      - '.github/workflows/frontend.yml'
 
 permissions:
   contents: write
@@ -134,11 +138,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download frontend coverage artifact
-        uses: actions/download-artifact@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          name: frontend-coverage
-          path: .
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Generate coverage for Sonar
+        run: |
+          cd frontend
+          npm run test:coverage
+          test -f coverage/lcov.info
+          ls -la coverage
 
       - name: SonarCloud scan (frontend)
         uses: SonarSource/sonarqube-scan-action@v6
@@ -151,6 +166,10 @@ jobs:
             -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY_FRONTEND }}
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.test.inclusions=tests/**/*.ts,tests/**/*.tsx,tests/**/*.js,tests/**/*.jsx
+            -Dsonar.coverage.exclusions=tests/**
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300

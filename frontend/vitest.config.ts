@@ -5,14 +5,17 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   test: {
-    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx", "tests/**/*.spec.ts", "tests/**/*.spec.tsx"],
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
     globals: true,
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["**/*.d.ts", "**/*.test.ts", "**/*.test.tsx"],
+      exclude: [
+        "**/*.d.ts",
+        "tests/**",
+      ],
       reporter: ["text", "lcov", "cobertura", "json-summary"],
       reportsDirectory: "coverage",
       thresholds: {
