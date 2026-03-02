@@ -53,7 +53,7 @@ def validate_pdf_not_password_protected(uploaded_file):
         return True, None
 
     except (PermissionError, Exception):
-        return False, "The PDF file is private and cannot be accessed"
+        return False, "The PDF file is password-protected and cannot be accessed"
 
 
 def save_temp_file(uploaded_file):
