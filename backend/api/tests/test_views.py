@@ -156,7 +156,7 @@ class UploadEndpointTest(TestCase):
 
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
-        self.assertIn("message", resp.data)
+        self.assertIn("password", resp.data["message"].lower())
 
     def test_upload_file_exact_10mb_allowed(self):
         exact_content = b"a" * (10 * 1024 * 1024)
