@@ -2,9 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchAPI, uploadFile } from "@/lib/api";
 
 describe("fetchAPI", () => {
+  const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+  beforeEach(() => {
+    delete process.env.NEXT_PUBLIC_API_URL;
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    if (originalApiUrl) {
+      process.env.NEXT_PUBLIC_API_URL = originalApiUrl;
+    } else {
+      delete process.env.NEXT_PUBLIC_API_URL;
+    }
   });
 
   it("calls API endpoint and returns parsed JSON", async () => {
@@ -34,6 +45,41 @@ describe("fetchAPI", () => {
     vi.stubGlobal("fetch", mockedFetch);
 
     await expect(fetchAPI("health/")).rejects.toThrow("API error: 500");
+  });
+
+  it("normalizes endpoint slashes", async () => {
+    const mockedFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "ok" }),
+    });
+    vi.stubGlobal("fetch", mockedFetch);
+
+    await fetchAPI("/health/");
+
+    expect(mockedFetch).toHaveBeenCalledWith("http://localhost:8000/api/health/", {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  });
+
+  it("falls back to default API URL when env URL is invalid", async () => {
+    process.env.NEXT_PUBLIC_API_URL = "not-a-valid-url";
+    const mockedFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "ok" }),
+    });
+    vi.stubGlobal("fetch", mockedFetch);
+
+    await fetchAPI("health");
+
+    expect(mockedFetch).toHaveBeenCalledWith("http://localhost:8000/api/health/", {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
   });
 });
 
