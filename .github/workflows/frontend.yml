@@ -138,7 +138,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: frontend-coverage
-          path: .
+          path: frontend
 
       - name: SonarCloud scan (frontend)
         uses: SonarSource/sonarqube-scan-action@v6
@@ -151,6 +151,9 @@ jobs:
             -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY_FRONTEND }}
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.test.inclusions=tests/**/*.{test,spec}.{ts,tsx},tests/setup.ts,tests/mocks/**/*.ts
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
