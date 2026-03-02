@@ -40,7 +40,8 @@ class RateLimitDecoratorTest(SimpleTestCase):
         self.assertEqual(response_2.status_code, 200)
         self.assertEqual(response_2["X-RateLimit-Remaining"], "0")
 
-    def test_blocks_request_after_limit(self):
+    @patch("api.decorators.time", side_effect=[10, 10])
+    def test_blocks_request_after_limit(self, _mock_time):
         view = self._build_view(max_requests=1, per="minute")
 
         first = self.factory.get("/limited/")
@@ -52,7 +53,7 @@ class RateLimitDecoratorTest(SimpleTestCase):
         blocked = view(second)
         self.assertEqual(blocked.status_code, 429)
         self.assertEqual(blocked.data["detail"], "Rate limit exceeded. Try again later.")
-        self.assertEqual(blocked["Retry-After"], "60")
+        self.assertEqual(blocked["Retry-After"], "50")
 
     def test_tracks_clients_separately(self):
         view = self._build_view(max_requests=1, per="minute")

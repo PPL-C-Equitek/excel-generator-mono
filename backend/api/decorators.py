@@ -1,4 +1,5 @@
 from functools import wraps
+from math import ceil
 from time import time
 
 from django.core.cache import cache
@@ -10,6 +11,7 @@ WINDOW_SECONDS = {
     "minute": 60,
     "minutes": 60,
 }
+
 
 def _get_client_ip(request):
     forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
@@ -29,7 +31,8 @@ def rate_limit(max_requests, per="minute"):
         @wraps(view_func)
         def _wrapped(request, *args, **kwargs):
             client_ip = _get_client_ip(request)
-            bucket = int(time() // window)
+            current_time = time()
+            bucket = int(current_time // window)
             key = (
                 f"rl:{view_func.__module__}.{view_func.__name__}:"
                 f"{request.method}:{request.path}:{client_ip}:{bucket}"
@@ -46,11 +49,13 @@ def rate_limit(max_requests, per="minute"):
 
             remaining = max(max_requests - current, 0)
             if current > max_requests:
+                reset_at = (bucket + 1) * window
+                retry_after = max(1, ceil(reset_at - current_time))
                 response = Response(
                     {"detail": "Rate limit exceeded. Try again later."},
                     status=429,
                 )
-                response["Retry-After"] = str(window)
+                response["Retry-After"] = str(retry_after)
                 response["X-RateLimit-Limit"] = str(max_requests)
                 response["X-RateLimit-Remaining"] = "0"
                 return response
