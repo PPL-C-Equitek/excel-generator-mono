@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
-import { server } from "@/__mocks__/server";
+import { server } from "./mocks/server";
 
 vi.mock("next/font/google", () => ({
   Geist: () => ({ variable: "font-geist-sans" }),

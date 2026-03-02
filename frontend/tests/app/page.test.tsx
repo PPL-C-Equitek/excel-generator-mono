@@ -47,4 +47,24 @@ describe("Home page", () => {
 
         expect(await screen.findByText("Error: boom")).toBeInTheDocument();
     });
+
+    it("shows error when about fetch fails", async () => {
+        vi.mocked(getHealth).mockResolvedValue({ status: "ok", message: "Backend is running!" });
+        vi.mocked(getAbout).mockRejectedValue(new Error("about failed"));
+        vi.mocked(getMembers).mockResolvedValue({ group: "Kelompok 7", members: [] });
+
+        render(<Home />);
+
+        expect(await screen.findByText("Error: about failed")).toBeInTheDocument();
+    });
+
+    it("shows error when members fetch fails", async () => {
+        vi.mocked(getHealth).mockResolvedValue({ status: "ok", message: "Backend is running!" });
+        vi.mocked(getAbout).mockResolvedValue({ team: "PPL C - Equitek", project: "Excel Generator" });
+        vi.mocked(getMembers).mockRejectedValue(new Error("members failed"));
+
+        render(<Home />);
+
+        expect(await screen.findByText("Error: members failed")).toBeInTheDocument();
+    });
 });
