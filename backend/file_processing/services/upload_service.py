@@ -32,13 +32,9 @@ def validate_pdf_not_corrupt(uploaded_file):
         if not header.startswith(b"%PDF"):
             return False, "The file does not have a valid PDF header."
 
-        uploaded_file.seek(0)
-        reader = PdfReader(uploaded_file)
-        _ = len(reader.pages)
-
         return True, None
 
-    except (PdfReadError, Exception):
+    except PdfReadError:
         return False, "The PDF file is corrupt."
 
 
