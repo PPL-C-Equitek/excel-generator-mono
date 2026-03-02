@@ -5,7 +5,16 @@ from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory
 from unittest.mock import patch
 
-from api.decorators import rate_limit
+from api.decorators import (
+    _build_cache_key,
+    _build_rate_limited_response,
+    _default_key_func,
+    _execute_rate_limited_request,
+    _increment_request_count,
+    _set_rate_limit_headers,
+    _validate_rate_limit_config,
+    rate_limit,
+)
 
 
 class RateLimitDecoratorTest(SimpleTestCase):
@@ -174,3 +183,135 @@ class RateLimitDecoratorValidationTest(SimpleTestCase):
     def test_rejects_non_positive_error_status(self):
         with self.assertRaises(ValueError):
             rate_limit(max_requests=1, per="minute", error_status=0)
+
+
+class RateLimitHelperFunctionTest(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_default_key_func_returns_client_ip(self):
+        request = self.factory.get("/limited/")
+        request.META["REMOTE_ADDR"] = "192.168.1.1"
+        self.assertEqual(_default_key_func(request), "192.168.1.1")
+
+    def test_validate_rate_limit_config_returns_window_and_default_identity(self):
+        window, identity_func = _validate_rate_limit_config(
+            max_requests=2,
+            per="minute",
+            key_func=None,
+            error_status=429,
+        )
+        self.assertEqual(window, 60)
+        request = self.factory.get("/limited/")
+        request.META["REMOTE_ADDR"] = "127.0.0.1"
+        self.assertEqual(identity_func(request), "127.0.0.1")
+
+    def test_build_cache_key_contains_method_path_identity_and_bucket(self):
+        @api_view(["GET"])
+        def sample_view(request):
+            return Response({"ok": True})
+
+        request = self.factory.get("/api/upload/")
+        key = _build_cache_key(sample_view, request, "client-x", 12)
+        self.assertIn("api.tests.test_decorators.sample_view", key)
+        self.assertIn("GET:/api/upload/:client-x:12", key)
+
+    @patch("api.decorators.cache")
+    def test_increment_request_count_returns_one_on_first_request(self, mock_cache):
+        mock_cache.add.return_value = True
+        result = _increment_request_count("k1", 60)
+        self.assertEqual(result, 1)
+        mock_cache.incr.assert_not_called()
+
+    @patch("api.decorators.cache")
+    def test_increment_request_count_uses_incr_when_key_exists(self, mock_cache):
+        mock_cache.add.return_value = False
+        mock_cache.incr.return_value = 3
+        result = _increment_request_count("k2", 60)
+        self.assertEqual(result, 3)
+        mock_cache.incr.assert_called_once_with("k2")
+
+    @patch("api.decorators.cache")
+    def test_increment_request_count_falls_back_when_incr_raises(self, mock_cache):
+        mock_cache.add.side_effect = [False, True]
+        mock_cache.incr.side_effect = ValueError("missing")
+        result = _increment_request_count("k3", 60)
+        self.assertEqual(result, 1)
+        self.assertEqual(mock_cache.add.call_count, 2)
+
+    def test_set_rate_limit_headers_sets_limit_and_remaining(self):
+        response = Response({"ok": True}, status=200)
+        updated = _set_rate_limit_headers(response, max_requests=10, remaining=7)
+        self.assertEqual(updated["X-RateLimit-Limit"], "10")
+        self.assertEqual(updated["X-RateLimit-Remaining"], "7")
+
+    def test_build_rate_limited_response_contains_retry_headers_and_code(self):
+        response = _build_rate_limited_response(
+            current_time=10,
+            bucket=0,
+            window=60,
+            max_requests=5,
+            error_detail="Too many requests.",
+            error_status=429,
+            error_code="rate_limit_exceeded",
+        )
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.data["detail"], "Too many requests.")
+        self.assertEqual(response.data["code"], "rate_limit_exceeded")
+        self.assertEqual(response["Retry-After"], "50")
+        self.assertEqual(response["X-RateLimit-Limit"], "5")
+        self.assertEqual(response["X-RateLimit-Remaining"], "0")
+
+    @patch("api.decorators._increment_request_count", return_value=1)
+    @patch("api.decorators.monotonic", return_value=5)
+    def test_execute_rate_limited_request_allows_and_sets_headers(self, _mock_time, _mock_count):
+        @api_view(["GET"])
+        def sample_view(request):
+            return Response({"ok": True})
+
+        request = self.factory.get("/sample/")
+        response = _execute_rate_limited_request(
+            request=request,
+            view_func=sample_view,
+            args=(),
+            kwargs={},
+            max_requests=2,
+            window=60,
+            identity_func=lambda req: "identity-a",
+            error_detail="blocked",
+            error_status=429,
+            error_code=None,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-RateLimit-Limit"], "2")
+        self.assertEqual(response["X-RateLimit-Remaining"], "1")
+
+    @patch("api.decorators._increment_request_count", return_value=3)
+    @patch("api.decorators.monotonic", return_value=10)
+    def test_execute_rate_limited_request_blocks_when_limit_exceeded(self, _mock_time, _mock_count):
+        @api_view(["GET"])
+        def sample_view(request):
+            return Response({"ok": True})
+
+        request = self.factory.get("/sample/")
+        response = _execute_rate_limited_request(
+            request=request,
+            view_func=sample_view,
+            args=(),
+            kwargs={},
+            max_requests=2,
+            window=60,
+            identity_func=lambda req: "identity-a",
+            error_detail="blocked",
+            error_status=429,
+            error_code=None,
+        )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.data["detail"], "blocked")
+        self.assertEqual(response["Retry-After"], "50")
