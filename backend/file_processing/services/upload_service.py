@@ -42,6 +42,20 @@ def validate_pdf_not_corrupt(uploaded_file):
         return False, "The PDF file is corrupt."
 
 
+def validate_pdf_not_password_protected(uploaded_file):
+    try:
+        uploaded_file.seek(0)
+        reader = PdfReader(uploaded_file)
+
+        if reader.is_encrypted:
+            return False, "The PDF file is password-protected."
+
+        return True, None
+
+    except (PermissionError, Exception):
+        return False, "The PDF file is private and cannot be accessed"
+
+
 def save_temp_file(uploaded_file):
     os.makedirs(settings.UPLOAD_TEMP_DIR, exist_ok=True)
 
