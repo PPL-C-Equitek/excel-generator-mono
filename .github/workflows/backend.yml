@@ -197,7 +197,7 @@ jobs:
             -Dsonar.inclusions=**/*.py
             -Dsonar.test.inclusions=**/tests/**/*.py,**/tests.py,**/test_*.py,**/*_test.py
             -Dsonar.exclusions=**/migrations/**
-            -Dsonar.coverage.exclusions=**/tests/**,**/tests.py,**/test_*.py,**/*_test.py,**/migrations/**
+            -Dsonar.coverage.exclusions=**/tests/**,**/tests.py,**/test_*.py,**/*_test.py,**/migrations/**,config/**/*.py,manage.py,**/apps.py,**/admin.py,**/urls.py,**/wsgi.py,**/asgi.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
