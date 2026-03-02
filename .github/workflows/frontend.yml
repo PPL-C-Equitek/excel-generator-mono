@@ -138,25 +138,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download frontend coverage artifact
-        uses: actions/download-artifact@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          name: frontend-coverage
-          path: frontend
+          node-version: '20'
 
-      - name: Normalize frontend coverage path
+      - name: Install dependencies
         run: |
-          set -e
-          FOUND_LCOV="$(find . -type f -path '*/coverage/lcov.info' | head -n 1 || true)"
-          if [ -z "$FOUND_LCOV" ]; then
-            echo "lcov.info not found after artifact download"
-            find . -maxdepth 5 -type f | sort
-            exit 1
-          fi
-          mkdir -p frontend/coverage
-          cp "$FOUND_LCOV" frontend/coverage/lcov.info
-          echo "Using LCOV: $FOUND_LCOV"
-          ls -la frontend/coverage
+          cd frontend
+          npm ci
+
+      - name: Generate coverage for Sonar
+        run: |
+          cd frontend
+          npm run test:coverage
+          test -f coverage/lcov.info
+          ls -la coverage
 
       - name: SonarCloud scan (frontend)
         uses: SonarSource/sonarqube-scan-action@v6
