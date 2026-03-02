@@ -8,6 +8,10 @@ on:
       - 'scripts/deploy-frontend.sh'
   pull_request:
     branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'scripts/deploy-frontend.sh'
+      - '.github/workflows/frontend.yml'
 
 permissions:
   contents: write
@@ -153,7 +157,7 @@ jobs:
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY_FRONTEND }}
             -Dsonar.sources=src
             -Dsonar.tests=tests
-            -Dsonar.test.inclusions=tests/**/*.{test,spec}.{ts,tsx},tests/setup.ts,tests/mocks/**/*.ts
+            -Dsonar.test.inclusions=tests/**/*.{test,spec}.{js,jsx,ts,tsx},tests/setup.{js,ts},tests/mocks/**/*.{js,ts}
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
