@@ -52,14 +52,14 @@ def upload(request):
         )
 
     if os.path.splitext(uploaded_file.name)[1].lower() == ".pdf":
-        is_valid, error = validate_pdf_not_password_protected(uploaded_file)
+        is_valid, error = validate_pdf_not_corrupt(uploaded_file)
         if not is_valid:
             return Response(
                 {"status": "error", "message": error},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        is_valid, error = validate_pdf_not_corrupt(uploaded_file)
+        is_valid, error = validate_pdf_not_password_protected(uploaded_file)
         if not is_valid:
             return Response(
                 {"status": "error", "message": error},
