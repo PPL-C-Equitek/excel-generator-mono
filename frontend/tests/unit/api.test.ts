@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchAPI } from "@/lib/api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fetchAPI, uploadFile } from "@/lib/api";
 
 describe("fetchAPI", () => {
   afterEach(() => {
@@ -36,3 +36,32 @@ describe("fetchAPI", () => {
     await expect(fetchAPI("health/")).rejects.toThrow("API error: 500");
   });
 });
+
+describe('uploadFile', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+  })
+
+  it('sends file with correct FormData key', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'success', filename: 'test.pdf' }),
+    })
+
+    const file = new File(['dummy'], 'test.pdf', { type: 'application/pdf' })
+    await uploadFile(file)
+
+    const formData = (global.fetch as any).mock.calls[0][1].body as FormData
+    expect(formData.get('file')).toBe(file)
+  })
+
+  it('throws error when server returns error message', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ status: 'error', message: 'No file provided' }),
+    })
+
+    const file = new File(['dummy'], 'test.pdf')
+    await expect(uploadFile(file)).rejects.toThrow('No file provided')
+  })
+})
