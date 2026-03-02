@@ -5,14 +5,14 @@
  * All tests will FAIL until src/services/llm.ts is implemented.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { server } from "../mocks/server";
+import { server } from "@/__mocks__/server";
 import {
     handler401,
     handler429,
     handler504,
     handlerInvalidSchema,
     successHandler,
-} from "../mocks/handlers";
+} from "@/__mocks__/handlers";
 import { generateJson } from "@/services/llm";
 
 describe("generateJson — Positive", () => {
