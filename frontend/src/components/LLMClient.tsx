@@ -6,8 +6,6 @@ import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { generateJson } from "@/services/llm";
 import type { LLMResponse } from "@/services/llm";
 
-// ─── Sub-components ────────────────────────────────────────────────────────────
-
 function SkeletonLoader() {
     return (
         <div className="animate-pulse space-y-3 pt-2">
@@ -31,8 +29,6 @@ function Alert({ message }: { message: string }) {
     );
 }
 
-// ─── Main Component ─────────────────────────────────────────────────────────────
-
 export default function LLMClient() {
     const [input, setInput] = useState<string>("");
     const [result, setResult] = useState<LLMResponse | null>(null);
@@ -43,13 +39,11 @@ export default function LLMClient() {
         setError(null);
         setResult(null);
 
-        // Edge Case: input kosong setelah di-trim
         if (!input.trim()) {
             setError("Input tidak boleh kosong");
             return;
         }
 
-        // Edge Case: bukan JSON valid
         let parsedInput: Record<string, unknown>;
         try {
             parsedInput = JSON.parse(input);
@@ -76,7 +70,6 @@ export default function LLMClient() {
     return (
         <div className="min-h-screen bg-gray-950 px-4 py-8 lg:px-8">
             <div className="mx-auto max-w-5xl">
-                {/* Header */}
                 <div className="mb-8">
                     <h1 className="text-3xl font-bold tracking-tight text-white">
                         LLM JSON Generator
@@ -86,10 +79,8 @@ export default function LLMClient() {
                     </p>
                 </div>
 
-                {/* Two-column on lg, single-column on mobile/tablet */}
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
 
-                    {/* ── Input Panel ── */}
                     <div className="flex flex-col rounded-2xl bg-gray-800/60 p-5 shadow-xl ring-1 ring-white/5">
                         <label
                             htmlFor="llm-input"
@@ -116,19 +107,13 @@ export default function LLMClient() {
                         </button>
                     </div>
 
-                    {/* ── Output Panel ── */}
                     <div className="flex flex-col rounded-2xl bg-gray-800/60 p-5 shadow-xl ring-1 ring-white/5">
                         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
                             Output
                         </p>
 
-                        {/* Loading skeleton */}
                         {loading && <SkeletonLoader />}
-
-                        {/* Error alert */}
                         {!loading && error && <Alert message={error} />}
-
-                        {/* Success: syntax-highlighted JSON */}
                         {!loading && result && (
                             <SyntaxHighlighter
                                 language="json"
@@ -146,7 +131,6 @@ export default function LLMClient() {
                             </SyntaxHighlighter>
                         )}
 
-                        {/* Empty state */}
                         {!loading && !error && !result && (
                             <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-gray-700 py-16 text-sm text-gray-600">
                                 Hasil akan tampil di sini
