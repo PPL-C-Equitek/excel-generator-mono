@@ -1,9 +1,13 @@
 [run]
 branch = True
 source =
-    api
+    .
 omit =
     */migrations/*
+    */tests/*
+    */tests.py
+    manage.py
+    config/*
 
 [report]
 show_missing = True
