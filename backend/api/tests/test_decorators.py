@@ -40,7 +40,7 @@ class RateLimitDecoratorTest(SimpleTestCase):
         self.assertEqual(response_2.status_code, 200)
         self.assertEqual(response_2["X-RateLimit-Remaining"], "0")
 
-    @patch("api.decorators.time", side_effect=[10, 10])
+    @patch("api.decorators.monotonic", side_effect=[10, 10])
     def test_blocks_request_after_limit(self, _mock_time):
         view = self._build_view(max_requests=1, per="minute")
 
@@ -66,7 +66,7 @@ class RateLimitDecoratorTest(SimpleTestCase):
         req_b.META["REMOTE_ADDR"] = "10.0.0.2"
         self.assertEqual(view(req_b).status_code, 200)
 
-    @patch("api.decorators.time", side_effect=[0, 0, 61])
+    @patch("api.decorators.monotonic", side_effect=[0, 0, 61])
     def test_resets_limit_when_window_changes(self, _mock_time):
         view = self._build_view(max_requests=1, per="minute")
 
@@ -84,7 +84,7 @@ class RateLimitDecoratorTest(SimpleTestCase):
         self.assertEqual(allowed_again.status_code, 200)
         self.assertEqual(allowed_again["X-RateLimit-Remaining"], "0")
 
-    @patch("api.decorators.time", return_value=0)
+    @patch("api.decorators.monotonic", return_value=0)
     @patch("api.decorators.cache")
     def test_falls_back_when_cache_incr_key_missing(self, mock_cache, _mock_time):
         view = self._build_view(max_requests=2, per="minute")
@@ -116,6 +116,47 @@ class RateLimitDecoratorTest(SimpleTestCase):
         blocked = view(same_forwarded)
         self.assertEqual(blocked.status_code, 429)
 
+    @patch("api.decorators.monotonic", side_effect=[0, 0, 0])
+    def test_supports_custom_key_func(self, _mock_time):
+        @api_view(["GET"])
+        @rate_limit(max_requests=1, per="minute", key_func=lambda request: request.headers.get("X-Client", "anon"))
+        def by_client_header(request):
+            return Response({"ok": True})
+
+        first = self.factory.get("/limited/", HTTP_X_CLIENT="client-a")
+        self.assertEqual(by_client_header(first).status_code, 200)
+
+        second = self.factory.get("/limited/", HTTP_X_CLIENT="client-a")
+        self.assertEqual(by_client_header(second).status_code, 429)
+
+        other = self.factory.get("/limited/", HTTP_X_CLIENT="client-b")
+        self.assertEqual(by_client_header(other).status_code, 200)
+
+    @patch("api.decorators.monotonic", side_effect=[10, 10])
+    def test_supports_custom_error_payload_status_and_code(self, _mock_time):
+        @api_view(["GET"])
+        @rate_limit(
+            max_requests=1,
+            per="minute",
+            error_detail="Too many requests for this endpoint.",
+            error_status=503,
+            error_code="rate_limited",
+        )
+        def limited_custom_error(request):
+            return Response({"ok": True})
+
+        first = self.factory.get("/limited-custom/")
+        first.META["REMOTE_ADDR"] = "10.0.0.1"
+        self.assertEqual(limited_custom_error(first).status_code, 200)
+
+        second = self.factory.get("/limited-custom/")
+        second.META["REMOTE_ADDR"] = "10.0.0.1"
+        blocked = limited_custom_error(second)
+        self.assertEqual(blocked.status_code, 503)
+        self.assertEqual(blocked.data["detail"], "Too many requests for this endpoint.")
+        self.assertEqual(blocked.data["code"], "rate_limited")
+        self.assertEqual(blocked["Retry-After"], "50")
+
 
 class RateLimitDecoratorValidationTest(SimpleTestCase):
     def test_rejects_invalid_window(self):
@@ -125,3 +166,11 @@ class RateLimitDecoratorValidationTest(SimpleTestCase):
     def test_rejects_non_positive_limit(self):
         with self.assertRaises(ValueError):
             rate_limit(max_requests=0, per="minute")
+
+    def test_rejects_non_callable_key_func(self):
+        with self.assertRaises(ValueError):
+            rate_limit(max_requests=1, per="minute", key_func="not-a-callable")
+
+    def test_rejects_non_positive_error_status(self):
+        with self.assertRaises(ValueError):
+            rate_limit(max_requests=1, per="minute", error_status=0)
