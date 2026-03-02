@@ -156,8 +156,10 @@ jobs:
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY_FRONTEND }}
             -Dsonar.sources=src
-            -Dsonar.tests=tests
-            -Dsonar.test.inclusions=tests/**/*.{test,spec}.{js,jsx,ts,tsx},tests/setup.{js,ts},tests/mocks/**/*.{js,ts}
+            -Dsonar.tests=src,tests
+            -Dsonar.test.inclusions=src/**/__tests__/**/*.ts,src/**/__tests__/**/*.tsx,src/**/__tests__/**/*.js,src/**/__tests__/**/*.jsx,src/**/*.test.ts,src/**/*.test.tsx,src/**/*.test.js,src/**/*.test.jsx,src/**/*.spec.ts,src/**/*.spec.tsx,src/**/*.spec.js,src/**/*.spec.jsx,tests/**/*.ts,tests/**/*.tsx,tests/**/*.js,tests/**/*.jsx
+            -Dsonar.exclusions=src/**/__tests__/**,src/**/__mocks__/**,src/**/*.test.ts,src/**/*.test.tsx,src/**/*.test.js,src/**/*.test.jsx,src/**/*.spec.ts,src/**/*.spec.tsx,src/**/*.spec.js,src/**/*.spec.jsx
+            -Dsonar.coverage.exclusions=src/**/__tests__/**,src/**/__mocks__/**,src/**/*.test.ts,src/**/*.test.tsx,src/**/*.test.js,src/**/*.test.jsx,src/**/*.spec.ts,src/**/*.spec.tsx,src/**/*.spec.js,src/**/*.spec.jsx,tests/**
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
