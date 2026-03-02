@@ -2,7 +2,6 @@ import { http, HttpResponse } from "msw";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-// Default handler — sukses
 export const successHandler = http.post(
     `${API_BASE}/api/llm/generate/`,
     () => {
@@ -18,30 +17,44 @@ export const successHandler = http.post(
     }
 );
 
-// 401 — API Key invalid
 export const handler401 = http.post(
     `${API_BASE}/api/llm/generate/`,
     () => HttpResponse.json({ detail: "Unauthorized" }, { status: 401 })
 );
 
-// 429 — Quota habis
 export const handler429 = http.post(
     `${API_BASE}/api/llm/generate/`,
     () => HttpResponse.json({ detail: "Too Many Requests" }, { status: 429 })
 );
 
-// 504 — Gateway Timeout
 export const handler504 = http.post(
     `${API_BASE}/api/llm/generate/`,
     () => HttpResponse.json({ detail: "Gateway Timeout" }, { status: 504 })
 );
 
-// Respons dengan skema yang salah (tidak ada output_json)
 export const handlerInvalidSchema = http.post(
     `${API_BASE}/api/llm/generate/`,
     () =>
         HttpResponse.json(
             { wrong_field: "unexpected" },
+            { status: 200 }
+        )
+);
+
+export const handlerArrayOutput = http.post(
+    `${API_BASE}/api/llm/generate/`,
+    () =>
+        HttpResponse.json(
+            { output_json: [{ id: 1, value: "row-a" }, { id: 2, value: "row-b" }] },
+            { status: 200 }
+        )
+);
+
+export const handlerPrimitiveOutput = http.post(
+    `${API_BASE}/api/llm/generate/`,
+    () =>
+        HttpResponse.json(
+            { output_json: "hanya sebuah string" },
             { status: 200 }
         )
 );
