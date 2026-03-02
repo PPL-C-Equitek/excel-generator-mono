@@ -1,8 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchAPI } from "@/lib/api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fetchAPI, uploadFile } from "@/lib/api";
+
+const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
 describe("fetchAPI", () => {
+    beforeEach(() => {
+        delete process.env.NEXT_PUBLIC_API_URL;
+    });
+
     afterEach(() => {
+        process.env.NEXT_PUBLIC_API_URL = originalApiUrl;
         vi.restoreAllMocks();
         vi.unstubAllGlobals();
     });
@@ -34,5 +41,105 @@ describe("fetchAPI", () => {
         vi.stubGlobal("fetch", mockedFetch);
 
         await expect(fetchAPI("health/")).rejects.toThrow("API error: 500");
+    });
+
+    it("normalizes endpoint slashes and uses API origin from env", async () => {
+        process.env.NEXT_PUBLIC_API_URL = "https://api.example.com/some/path";
+
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        await fetchAPI("//health//");
+
+        expect(mockedFetch).toHaveBeenCalledWith("https://api.example.com/api/health/", {
+            headers: {
+                "Content-Type": "application/json",
+            },
+        });
+    });
+
+    it("falls back to default base URL when env URL is invalid", async () => {
+        process.env.NEXT_PUBLIC_API_URL = "this is not a valid url";
+
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        await fetchAPI("health");
+
+        expect(mockedFetch).toHaveBeenCalledWith("http://localhost:8000/api/health/", {
+            headers: {
+                "Content-Type": "application/json",
+            },
+        });
+    });
+});
+
+describe("uploadFile", () => {
+    beforeEach(() => {
+        delete process.env.NEXT_PUBLIC_API_URL;
+    });
+
+    afterEach(() => {
+        process.env.NEXT_PUBLIC_API_URL = originalApiUrl;
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    it("uploads file as FormData and returns parsed response", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 201,
+            json: async () => ({ message: "uploaded" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "report.xlsx", {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+
+        const result = await uploadFile(file);
+
+        expect(mockedFetch).toHaveBeenCalledWith(
+            "http://localhost:8000/api/upload/",
+            expect.objectContaining({
+                method: "POST",
+                body: expect.any(FormData),
+            })
+        );
+        expect(result).toEqual({ message: "uploaded" });
+    });
+
+    it("throws API error message when upload fails with message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Invalid file" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "bad.txt", { type: "text/plain" });
+
+        await expect(uploadFile(file)).rejects.toThrow("Invalid file");
+    });
+
+    it("throws default error when upload fails without message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 500,
+            json: async () => ({}),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "bad.txt", { type: "text/plain" });
+
+        await expect(uploadFile(file)).rejects.toThrow("Upload failed");
     });
 });
