@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, DragEvent, ChangeEvent } from 'react'
+import { uploadFile } from '@/lib/api'
 
 interface UploadZoneProps {
     onFileSelect?: (file: File) => void
@@ -9,11 +10,22 @@ interface UploadZoneProps {
 export default function UploadZone({ onFileSelect }: UploadZoneProps) {
     const [isDragging, setIsDragging] = useState(false)
     const [selectedFile, setSelectedFile] = useState<string | null>(null)
+    const [isLoading, setIsLoading] = useState(false)
+    const [error, setError] = useState<string | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
 
-    const handleFile = (file: File) => {
+    const handleFile = async (file: File) => {
         setSelectedFile(file.name)
-        onFileSelect?.(file)
+        setIsLoading(true)
+        setError(null)
+        try {
+            const result = await uploadFile(file)
+            onFileSelect?.(file)
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Upload failed')
+        } finally {
+            setIsLoading(false)
+        }
     }
 
     const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -35,7 +47,7 @@ export default function UploadZone({ onFileSelect }: UploadZoneProps) {
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
             className={`border-2 border-dashed rounded-lg p-20 flex flex-col items-center justify-center gap-3 transition-colors
-        ${isDragging ? 'border-red-600 bg-red-50' : 'border-gray-300 bg-gray-100'}`}
+                ${isDragging ? 'border-red-600 bg-red-50' : 'border-gray-300 bg-gray-100'}`}
         >
             <input
                 data-testid="file-input"
@@ -46,14 +58,20 @@ export default function UploadZone({ onFileSelect }: UploadZoneProps) {
             />
             <button
                 onClick={() => inputRef.current?.click()}
-                className="bg-red-700 text-white font-bold px-8 py-3 rounded-xl hover:bg-red-800 transition"
+                disabled={isLoading}
+                className="bg-red-700 text-white font-bold px-8 py-3 rounded-xl hover:bg-red-800 transition disabled:opacity-50"
             >
-                Upload File
+                {isLoading ? 'Uploading...' : 'Upload File'}
             </button>
-            {selectedFile
+
+            {error && (
+                <p className="text-red-500 text-sm">{error}</p>
+            )}
+
+            {!error && (selectedFile
                 ? <p className="text-gray-600 text-sm">{selectedFile}</p>
                 : <p className="text-gray-400 text-sm">Or drop file here</p>
-            }
+            )}
         </div>
     )
 }

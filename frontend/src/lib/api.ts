@@ -14,3 +14,21 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
 
   return res.json();
 }
+
+export async function uploadFile(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await fetch('http://localhost:8000/upload/', {
+    method: 'POST',
+    body: formData,
+  })
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(data.message || 'Upload failed')
+  }
+
+  return data
+}
