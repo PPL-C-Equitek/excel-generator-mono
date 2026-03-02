@@ -19,14 +19,10 @@ const createMockFile = (
   return new File([content], name, { type })
 }
 
-interface MockDataTransfer {
-  files: File[]
-}
-
 const createDragEvent = (files: File[]): Partial<DragEvent> => {
   return {
     dataTransfer: {
-      files: files as any,
+      files: files as unknown as FileList,
     } as DataTransfer,
     preventDefault: vi.fn(),
   }
@@ -359,7 +355,7 @@ describe('UploadZone', () => {
 
     it('waits for API response before calling onFileSelect', async () => {
       const mockOnFileSelect = vi.fn()
-      let resolveUpload: (value: any) => void
+      let resolveUpload: (value: unknown) => void
 
       mockUploadFile.mockReturnValue(
         new Promise((resolve) => {
@@ -418,7 +414,7 @@ describe('UploadZone', () => {
 
       const event = {
         preventDefault: vi.fn(),
-        dataTransfer: { files: [] as any },
+        dataTransfer: { files: [] as unknown as FileList },
       }
 
       expect(() => fireEvent.drop(dropZone, event)).not.toThrow()

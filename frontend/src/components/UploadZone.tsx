@@ -19,7 +19,7 @@ export default function UploadZone({ onFileSelect }: UploadZoneProps) {
         setIsLoading(true)
         setError(null)
         try {
-            const result = await uploadFile(file)
+            await uploadFile(file)
             onFileSelect?.(file)
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Upload failed')
