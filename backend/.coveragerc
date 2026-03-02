@@ -1,12 +1,13 @@
 [run]
 branch = True
 source =
-    api
-    file_processing
+    .
 omit =
     */migrations/*
     */tests/*
     */tests.py
+    manage.py
+    config/*
 
 [report]
 show_missing = True
