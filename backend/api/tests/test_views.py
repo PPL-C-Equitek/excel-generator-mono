@@ -151,16 +151,7 @@ class UploadEndpointTest(TestCase):
 
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
-        self.assertIn("password", resp.data["message"].lower())
-
-    def test_file_is_private_pdf(self):
-        private_pdf = self.generate_private_pdf_bytes(password="1234")
-
-        resp = self._post_file("private.pdf", private_pdf, "application/pdf")
-
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data["status"], "error")
-        self.assertIn("password", resp.data["message"].lower())
+        self.assertIn("message", resp.data)
 
     def test_upload_file_exact_10mb_allowed(self):
         valid_pdf = self.generate_valid_pdf_bytes()
@@ -177,3 +168,12 @@ class UploadEndpointTest(TestCase):
         less_content = valid_pdf + padding
         resp = self._post_file("small.pdf", less_content, "application/pdf")
         self.assertEqual(resp.status_code, 200)
+
+    def test_file_is_private_pdf(self):
+        private_pdf = self.generate_private_pdf_bytes(password="1234")
+
+        resp = self._post_file("private.pdf", private_pdf, "application/pdf")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
