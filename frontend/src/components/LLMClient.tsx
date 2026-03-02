@@ -9,7 +9,7 @@ import type { ILLMService } from "@/lib/ILLMService";
 const defaultService: ILLMService = { generate: generateJson };
 
 interface Props {
-    service?: ILLMService;
+    readonly service?: ILLMService;
 }
 
 function SkeletonLoader() {

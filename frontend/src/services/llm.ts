@@ -1,11 +1,11 @@
 import { fetchAPI } from "@/lib/api";
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
-import {
-    isJsonObjectOrArray,
-    type JsonValue,
-} from "@/utils/schemaValidator";
+import { isJsonObjectOrArray } from "@/utils/schemaValidator";
+import type { JsonValue } from "@/utils/schemaValidator";
 export { ERROR_MESSAGES };
-export type { JsonValue };
+export type { JsonValue } from "@/utils/schemaValidator";
+
+
 
 export interface LLMRequest {
     input_json: JsonValue;
