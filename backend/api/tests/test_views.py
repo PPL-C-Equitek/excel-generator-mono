@@ -159,11 +159,17 @@ class UploadEndpointTest(TestCase):
         self.assertIn("password", resp.data["message"].lower())
 
     def test_upload_file_exact_10mb_allowed(self):
-        exact_content = b"a" * (10 * 1024 * 1024)
+        valid_pdf = self.generate_valid_pdf_bytes()
+        remaining_size = (10 * 1024 * 1024) - len(valid_pdf)
+
+        padding = b"\0" * remaining_size
+        exact_content = valid_pdf + padding
         resp = self._post_file("exact.pdf", exact_content, "application/pdf")
         self.assertEqual(resp.status_code, 200)
 
     def test_upload_file_less_than_10mb_allowed(self):
-        less_content = b"a" * (5 * 1024 * 1024)
+        valid_pdf = self.generate_valid_pdf_bytes()
+        padding = b"\0" * (5 * 1024 * 1024)
+        less_content = valid_pdf + padding
         resp = self._post_file("small.pdf", less_content, "application/pdf")
         self.assertEqual(resp.status_code, 200)
