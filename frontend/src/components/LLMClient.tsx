@@ -1,10 +1,16 @@
 "use client";
 
-import { useState } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { generateJson } from "@/services/llm";
-import type { LLMResponse } from "@/services/llm";
+import { useLLMGenerator } from "@/hooks/useLLMGenerator";
+import type { ILLMService } from "@/lib/ILLMService";
+
+const defaultService: ILLMService = { generate: generateJson };
+
+interface Props {
+    service?: ILLMService;
+}
 
 function SkeletonLoader() {
     return (
@@ -29,43 +35,9 @@ function Alert({ message }: { message: string }) {
     );
 }
 
-export default function LLMClient() {
-    const [input, setInput] = useState<string>("");
-    const [result, setResult] = useState<LLMResponse | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [loading, setLoading] = useState<boolean>(false);
-
-    async function handleSubmit() {
-        setError(null);
-        setResult(null);
-
-        if (!input.trim()) {
-            setError("Input tidak boleh kosong");
-            return;
-        }
-
-        let parsedInput: Record<string, unknown>;
-        try {
-            parsedInput = JSON.parse(input);
-        } catch {
-            setError("Input harus berupa JSON yang valid");
-            return;
-        }
-
-        setLoading(true);
-        try {
-            const response = await generateJson(parsedInput);
-            setResult(response);
-        } catch (err: unknown) {
-            setError(
-                err instanceof Error
-                    ? err.message
-                    : "Terjadi kesalahan tidak diketahui"
-            );
-        } finally {
-            setLoading(false);
-        }
-    }
+export default function LLMClient({ service = defaultService }: Props) {
+    const { input, setInput, result, error, loading, handleSubmit } =
+        useLLMGenerator(service);
 
     return (
         <div className="min-h-screen bg-gray-950 px-4 py-8 lg:px-8">
@@ -80,7 +52,6 @@ export default function LLMClient() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-
                     <div className="flex flex-col rounded-2xl bg-gray-800/60 p-5 shadow-xl ring-1 ring-white/5">
                         <label
                             htmlFor="llm-input"
