@@ -1,11 +1,15 @@
 from django.test import SimpleTestCase
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APIRequestFactory
 from unittest.mock import patch
 
+from llm.views import llm_generate
 from llm.services.openai_client import OpenAIServiceError
 
 
 class LlmGenerateEndpointTest(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
     @patch("llm.views.generate_json")
     def test_llm_generate_returns_200(self, mock_generate_json):
         mock_generate_json.return_value = {"status": "ok"}
@@ -87,6 +91,16 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         client = APIClient()
 
         response = client.post("/api/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "input_json must be an object or array.")
+
+    @patch("llm.views.generate_json")
+    def test_llm_generate_direct_view_covers_value_error_branch(self, mock_generate_json):
+        mock_generate_json.side_effect = ValueError("input_json must be an object or array.")
+        request = self.factory.post("/api/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+
+        response = llm_generate(request)
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["detail"], "input_json must be an object or array.")
