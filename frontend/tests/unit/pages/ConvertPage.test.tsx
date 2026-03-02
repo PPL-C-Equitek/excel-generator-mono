@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import ConvertPage from '../../../src/app/convert/ConvertPage'
 
 // Test utilities - Factory pattern for creating test data
@@ -137,7 +137,7 @@ describe('ConvertPage', () => {
         })
 
         it('subtitle has correct styling', () => {
-            const { container } = render(<ConvertPage />)
+            render(<ConvertPage />)
             const subtitle = screen.getByText(/Replace manual entry/i)
             expect(subtitle.tagName).toBe('P')
             expect(subtitle).toHaveClass('text-gray-500', 'text-center')
