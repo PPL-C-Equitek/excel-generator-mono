@@ -5,7 +5,7 @@ from .serializers import LlmGenerateRequestSerializer, LlmGenerateResponseSerial
 from .services.openai_client import OpenAIServiceError, generate_json
 
 
-@api_view(["POST"])
+@require_http_methods(["POST"])
 def llm_generate(request):
     request_serializer = LlmGenerateRequestSerializer(data=request.data)
     request_serializer.is_valid(raise_exception=True)
