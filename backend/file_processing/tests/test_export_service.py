@@ -1,6 +1,9 @@
+import csv
+import io
 import unittest
 from copy import deepcopy
 
+import file_processing.services.export_service as export_service
 from file_processing.services.export_service import (
     OutputCSVMappingError,
     OutputLLMValidationError,
@@ -401,6 +404,167 @@ class MapOutputCSVTest(unittest.TestCase):
         result = map_output_csv(validated_output)
 
         self.assertEqual(len(result["sheets"][0]["rows"]), 1000)
+
+
+class GenerateCSVTest(unittest.TestCase):
+    def _build_mapped_output(self):
+        return {
+            "sheets": [
+                {
+                    "name": "Sheet1",
+                    "headers": ["name", "age", "city"],
+                    "rows": [
+                        ["Zufar", 21, "Depok"],
+                        ["Siti", 22, "Jakarta"],
+                    ],
+                }
+            ]
+        }
+
+    def _read_csv_rows(self, csv_content):
+        return list(csv.reader(io.StringIO(csv_content)))
+
+    def test_generate_csv_exposes_expected_api(self):
+        self.assertTrue(
+            hasattr(export_service, "generate_csv"),
+            "generate_csv must be implemented in export_service.",
+        )
+        self.assertTrue(
+            hasattr(export_service, "OutputCSVGenerationError"),
+            "OutputCSVGenerationError must be implemented in export_service.",
+        )
+
+    def test_generate_csv_single_sheet_successfully(self):
+        mapped_output = self._build_mapped_output()
+
+        result = export_service.generate_csv(mapped_output)
+
+        self.assertEqual(len(result["files"]), 1)
+        self.assertEqual(result["files"][0]["name"], "Sheet1.csv")
+        self.assertEqual(
+            self._read_csv_rows(result["files"][0]["content"]),
+            [
+                ["name", "age", "city"],
+                ["Zufar", "21", "Depok"],
+                ["Siti", "22", "Jakarta"],
+            ],
+        )
+
+    def test_generate_csv_multiple_sheets_successfully(self):
+        mapped_output = self._build_mapped_output()
+        mapped_output["sheets"].append(
+            {
+                "name": "Sheet2",
+                "headers": ["sku", "price"],
+                "rows": [["A-1", 15000]],
+            }
+        )
+
+        result = export_service.generate_csv(mapped_output)
+
+        self.assertEqual(len(result["files"]), 2)
+        self.assertEqual(result["files"][0]["name"], "Sheet1.csv")
+        self.assertEqual(result["files"][1]["name"], "Sheet2.csv")
+        self.assertEqual(
+            self._read_csv_rows(result["files"][1]["content"]),
+            [
+                ["sku", "price"],
+                ["A-1", "15000"],
+            ],
+        )
+
+    def test_generate_csv_allows_empty_rows(self):
+        mapped_output = self._build_mapped_output()
+        mapped_output["sheets"][0]["rows"] = []
+
+        result = export_service.generate_csv(mapped_output)
+
+        self.assertEqual(
+            self._read_csv_rows(result["files"][0]["content"]),
+            [["name", "age", "city"]],
+        )
+
+    def test_generate_csv_rejects_invalid_root_or_sheets(self):
+        cases = [
+            ("root_non_object", "invalid"),
+            ("sheets_missing", {}),
+            ("sheets_non_list", {"sheets": {}}),
+            ("sheet_non_object", {"sheets": ["invalid"]}),
+        ]
+        for case_name, payload in cases:
+            with self.subTest(case=case_name):
+                with self.assertRaises(export_service.OutputCSVGenerationError):
+                    export_service.generate_csv(payload)
+
+    def test_generate_csv_rejects_sheet_missing_required_fields(self):
+        cases = [
+            ("missing_name", {"headers": ["name"], "rows": [["Zufar"]]}),
+            ("missing_headers", {"name": "Sheet1", "rows": [["Zufar"]]}),
+            ("missing_rows", {"name": "Sheet1", "headers": ["name"]}),
+        ]
+        for case_name, sheet_payload in cases:
+            with self.subTest(case=case_name):
+                mapped_output = {"sheets": [sheet_payload]}
+                with self.assertRaises(export_service.OutputCSVGenerationError):
+                    export_service.generate_csv(mapped_output)
+
+    def test_generate_csv_rejects_invalid_headers_and_rows(self):
+        cases = [
+            ("headers_non_list", {"headers": "name"}),
+            ("headers_empty", {"headers": []}),
+            ("header_non_string", {"headers": ["name", 1]}),
+            ("rows_non_list", {"rows": "not-list"}),
+            ("row_non_list", {"rows": ["not-list-row"]}),
+        ]
+        for case_name, mutation in cases:
+            with self.subTest(case=case_name):
+                mapped_output = self._build_mapped_output()
+                mapped_output["sheets"][0].update(mutation)
+                with self.assertRaises(export_service.OutputCSVGenerationError):
+                    export_service.generate_csv(mapped_output)
+
+    def test_generate_csv_rejects_row_length_mismatch(self):
+        mapped_output = self._build_mapped_output()
+        mapped_output["sheets"][0]["rows"] = [["Zufar", 21]]
+
+        with self.assertRaises(export_service.OutputCSVGenerationError):
+            export_service.generate_csv(mapped_output)
+
+    def test_generate_csv_handles_csv_special_characters(self):
+        mapped_output = {
+            "sheets": [
+                {
+                    "name": "Sheet1",
+                    "headers": ["text"],
+                    "rows": [['Hello, "CSV"\nWorld']],
+                }
+            ]
+        }
+
+        result = export_service.generate_csv(mapped_output)
+
+        self.assertEqual(
+            self._read_csv_rows(result["files"][0]["content"]),
+            [["text"], ['Hello, "CSV"\nWorld']],
+        )
+
+    def test_generate_csv_keeps_unicode_and_formula_like_values(self):
+        mapped_output = {
+            "sheets": [
+                {
+                    "name": "Sheet1",
+                    "headers": ["name", "note"],
+                    "rows": [["शोफ़ी", "=SUM(A1:A2)"]],
+                }
+            ]
+        }
+
+        result = export_service.generate_csv(mapped_output)
+
+        self.assertEqual(
+            self._read_csv_rows(result["files"][0]["content"]),
+            [["name", "note"], ["शोफ़ी", "=SUM(A1:A2)"]],
+        )
 
 
 if __name__ == "__main__":
