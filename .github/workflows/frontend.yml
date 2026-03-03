@@ -10,6 +10,8 @@ on:
     branches: [main]
     paths:
       - 'frontend/**'
+      - 'scripts/deploy-frontend.sh'
+      - '.github/workflows/frontend.yml'
 
 permissions:
   contents: write
@@ -128,9 +130,53 @@ jobs:
 
           echo "Badge update skipped after retries."
 
-  deploy:
+  sonar:
     runs-on: ubuntu-latest
     needs: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Generate coverage for Sonar
+        run: |
+          cd frontend
+          npm run test:coverage
+          test -f coverage/lcov.info
+          ls -la coverage
+
+      - name: SonarCloud scan (frontend)
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectBaseDir: frontend
+          args: >
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY_FRONTEND }}
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.test.inclusions=tests/**/*.ts,tests/**/*.tsx,tests/**/*.js,tests/**/*.jsx
+            -Dsonar.coverage.exclusions=tests/**
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [test, sonar]
     if: github.event_name == 'push'
     steps:
       - name: Deploy via SSH
@@ -141,16 +187,19 @@ jobs:
           password: ${{ secrets.VM_PASSWORD }}
           script: |
             cat > ~/apps/.env << 'ENVEOF'
-            POSTGRES_DB=${{ secrets.POSTGRES_DB }}
-            POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+            POSTGRES_DB=${{ vars.POSTGRES_DB }}
+            POSTGRES_USER=${{ vars.POSTGRES_USER }}
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             POSTGRES_HOST=localhost
             POSTGRES_PORT=5432
             DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
             DJANGO_DEBUG=False
-            DJANGO_ALLOWED_HOSTS=${{ secrets.DJANGO_ALLOWED_HOSTS }}
-            DJANGO_CORS_ALLOWED_ORIGINS=${{ secrets.DJANGO_CORS_ALLOWED_ORIGINS }}
-            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+            DJANGO_ALLOWED_HOSTS=${{ vars.DJANGO_ALLOWED_HOSTS }}
+            DJANGO_CORS_ALLOWED_ORIGINS=${{ vars.DJANGO_CORS_ALLOWED_ORIGINS }}
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            OPENAI_MODEL=${{ vars.OPENAI_MODEL }}
+            OPENAI_SYSTEM_PROMPT=${{ vars.OPENAI_SYSTEM_PROMPT }}
             ENVEOF
 
             cd ~/apps/excel-generator-mono
