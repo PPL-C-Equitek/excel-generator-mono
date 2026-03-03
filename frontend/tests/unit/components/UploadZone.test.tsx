@@ -77,48 +77,7 @@ describe('UploadZone', () => {
       render(<UploadZone />)
       const dropZone = screen.getByTestId('drop-zone')
 
-      expect(dropZone).toHaveAttribute('role', 'button')
-      expect(dropZone).toHaveAttribute('tabindex', '0')
       expect(dropZone).toHaveAttribute('aria-label', 'File upload drop zone')
-      expect(dropZone).toHaveAttribute('aria-disabled', 'false')
-    })
-  })
-
-  describe('Keyboard Accessibility', () => {
-    it('opens file picker when pressing Enter on drop zone', () => {
-      render(<UploadZone />)
-
-      const dropZone = screen.getByTestId('drop-zone')
-      const input = screen.getByTestId('file-input') as HTMLInputElement
-      const clickSpy = vi.spyOn(input, 'click')
-
-      fireEvent.keyDown(dropZone, { key: 'Enter' })
-
-      expect(clickSpy).toHaveBeenCalledTimes(1)
-    })
-
-    it('opens file picker when pressing Space on drop zone', () => {
-      render(<UploadZone />)
-
-      const dropZone = screen.getByTestId('drop-zone')
-      const input = screen.getByTestId('file-input') as HTMLInputElement
-      const clickSpy = vi.spyOn(input, 'click')
-
-      fireEvent.keyDown(dropZone, { key: ' ' })
-
-      expect(clickSpy).toHaveBeenCalledTimes(1)
-    })
-
-    it('does not open file picker for other keys', () => {
-      render(<UploadZone />)
-
-      const dropZone = screen.getByTestId('drop-zone')
-      const input = screen.getByTestId('file-input') as HTMLInputElement
-      const clickSpy = vi.spyOn(input, 'click')
-
-      fireEvent.keyDown(dropZone, { key: 'Escape' })
-
-      expect(clickSpy).not.toHaveBeenCalled()
     })
   })
 
@@ -324,29 +283,6 @@ describe('UploadZone', () => {
       await waitFor(() => {
         const button = screen.getByText('Upload File')
         expect(button).not.toBeDisabled()
-      })
-    })
-
-    it('updates drop zone aria-disabled during upload lifecycle', async () => {
-      let resolveUpload: (value: unknown) => void
-      mockUploadFile.mockReturnValue(
-        new Promise((resolve) => {
-          resolveUpload = resolve
-        })
-      )
-
-      render(<UploadZone />)
-      const dropZone = screen.getByTestId('drop-zone')
-      const file = createMockFile()
-      const input = screen.getByTestId('file-input')
-
-      await userEvent.upload(input, file)
-      expect(dropZone).toHaveAttribute('aria-disabled', 'true')
-
-      resolveUpload!({ filename: 'test.pdf' })
-
-      await waitFor(() => {
-        expect(dropZone).toHaveAttribute('aria-disabled', 'false')
       })
     })
   })

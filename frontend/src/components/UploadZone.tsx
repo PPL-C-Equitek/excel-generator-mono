@@ -40,26 +40,14 @@ export default function UploadZone({ onFileSelect }: UploadZoneProps) {
         if (file) handleFile(file)
     }
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-        // Allow Enter or Space to activate the file picker
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            inputRef.current?.click()
-        }
-    }
-
     return (
         <div
             data-testid="drop-zone"
-            role="button"
-            tabIndex={0}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
-            onKeyDown={handleKeyDown}
             aria-label="File upload drop zone"
-            aria-disabled={isLoading}
-            className={`border-2 border-dashed rounded-lg p-20 flex flex-col items-center justify-center gap-3 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-red-700 focus:ring-offset-2
+            className={`border-2 border-dashed rounded-lg p-20 flex flex-col items-center justify-center gap-3 transition-colors
                 ${isDragging ? 'border-red-600 bg-red-50' : 'border-gray-300 bg-gray-100'}`}
         >
             <input
