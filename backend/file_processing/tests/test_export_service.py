@@ -566,6 +566,31 @@ class GenerateCSVTest(unittest.TestCase):
             [["name", "note"], ["शोफ़ी", "=SUM(A1:A2)"]],
         )
 
+    def test_generate_csv_sanitizes_formula_like_values_to_prevent_csv_injection(self):
+        dangerous_values = [
+            "=SUM(A1:A2)",
+            "+CMD|'/C calc'!A0",
+            "-10+20",
+            "@HYPERLINK(\"http://evil.com\")",
+        ]
+
+        for value in dangerous_values:
+            with self.subTest(value=value):
+                mapped_output = {
+                    "sheets": [
+                        {
+                            "name": "Sheet1",
+                            "headers": ["name", "note"],
+                            "rows": [["Zufar", value]],
+                        }
+                    ]
+                }
+
+                result = export_service.generate_csv(mapped_output)
+                rows = self._read_csv_rows(result["files"][0]["content"])
+
+                self.assertEqual(rows[1][1], f"'{value}")
+
 
 if __name__ == "__main__":
     unittest.main()
