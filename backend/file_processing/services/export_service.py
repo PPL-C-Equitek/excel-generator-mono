@@ -1,9 +1,17 @@
+import csv
+import io
+
+
 class OutputLLMValidationError(Exception):
     """Raised when LLM output does not satisfy CSV validation contract."""
 
 
 class OutputCSVMappingError(Exception):
     """Raised when validated LLM output cannot be mapped into CSV tabular structure."""
+
+
+class OutputCSVGenerationError(Exception):
+    """Raised when mapped output cannot be generated into CSV content."""
 
 
 _SCALAR_TYPES = (str, int, float, bool, type(None))
@@ -253,3 +261,111 @@ def _map_rows(headers, rows, sheet_index):
         mapped_rows.append([row[header] for header in headers])
 
     return mapped_rows
+
+
+def generate_csv(mapped_output):
+    if not isinstance(mapped_output, dict):
+        raise OutputCSVGenerationError("mapped_output must be an object.")
+
+    sheets = mapped_output.get("sheets")
+    if not isinstance(sheets, list):
+        raise OutputCSVGenerationError("mapped_output.sheets must be a list.")
+
+    files = []
+    for sheet_index, sheet in enumerate(sheets):
+        if not isinstance(sheet, dict):
+            raise OutputCSVGenerationError(f"Sheet {sheet_index} must be an object.")
+
+        for required_key in ("name", "headers", "rows"):
+            if required_key not in sheet:
+                raise OutputCSVGenerationError(
+                    f"Sheet {sheet_index} is missing required key '{required_key}'."
+                )
+
+        sheet_name = sheet["name"]
+        headers = sheet["headers"]
+        rows = sheet["rows"]
+
+        if not isinstance(sheet_name, str) or not sheet_name.strip():
+            raise OutputCSVGenerationError(
+                f"Sheet {sheet_index} name must be a non-empty string."
+            )
+
+        _validate_csv_headers(headers, sheet_index)
+        normalized_rows = _validate_csv_rows(rows, headers, sheet_index)
+
+        files.append(
+            {
+                "name": f"{sheet_name}.csv",
+                "content": _build_csv_content(headers, normalized_rows),
+            }
+        )
+
+    return {"files": files}
+
+
+def _validate_csv_headers(headers, sheet_index):
+    if not isinstance(headers, list):
+        raise OutputCSVGenerationError(f"Sheet {sheet_index} headers must be a list.")
+    if not headers:
+        raise OutputCSVGenerationError(
+            f"Sheet {sheet_index} headers must be a non-empty list."
+        )
+
+    seen_headers = set()
+    for header in headers:
+        if not isinstance(header, str):
+            raise OutputCSVGenerationError(
+                f"Sheet {sheet_index} header names must be strings."
+            )
+        normalized_header = header.strip()
+        if not normalized_header:
+            raise OutputCSVGenerationError(
+                f"Sheet {sheet_index} contains blank header name."
+            )
+
+        dedupe_key = normalized_header.lower()
+        if dedupe_key in seen_headers:
+            raise OutputCSVGenerationError(
+                f"Sheet {sheet_index} headers must be unique (case-insensitive)."
+            )
+        seen_headers.add(dedupe_key)
+
+
+def _validate_csv_rows(rows, headers, sheet_index):
+    if not isinstance(rows, list):
+        raise OutputCSVGenerationError(f"Sheet {sheet_index} rows must be a list.")
+
+    normalized_rows = []
+    for row_index, row in enumerate(rows):
+        if not isinstance(row, list):
+            raise OutputCSVGenerationError(
+                f"Sheet {sheet_index}, row {row_index} must be a list."
+            )
+        if len(row) != len(headers):
+            raise OutputCSVGenerationError(
+                f"Sheet {sheet_index}, row {row_index} must have {len(headers)} values."
+            )
+
+        normalized_row = []
+        for value in row:
+            if isinstance(value, (dict, list)):
+                raise OutputCSVGenerationError(
+                    f"Sheet {sheet_index}, row {row_index} contains unsupported nested value."
+                )
+            if not isinstance(value, _SCALAR_TYPES):
+                raise OutputCSVGenerationError(
+                    f"Sheet {sheet_index}, row {row_index} contains unsupported value type."
+                )
+            normalized_row.append(value)
+        normalized_rows.append(normalized_row)
+
+    return normalized_rows
+
+
+def _build_csv_content(headers, rows):
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    return output.getvalue()
