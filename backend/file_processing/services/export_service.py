@@ -18,6 +18,7 @@ _SCALAR_TYPES = (str, int, float, bool, type(None))
 _ALLOWED_STATUS = {"ok", "error"}
 _ALLOWED_VALIDATION_LEVELS = {"info", "warning", "error"}
 _REQUIRED_TOP_LEVEL_KEYS = {"status", "summary", "sheets", "validations", "errors"}
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
 def validate_output_llm(output_json):
@@ -357,10 +358,27 @@ def _validate_csv_rows(rows, headers, sheet_index):
                 raise OutputCSVGenerationError(
                     f"Sheet {sheet_index}, row {row_index} contains unsupported value type."
                 )
-            normalized_row.append(value)
+            normalized_row.append(_sanitize_csv_value(value))
         normalized_rows.append(normalized_row)
 
     return normalized_rows
+
+
+def _sanitize_csv_value(value):
+    if not isinstance(value, str):
+        return value
+
+    stripped_value = value.lstrip()
+    if not stripped_value:
+        return value
+
+    if stripped_value.startswith("'"):
+        return value
+
+    if stripped_value[0] in _CSV_FORMULA_PREFIXES:
+        return f"'{value}"
+
+    return value
 
 
 def _build_csv_content(headers, rows):

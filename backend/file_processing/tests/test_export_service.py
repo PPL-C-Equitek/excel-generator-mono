@@ -548,7 +548,7 @@ class GenerateCSVTest(unittest.TestCase):
             [["text"], ['Hello, "CSV"\nWorld']],
         )
 
-    def test_generate_csv_keeps_unicode_and_formula_like_values(self):
+    def test_generate_csv_keeps_unicode_and_sanitizes_formula_like_values(self):
         mapped_output = {
             "sheets": [
                 {
@@ -563,7 +563,7 @@ class GenerateCSVTest(unittest.TestCase):
 
         self.assertEqual(
             self._read_csv_rows(result["files"][0]["content"]),
-            [["name", "note"], ["शोफ़ी", "=SUM(A1:A2)"]],
+            [["name", "note"], ["शोफ़ी", "'=SUM(A1:A2)"]],
         )
 
     def test_generate_csv_sanitizes_formula_like_values_to_prevent_csv_injection(self):
