@@ -170,39 +170,46 @@ def _validate_row_values(row, columns, sheet_index, row_index):
 
 def _validate_validations(validations, sheet_names):
     for index, validation in enumerate(validations):
-        if not isinstance(validation, dict):
+        _validate_validation_item_structure(validation, index)
+        _validate_validation_item_fields(validation, sheet_names, index)
+
+
+def _validate_validation_item_structure(validation, index):
+    if not isinstance(validation, dict):
+        raise OutputLLMValidationError(
+            f"Validation item {index} must be an object."
+        )
+
+    for required_key in ("sheet", "rule", "level"):
+        if required_key not in validation:
             raise OutputLLMValidationError(
-                f"Validation item {index} must be an object."
+                f"Validation item {index} is missing required key '{required_key}'."
             )
 
-        for required_key in ("sheet", "rule", "level"):
-            if required_key not in validation:
-                raise OutputLLMValidationError(
-                    f"Validation item {index} is missing required key '{required_key}'."
-                )
 
-        sheet_name = validation["sheet"]
-        rule = validation["rule"]
-        level = validation["level"]
+def _validate_validation_item_fields(validation, sheet_names, index):
+    sheet_name = validation["sheet"]
+    rule = validation["rule"]
+    level = validation["level"]
 
-        if not isinstance(sheet_name, str) or not sheet_name.strip():
-            raise OutputLLMValidationError(
-                f"Validation item {index} sheet must be a non-empty string."
-            )
-        if sheet_name not in sheet_names:
-            raise OutputLLMValidationError(
-                f"Validation item {index} references unknown sheet '{sheet_name}'."
-            )
+    if not isinstance(sheet_name, str) or not sheet_name.strip():
+        raise OutputLLMValidationError(
+            f"Validation item {index} sheet must be a non-empty string."
+        )
+    if sheet_name not in sheet_names:
+        raise OutputLLMValidationError(
+            f"Validation item {index} references unknown sheet '{sheet_name}'."
+        )
 
-        if not isinstance(rule, str) or not rule.strip():
-            raise OutputLLMValidationError(
-                f"Validation item {index} rule must be a non-empty string."
-            )
+    if not isinstance(rule, str) or not rule.strip():
+        raise OutputLLMValidationError(
+            f"Validation item {index} rule must be a non-empty string."
+        )
 
-        if not isinstance(level, str) or level not in _ALLOWED_VALIDATION_LEVELS:
-            raise OutputLLMValidationError(
-                f"Validation item {index} level must be one of: info, warning, error."
-            )
+    if not isinstance(level, str) or level not in _ALLOWED_VALIDATION_LEVELS:
+        raise OutputLLMValidationError(
+            f"Validation item {index} level must be one of: info, warning, error."
+        )
 
 
 def _validate_errors(errors):
