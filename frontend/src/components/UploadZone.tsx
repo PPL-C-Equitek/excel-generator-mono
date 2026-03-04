@@ -33,7 +33,7 @@ export default function UploadZone({ onFileSelect }: UploadZoneProps) {
         if (file) handleFile(file)
     }
 
-    const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
         e.preventDefault()
         setIsDragging(false)
         const file = e.dataTransfer.files?.[0]
@@ -41,13 +41,13 @@ export default function UploadZone({ onFileSelect }: UploadZoneProps) {
     }
 
     return (
-        <div
+        <label
             data-testid="drop-zone"
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
             aria-label="File upload drop zone"
-            className={`border-2 border-dashed rounded-lg p-20 flex flex-col items-center justify-center gap-3 transition-colors
+            className={`border-2 border-dashed rounded-lg p-20 flex flex-col items-center justify-center gap-3 transition-colors cursor-pointer
                 ${isDragging ? 'border-red-600 bg-red-50' : 'border-gray-300 bg-gray-100'}`}
         >
             <input
@@ -55,15 +55,15 @@ export default function UploadZone({ onFileSelect }: UploadZoneProps) {
                 type="file"
                 ref={inputRef}
                 onChange={handleChange}
+                disabled={isLoading}
                 className="hidden"
             />
-            <button
-                onClick={() => inputRef.current?.click()}
-                disabled={isLoading}
-                className="bg-red-700 text-white font-bold px-8 py-3 rounded-xl hover:bg-red-800 transition disabled:opacity-50"
+            <span
+                className={`bg-red-700 text-white font-bold px-8 py-3 rounded-xl transition pointer-events-none
+                    ${isLoading ? 'opacity-50' : 'hover:bg-red-800'}`}
             >
                 {isLoading ? 'Uploading...' : 'Upload File'}
-            </button>
+            </span>
 
             {error && (
                 <p className="text-red-500 text-sm">{error}</p>
@@ -73,6 +73,6 @@ export default function UploadZone({ onFileSelect }: UploadZoneProps) {
                 ? <p className="text-gray-600 text-sm">{selectedFile}</p>
                 : <p className="text-gray-400 text-sm">Or drop file here</p>
             )}
-        </div>
+        </label>
     )
 }
