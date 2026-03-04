@@ -121,33 +121,51 @@ def _validate_rows(rows, columns, sheet_index):
 
     column_set = set(columns)
     for row_index, row in enumerate(rows):
-        if not isinstance(row, dict):
-            raise OutputLLMValidationError(
-                f"Sheet {sheet_index}, row {row_index} must be an object."
-            )
+        _validate_row_structure(
+            row=row,
+            columns=columns,
+            column_set=column_set,
+            sheet_index=sheet_index,
+            row_index=row_index,
+        )
+        _validate_row_values(
+            row=row,
+            columns=columns,
+            sheet_index=sheet_index,
+            row_index=row_index,
+        )
 
-        missing_columns = [column for column in columns if column not in row]
-        if missing_columns:
-            raise OutputLLMValidationError(
-                f"Sheet {sheet_index}, row {row_index} is missing required columns: {missing_columns}."
-            )
 
-        unknown_columns = [key for key in row if key not in column_set]
-        if unknown_columns:
-            raise OutputLLMValidationError(
-                f"Sheet {sheet_index}, row {row_index} has unknown columns: {unknown_columns}."
-            )
+def _validate_row_structure(row, columns, column_set, sheet_index, row_index):
+    if not isinstance(row, dict):
+        raise OutputLLMValidationError(
+            f"Sheet {sheet_index}, row {row_index} must be an object."
+        )
 
-        for column in columns:
-            value = row[column]
-            if isinstance(value, (dict, list)):
-                raise OutputLLMValidationError(
-                    f"Sheet {sheet_index}, row {row_index}, column '{column}' has unsupported nested value."
-                )
-            if not isinstance(value, _SCALAR_TYPES):
-                raise OutputLLMValidationError(
-                    f"Sheet {sheet_index}, row {row_index}, column '{column}' has unsupported value type."
-                )
+    missing_columns = [column for column in columns if column not in row]
+    if missing_columns:
+        raise OutputLLMValidationError(
+            f"Sheet {sheet_index}, row {row_index} is missing required columns: {missing_columns}."
+        )
+
+    unknown_columns = [key for key in row if key not in column_set]
+    if unknown_columns:
+        raise OutputLLMValidationError(
+            f"Sheet {sheet_index}, row {row_index} has unknown columns: {unknown_columns}."
+        )
+
+
+def _validate_row_values(row, columns, sheet_index, row_index):
+    for column in columns:
+        value = row[column]
+        if isinstance(value, (dict, list)):
+            raise OutputLLMValidationError(
+                f"Sheet {sheet_index}, row {row_index}, column '{column}' has unsupported nested value."
+            )
+        if not isinstance(value, _SCALAR_TYPES):
+            raise OutputLLMValidationError(
+                f"Sheet {sheet_index}, row {row_index}, column '{column}' has unsupported value type."
+            )
 
 
 def _validate_validations(validations, sheet_names):
