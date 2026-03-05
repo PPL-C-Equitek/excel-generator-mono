@@ -2,6 +2,7 @@ import csv
 import io
 import unittest
 from copy import deepcopy
+from unittest.mock import patch
 
 import file_processing.services.export_service as export_service
 from file_processing.services.export_service import (
@@ -405,6 +406,23 @@ class MapOutputCSVTest(unittest.TestCase):
 
         self.assertEqual(len(result["sheets"][0]["rows"]), 1000)
 
+    def test_mapping_output_csv_uses_stubbed_row_mapper(self):
+        validated_output = self._build_validated_output()
+        stubbed_rows = [["stubbed-row"]]
+
+        with patch(
+            "file_processing.services.export_service._map_rows",
+            return_value=stubbed_rows,
+        ) as mocked_map_rows:
+            result = map_output_csv(validated_output)
+
+        mocked_map_rows.assert_called_once_with(
+            headers=["name", "age", "city"],
+            rows=validated_output["sheets"][0]["rows"],
+            sheet_index=0,
+        )
+        self.assertEqual(result["sheets"][0]["rows"], stubbed_rows)
+
 
 class GenerateCSVTest(unittest.TestCase):
     def _build_mapped_output(self):
@@ -590,6 +608,38 @@ class GenerateCSVTest(unittest.TestCase):
                 rows = self._read_csv_rows(result["files"][0]["content"])
 
                 self.assertEqual(rows[1][1], f"'{value}")
+
+    def test_generate_csv_sanitizes_formula_like_headers_to_prevent_csv_injection(self):
+        mapped_output = {
+            "sheets": [
+                {
+                    "name": "Sheet1",
+                    "headers": ["=InjectedHeader", "name"],
+                    "rows": [["x", "Zufar"]],
+                }
+            ]
+        }
+
+        result = export_service.generate_csv(mapped_output)
+        rows = self._read_csv_rows(result["files"][0]["content"])
+
+        self.assertEqual(rows[0][0], "'=InjectedHeader")
+
+    def test_generate_csv_uses_mocked_csv_builder(self):
+        mapped_output = self._build_mapped_output()
+        mocked_csv_content = "name,age,city\r\nstub,0,stub-city\r\n"
+
+        with patch(
+            "file_processing.services.export_service._build_csv_content",
+            return_value=mocked_csv_content,
+        ) as mocked_builder:
+            result = export_service.generate_csv(mapped_output)
+
+        mocked_builder.assert_called_once_with(
+            ["name", "age", "city"],
+            [["Zufar", 21, "Depok"], ["Siti", 22, "Jakarta"]],
+        )
+        self.assertEqual(result["files"][0]["content"], mocked_csv_content)
 
 
 if __name__ == "__main__":
