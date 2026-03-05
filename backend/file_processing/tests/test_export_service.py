@@ -526,6 +526,18 @@ class GenerateCSVTest(unittest.TestCase):
                 with self.assertRaises(export_service.OutputCSVGenerationError):
                     export_service.generate_csv(mapped_output)
 
+    def test_generate_csv_rejects_invalid_sheet_name(self):
+        cases = [
+            ("name_non_string", 123),
+            ("name_blank", "   "),
+        ]
+        for case_name, name_value in cases:
+            with self.subTest(case=case_name):
+                mapped_output = self._build_mapped_output()
+                mapped_output["sheets"][0]["name"] = name_value
+                with self.assertRaises(export_service.OutputCSVGenerationError):
+                    export_service.generate_csv(mapped_output)
+
     def test_generate_csv_rejects_invalid_headers_and_rows(self):
         cases = [
             ("headers_non_list", {"headers": "name"}),
@@ -541,12 +553,38 @@ class GenerateCSVTest(unittest.TestCase):
                 with self.assertRaises(export_service.OutputCSVGenerationError):
                     export_service.generate_csv(mapped_output)
 
+    def test_generate_csv_rejects_blank_or_duplicate_headers(self):
+        cases = [
+            ("blank_header", ["name", "   "], [["Zufar", "x"]]),
+            ("duplicate_header_case_insensitive", ["Name", "name"], [["Zufar", "x"]]),
+        ]
+        for case_name, headers, rows in cases:
+            with self.subTest(case=case_name):
+                mapped_output = self._build_mapped_output()
+                mapped_output["sheets"][0]["headers"] = headers
+                mapped_output["sheets"][0]["rows"] = rows
+                with self.assertRaises(export_service.OutputCSVGenerationError):
+                    export_service.generate_csv(mapped_output)
+
     def test_generate_csv_rejects_row_length_mismatch(self):
         mapped_output = self._build_mapped_output()
         mapped_output["sheets"][0]["rows"] = [["Zufar", 21]]
 
         with self.assertRaises(export_service.OutputCSVGenerationError):
             export_service.generate_csv(mapped_output)
+
+    def test_generate_csv_rejects_nested_or_unsupported_row_values(self):
+        cases = [
+            ("nested_dict_value", [["Zufar", {"age": 21}, "Depok"]]),
+            ("nested_list_value", [["Zufar", [21], "Depok"]]),
+            ("unsupported_set_value", [["Zufar", {21}, "Depok"]]),
+        ]
+        for case_name, rows in cases:
+            with self.subTest(case=case_name):
+                mapped_output = self._build_mapped_output()
+                mapped_output["sheets"][0]["rows"] = rows
+                with self.assertRaises(export_service.OutputCSVGenerationError):
+                    export_service.generate_csv(mapped_output)
 
     def test_generate_csv_handles_csv_special_characters(self):
         mapped_output = {
@@ -608,6 +646,24 @@ class GenerateCSVTest(unittest.TestCase):
                 rows = self._read_csv_rows(result["files"][0]["content"])
 
                 self.assertEqual(rows[1][1], f"'{value}")
+
+    def test_generate_csv_keeps_whitespace_only_and_prequoted_values_unchanged(self):
+        mapped_output = {
+            "sheets": [
+                {
+                    "name": "Sheet1",
+                    "headers": ["note", "formula"],
+                    "rows": [["   ", "'=SUM(A1:A2)"]],
+                }
+            ]
+        }
+
+        result = export_service.generate_csv(mapped_output)
+
+        self.assertEqual(
+            self._read_csv_rows(result["files"][0]["content"]),
+            [["note", "formula"], ["   ", "'=SUM(A1:A2)"]],
+        )
 
     def test_generate_csv_sanitizes_formula_like_headers_to_prevent_csv_injection(self):
         mapped_output = {
