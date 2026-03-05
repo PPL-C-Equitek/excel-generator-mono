@@ -1,4 +1,5 @@
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+const raw = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = raw.endsWith("/") ? raw.replace(/\/+$/, "") : raw;
 
 export async function fetchAPI(endpoint: string, options?: RequestInit) {
   const normalizedEndpoint = endpoint.replace(/^\/+/, "");
