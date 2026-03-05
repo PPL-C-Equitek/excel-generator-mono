@@ -318,12 +318,13 @@ def generate_csv(mapped_output):
             )
 
         _validate_csv_headers(headers, sheet_index)
+        normalized_headers = [_sanitize_csv_value(header) for header in headers]
         normalized_rows = _validate_csv_rows(rows, headers, sheet_index)
 
         files.append(
             {
                 "name": f"{sheet_name}.csv",
-                "content": _build_csv_content(headers, normalized_rows),
+                "content": _build_csv_content(normalized_headers, normalized_rows),
             }
         )
 
