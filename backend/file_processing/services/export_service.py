@@ -14,11 +14,30 @@ class OutputCSVGenerationError(Exception):
     """Raised when mapped output cannot be generated into CSV content."""
 
 
+class CSVSanitizationPolicy:
+    """Strategy extension point for CSV header/value sanitization."""
+
+    def sanitize_header(self, header):
+        return _sanitize_csv_value(header)
+
+    def sanitize_value(self, value):
+        return _sanitize_csv_value(value)
+
+
+class CSVFileNamePolicy:
+    """Strategy extension point for CSV file naming."""
+
+    def build_filename(self, sheet_name):
+        return f"{sheet_name}.csv"
+
+
 _SCALAR_TYPES = (str, int, float, bool, type(None))
 _ALLOWED_STATUS = {"ok", "error"}
 _ALLOWED_VALIDATION_LEVELS = {"info", "warning", "error"}
 _REQUIRED_TOP_LEVEL_KEYS = {"status", "summary", "sheets", "validations", "errors"}
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+_DEFAULT_CSV_SANITIZATION_POLICY = CSVSanitizationPolicy()
+_DEFAULT_CSV_FILENAME_POLICY = CSVFileNamePolicy()
 
 
 def validate_output_llm(output_json):
@@ -289,13 +308,16 @@ def _map_rows(headers, rows, sheet_index):
     return mapped_rows
 
 
-def generate_csv(mapped_output):
+def generate_csv(mapped_output, sanitization_policy=None, filename_policy=None):
     if not isinstance(mapped_output, dict):
         raise OutputCSVGenerationError("mapped_output must be an object.")
 
     sheets = mapped_output.get("sheets")
     if not isinstance(sheets, list):
         raise OutputCSVGenerationError("mapped_output.sheets must be a list.")
+
+    sanitization_policy = _resolve_sanitization_policy(sanitization_policy)
+    filename_policy = _resolve_filename_policy(filename_policy)
 
     files = []
     for sheet_index, sheet in enumerate(sheets):
@@ -318,12 +340,24 @@ def generate_csv(mapped_output):
             )
 
         _validate_csv_headers(headers, sheet_index)
-        normalized_headers = [_sanitize_csv_value(header) for header in headers]
-        normalized_rows = _validate_csv_rows(rows, headers, sheet_index)
+        normalized_headers = [
+            sanitization_policy.sanitize_header(header) for header in headers
+        ]
+        normalized_rows = _validate_csv_rows(
+            rows=rows,
+            headers=headers,
+            sheet_index=sheet_index,
+            sanitization_policy=sanitization_policy,
+        )
+        filename = filename_policy.build_filename(sheet_name)
+        if not isinstance(filename, str) or not filename.strip():
+            raise OutputCSVGenerationError(
+                "filename_policy.build_filename must return a non-empty string."
+            )
 
         files.append(
             {
-                "name": f"{sheet_name}.csv",
+                "name": filename,
                 "content": _build_csv_content(normalized_headers, normalized_rows),
             }
         )
@@ -359,7 +393,7 @@ def _validate_csv_headers(headers, sheet_index):
         seen_headers.add(dedupe_key)
 
 
-def _validate_csv_rows(rows, headers, sheet_index):
+def _validate_csv_rows(rows, headers, sheet_index, sanitization_policy):
     if not isinstance(rows, list):
         raise OutputCSVGenerationError(f"Sheet {sheet_index} rows must be a list.")
 
@@ -384,10 +418,47 @@ def _validate_csv_rows(rows, headers, sheet_index):
                 raise OutputCSVGenerationError(
                     f"Sheet {sheet_index}, row {row_index} contains unsupported value type."
                 )
-            normalized_row.append(_sanitize_csv_value(value))
+            normalized_row.append(sanitization_policy.sanitize_value(value))
         normalized_rows.append(normalized_row)
 
     return normalized_rows
+
+
+def _resolve_sanitization_policy(sanitization_policy):
+    return _resolve_policy_with_methods(
+        policy=sanitization_policy,
+        default_policy=_DEFAULT_CSV_SANITIZATION_POLICY,
+        required_methods=("sanitize_header", "sanitize_value"),
+        error_message=(
+            "sanitization_policy must implement callable sanitize_header and "
+            "sanitize_value methods."
+        ),
+    )
+
+
+def _resolve_filename_policy(filename_policy):
+    return _resolve_policy_with_methods(
+        policy=filename_policy,
+        default_policy=_DEFAULT_CSV_FILENAME_POLICY,
+        required_methods=("build_filename",),
+        error_message="filename_policy must implement callable build_filename method.",
+    )
+
+
+def _resolve_policy_with_methods(
+    policy,
+    default_policy,
+    required_methods,
+    error_message,
+):
+    if policy is None:
+        return default_policy
+
+    for method_name in required_methods:
+        if not callable(getattr(policy, method_name, None)):
+            raise OutputCSVGenerationError(error_message)
+
+    return policy
 
 
 def _sanitize_csv_value(value):
