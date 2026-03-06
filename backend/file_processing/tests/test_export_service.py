@@ -16,22 +16,24 @@ from file_processing.services.export_service import (
 class ValidateOutputLLMTest(unittest.TestCase):
     def _build_valid_payload(self):
         return {
-            "status": "ok",
-            "summary": "Successfully extracted rows.",
-            "sheets": [
+            "document_info": {
+                "source_type": "Excel",
+                "filename": "laporan_tahunan.xlsx",
+            },
+            "summary": {
+                "grand_total": 1500000,
+                "period": "2026",
+            },
+            "content_data": [
                 {
-                    "name": "Sheet1",
-                    "columns": ["name", "age"],
+                    "table_name": "Sheet1_Januari",
+                    "headers": ["item_name", "quantity", "price"],
                     "rows": [
-                        {"name": "Zufar", "age": 21},
-                        {"name": "Siti", "age": 22},
+                        {"item_name": "Kertas", "quantity": 10, "price": 50000},
+                        {"item_name": "Pena", "quantity": 5, "price": 10000},
                     ],
                 }
             ],
-            "validations": [
-                {"sheet": "Sheet1", "rule": "row_count>0", "level": "info"},
-            ],
-            "errors": [],
         }
 
     def test_validate_output_llm_accepts_valid_ok_payload_single_sheet(self):
@@ -41,35 +43,19 @@ class ValidateOutputLLMTest(unittest.TestCase):
 
         self.assertEqual(result, output_json)
 
-    def test_validate_output_llm_accepts_valid_error_payload(self):
-        output_json = {
-            "status": "error",
-            "summary": "Extraction failed for uploaded file.",
-            "sheets": [],
-            "validations": [],
-            "errors": ["Unsupported file structure"],
-        }
-
-        result = validate_output_llm(output_json)
-
-        self.assertEqual(result, output_json)
-
     def test_validate_output_llm_accepts_valid_multiple_sheets_payload(self):
         output_json = self._build_valid_payload()
-        output_json["sheets"] = [
+        output_json["content_data"] = [
             {
-                "name": "Employees",
-                "columns": ["name", "age"],
-                "rows": [{"name": "Zufar", "age": 21}],
+                "table_name": "Sheet1_Januari",
+                "headers": ["item_name", "quantity", "price"],
+                "rows": [{"item_name": "Kertas", "quantity": 10, "price": 50000}],
             },
             {
-                "name": "Products",
-                "columns": ["sku", "price"],
-                "rows": [{"sku": "A-1", "price": 15000}],
+                "table_name": "Sheet2_Februari",
+                "headers": ["item_name", "quantity", "price"],
+                "rows": [{"item_name": "Tinta", "quantity": 1, "price": 400000}],
             },
-        ]
-        output_json["validations"] = [
-            {"sheet": "Employees", "rule": "row_count>0", "level": "warning"}
         ]
 
         result = validate_output_llm(output_json)
@@ -81,7 +67,7 @@ class ValidateOutputLLMTest(unittest.TestCase):
             validate_output_llm("not-valid")
 
     def test_validate_output_llm_rejects_missing_required_top_level_keys(self):
-        required_keys = ("status", "summary", "sheets", "validations", "errors")
+        required_keys = ("document_info", "summary", "content_data")
         for key in required_keys:
             with self.subTest(missing_key=key):
                 payload = self._build_valid_payload()
@@ -91,12 +77,9 @@ class ValidateOutputLLMTest(unittest.TestCase):
 
     def test_validate_output_llm_rejects_invalid_top_level_values(self):
         cases = [
-            ("status_non_string", {"status": 1}),
-            ("status_not_allowed", {"status": "partial"}),
-            ("summary_non_string", {"summary": 123}),
-            ("sheets_non_list", {"sheets": {}}),
-            ("validations_non_list", {"validations": {}}),
-            ("errors_non_list", {"errors": {}}),
+            ("document_info_non_object", {"document_info": 1}),
+            ("summary_non_object", {"summary": 123}),
+            ("content_data_non_list", {"content_data": {}}),
         ]
         for case_name, mutation in cases:
             with self.subTest(case=case_name):
@@ -105,49 +88,93 @@ class ValidateOutputLLMTest(unittest.TestCase):
                 with self.assertRaises(OutputLLMValidationError):
                     validate_output_llm(payload)
 
-    def test_validate_output_llm_rejects_invalid_sheet_structure(self):
+    def test_validate_output_llm_rejects_invalid_document_info_fields(self):
         cases = [
-            ("sheet_non_object", ["x"]),
-            ("missing_name", [{"columns": ["name"], "rows": [{"name": "Zufar"}]}]),
-            ("missing_columns", [{"name": "Sheet1", "rows": [{"name": "Zufar"}]}]),
-            ("missing_rows", [{"name": "Sheet1", "columns": ["name"]}]),
+            ("missing_source_type", {"filename": "laporan.xlsx"}),
+            ("missing_filename", {"source_type": "Excel"}),
+            ("source_type_non_string", {"source_type": 1, "filename": "laporan.xlsx"}),
             (
-                "sheet_name_non_string",
-                [{"name": 123, "columns": ["name"], "rows": [{"name": "Zufar"}]}],
+                "source_type_not_allowed",
+                {"source_type": "Word", "filename": "laporan.xlsx"},
             ),
-            (
-                "sheet_name_blank",
-                [{"name": "   ", "columns": ["name"], "rows": [{"name": "Zufar"}]}],
-            ),
-            (
-                "duplicate_sheet_name",
-                [
-                    {"name": "Sheet1", "columns": ["name"], "rows": [{"name": "Zufar"}]},
-                    {"name": "Sheet1", "columns": ["name"], "rows": [{"name": "Siti"}]},
-                ],
-            ),
+            ("filename_non_string", {"source_type": "Excel", "filename": 123}),
+            ("filename_blank", {"source_type": "Excel", "filename": "   "}),
         ]
-        for case_name, sheets in cases:
+        for case_name, document_info in cases:
             with self.subTest(case=case_name):
                 payload = self._build_valid_payload()
-                payload["sheets"] = sheets
+                payload["document_info"] = document_info
                 with self.assertRaises(OutputLLMValidationError):
                     validate_output_llm(payload)
 
-    def test_validate_output_llm_rejects_invalid_columns(self):
+    def test_validate_output_llm_rejects_invalid_summary_values(self):
+        payload = self._build_valid_payload()
+        payload["summary"] = {
+            "grand_total": 1500000,
+            "period": {"year": "2026"},
+        }
+        with self.assertRaises(OutputLLMValidationError):
+            validate_output_llm(payload)
+
+        payload = self._build_valid_payload()
+        payload["summary"] = {"": "blank-key"}
+        with self.assertRaises(OutputLLMValidationError):
+            validate_output_llm(payload)
+
+        payload = self._build_valid_payload()
+        payload["summary"] = {"grand_total": {1}}
+        with self.assertRaises(OutputLLMValidationError):
+            validate_output_llm(payload)
+
+    def test_validate_output_llm_rejects_invalid_content_data_structure(self):
         cases = [
-            ("columns_non_list", {"columns": "name"}),
-            ("columns_empty", {"columns": []}),
-            ("column_non_string", {"columns": ["name", 1]}),
-            ("column_blank", {"columns": ["name", "   "]}),
-            ("column_duplicate_case_insensitive", {"columns": ["Name", "name"]}),
+            ("table_non_object", ["x"]),
+            (
+                "missing_table_name",
+                [{"headers": ["item_name"], "rows": [{"item_name": "Kertas"}]}],
+            ),
+            (
+                "missing_headers",
+                [{"table_name": "Sheet1", "rows": [{"item_name": "Kertas"}]}],
+            ),
+            ("missing_rows", [{"table_name": "Sheet1", "headers": ["item_name"]}]),
+            (
+                "table_name_non_string",
+                [{"table_name": 123, "headers": ["item_name"], "rows": [{"item_name": "Kertas"}]}],
+            ),
+            (
+                "table_name_blank",
+                [{"table_name": "   ", "headers": ["item_name"], "rows": [{"item_name": "Kertas"}]}],
+            ),
+            (
+                "duplicate_table_name",
+                [
+                    {"table_name": "Sheet1", "headers": ["item_name"], "rows": [{"item_name": "Kertas"}]},
+                    {"table_name": "Sheet1", "headers": ["item_name"], "rows": [{"item_name": "Pena"}]},
+                ],
+            ),
+        ]
+        for case_name, content_data in cases:
+            with self.subTest(case=case_name):
+                payload = self._build_valid_payload()
+                payload["content_data"] = content_data
+                with self.assertRaises(OutputLLMValidationError):
+                    validate_output_llm(payload)
+
+    def test_validate_output_llm_rejects_invalid_headers(self):
+        cases = [
+            ("headers_non_list", {"headers": "item_name"}),
+            ("headers_empty", {"headers": []}),
+            ("header_non_string", {"headers": ["item_name", 1]}),
+            ("header_blank", {"headers": ["item_name", "   "]}),
+            ("header_duplicate_case_insensitive", {"headers": ["Item", "item"]}),
         ]
         for case_name, mutation in cases:
             with self.subTest(case=case_name):
                 payload = self._build_valid_payload()
-                payload["sheets"][0].update(mutation)
-                if case_name == "column_duplicate_case_insensitive":
-                    payload["sheets"][0]["rows"] = [{"Name": "Zufar", "name": "Zufar"}]
+                payload["content_data"][0].update(mutation)
+                if case_name == "header_duplicate_case_insensitive":
+                    payload["content_data"][0]["rows"] = [{"Item": "Kertas", "item": "Pena"}]
                 with self.assertRaises(OutputLLMValidationError):
                     validate_output_llm(payload)
 
@@ -159,76 +186,40 @@ class ValidateOutputLLMTest(unittest.TestCase):
         for case_name, rows_value in cases:
             with self.subTest(case=case_name):
                 payload = self._build_valid_payload()
-                payload["sheets"][0]["rows"] = rows_value
+                payload["content_data"][0]["rows"] = rows_value
                 with self.assertRaises(OutputLLMValidationError):
                     validate_output_llm(payload)
 
-    def test_validate_output_llm_rejects_row_column_mismatch_and_invalid_values(self):
+    def test_validate_output_llm_rejects_row_header_mismatch_and_invalid_values(self):
         cases = [
-            ("missing_required_column", [{"name": "Zufar"}]),
-            ("unknown_extra_column", [{"name": "Zufar", "age": 21, "city": "Depok"}]),
-            ("nested_dict_value", [{"name": "Zufar", "age": {"raw": 21}}]),
-            ("nested_list_value", [{"name": "Zufar", "age": [21]}]),
-            ("non_scalar_value_type", [{"name": "Zufar", "age": {21}}]),
+            ("missing_required_header", [{"item_name": "Kertas", "quantity": 10}]),
+            (
+                "unknown_extra_header",
+                [{"item_name": "Kertas", "quantity": 10, "price": 50000, "note": "x"}],
+            ),
+            (
+                "nested_dict_value",
+                [{"item_name": "Kertas", "quantity": 10, "price": {"raw": 50000}}],
+            ),
+            (
+                "nested_list_value",
+                [{"item_name": "Kertas", "quantity": 10, "price": [50000]}],
+            ),
+            (
+                "non_scalar_value_type",
+                [{"item_name": "Kertas", "quantity": 10, "price": {50000}}],
+            ),
         ]
         for case_name, rows in cases:
             with self.subTest(case=case_name):
                 payload = self._build_valid_payload()
-                payload["sheets"][0]["rows"] = rows
-                with self.assertRaises(OutputLLMValidationError):
-                    validate_output_llm(payload)
-
-    def test_validate_output_llm_rejects_invalid_validation_item_structure(self):
-        cases = [
-            ("validation_non_object", ["bad-item"]),
-            ("validation_missing_sheet", [{"rule": "must_have_name", "level": "info"}]),
-            ("validation_missing_rule", [{"sheet": "Sheet1", "level": "info"}]),
-            ("validation_missing_level", [{"sheet": "Sheet1", "rule": "must_have_name"}]),
-        ]
-        for case_name, validations in cases:
-            with self.subTest(case=case_name):
-                payload = self._build_valid_payload()
-                payload["validations"] = validations
-                with self.assertRaises(OutputLLMValidationError):
-                    validate_output_llm(payload)
-
-    def test_validate_output_llm_rejects_invalid_validation_fields(self):
-        cases = [
-            ("validation_sheet_non_string", [{"sheet": 1, "rule": "r", "level": "info"}]),
-            ("validation_sheet_blank", [{"sheet": "  ", "rule": "r", "level": "info"}]),
-            ("validation_sheet_unknown", [{"sheet": "Unknown", "rule": "r", "level": "info"}]),
-            ("validation_rule_non_string", [{"sheet": "Sheet1", "rule": 1, "level": "info"}]),
-            ("validation_rule_blank", [{"sheet": "Sheet1", "rule": " ", "level": "info"}]),
-            ("validation_level_non_string", [{"sheet": "Sheet1", "rule": "r", "level": 1}]),
-            (
-                "validation_level_not_allowed",
-                [{"sheet": "Sheet1", "rule": "r", "level": "critical"}],
-            ),
-        ]
-        for case_name, validations in cases:
-            with self.subTest(case=case_name):
-                payload = self._build_valid_payload()
-                payload["validations"] = validations
-                with self.assertRaises(OutputLLMValidationError):
-                    validate_output_llm(payload)
-
-    def test_validate_output_llm_rejects_non_string_error_items(self):
-        cases = [
-            ["error-1", 2],
-            [False],
-            [None],
-        ]
-        for errors in cases:
-            with self.subTest(errors=errors):
-                payload = self._build_valid_payload()
-                payload["status"] = "error"
-                payload["errors"] = errors
+                payload["content_data"][0]["rows"] = rows
                 with self.assertRaises(OutputLLMValidationError):
                     validate_output_llm(payload)
 
     def test_validate_output_llm_allows_empty_rows_per_sheet(self):
         output_json = self._build_valid_payload()
-        output_json["sheets"][0]["rows"] = []
+        output_json["content_data"][0]["rows"] = []
 
         result = validate_output_llm(output_json)
 
@@ -236,12 +227,11 @@ class ValidateOutputLLMTest(unittest.TestCase):
 
     def test_validate_output_llm_accepts_unicode_and_formula_like_strings(self):
         output_json = self._build_valid_payload()
-        output_json["sheets"][0] = {
-            "name": "Sheet1",
-            "columns": ["name", "note"],
-            "rows": [{"name": "शोफ़ी", "note": "=SUM(A1:A2)"}],
+        output_json["content_data"][0] = {
+            "table_name": "Sheet1_Januari",
+            "headers": ["item_name", "note"],
+            "rows": [{"item_name": "शोफ़ी", "note": "=SUM(A1:A2)"}],
         }
-        output_json["validations"] = []
 
         result = validate_output_llm(output_json)
 
@@ -250,15 +240,14 @@ class ValidateOutputLLMTest(unittest.TestCase):
     def test_validate_output_llm_handles_large_payload_smoke(self):
         rows = []
         for index in range(1000):
-            rows.append({"name": f"user-{index}", "age": index})
+            rows.append({"item_name": f"user-{index}", "quantity": index, "price": index})
 
         output_json = self._build_valid_payload()
-        output_json["sheets"][0]["rows"] = rows
-        output_json["validations"] = []
+        output_json["content_data"][0]["rows"] = rows
 
         result = validate_output_llm(output_json)
 
-        self.assertEqual(len(result["sheets"][0]["rows"]), 1000)
+        self.assertEqual(len(result["content_data"][0]["rows"]), 1000)
 
     def test_validate_output_llm_rejects_empty_output_object(self):
         with self.assertRaises(OutputLLMValidationError):
@@ -268,20 +257,24 @@ class ValidateOutputLLMTest(unittest.TestCase):
 class MapOutputCSVTest(unittest.TestCase):
     def _build_validated_output(self):
         return {
-            "status": "ok",
-            "summary": "valid payload",
-            "sheets": [
+            "document_info": {
+                "source_type": "Excel",
+                "filename": "laporan_tahunan.xlsx",
+            },
+            "summary": {
+                "grand_total": 1500000,
+                "period": "2026",
+            },
+            "content_data": [
                 {
-                    "name": "Sheet1",
-                    "columns": ["name", "age", "city"],
+                    "table_name": "Sheet1_Januari",
+                    "headers": ["item_name", "quantity", "price"],
                     "rows": [
-                        {"city": "Depok", "name": "Zufar", "age": 21},
-                        {"name": "Siti", "city": "Jakarta", "age": 22},
+                        {"item_name": "Kertas", "quantity": 10, "price": 50000},
+                        {"item_name": "Pena", "quantity": 5, "price": 10000},
                     ],
                 }
             ],
-            "validations": [],
-            "errors": [],
         }
 
     def test_mapping_output_csv_maps_single_sheet_successfully(self):
@@ -289,43 +282,54 @@ class MapOutputCSVTest(unittest.TestCase):
 
         result = map_output_csv(validated_output)
 
-        self.assertEqual(result["sheets"][0]["name"], "Sheet1")
-        self.assertEqual(result["sheets"][0]["headers"], ["name", "age", "city"])
+        self.assertEqual(result["document_info"], validated_output["document_info"])
+        self.assertEqual(result["summary"], validated_output["summary"])
+        self.assertEqual(result["sheets"][0]["name"], "Sheet1_Januari")
+        self.assertEqual(
+            result["sheets"][0]["headers"],
+            ["item_name", "quantity", "price"],
+        )
         self.assertEqual(
             result["sheets"][0]["rows"],
-            [["Zufar", 21, "Depok"], ["Siti", 22, "Jakarta"]],
+            [["Kertas", 10, 50000], ["Pena", 5, 10000]],
         )
 
     def test_mapping_output_csv_maps_multiple_sheets_successfully(self):
         validated_output = self._build_validated_output()
-        validated_output["sheets"].append(
+        validated_output["content_data"].append(
             {
-                "name": "Sheet2",
-                "columns": ["sku", "price"],
-                "rows": [{"price": 15000, "sku": "A-1"}],
+                "table_name": "Sheet2_Februari",
+                "headers": ["item_name", "quantity", "price"],
+                "rows": [{"item_name": "Tinta", "quantity": 1, "price": 400000}],
             }
         )
 
         result = map_output_csv(validated_output)
 
         self.assertEqual(len(result["sheets"]), 2)
-        self.assertEqual(result["sheets"][1]["headers"], ["sku", "price"])
-        self.assertEqual(result["sheets"][1]["rows"], [["A-1", 15000]])
+        self.assertEqual(
+            result["sheets"][1]["headers"],
+            ["item_name", "quantity", "price"],
+        )
+        self.assertEqual(result["sheets"][1]["rows"], [["Tinta", 1, 400000]])
 
     def test_mapping_output_csv_allows_empty_rows(self):
         validated_output = self._build_validated_output()
-        validated_output["sheets"][0]["rows"] = []
+        validated_output["content_data"][0]["rows"] = []
 
         result = map_output_csv(validated_output)
 
-        self.assertEqual(result["sheets"][0]["headers"], ["name", "age", "city"])
+        self.assertEqual(
+            result["sheets"][0]["headers"],
+            ["item_name", "quantity", "price"],
+        )
         self.assertEqual(result["sheets"][0]["rows"], [])
 
     def test_mapping_output_csv_keeps_unicode_and_formula_like_values(self):
         validated_output = self._build_validated_output()
-        validated_output["sheets"][0]["columns"] = ["name", "note"]
-        validated_output["sheets"][0]["rows"] = [
-            {"name": "शोफ़ी", "note": "=SUM(A1:A2)"},
+        validated_output["content_data"][0]["headers"] = ["item_name", "note"]
+        validated_output["content_data"][0]["rows"] = [
+            {"item_name": "शोफ़ी", "note": "=SUM(A1:A2)"},
         ]
 
         result = map_output_csv(validated_output)
@@ -336,8 +340,8 @@ class MapOutputCSVTest(unittest.TestCase):
         cases = [
             ("root_non_object", "invalid"),
             ("sheets_missing", {"status": "ok"}),
-            ("sheets_non_list", {"sheets": {}}),
-            ("sheet_item_non_object", {"sheets": ["invalid"]}),
+            ("content_data_non_list", {"content_data": {}}),
+            ("table_item_non_object", {"content_data": ["invalid"]}),
         ]
         for case_name, payload in cases:
             with self.subTest(case=case_name):
@@ -346,43 +350,49 @@ class MapOutputCSVTest(unittest.TestCase):
 
     def test_mapping_output_csv_rejects_sheet_missing_required_fields(self):
         cases = [
-            ("missing_name", {"columns": ["name"], "rows": [{"name": "Zufar"}]}),
-            ("missing_columns", {"name": "Sheet1", "rows": [{"name": "Zufar"}]}),
-            ("missing_rows", {"name": "Sheet1", "columns": ["name"]}),
+            (
+                "missing_table_name",
+                {"headers": ["item_name"], "rows": [{"item_name": "Kertas"}]},
+            ),
+            (
+                "missing_headers",
+                {"table_name": "Sheet1_Januari", "rows": [{"item_name": "Kertas"}]},
+            ),
+            ("missing_rows", {"table_name": "Sheet1_Januari", "headers": ["item_name"]}),
         ]
-        for case_name, sheet_payload in cases:
+        for case_name, table_payload in cases:
             with self.subTest(case=case_name):
                 validated_output = self._build_validated_output()
-                validated_output["sheets"] = [sheet_payload]
+                validated_output["content_data"] = [table_payload]
                 with self.assertRaises(OutputCSVMappingError):
                     map_output_csv(validated_output)
 
     def test_mapping_output_csv_rejects_invalid_columns_and_rows_container(self):
         cases = [
-            ("columns_non_list", {"columns": "name"}),
-            ("columns_empty", {"columns": []}),
+            ("headers_non_list", {"headers": "item_name"}),
+            ("headers_empty", {"headers": []}),
             ("rows_non_list", {"rows": "not-list"}),
         ]
         for case_name, mutation in cases:
             with self.subTest(case=case_name):
                 validated_output = self._build_validated_output()
-                validated_output["sheets"][0].update(mutation)
+                validated_output["content_data"][0].update(mutation)
                 with self.assertRaises(OutputCSVMappingError):
                     map_output_csv(validated_output)
 
     def test_mapping_output_csv_rejects_invalid_row_items_and_key_mismatch(self):
         cases = [
             ("row_non_object", ["not-dict"]),
-            ("missing_column", [{"name": "Zufar", "age": 21}]),
+            ("missing_column", [{"item_name": "Kertas", "quantity": 10}]),
             (
                 "unknown_column",
-                [{"name": "Zufar", "age": 21, "city": "Depok", "zip": 12345}],
+                [{"item_name": "Kertas", "quantity": 10, "price": 50000, "zip": 12345}],
             ),
         ]
         for case_name, rows in cases:
             with self.subTest(case=case_name):
                 validated_output = self._build_validated_output()
-                validated_output["sheets"][0]["rows"] = rows
+                validated_output["content_data"][0]["rows"] = rows
                 with self.assertRaises(OutputCSVMappingError):
                     map_output_csv(validated_output)
 
@@ -397,10 +407,12 @@ class MapOutputCSVTest(unittest.TestCase):
     def test_mapping_output_csv_handles_large_payload_smoke(self):
         rows = []
         for index in range(1000):
-            rows.append({"name": f"user-{index}", "age": index, "city": "Depok"})
+            rows.append(
+                {"item_name": f"user-{index}", "quantity": index, "price": index}
+            )
 
         validated_output = self._build_validated_output()
-        validated_output["sheets"][0]["rows"] = rows
+        validated_output["content_data"][0]["rows"] = rows
 
         result = map_output_csv(validated_output)
 
@@ -417,9 +429,9 @@ class MapOutputCSVTest(unittest.TestCase):
             result = map_output_csv(validated_output)
 
         mocked_map_rows.assert_called_once_with(
-            headers=["name", "age", "city"],
-            rows=validated_output["sheets"][0]["rows"],
-            sheet_index=0,
+            headers=["item_name", "quantity", "price"],
+            rows=validated_output["content_data"][0]["rows"],
+            table_index=0,
         )
         self.assertEqual(result["sheets"][0]["rows"], stubbed_rows)
 

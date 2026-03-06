@@ -32,9 +32,8 @@ class CSVFileNamePolicy:
 
 
 _SCALAR_TYPES = (str, int, float, bool, type(None))
-_ALLOWED_STATUS = {"ok", "error"}
-_ALLOWED_VALIDATION_LEVELS = {"info", "warning", "error"}
-_REQUIRED_TOP_LEVEL_KEYS = {"status", "summary", "sheets", "validations", "errors"}
+_ALLOWED_SOURCE_TYPES = {"Excel", "PDF"}
+_REQUIRED_TOP_LEVEL_KEYS = {"document_info", "summary", "content_data"}
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 _DEFAULT_CSV_SANITIZATION_POLICY = CSVSanitizationPolicy()
 _DEFAULT_CSV_FILENAME_POLICY = CSVFileNamePolicy()
@@ -45,9 +44,9 @@ def validate_output_llm(output_json):
         raise OutputLLMValidationError("output_json root must be an object.")
 
     _validate_top_level(output_json)
-    sheet_names = _validate_sheets(output_json["sheets"])
-    _validate_validations(output_json["validations"], sheet_names)
-    _validate_errors(output_json["errors"])
+    _validate_document_info(output_json["document_info"])
+    _validate_summary(output_json["summary"])
+    _validate_content_data(output_json["content_data"])
 
     return output_json
 
@@ -59,74 +58,102 @@ def _validate_top_level(payload):
             f"Missing required top-level keys: {missing_keys}."
         )
 
-    status = payload["status"]
-    if not isinstance(status, str) or status not in _ALLOWED_STATUS:
-        raise OutputLLMValidationError("status must be one of: ok, error.")
-
-    summary = payload["summary"]
-    if not isinstance(summary, str):
-        raise OutputLLMValidationError("summary must be a string.")
-
-    if not isinstance(payload["sheets"], list):
-        raise OutputLLMValidationError("sheets must be a list.")
-    if not isinstance(payload["validations"], list):
-        raise OutputLLMValidationError("validations must be a list.")
-    if not isinstance(payload["errors"], list):
-        raise OutputLLMValidationError("errors must be a list.")
+    if not isinstance(payload["document_info"], dict):
+        raise OutputLLMValidationError("document_info must be an object.")
+    if not isinstance(payload["summary"], dict):
+        raise OutputLLMValidationError("summary must be an object.")
+    if not isinstance(payload["content_data"], list):
+        raise OutputLLMValidationError("content_data must be a list.")
 
 
-def _validate_sheets(sheets):
-    sheet_names = set()
-    for sheet_index, sheet in enumerate(sheets):
-        if not isinstance(sheet, dict):
-            raise OutputLLMValidationError(f"Sheet {sheet_index} must be an object.")
+def _validate_document_info(document_info):
+    required_keys = ("source_type", "filename")
+    for key in required_keys:
+        if key not in document_info:
+            raise OutputLLMValidationError(
+                f"document_info is missing required key '{key}'."
+            )
 
-        for required_key in ("name", "columns", "rows"):
-            if required_key not in sheet:
+    source_type = document_info["source_type"]
+    if not isinstance(source_type, str) or source_type not in _ALLOWED_SOURCE_TYPES:
+        raise OutputLLMValidationError("document_info.source_type must be Excel or PDF.")
+
+    filename = document_info["filename"]
+    if not isinstance(filename, str) or not filename.strip():
+        raise OutputLLMValidationError(
+            "document_info.filename must be a non-empty string."
+        )
+
+
+def _validate_summary(summary):
+    for key, value in summary.items():
+        if not isinstance(key, str) or not key.strip():
+            raise OutputLLMValidationError("summary keys must be non-empty strings.")
+        if isinstance(value, (dict, list)):
+            raise OutputLLMValidationError(
+                f"summary['{key}'] must be a scalar value."
+            )
+        if not isinstance(value, _SCALAR_TYPES):
+            raise OutputLLMValidationError(
+                f"summary['{key}'] has unsupported value type."
+            )
+
+def _validate_content_data(content_data):
+    table_names = set()
+    for table_index, table in enumerate(content_data):
+        if not isinstance(table, dict):
+            raise OutputLLMValidationError(
+                f"content_data[{table_index}] must be an object."
+            )
+
+        for required_key in ("table_name", "headers", "rows"):
+            if required_key not in table:
                 raise OutputLLMValidationError(
-                    f"Sheet {sheet_index} is missing required key '{required_key}'."
+                    f"content_data[{table_index}] is missing required key '{required_key}'."
                 )
 
-        sheet_name = sheet["name"]
-        if not isinstance(sheet_name, str) or not sheet_name.strip():
+        table_name = table["table_name"]
+        if not isinstance(table_name, str) or not table_name.strip():
             raise OutputLLMValidationError(
-                f"Sheet {sheet_index} name must be a non-empty string."
+                f"content_data[{table_index}].table_name must be a non-empty string."
             )
-        if sheet_name in sheet_names:
+        if table_name in table_names:
             raise OutputLLMValidationError(
-                f"Duplicate sheet name found: '{sheet_name}'."
+                f"Duplicate table_name found: '{table_name}'."
             )
-        sheet_names.add(sheet_name)
+        table_names.add(table_name)
 
-        columns = _validate_columns(sheet["columns"], sheet_index)
-        _validate_rows(sheet["rows"], columns, sheet_index)
-
-    return sheet_names
+        headers = _validate_headers(table["headers"], table_index)
+        _validate_rows(table["rows"], headers, table_index)
 
 
-def _validate_columns(columns, sheet_index):
-    if not isinstance(columns, list):
-        raise OutputLLMValidationError(f"Sheet {sheet_index} columns must be a list.")
-    if not columns:
-        raise OutputLLMValidationError(f"Sheet {sheet_index} columns must not be empty.")
+def _validate_headers(headers, table_index):
+    if not isinstance(headers, list):
+        raise OutputLLMValidationError(
+            f"content_data[{table_index}].headers must be a list."
+        )
+    if not headers:
+        raise OutputLLMValidationError(
+            f"content_data[{table_index}].headers must not be empty."
+        )
 
     normalized_columns = []
     seen_columns = set()
-    for column in columns:
-        if not isinstance(column, str):
+    for header in headers:
+        if not isinstance(header, str):
             raise OutputLLMValidationError(
-                f"Sheet {sheet_index} column names must be strings."
+                f"content_data[{table_index}] header names must be strings."
             )
-        trimmed_column = column.strip()
+        trimmed_column = header.strip()
         if not trimmed_column:
             raise OutputLLMValidationError(
-                f"Sheet {sheet_index} contains blank column name."
+                f"content_data[{table_index}] contains blank header name."
             )
 
         dedupe_key = trimmed_column.lower()
         if dedupe_key in seen_columns:
             raise OutputLLMValidationError(
-                f"Sheet {sheet_index} columns must be unique (case-insensitive)."
+                f"content_data[{table_index}] headers must be unique (case-insensitive)."
             )
         seen_columns.add(dedupe_key)
         normalized_columns.append(trimmed_column)
@@ -134,108 +161,58 @@ def _validate_columns(columns, sheet_index):
     return normalized_columns
 
 
-def _validate_rows(rows, columns, sheet_index):
+def _validate_rows(rows, headers, table_index):
     if not isinstance(rows, list):
-        raise OutputLLMValidationError(f"Sheet {sheet_index} rows must be a list.")
+        raise OutputLLMValidationError(
+            f"content_data[{table_index}].rows must be a list."
+        )
 
-    column_set = set(columns)
+    header_set = set(headers)
     for row_index, row in enumerate(rows):
         _validate_row_structure(
             row=row,
-            columns=columns,
-            column_set=column_set,
-            sheet_index=sheet_index,
+            headers=headers,
+            header_set=header_set,
+            table_index=table_index,
             row_index=row_index,
         )
         _validate_row_values(
             row=row,
-            columns=columns,
-            sheet_index=sheet_index,
+            headers=headers,
+            table_index=table_index,
             row_index=row_index,
         )
 
 
-def _validate_row_structure(row, columns, column_set, sheet_index, row_index):
+def _validate_row_structure(row, headers, header_set, table_index, row_index):
     if not isinstance(row, dict):
         raise OutputLLMValidationError(
-            f"Sheet {sheet_index}, row {row_index} must be an object."
+            f"content_data[{table_index}], row {row_index} must be an object."
         )
 
-    missing_columns = [column for column in columns if column not in row]
+    missing_columns = [header for header in headers if header not in row]
     if missing_columns:
         raise OutputLLMValidationError(
-            f"Sheet {sheet_index}, row {row_index} is missing required columns: {missing_columns}."
+            f"content_data[{table_index}], row {row_index} is missing required headers: {missing_columns}."
         )
 
-    unknown_columns = [key for key in row if key not in column_set]
+    unknown_columns = [key for key in row if key not in header_set]
     if unknown_columns:
         raise OutputLLMValidationError(
-            f"Sheet {sheet_index}, row {row_index} has unknown columns: {unknown_columns}."
+            f"content_data[{table_index}], row {row_index} has unknown headers: {unknown_columns}."
         )
 
 
-def _validate_row_values(row, columns, sheet_index, row_index):
-    for column in columns:
-        value = row[column]
+def _validate_row_values(row, headers, table_index, row_index):
+    for header in headers:
+        value = row[header]
         if isinstance(value, (dict, list)):
             raise OutputLLMValidationError(
-                f"Sheet {sheet_index}, row {row_index}, column '{column}' has unsupported nested value."
+                f"content_data[{table_index}], row {row_index}, header '{header}' has unsupported nested value."
             )
         if not isinstance(value, _SCALAR_TYPES):
             raise OutputLLMValidationError(
-                f"Sheet {sheet_index}, row {row_index}, column '{column}' has unsupported value type."
-            )
-
-
-def _validate_validations(validations, sheet_names):
-    for index, validation in enumerate(validations):
-        _validate_validation_item_structure(validation, index)
-        _validate_validation_item_fields(validation, sheet_names, index)
-
-
-def _validate_validation_item_structure(validation, index):
-    if not isinstance(validation, dict):
-        raise OutputLLMValidationError(
-            f"Validation item {index} must be an object."
-        )
-
-    for required_key in ("sheet", "rule", "level"):
-        if required_key not in validation:
-            raise OutputLLMValidationError(
-                f"Validation item {index} is missing required key '{required_key}'."
-            )
-
-
-def _validate_validation_item_fields(validation, sheet_names, index):
-    sheet_name = validation["sheet"]
-    rule = validation["rule"]
-    level = validation["level"]
-
-    if not isinstance(sheet_name, str) or not sheet_name.strip():
-        raise OutputLLMValidationError(
-            f"Validation item {index} sheet must be a non-empty string."
-        )
-    if sheet_name not in sheet_names:
-        raise OutputLLMValidationError(
-            f"Validation item {index} references unknown sheet '{sheet_name}'."
-        )
-
-    if not isinstance(rule, str) or not rule.strip():
-        raise OutputLLMValidationError(
-            f"Validation item {index} rule must be a non-empty string."
-        )
-
-    if not isinstance(level, str) or level not in _ALLOWED_VALIDATION_LEVELS:
-        raise OutputLLMValidationError(
-            f"Validation item {index} level must be one of: info, warning, error."
-        )
-
-
-def _validate_errors(errors):
-    for index, error in enumerate(errors):
-        if not isinstance(error, str):
-            raise OutputLLMValidationError(
-                f"errors[{index}] must be a string."
+                f"content_data[{table_index}], row {row_index}, header '{header}' has unsupported value type."
             )
 
 
@@ -243,33 +220,37 @@ def map_output_csv(validated_output):
     if not isinstance(validated_output, dict):
         raise OutputCSVMappingError("validated_output must be an object.")
 
-    sheets = validated_output.get("sheets")
-    if not isinstance(sheets, list):
-        raise OutputCSVMappingError("validated_output.sheets must be a list.")
+    tables = validated_output.get("content_data")
+    if not isinstance(tables, list):
+        raise OutputCSVMappingError("validated_output.content_data must be a list.")
 
     mapped_sheets = []
-    for sheet_index, sheet in enumerate(sheets):
-        if not isinstance(sheet, dict):
-            raise OutputCSVMappingError(f"Sheet {sheet_index} must be an object.")
+    for table_index, table in enumerate(tables):
+        if not isinstance(table, dict):
+            raise OutputCSVMappingError(
+                f"content_data[{table_index}] must be an object."
+            )
 
-        for required_key in ("name", "columns", "rows"):
-            if required_key not in sheet:
+        for required_key in ("table_name", "headers", "rows"):
+            if required_key not in table:
                 raise OutputCSVMappingError(
-                    f"Sheet {sheet_index} is missing required key '{required_key}'."
+                    f"content_data[{table_index}] is missing required key '{required_key}'."
                 )
 
-        name = sheet["name"]
-        headers = sheet["columns"]
-        rows = sheet["rows"]
+        name = table["table_name"]
+        headers = table["headers"]
+        rows = table["rows"]
 
         if not isinstance(headers, list) or not headers:
             raise OutputCSVMappingError(
-                f"Sheet {sheet_index} columns must be a non-empty list."
+                f"content_data[{table_index}].headers must be a non-empty list."
             )
         if not isinstance(rows, list):
-            raise OutputCSVMappingError(f"Sheet {sheet_index} rows must be a list.")
+            raise OutputCSVMappingError(
+                f"content_data[{table_index}].rows must be a list."
+            )
 
-        mapped_rows = _map_rows(headers=headers, rows=rows, sheet_index=sheet_index)
+        mapped_rows = _map_rows(headers=headers, rows=rows, table_index=table_index)
         mapped_sheets.append(
             {
                 "name": name,
@@ -278,29 +259,33 @@ def map_output_csv(validated_output):
             }
         )
 
-    return {"sheets": mapped_sheets}
+    return {
+        "document_info": validated_output.get("document_info", {}),
+        "summary": validated_output.get("summary", {}),
+        "sheets": mapped_sheets,
+    }
 
 
-def _map_rows(headers, rows, sheet_index):
+def _map_rows(headers, rows, table_index):
     mapped_rows = []
     header_set = set(headers)
 
     for row_index, row in enumerate(rows):
         if not isinstance(row, dict):
             raise OutputCSVMappingError(
-                f"Sheet {sheet_index}, row {row_index} must be an object."
+                f"content_data[{table_index}], row {row_index} must be an object."
             )
 
         missing_headers = [header for header in headers if header not in row]
         if missing_headers:
             raise OutputCSVMappingError(
-                f"Sheet {sheet_index}, row {row_index} is missing headers: {missing_headers}."
+                f"content_data[{table_index}], row {row_index} is missing headers: {missing_headers}."
             )
 
         unknown_headers = [key for key in row.keys() if key not in header_set]
         if unknown_headers:
             raise OutputCSVMappingError(
-                f"Sheet {sheet_index}, row {row_index} has unknown headers: {unknown_headers}."
+                f"content_data[{table_index}], row {row_index} has unknown headers: {unknown_headers}."
             )
 
         mapped_rows.append([row[header] for header in headers])
