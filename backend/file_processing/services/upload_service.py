@@ -8,6 +8,27 @@ from PyPDF2.errors import PdfReadError
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
+def process_upload(uploaded_file):
+    is_valid, error = validate_file(uploaded_file)
+    if not is_valid:
+        return False, error, None
+
+    ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+    if ext == ".pdf":
+
+        is_valid, error = validate_pdf_not_corrupt(uploaded_file)
+        if not is_valid:
+            return False, error, None
+
+        is_valid, error = validate_pdf_not_password_protected(uploaded_file)
+        if not is_valid:
+            return False, error, None
+
+    file_path = save_temp_file(uploaded_file)
+
+    return True, None, file_path
+
 
 def validate_file(uploaded_file):
     filename = uploaded_file.name

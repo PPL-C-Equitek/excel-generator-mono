@@ -71,7 +71,7 @@ class UploadEndpointTest(TestCase):
 
     def _post_file(self, name, content, content_type):
         f = SimpleUploadedFile(name, content, content_type=content_type)
-        return self.client.post("/api/upload/", {"file": f}, format="multipart")
+        return self.client.post("/upload/", {"file": f}, format="multipart")
 
     def generate_valid_pdf_bytes(self):
         buffer = BytesIO()
@@ -125,7 +125,7 @@ class UploadEndpointTest(TestCase):
         self.assertIn("message", resp.data)
 
     def test_upload_no_file(self):
-        resp = self.client.post("/api/upload/", {}, format="multipart")
+        resp = self.client.post("/upload/", {}, format="multipart")
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
