@@ -425,6 +425,23 @@ class MapOutputCSVTest(unittest.TestCase):
 
 
 class GenerateCSVTest(unittest.TestCase):
+    class PrefixSanitizationPolicy:
+        def sanitize_header(self, header):
+            return f"HDR::{header}"
+
+        def sanitize_value(self, value):
+            if isinstance(value, str):
+                return f"VAL::{value}"
+            return value
+
+    class PrefixFileNamePolicy:
+        def build_filename(self, sheet_name):
+            return f"csv_{sheet_name.lower()}.export.csv"
+
+    class BlankFileNamePolicy:
+        def build_filename(self, sheet_name):
+            return "   "
+
     def _build_mapped_output(self):
         return {
             "sheets": [
@@ -696,6 +713,63 @@ class GenerateCSVTest(unittest.TestCase):
             [["Zufar", 21, "Depok"], ["Siti", 22, "Jakarta"]],
         )
         self.assertEqual(result["files"][0]["content"], mocked_csv_content)
+
+    def test_generate_csv_supports_custom_sanitization_policy(self):
+        mapped_output = self._build_mapped_output()
+        policy = self.PrefixSanitizationPolicy()
+
+        result = export_service.generate_csv(
+            mapped_output,
+            sanitization_policy=policy,
+        )
+
+        self.assertEqual(
+            self._read_csv_rows(result["files"][0]["content"]),
+            [
+                ["HDR::name", "HDR::age", "HDR::city"],
+                ["VAL::Zufar", "21", "VAL::Depok"],
+                ["VAL::Siti", "22", "VAL::Jakarta"],
+            ],
+        )
+
+    def test_generate_csv_rejects_invalid_sanitization_policy_contract(self):
+        mapped_output = self._build_mapped_output()
+
+        with self.assertRaises(export_service.OutputCSVGenerationError):
+            export_service.generate_csv(
+                mapped_output,
+                sanitization_policy=object(),
+            )
+
+    def test_generate_csv_supports_custom_filename_policy(self):
+        mapped_output = self._build_mapped_output()
+        filename_policy = self.PrefixFileNamePolicy()
+
+        result = export_service.generate_csv(
+            mapped_output,
+            filename_policy=filename_policy,
+        )
+
+        self.assertEqual(result["files"][0]["name"], "csv_sheet1.export.csv")
+
+    def test_generate_csv_rejects_invalid_filename_policy_contract(self):
+        mapped_output = self._build_mapped_output()
+
+        with self.assertRaises(export_service.OutputCSVGenerationError):
+            export_service.generate_csv(
+                mapped_output,
+                filename_policy=object(),
+            )
+
+    def test_generate_csv_rejects_blank_filename_from_policy(self):
+        mapped_output = self._build_mapped_output()
+        filename_policy = self.BlankFileNamePolicy()
+
+        with self.assertRaises(export_service.OutputCSVGenerationError):
+            export_service.generate_csv(
+                mapped_output,
+                filename_policy=filename_policy,
+            )
 
 
 if __name__ == "__main__":
