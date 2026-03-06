@@ -47,7 +47,7 @@ describe("generateJson negative (HTTP errors)", () => {
 
   it("maps 503 to user-friendly message", async () => {
     server.use(
-      http.post(`${API_BASE}/api/llm/generate/`, () =>
+      http.post(`${API_BASE}/llm/generate/`, () =>
         HttpResponse.json({ detail: "Service Unavailable" }, { status: 503 })
       )
     );
@@ -58,7 +58,7 @@ describe("generateJson negative (HTTP errors)", () => {
 
   it("keeps original API error when status is not mapped", async () => {
     server.use(
-      http.post(`${API_BASE}/api/llm/generate/`, () =>
+      http.post(`${API_BASE}/llm/generate/`, () =>
         HttpResponse.json({ detail: "Teapot" }, { status: 418 })
       )
     );
