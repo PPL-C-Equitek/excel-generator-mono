@@ -1,6 +1,7 @@
 import csv
 import io
 import unittest
+import zipfile
 from copy import deepcopy
 from unittest.mock import patch
 
@@ -477,6 +478,10 @@ class GenerateCSVTest(unittest.TestCase):
             "generate_csv must be implemented in export_service.",
         )
         self.assertTrue(
+            hasattr(export_service, "generate_csv_download_artifact"),
+            "generate_csv_download_artifact must be implemented in export_service.",
+        )
+        self.assertTrue(
             hasattr(export_service, "OutputCSVGenerationError"),
             "OutputCSVGenerationError must be implemented in export_service.",
         )
@@ -781,6 +786,52 @@ class GenerateCSVTest(unittest.TestCase):
             export_service.generate_csv(
                 mapped_output,
                 filename_policy=filename_policy,
+            )
+
+    def test_generate_csv_download_artifact_single_sheet_returns_plain_csv(self):
+        mapped_output = self._build_mapped_output()
+
+        result = export_service.generate_csv_download_artifact(mapped_output)
+
+        self.assertEqual(result["type"], "csv")
+        self.assertEqual(result["name"], "Sheet1.csv")
+        rows = self._read_csv_rows(result["content"].decode("utf-8"))
+        self.assertEqual(
+            rows,
+            [
+                ["name", "age", "city"],
+                ["Zufar", "21", "Depok"],
+                ["Siti", "22", "Jakarta"],
+            ],
+        )
+
+    def test_generate_csv_download_artifact_multiple_sheets_returns_zip(self):
+        mapped_output = self._build_mapped_output()
+        mapped_output["sheets"].append(
+            {
+                "name": "Sheet2",
+                "headers": ["sku", "price"],
+                "rows": [["A-1", 15000]],
+            }
+        )
+
+        result = export_service.generate_csv_download_artifact(mapped_output)
+
+        self.assertEqual(result["type"], "zip")
+        self.assertEqual(result["name"], "csv_export.zip")
+        with zipfile.ZipFile(io.BytesIO(result["content"]), "r") as archive:
+            names = sorted(archive.namelist())
+            self.assertEqual(names, ["Sheet1.csv", "Sheet2.csv"])
+
+            sheet2_rows = list(
+                csv.reader(io.StringIO(archive.read("Sheet2.csv").decode("utf-8")))
+            )
+            self.assertEqual(
+                sheet2_rows,
+                [
+                    ["sku", "price"],
+                    ["A-1", "15000"],
+                ],
             )
 
 
