@@ -307,48 +307,61 @@ def generate_csv(mapped_output, sanitization_policy=None, filename_policy=None):
 
     files = []
     for sheet_index, sheet in enumerate(sheets):
-        if not isinstance(sheet, dict):
-            raise OutputCSVGenerationError(f"Sheet {sheet_index} must be an object.")
-
-        for required_key in ("name", "headers", "rows"):
-            if required_key not in sheet:
-                raise OutputCSVGenerationError(
-                    f"Sheet {sheet_index} is missing required key '{required_key}'."
-                )
-
-        sheet_name = sheet["name"]
-        headers = sheet["headers"]
-        rows = sheet["rows"]
-
-        if not isinstance(sheet_name, str) or not sheet_name.strip():
-            raise OutputCSVGenerationError(
-                f"Sheet {sheet_index} name must be a non-empty string."
-            )
-
-        _validate_csv_headers(headers, sheet_index)
-        normalized_headers = [
-            sanitization_policy.sanitize_header(header) for header in headers
-        ]
-        normalized_rows = _validate_csv_rows(
-            rows=rows,
-            headers=headers,
-            sheet_index=sheet_index,
-            sanitization_policy=sanitization_policy,
-        )
-        filename = filename_policy.build_filename(sheet_name)
-        if not isinstance(filename, str) or not filename.strip():
-            raise OutputCSVGenerationError(
-                "filename_policy.build_filename must return a non-empty string."
-            )
-
         files.append(
-            {
-                "name": filename,
-                "content": _build_csv_content(normalized_headers, normalized_rows),
-            }
+            _build_csv_file(
+                sheet=sheet,
+                sheet_index=sheet_index,
+                sanitization_policy=sanitization_policy,
+                filename_policy=filename_policy,
+            )
         )
 
     return {"files": files}
+
+
+def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
+    sheet_name, headers, rows = _validate_generate_csv_sheet(sheet, sheet_index)
+
+    _validate_csv_headers(headers, sheet_index)
+    normalized_headers = [sanitization_policy.sanitize_header(header) for header in headers]
+    normalized_rows = _validate_csv_rows(
+        rows=rows,
+        headers=headers,
+        sheet_index=sheet_index,
+        sanitization_policy=sanitization_policy,
+    )
+    filename = filename_policy.build_filename(sheet_name)
+    if not isinstance(filename, str) or not filename.strip():
+        raise OutputCSVGenerationError(
+            "filename_policy.build_filename must return a non-empty string."
+        )
+
+    return {
+        "name": filename,
+        "content": _build_csv_content(normalized_headers, normalized_rows),
+    }
+
+
+def _validate_generate_csv_sheet(sheet, sheet_index):
+    if not isinstance(sheet, dict):
+        raise OutputCSVGenerationError(f"Sheet {sheet_index} must be an object.")
+
+    for required_key in ("name", "headers", "rows"):
+        if required_key not in sheet:
+            raise OutputCSVGenerationError(
+                f"Sheet {sheet_index} is missing required key '{required_key}'."
+            )
+
+    sheet_name = sheet["name"]
+    headers = sheet["headers"]
+    rows = sheet["rows"]
+
+    if not isinstance(sheet_name, str) or not sheet_name.strip():
+        raise OutputCSVGenerationError(
+            f"Sheet {sheet_index} name must be a non-empty string."
+        )
+
+    return sheet_name, headers, rows
 
 
 def generate_csv_download_artifact(
