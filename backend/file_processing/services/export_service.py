@@ -1,5 +1,6 @@
 import csv
 import io
+import zipfile
 
 
 class OutputLLMValidationError(Exception):
@@ -348,6 +349,38 @@ def generate_csv(mapped_output, sanitization_policy=None, filename_policy=None):
         )
 
     return {"files": files}
+
+
+def generate_csv_download_artifact(
+    mapped_output,
+    sanitization_policy=None,
+    filename_policy=None,
+):
+    generated = generate_csv(
+        mapped_output,
+        sanitization_policy=sanitization_policy,
+        filename_policy=filename_policy,
+    )
+    files = generated["files"]
+
+    if len(files) == 1:
+        single_file = files[0]
+        return {
+            "type": "csv",
+            "name": single_file["name"],
+            "content": single_file["content"].encode("utf-8"),
+        }
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for file_item in files:
+            archive.writestr(file_item["name"], file_item["content"])
+
+    return {
+        "type": "zip",
+        "name": "csv_export.zip",
+        "content": zip_buffer.getvalue(),
+    }
 
 
 def _validate_csv_headers(headers, sheet_index):
