@@ -175,6 +175,32 @@ class UploadEndpointTest(TestCase):
                 )
                 save_temp_file(f)
 
+    def test_save_temp_file_success(self):
+        from file_processing.services.upload_service import save_temp_file
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            pdf_doc,
+            content_type="application/pdf",
+        )
+
+        path = save_temp_file(f)
+
+        self.assertTrue(path.endswith(".pdf"))
+
+    def test_upload_pdf_uppercase_extension(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "DOC.PDF",
+            pdf_doc,
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+
     def test_file_header_not_pdf_with_extension_pdf(self):
         resp = self._post_file("doc.pdf", b"data", "application/pdf")
         self.assertEqual(resp.status_code, 400)
