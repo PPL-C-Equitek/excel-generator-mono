@@ -1,6 +1,10 @@
 import csv
 import io
+import os
+import re
+import uuid
 import zipfile
+from datetime import datetime, timezone
 
 
 class OutputLLMValidationError(Exception):
@@ -396,6 +400,43 @@ def generate_csv_download_artifact(
     }
 
 
+def export_csv_to_filesystem(
+    output_json,
+    storage_dir,
+    token_generator=None,
+    now_provider=None,
+    sanitization_policy=None,
+    filename_policy=None,
+):
+    validated = validate_output_llm(output_json)
+    mapped = map_output_csv(validated)
+    artifact = generate_csv_download_artifact(
+        mapped,
+        sanitization_policy=sanitization_policy,
+        filename_policy=filename_policy,
+    )
+
+    base_dir = _resolve_storage_dir(storage_dir)
+    token = _resolve_export_token(token_generator)
+    extension = "zip" if artifact["type"] == "zip" else "csv"
+    file_name = f"export_{token}.{extension}"
+    file_path = _build_safe_file_path(base_dir, file_name)
+
+    try:
+        with open(file_path, "wb") as destination:
+            destination.write(artifact["content"])
+    except OSError as exc:
+        raise OutputCSVGenerationError("Failed to save generated CSV artifact.") from exc
+
+    return {
+        "file_id": f"csv_{token}",
+        "file_name": file_name,
+        "artifact_type": artifact["type"],
+        "size_bytes": len(artifact["content"]),
+        "created_at": _resolve_created_at(now_provider),
+    }
+
+
 def _validate_csv_headers(headers, sheet_index):
     if not isinstance(headers, list):
         raise OutputCSVGenerationError(f"Sheet {sheet_index} headers must be a list.")
@@ -490,6 +531,65 @@ def _resolve_policy_with_methods(
             raise OutputCSVGenerationError(error_message)
 
     return policy
+
+
+def _resolve_storage_dir(storage_dir):
+    if not isinstance(storage_dir, str) or not storage_dir.strip():
+        raise OutputCSVGenerationError("storage_dir must be a non-empty string.")
+
+    base_dir = os.path.abspath(storage_dir)
+    try:
+        os.makedirs(base_dir, exist_ok=True)
+    except OSError as exc:
+        raise OutputCSVGenerationError("storage_dir cannot be created.") from exc
+
+    return base_dir
+
+
+def _resolve_export_token(token_generator):
+    if token_generator is None:
+        token = uuid.uuid4().hex
+    else:
+        token = token_generator()
+
+    if not isinstance(token, str) or not token.strip():
+        raise OutputCSVGenerationError(
+            "token_generator must return a non-empty string token."
+        )
+
+    normalized_token = token.strip().lower()
+    if not re.fullmatch(r"[a-z0-9]+", normalized_token):
+        raise OutputCSVGenerationError(
+            "token_generator returned an unsafe token format."
+        )
+
+    return normalized_token
+
+
+def _build_safe_file_path(base_dir, file_name):
+    candidate = os.path.abspath(os.path.join(base_dir, file_name))
+    expected_prefix = base_dir + os.sep
+    if candidate != base_dir and not candidate.startswith(expected_prefix):
+        raise OutputCSVGenerationError("Invalid storage path detected.")
+
+    return candidate
+
+
+def _resolve_created_at(now_provider):
+    if now_provider is None:
+        now_value = datetime.now(timezone.utc)
+    else:
+        now_value = now_provider()
+
+    if isinstance(now_value, datetime):
+        return now_value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    if isinstance(now_value, str) and now_value.strip():
+        return now_value
+
+    raise OutputCSVGenerationError(
+        "now_provider must return datetime or non-empty string."
+    )
 
 
 def _sanitize_csv_value(value):
