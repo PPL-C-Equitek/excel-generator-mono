@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getAbout, AboutResponse } from "@/services/about";
 import { getHealth } from "@/services/health";
 import { getMembers, MembersResponse } from "@/services/members";
+import LLMClient from "@/components/LLMClient";
 
 interface HealthResponse {
   status: string;
@@ -51,7 +52,11 @@ export default function Home() {
         }}
       >
         <h2 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>Backend Status</h2>
-        {error && <p style={{ color: "red" }}>Error: {error}</p>}
+        {error && (
+          <p style={{ color: "red" }}>
+            Error: {error}
+          </p>
+        )}
         {health ? <p style={{ color: "green" }}>OK: {health.message}</p> : !error && <p>Loading...</p>}
       </div>
 
@@ -94,6 +99,21 @@ export default function Home() {
           </ul>
         </div>
       )}
+
+      <div
+        style={{
+          backgroundColor: "#fff",
+          padding: "1.5rem 2rem",
+          borderRadius: "8px",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+          marginTop: "1rem",
+          width: "100%",
+          maxWidth: "720px",
+        }}
+      >
+        <h2 style={{ fontSize: "1rem", marginBottom: "0.75rem" }}>LLM Generate JSON</h2>
+        <LLMClient />
+      </div>
     </main>
   );
 }
