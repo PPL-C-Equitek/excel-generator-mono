@@ -1,21 +1,27 @@
-import { render, screen, waitFor } from '@testing-library/react'
+/**
+ * [REFACTOR] ConvertPage rendering tests
+ *
+ * Setelah refactor, ConvertPage adalah pure presentational component.
+ * Test ini hanya memverifikasi RENDERING berdasarkan state yang dikembalikan
+ * oleh useConvertFlow — logic bisnis diuji terpisah di useConvertFlow.test.ts.
+ *
+ * F.I.R.S.T:
+ * - Fast: useConvertFlow di-mock, tidak ada async/network
+ * - Independent: setiap describe kelompok mengeset state hook-nya sendiri
+ * - Repeatable: mock deterministik via vi.fn()
+ * - Self-validating: assertions jelas pada elemen DOM
+ * - Timely: ditulis bersamaan implementasi refactor
+ */
+
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { ILLMService } from '../../../src/lib/ILLMService'
-import type { JsonValue } from '../../../src/utils/schemaValidator'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { OutputFile } from '../../../src/hooks/useConvertFlow'
 import ConvertPage from '../../../src/app/convert/ConvertPage'
 
 // ---------------------------------------------------------------------------
-// Mocks
+// Mock dependencies
 // ---------------------------------------------------------------------------
-
-vi.mock('../../../src/lib/api', () => ({
-    uploadFile: vi.fn(),
-    fetchAPI: vi.fn(),
-}))
-
-import { uploadFile } from '../../../src/lib/api'
-const mockUploadFile = vi.mocked(uploadFile)
 
 vi.mock('../../../src/components/Sidebar', () => ({
     default: () => <div data-testid="sidebar" />,
@@ -26,10 +32,7 @@ vi.mock('../../../src/components/UploadZone', () => ({
         const file = new File(['content'], 'report.pdf', { type: 'application/pdf' })
         return (
             <div data-testid="upload-zone">
-                <button
-                    data-testid="upload-btn"
-                    onClick={() => onFileSelect?.(file)}
-                >
+                <button data-testid="upload-btn" onClick={() => onFileSelect?.(file)}>
                     Upload File
                 </button>
             </div>
@@ -37,362 +40,183 @@ vi.mock('../../../src/components/UploadZone', () => ({
     },
 }))
 
+// Centralized mock return value — set per describe block
+const mockHandleFileSelect = vi.fn()
+const mockHookReturn = {
+    isConverting: false,
+    error: null as string | null,
+    outputFile: null as OutputFile | null,
+    handleFileSelect: mockHandleFileSelect,
+}
+
+vi.mock('../../../src/hooks/useConvertFlow', () => ({
+    useConvertFlow: () => mockHookReturn,
+}))
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const mockLLMResult: JsonValue = {
-    status: 'ok',
-    summary: 'Conversion successful',
-    sheets: [
-        {
-            name: 'Sheet1',
-            columns: ['Name', 'Age'],
-            rows: [{ Name: 'Alice', Age: 30 }],
-        },
-    ],
-    validations: [],
-    errors: [],
+const sampleOutput: OutputFile = {
+    filename: 'report.xlsx',
+    format: 'xlsx',
+    size: 20480,
 }
-
-function makeMockService(result: JsonValue = mockLLMResult): ILLMService {
-    return {
-        generate: vi.fn().mockResolvedValue({ output_json: result }),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const OUTPUT_FILE_NAME = 'report.xlsx'
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('[RED] ConvertPage — LLM Integration', () => {
+describe('ConvertPage — rendering tests (post-refactor)', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        mockUploadFile.mockResolvedValue({
-            filename: OUTPUT_FILE_NAME,
-            size: 20480,
-            format: 'xlsx',
-        })
-    })
-
-    afterEach(() => {
-        vi.resetAllMocks()
+        // Reset hook state to idle
+        mockHookReturn.isConverting = false
+        mockHookReturn.error = null
+        mockHookReturn.outputFile = null
     })
 
     // -----------------------------------------------------------------------
-    // 1. Prop: llmService
+    // Static layout
     // -----------------------------------------------------------------------
-    describe('Prop: llmService', () => {
-        it('ConvertPage menerima prop llmService bertipe ILLMService', () => {
-            const service = makeMockService()
-            expect(() => render(<ConvertPage llmService={service} />)).not.toThrow()
-        })
-    })
-
-    // -----------------------------------------------------------------------
-    // 2. Integrasi upload → llmService.generate
-    // -----------------------------------------------------------------------
-    describe('Upload → LLM flow', () => {
-        it('memanggil uploadFile ketika user memilih file', async () => {
-            const user = userEvent.setup()
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(mockUploadFile).toHaveBeenCalledTimes(1)
-                expect(mockUploadFile).toHaveBeenCalledWith(expect.any(File))
-            })
+    describe('static layout', () => {
+        it('renders heading and subtitle', () => {
+            render(<ConvertPage />)
+            expect(screen.getByText('Automate Your Data Structuring')).toBeInTheDocument()
+            expect(screen.getByText(/Replace manual entry/i)).toBeInTheDocument()
         })
 
-        it('memanggil llmService.generate setelah uploadFile sukses', async () => {
-            const user = userEvent.setup()
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(service.generate).toHaveBeenCalledTimes(1)
-            })
+        it('renders Sidebar and UploadZone components', () => {
+            render(<ConvertPage />)
+            expect(screen.getByTestId('sidebar')).toBeInTheDocument()
+            expect(screen.getByTestId('upload-zone')).toBeInTheDocument()
         })
 
-        it('memanggil llmService.generate dengan data dari response uploadFile', async () => {
-            const user = userEvent.setup()
-            const uploadResponse = { filename: 'report.pdf', size: 1024, format: 'pdf' }
-            mockUploadFile.mockResolvedValue(uploadResponse)
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(service.generate).toHaveBeenCalledWith(
-                    expect.objectContaining(uploadResponse)
-                )
-            })
-        })
-
-        it('tidak memanggil llmService.generate jika uploadFile gagal', async () => {
-            const user = userEvent.setup()
-            mockUploadFile.mockRejectedValue(new Error('Upload failed'))
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(service.generate).not.toHaveBeenCalled()
-            })
+        it('uses semantic HTML with single h1', () => {
+            const { container } = render(<ConvertPage />)
+            expect(container.querySelector('h1')).toBeInTheDocument()
+            expect(container.querySelectorAll('h1')).toHaveLength(1)
+            expect(container.querySelector('main')).toBeInTheDocument()
         })
     })
 
     // -----------------------------------------------------------------------
-    // 3. Loading indicator
+    // Idle state — nothing extra shown
     // -----------------------------------------------------------------------
-    describe('Loading indicator', () => {
-        it('menampilkan loading indicator selama konversi berlangsung', async () => {
-            const user = userEvent.setup()
-            const service: ILLMService = {
-                generate: vi.fn().mockReturnValue(new Promise(() => {})),
-            }
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(
-                    screen.getByRole('status') ||
-                    screen.queryByText(/converting/i) ||
-                    screen.queryByText(/processing/i) ||
-                    screen.queryByText(/loading/i) ||
-                    document.querySelector('[data-testid="loading-indicator"]')
-                ).toBeTruthy()
-            })
-        })
-
-        it('menyembunyikan loading indicator setelah konversi selesai', async () => {
-            const user = userEvent.setup()
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(service.generate).toHaveBeenCalled()
-            })
-
+    describe('idle state (no conversion started)', () => {
+        it('does not show loading indicator', () => {
+            render(<ConvertPage />)
             expect(screen.queryByRole('status')).not.toBeInTheDocument()
         })
-    })
 
-    // -----------------------------------------------------------------------
-    // 4. Hasil konversi sukses
-    // -----------------------------------------------------------------------
-    describe('Tampilan hasil konversi sukses', () => {
-        it('menampilkan nama file output setelah konversi berhasil', async () => {
-            const user = userEvent.setup()
-            mockUploadFile.mockResolvedValue({ filename: 'report.pdf', size: 1024, format: 'pdf' })
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(screen.getByText(OUTPUT_FILE_NAME)).toBeInTheDocument()
-            })
+        it('does not show error alert', () => {
+            render(<ConvertPage />)
+            expect(screen.queryByRole('alert')).not.toBeInTheDocument()
         })
 
-        it('menggunakan nama file asli sebagai fallback jika uploadResult tidak punya filename', async () => {
-            const user = userEvent.setup()
-            mockUploadFile.mockResolvedValue({})
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(screen.getByText('report.xlsx')).toBeInTheDocument()
-                expect(screen.getByTestId('file-size')).toHaveTextContent('0 KB')
-            })
-        })
-
-        it('menampilkan format/ekstensi file output setelah konversi berhasil', async () => {
-            const user = userEvent.setup()
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                const xlsxElements = screen.getAllByText(/xlsx/i)
-                expect(xlsxElements.length).toBeGreaterThan(0)
-            })
-        })
-
-        it('menampilkan ukuran file output setelah konversi berhasil', async () => {
-            const user = userEvent.setup()
-            mockUploadFile.mockResolvedValue({ filename: 'report.pdf', size: 20480, format: 'pdf' })
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(
-                    screen.getByText(/20\s*KB/i) ||
-                    screen.getByText(/20480/i) ||
-                    screen.getByText(/ukuran/i) ||
-                    screen.getByTestId('file-size')
-                ).toBeTruthy()
-            })
-        })
-    })
-
-    // -----------------------------------------------------------------------
-    // 5. Tombol Download
-    // -----------------------------------------------------------------------
-    describe('Tombol Download', () => {
-        it('menampilkan tombol Download setelah konversi berhasil', async () => {
-            const user = userEvent.setup()
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(
-                    screen.getByRole('button', { name: /download/i }) ||
-                    screen.getByRole('link', { name: /download/i }) ||
-                    screen.getByTestId('download-btn')
-                ).toBeTruthy()
-            })
-        })
-
-        it('tidak menampilkan tombol Download sebelum konversi dilakukan', () => {
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument()
+        it('does not show download button', () => {
+            render(<ConvertPage />)
             expect(screen.queryByTestId('download-btn')).not.toBeInTheDocument()
         })
+    })
 
-        it('tombol Download memiliki href atau trigger download yang valid', async () => {
-            const user = userEvent.setup()
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
+    // -----------------------------------------------------------------------
+    // Loading state
+    // -----------------------------------------------------------------------
+    describe('loading state (isConverting=true)', () => {
+        it('shows loading indicator with role="status"', () => {
+            mockHookReturn.isConverting = true
+            render(<ConvertPage />)
+            expect(screen.getByRole('status')).toBeInTheDocument()
+        })
 
-            await user.click(screen.getByTestId('upload-btn'))
+        it('shows "Converting..." text', () => {
+            mockHookReturn.isConverting = true
+            render(<ConvertPage />)
+            expect(screen.getByText(/converting/i)).toBeInTheDocument()
+        })
 
-            await waitFor(() => {
-                const downloadEl =
-                    screen.queryByRole('button', { name: /download/i }) ||
-                    screen.queryByRole('link', { name: /download/i }) ||
-                    screen.queryByTestId('download-btn')
-                expect(downloadEl).toBeInTheDocument()
-            })
+        it('does not show error or output while loading', () => {
+            mockHookReturn.isConverting = true
+            render(<ConvertPage />)
+            expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+            expect(screen.queryByTestId('download-btn')).not.toBeInTheDocument()
         })
     })
 
     // -----------------------------------------------------------------------
-    // 6. Error handling
+    // Error state
     // -----------------------------------------------------------------------
-    describe('Error handling', () => {
-        it('menampilkan pesan error jika uploadFile gagal', async () => {
-            const user = userEvent.setup()
-            mockUploadFile.mockRejectedValue(new Error('Network error: upload failed'))
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(screen.getByRole('alert')).toBeInTheDocument()
-                expect(screen.getByText(/upload failed/i)).toBeInTheDocument()
-            })
+    describe('error state (error set)', () => {
+        it('shows role="alert" with error message', () => {
+            mockHookReturn.error = 'Upload failed'
+            render(<ConvertPage />)
+            expect(screen.getByRole('alert')).toBeInTheDocument()
+            expect(screen.getByText('Upload failed')).toBeInTheDocument()
         })
 
-        it('menampilkan fallback error jika uploadFile melempar non-Error object', async () => {
-            const user = userEvent.setup()
-            mockUploadFile.mockRejectedValue('string error')
-            const service = makeMockService()
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(screen.getByRole('alert')).toBeInTheDocument()
-                expect(screen.getByText(/upload failed/i)).toBeInTheDocument()
-            })
+        it('shows role="alert" for schema validation error', () => {
+            mockHookReturn.error = 'Respons upload tidak valid'
+            render(<ConvertPage />)
+            expect(screen.getByRole('alert')).toBeInTheDocument()
+            expect(screen.getByText('Respons upload tidak valid')).toBeInTheDocument()
         })
 
-        it('menampilkan pesan error jika llmService.generate gagal', async () => {
-            const user = userEvent.setup()
-            const service: ILLMService = {
-                generate: vi.fn().mockRejectedValue(new Error('LLM quota exceeded')),
-            }
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(screen.getByRole('alert')).toBeInTheDocument()
-                expect(screen.getByText(/quota exceeded/i)).toBeInTheDocument()
-            })
+        it('shows role="alert" for LLM conversion error', () => {
+            mockHookReturn.error = 'LLM quota exceeded'
+            render(<ConvertPage />)
+            expect(screen.getByRole('alert')).toBeInTheDocument()
+            expect(screen.getByText('LLM quota exceeded')).toBeInTheDocument()
         })
 
-        it('menampilkan fallback error jika generate melempar non-Error object', async () => {
-            const user = userEvent.setup()
-            const service: ILLMService = {
-                generate: vi.fn().mockRejectedValue({ code: 500 }),
-            }
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(screen.getByRole('alert')).toBeInTheDocument()
-                expect(screen.getByText(/conversion failed/i)).toBeInTheDocument()
-            })
-        })
-
-        it('pesan error informatif, bukan pesan generik saja', async () => {
-            const user = userEvent.setup()
-            const errorMessage = 'API key tidak valid'
-            const service: ILLMService = {
-                generate: vi.fn().mockRejectedValue(new Error(errorMessage)),
-            }
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(screen.getByText(new RegExp(errorMessage, 'i'))).toBeInTheDocument()
-            })
-        })
-
-        it('tidak menampilkan hasil konversi ketika terjadi error', async () => {
-            const user = userEvent.setup()
-            const service: ILLMService = {
-                generate: vi.fn().mockRejectedValue(new Error('Terjadi kesalahan')),
-            }
-            render(<ConvertPage llmService={service} />)
-
-            await user.click(screen.getByTestId('upload-btn'))
-
-            await waitFor(() => {
-                expect(screen.getByRole('alert')).toBeInTheDocument()
-            })
-
+        it('does not show download button when error is set', () => {
+            mockHookReturn.error = 'Upload failed'
+            mockHookReturn.outputFile = sampleOutput
+            render(<ConvertPage />)
             expect(screen.queryByTestId('download-btn')).not.toBeInTheDocument()
-            expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument()
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // Success state
+    // -----------------------------------------------------------------------
+    describe('success state (outputFile set, no error)', () => {
+        it('shows output filename', () => {
+            mockHookReturn.outputFile = sampleOutput
+            render(<ConvertPage />)
+            expect(screen.getByText('report.xlsx')).toBeInTheDocument()
+        })
+
+        it('shows output format', () => {
+            mockHookReturn.outputFile = sampleOutput
+            render(<ConvertPage />)
+            const xlsxMatches = screen.getAllByText(/xlsx/i)
+            expect(xlsxMatches.length).toBeGreaterThan(0)
+        })
+
+        it('shows file size in KB', () => {
+            mockHookReturn.outputFile = sampleOutput
+            render(<ConvertPage />)
+            expect(screen.getByTestId('file-size')).toHaveTextContent('20 KB')
+        })
+
+        it('shows Download button', () => {
+            mockHookReturn.outputFile = sampleOutput
+            render(<ConvertPage />)
+            expect(screen.getByTestId('download-btn')).toBeInTheDocument()
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // Hook wiring
+    // -----------------------------------------------------------------------
+    describe('hook wiring', () => {
+        it('passes handleFileSelect from hook to UploadZone', async () => {
+            const user = userEvent.setup()
+            render(<ConvertPage />)
+            await user.click(screen.getByTestId('upload-btn'))
+            expect(mockHandleFileSelect).toHaveBeenCalledTimes(1)
+            expect(mockHandleFileSelect).toHaveBeenCalledWith(expect.any(File))
         })
     })
 })

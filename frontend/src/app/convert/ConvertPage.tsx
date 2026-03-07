@@ -1,58 +1,16 @@
 'use client'
 
-import { useState } from 'react'
 import Sidebar from '@/components/Sidebar'
 import UploadZone from '@/components/UploadZone'
-import { uploadFile } from '@/lib/api'
-import { generateJson } from '@/services/llm'
+import { useConvertFlow } from '@/hooks/useConvertFlow'
 import type { ILLMService } from '@/lib/ILLMService'
-
-const defaultService: ILLMService = { generate: generateJson }
 
 interface ConvertPageProps {
     readonly llmService?: ILLMService
 }
 
-interface OutputFile {
-    filename: string
-    format: string
-    size: number
-}
-
-export default function ConvertPage({ llmService = defaultService }: ConvertPageProps) {
-    const [isConverting, setIsConverting] = useState(false)
-    const [error, setError] = useState<string | null>(null)
-    const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
-
-    const handleFileSelect = async (file: File) => {
-        setError(null)
-        setOutputFile(null)
-        setIsConverting(true)
-
-        let uploadResult: any
-        try {
-            uploadResult = await uploadFile(file)
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Upload failed')
-            setIsConverting(false)
-            return
-        }
-
-        try {
-            await llmService.generate(uploadResult)
-            const inputName = String(uploadResult?.filename ?? file.name)
-            const baseName = inputName.replace(/\.[^/.]+$/, '')
-            setOutputFile({
-                filename: `${baseName}.xlsx`,
-                format: 'xlsx',
-                size: Number(uploadResult?.size ?? 0),
-            })
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Conversion failed')
-        } finally {
-            setIsConverting(false)
-        }
-    }
+export default function ConvertPage({ llmService }: ConvertPageProps) {
+    const { isConverting, error, outputFile, handleFileSelect } = useConvertFlow(llmService)
 
     return (
         <div className="flex min-h-screen">
