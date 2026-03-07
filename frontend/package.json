@@ -33,6 +33,7 @@
     "msw": "^2.12.10",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vite": "^6.4.1",
     "vitest": "^4.0.7"
   }
 }
