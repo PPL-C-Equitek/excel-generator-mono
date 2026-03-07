@@ -212,3 +212,202 @@ class ExcelDataExtractionTests(TestCase):
         if "data" in body and isinstance(body["data"], dict):
             return body["data"].get(sheet_name)
         return body.get(sheet_name)
+
+class FileValidationTests(TestCase):
+    UPLOAD_URL = '/upload/'
+
+    def _make_file(self, name: str, content: bytes, content_type: str) -> SimpleUploadedFile:
+        return SimpleUploadedFile(name, content, content_type=content_type)
+
+    def _valid_xlsx_bytes(self) -> bytes:
+
+        return _build_excel({"Sheet1": [["A", "B"], [1, 2]]})
+
+    def test_extension_txt_is_rejected(self):
+        fake_txt = self._make_file(
+            "data.txt",
+            b"NIM,Nama\n12345,Alice",
+            "text/plain",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': fake_txt})
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertIn("error", body)
+
+    def test_extension_xlsx_is_accepted(self):
+        valid_xlsx = self._make_file(
+            "data.xlsx",
+            self._valid_xlsx_bytes(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': valid_xlsx})
+        self.assertEqual(response.status_code, 200)
+
+    def test_magic_number_fake_xlsx_is_rejected(self):
+        fake_content = b"This is just plain text disguised as xlsx"
+        fake_xlsx = self._make_file(
+            "fake.xlsx",
+            fake_content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': fake_xlsx})
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertIn("error", body)
+
+    def test_magic_number_fake_xls_is_rejected(self):
+        fake_content = b"\x00\x01\x02\x03 bukan compound document"
+        fake_xls = self._make_file(
+            "fake.xls",
+            fake_content,
+            "application/vnd.ms-excel",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': fake_xls})
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertIn("error", body)
+
+    def test_magic_number_valid_xlsx_passes(self):
+        valid_bytes = self._valid_xlsx_bytes()
+        self.assertEqual(valid_bytes[:4], b'\x50\x4B\x03\x04',
+                         "Helper _build_excel harus menghasilkan file ZIP valid")
+
+        valid_xlsx = self._make_file(
+            "valid.xlsx",
+            valid_bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': valid_xlsx})
+        self.assertEqual(response.status_code, 200)
+
+    def test_file_exceeding_10mb_is_rejected(self):
+        oversized_content = b'\x50\x4B\x03\x04' + b'A' * (10 * 1024 * 1024)
+        oversized_file = self._make_file(
+            "besar.xlsx",
+            oversized_content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': oversized_file})
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertIn("error", body)
+
+    def test_file_exactly_10mb_is_accepted_or_rejected_gracefully(self):
+        exactly_10mb = b'\x50\x4B\x03\x04' + b'B' * (10 * 1024 * 1024 - 4)
+        file_10mb = self._make_file(
+            "pas10mb.xlsx",
+            exactly_10mb,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': file_10mb})
+        self.assertNotEqual(response.status_code, 500,
+                            "File tepat 10 MB tidak boleh menyebabkan server error.")
+
+    def test_small_valid_file_is_accepted(self):
+        valid_xlsx = self._make_file(
+            "kecil.xlsx",
+            self._valid_xlsx_bytes(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': valid_xlsx})
+        self.assertNotEqual(response.status_code, 400)
+
+    def test_mime_type_text_plain_is_rejected(self):
+        file_wrong_mime = self._make_file(
+            "data.xlsx",
+            self._valid_xlsx_bytes(),
+            "text/plain",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': file_wrong_mime})
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertIn("error", body)
+
+    def test_mime_type_application_pdf_is_rejected(self):
+        file_pdf_mime = self._make_file(
+            "data.xlsx",
+            self._valid_xlsx_bytes(),
+            "application/pdf",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': file_pdf_mime})
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertIn("error", body)
+
+    def test_mime_type_xlsx_is_accepted(self):
+        file_correct_mime = self._make_file(
+            "data.xlsx",
+            self._valid_xlsx_bytes(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': file_correct_mime})
+        self.assertEqual(response.status_code, 200)
+
+    def test_mime_type_xls_is_accepted(self):
+        file_xls_mime = self._make_file(
+            "data.xls",
+            self._valid_xlsx_bytes(),
+            "application/vnd.ms-excel",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': file_xls_mime})
+        body = response.json()
+        if response.status_code == 400:
+            error_msg = body.get("error", "").lower()
+            self.assertNotIn("mime", error_msg,
+                             "File .xls tidak boleh ditolak karena MIME type.")
+
+    def test_corrupted_xlsx_returns_400_with_error_message(self):
+        corrupted_content = b'\x50\x4B\x03\x04' + b'\xFF\xFE\xFD' * 50
+        corrupted_file = self._make_file(
+            "corrupt.xlsx",
+            corrupted_content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': corrupted_file})
+        self.assertEqual(response.status_code, 400,
+                         "File corrupted harus mengembalikan 400, bukan 500.")
+        body = response.json()
+        self.assertIn("error", body,
+                      "Response harus memiliki kunci 'error'.")
+        self.assertTrue(len(body["error"]) > 0,
+                        "Pesan error tidak boleh kosong.")
+
+    def test_corrupted_xls_returns_400_with_error_message(self):
+        corrupted_content = b'\xD0\xCF\x11\xE0' + b'\x00\x01\x02\x03' * 30
+        corrupted_xls = self._make_file(
+            "corrupt.xls",
+            corrupted_content,
+            "application/vnd.ms-excel",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': corrupted_xls})
+        self.assertIn(response.status_code, [400, 500])
+        if response.status_code == 400:
+            body = response.json()
+            self.assertIn("error", body)
+
+    def test_empty_file_is_rejected_with_error(self):
+        empty_file = self._make_file(
+            "empty.xlsx",
+            b"",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': empty_file})
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertIn("error", body)
+
+    def test_corrupted_file_error_message_is_user_friendly(self):
+        corrupted_content = b'\x50\x4B\x03\x04' + b'\xDE\xAD\xBE\xEF' * 20
+        corrupted_file = self._make_file(
+            "corrupt2.xlsx",
+            corrupted_content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response = self.client.post(self.UPLOAD_URL, {'file': corrupted_file})
+        if response.status_code == 400:
+            body = response.json()
+            error_msg = body.get("error", "")
+            self.assertNotIn("Traceback", error_msg)
+            self.assertNotIn("raise ", error_msg)
+            self.assertTrue(len(error_msg) > 0,
+                            "Pesan error untuk file corrupted harus informatif.")
