@@ -48,8 +48,8 @@ def generate_json(input_json: dict[str, Any] | list[Any]) -> dict[str, Any] | li
     output_text = generate_text(prompt=json.dumps(input_json))
     try:
         parsed_output = json.loads(output_text)
-    except json.JSONDecodeError:
-        raise OpenAIServiceError("OpenAI response is not valid JSON.")
+    except json.JSONDecodeError as exc:
+        raise OpenAIServiceError("OpenAI response is not valid JSON.") from exc
 
     if not isinstance(parsed_output, (dict, list)):
         raise OpenAIServiceError("OpenAI response JSON must be an object or array.")

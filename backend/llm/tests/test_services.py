@@ -1,3 +1,5 @@
+import json
+
 from django.test import SimpleTestCase, override_settings
 from unittest.mock import Mock, patch
 
@@ -92,8 +94,9 @@ class OpenAIClientServiceTest(SimpleTestCase):
     def test_generate_json_raises_for_invalid_json_output(self, mock_generate_text):
         mock_generate_text.return_value = "not valid json"
 
-        with self.assertRaises(OpenAIServiceError):
+        with self.assertRaises(OpenAIServiceError) as exc_ctx:
             generate_json({"source": "upload"})
+        self.assertIsInstance(exc_ctx.exception.__cause__, json.JSONDecodeError)
 
     @patch("llm.services.openai_client.generate_text")
     def test_generate_json_raises_for_json_primitive_output(self, mock_generate_text):

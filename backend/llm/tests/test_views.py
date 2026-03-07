@@ -65,8 +65,9 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from OpenAI.")
 
+    @patch("llm.views.logger")
     @patch("llm.views.generate_json")
-    def test_llm_generate_returns_502_for_unexpected_error(self, mock_generate_json):
+    def test_llm_generate_returns_502_for_unexpected_error(self, mock_generate_json, mock_logger):
         mock_generate_json.side_effect = RuntimeError("upstream error")
         client = APIClient()
 
@@ -74,6 +75,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from OpenAI.")
+        mock_logger.exception.assert_called_once()
 
     @patch("llm.views.LlmGenerateResponseSerializer")
     @patch("llm.views.generate_json")
