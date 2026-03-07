@@ -42,4 +42,12 @@ describe("isJsonObjectOrArray", () => {
     it("returns false for undefined", () => {
         expect(isJsonObjectOrArray(undefined)).toBe(false);
     });
+
+    it("returns false for a Date instance", () => {
+        expect(isJsonObjectOrArray(new Date())).toBe(false);
+    });
+
+    it("returns false for a Map instance", () => {
+        expect(isJsonObjectOrArray(new Map())).toBe(false);
+    });
 });

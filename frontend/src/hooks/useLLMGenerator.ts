@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { isJsonObjectOrArray } from "@/utils/schemaValidator";
 import type { JsonValue } from "@/utils/schemaValidator";
 import type { LLMResponse } from "@/services/llm";
@@ -8,7 +9,7 @@ import type { ILLMService } from "@/lib/ILLMService";
 
 export interface UseLLMGeneratorReturn {
     input: string;
-    setInput: (value: string) => void;
+    setInput: Dispatch<SetStateAction<string>>;
     result: LLMResponse | null;
     error: string | null;
     loading: boolean;
