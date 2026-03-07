@@ -227,16 +227,16 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
 
-    def test_upload_xlsx_success(self):
-        xlsx_content = self.generate_valid_xlsx_bytes()
-
+    def test_xlsx_extension_but_invalid_mime(self):
         resp = self._post_file(
-            "sheet.xlsx",
-            xlsx_content,
+            "fake.xlsx",
+            b"this is not an excel file",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
 
     def test_mime_detection_exception(self):
         with patch(
