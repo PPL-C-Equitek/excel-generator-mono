@@ -12,7 +12,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         client = APIClient()
 
         payload = {"input_json": {"sheet": "Sheet1"}}
-        response = client.post("/api/llm/generate/", payload, format="json")
+        response = client.post("/llm/generate/", payload, format="json")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_json"], {"status": "ok"})
@@ -24,7 +24,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         client = APIClient()
 
         response = client.post(
-            "/api/llm/generate/",
+            "/llm/generate/",
             {"input_json": {"hello": "world"}, "model": "gpt-4.1-mini"},
             format="json",
         )
@@ -35,19 +35,19 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
     def test_llm_generate_rejects_missing_input_json(self):
         client = APIClient()
-        response = client.post("/api/llm/generate/", {}, format="json")
+        response = client.post("/llm/generate/", {}, format="json")
         self.assertEqual(response.status_code, 400)
         self.assertIn("input_json", response.data)
 
     def test_llm_generate_rejects_non_object_or_array_input_json(self):
         client = APIClient()
-        response = client.post("/api/llm/generate/", {"input_json": "not-json-object"}, format="json")
+        response = client.post("/llm/generate/", {"input_json": "not-json-object"}, format="json")
         self.assertEqual(response.status_code, 400)
         self.assertIn("input_json", response.data)
 
     def test_llm_generate_rejects_invalid_model(self):
         client = APIClient()
-        response = client.post("/api/llm/generate/", {"input_json": {"ok": True}, "model": ""}, format="json")
+        response = client.post("/llm/generate/", {"input_json": {"ok": True}, "model": ""}, format="json")
         self.assertEqual(response.status_code, 400)
         self.assertIn("model", response.data)
 
@@ -56,7 +56,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_generate_json.side_effect = OpenAIServiceError("OPENAI_API_KEY is not configured.")
         client = APIClient()
 
-        response = client.post("/api/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.data["detail"], "Service unavailable. Please try again later.")
@@ -66,7 +66,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_generate_json.side_effect = OpenAIServiceError("OpenAI response is not valid JSON.")
         client = APIClient()
 
-        response = client.post("/api/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from OpenAI.")
@@ -76,7 +76,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_generate_json.side_effect = RuntimeError("upstream error")
         client = APIClient()
 
-        response = client.post("/api/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from OpenAI.")
@@ -93,6 +93,6 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
     def test_llm_generate_rejects_get(self):
         client = APIClient()
-        response = client.get("/api/llm/generate/")
+        response = client.get("/llm/generate/")
         self.assertEqual(response.status_code, 405)
 

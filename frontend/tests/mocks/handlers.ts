@@ -3,7 +3,7 @@ import { http, HttpResponse } from "msw";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export const successHandler = http.post(
-    `${API_BASE}/api/llm/generate/`,
+    `${API_BASE}/llm/generate/`,
     () => {
         return HttpResponse.json(
             {
@@ -18,22 +18,22 @@ export const successHandler = http.post(
 );
 
 export const handler401 = http.post(
-    `${API_BASE}/api/llm/generate/`,
+    `${API_BASE}/llm/generate/`,
     () => HttpResponse.json({ detail: "Unauthorized" }, { status: 401 })
 );
 
 export const handler429 = http.post(
-    `${API_BASE}/api/llm/generate/`,
+    `${API_BASE}/llm/generate/`,
     () => HttpResponse.json({ detail: "Too Many Requests" }, { status: 429 })
 );
 
 export const handler504 = http.post(
-    `${API_BASE}/api/llm/generate/`,
+    `${API_BASE}/llm/generate/`,
     () => HttpResponse.json({ detail: "Gateway Timeout" }, { status: 504 })
 );
 
 export const handlerInvalidSchema = http.post(
-    `${API_BASE}/api/llm/generate/`,
+    `${API_BASE}/llm/generate/`,
     () =>
         HttpResponse.json(
             { wrong_field: "unexpected" },
