@@ -1,6 +1,17 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+vi.mock('../../../src/lib/api', () => ({
+    uploadFile: vi.fn(),
+    fetchAPI: vi.fn(),
+}))
+vi.mock('../../../src/services/llm', () => ({
+    generateJson: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+}))
+
+import { uploadFile } from '../../../src/lib/api'
+const mockUploadFile = vi.mocked(uploadFile)
 import ConvertPage from '../../../src/app/convert/ConvertPage'
 
 // Test utilities - Factory pattern for creating test data
@@ -49,6 +60,9 @@ describe('ConvertPage', () => {
 
         // Spy on console methods
         consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => { })
+
+        // Default: uploadFile resolves successfully
+        mockUploadFile.mockResolvedValue({ filename: 'test.xlsx', size: 10240, format: 'xlsx' })
     })
 
     afterEach(() => {
@@ -166,7 +180,8 @@ describe('ConvertPage', () => {
             await user.click(uploadButton)
 
             await waitFor(() => {
-                expect(consoleLogSpy).toHaveBeenCalledWith('File selected:', 'test.pdf')
+                expect(mockUploadFile).toHaveBeenCalledTimes(1)
+                expect(mockUploadFile).toHaveBeenCalledWith(expect.any(File))
             })
         })
 
@@ -178,10 +193,9 @@ describe('ConvertPage', () => {
             await user.click(uploadButton)
 
             await waitFor(() => {
-                expect(consoleLogSpy).toHaveBeenCalledTimes(1)
-                const callArgs = consoleLogSpy.mock.calls[0]
-                expect(callArgs[0]).toBe('File selected:')
-                expect(callArgs[1]).toBe('test.pdf')
+                expect(mockUploadFile).toHaveBeenCalledTimes(1)
+                const calledFile = mockUploadFile.mock.calls[0][0] as File
+                expect(calledFile.name).toBe('test.pdf')
             })
         })
 
@@ -222,7 +236,7 @@ describe('ConvertPage', () => {
             await user.click(uploadButton)
 
             await waitFor(() => {
-                expect(consoleLogSpy).toHaveBeenCalledTimes(2)
+                expect(mockUploadFile).toHaveBeenCalledTimes(2)
             })
         })
 
@@ -237,7 +251,7 @@ describe('ConvertPage', () => {
             }
 
             await waitFor(() => {
-                expect(consoleLogSpy).toHaveBeenCalledTimes(3)
+                expect(mockUploadFile).toHaveBeenCalledTimes(3)
                 expect(mockOnFileSelectCalls).toHaveLength(3)
             })
         })
@@ -271,6 +285,9 @@ describe('ConvertPage', () => {
             const uploadButton = screen.getByText('Upload File')
 
             await expect(user.click(uploadButton)).resolves.not.toThrow()
+            await waitFor(() => {
+                expect(mockUploadFile).toHaveBeenCalledTimes(1)
+            })
         })
     })
 

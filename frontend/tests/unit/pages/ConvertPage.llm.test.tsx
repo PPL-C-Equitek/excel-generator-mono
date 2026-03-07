@@ -210,6 +210,20 @@ describe('[RED] ConvertPage — LLM Integration', () => {
             })
         })
 
+        it('menggunakan nama file asli sebagai fallback jika uploadResult tidak punya filename', async () => {
+            const user = userEvent.setup()
+            mockUploadFile.mockResolvedValue({})
+            const service = makeMockService()
+            render(<ConvertPage llmService={service} />)
+
+            await user.click(screen.getByTestId('upload-btn'))
+
+            await waitFor(() => {
+                expect(screen.getByText('report.xlsx')).toBeInTheDocument()
+                expect(screen.getByTestId('file-size')).toHaveTextContent('0 KB')
+            })
+        })
+
         it('menampilkan format/ekstensi file output setelah konversi berhasil', async () => {
             const user = userEvent.setup()
             const service = makeMockService()
@@ -218,9 +232,8 @@ describe('[RED] ConvertPage — LLM Integration', () => {
             await user.click(screen.getByTestId('upload-btn'))
 
             await waitFor(() => {
-                expect(
-                    screen.getByText(/xlsx/i) || screen.getByText(/format/i)
-                ).toBeInTheDocument()
+                const xlsxElements = screen.getAllByText(/xlsx/i)
+                expect(xlsxElements.length).toBeGreaterThan(0)
             })
         })
 
@@ -306,6 +319,20 @@ describe('[RED] ConvertPage — LLM Integration', () => {
             })
         })
 
+        it('menampilkan fallback error jika uploadFile melempar non-Error object', async () => {
+            const user = userEvent.setup()
+            mockUploadFile.mockRejectedValue('string error')
+            const service = makeMockService()
+            render(<ConvertPage llmService={service} />)
+
+            await user.click(screen.getByTestId('upload-btn'))
+
+            await waitFor(() => {
+                expect(screen.getByRole('alert')).toBeInTheDocument()
+                expect(screen.getByText(/upload failed/i)).toBeInTheDocument()
+            })
+        })
+
         it('menampilkan pesan error jika llmService.generate gagal', async () => {
             const user = userEvent.setup()
             const service: ILLMService = {
@@ -318,6 +345,21 @@ describe('[RED] ConvertPage — LLM Integration', () => {
             await waitFor(() => {
                 expect(screen.getByRole('alert')).toBeInTheDocument()
                 expect(screen.getByText(/quota exceeded/i)).toBeInTheDocument()
+            })
+        })
+
+        it('menampilkan fallback error jika generate melempar non-Error object', async () => {
+            const user = userEvent.setup()
+            const service: ILLMService = {
+                generate: vi.fn().mockRejectedValue({ code: 500 }),
+            }
+            render(<ConvertPage llmService={service} />)
+
+            await user.click(screen.getByTestId('upload-btn'))
+
+            await waitFor(() => {
+                expect(screen.getByRole('alert')).toBeInTheDocument()
+                expect(screen.getByText(/conversion failed/i)).toBeInTheDocument()
             })
         })
 

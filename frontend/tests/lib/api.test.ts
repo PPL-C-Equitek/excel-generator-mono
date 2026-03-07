@@ -118,4 +118,23 @@ describe("uploadFile", () => {
 
         await expect(uploadFile(file)).rejects.toThrow("Upload failed");
     });
+
+    it("falls back to localhost:8000 when NEXT_PUBLIC_API_URL is not a valid URL", async () => {
+        vi.resetModules();
+        vi.stubEnv("NEXT_PUBLIC_API_URL", "not-a-valid-url");
+
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ message: "ok" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const { uploadFile: freshUploadFile } = await import("@/lib/api");
+        const file = new File(["content"], "test.pdf", { type: "application/pdf" });
+        await freshUploadFile(file);
+
+        const calledUrl = mockedFetch.mock.calls[0][0] as string;
+        expect(calledUrl).toBe("http://localhost:8000/api/upload/");
+    });
 });
