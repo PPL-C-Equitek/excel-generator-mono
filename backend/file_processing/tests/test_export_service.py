@@ -958,6 +958,67 @@ class ExportCSVToFilesystemTest(unittest.TestCase):
             self.assertNotEqual(first["file_id"], second["file_id"])
             self.assertNotEqual(first["file_name"], second["file_name"])
 
+    @patch("file_processing.services.export_service.open")
+    def test_export_csv_to_filesystem_raises_when_writing_file_fails(self, mocked_open):
+        output_json = self._build_valid_output_json()
+        mocked_open.side_effect = OSError("disk write failed")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(export_service.OutputCSVGenerationError):
+                export_service.export_csv_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                )
+
+    @patch("file_processing.services.export_service.os.makedirs")
+    def test_export_csv_to_filesystem_raises_when_storage_dir_creation_fails(
+        self,
+        mocked_makedirs,
+    ):
+        output_json = self._build_valid_output_json()
+        mocked_makedirs.side_effect = OSError("cannot create dir")
+
+        with self.assertRaises(export_service.OutputCSVGenerationError):
+            export_service.export_csv_to_filesystem(
+                output_json=output_json,
+                storage_dir="C:/invalid/dir",
+            )
+
+    def test_export_csv_to_filesystem_rejects_empty_token_from_generator(self):
+        output_json = self._build_valid_output_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(export_service.OutputCSVGenerationError):
+                export_service.export_csv_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                    token_generator=lambda: "   ",
+                )
+
+    def test_export_csv_to_filesystem_rejects_unsafe_token_from_generator(self):
+        output_json = self._build_valid_output_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(export_service.OutputCSVGenerationError):
+                export_service.export_csv_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                    token_generator=lambda: "abc-123",
+                )
+
+    def test_export_csv_to_filesystem_rejects_invalid_now_provider_value(self):
+        output_json = self._build_valid_output_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(export_service.OutputCSVGenerationError):
+                export_service.export_csv_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                    now_provider=lambda: "",
+                )
+
+    def test_build_safe_file_path_rejects_path_traversal(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(export_service.OutputCSVGenerationError):
+                export_service._build_safe_file_path(temp_dir, "../evil.csv")
+
 
 if __name__ == "__main__":
     unittest.main()
