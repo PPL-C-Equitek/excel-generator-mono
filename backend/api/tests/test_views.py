@@ -7,6 +7,7 @@ from unittest.mock import patch
 from api.models import GroupMember
 from io import BytesIO
 from reportlab.pdfgen import canvas
+from openpyxl import Workbook
 
 
 class BaseApiViewTest(TestCase):
@@ -99,6 +100,15 @@ class UploadEndpointTest(TestCase):
 
         output_buffer.seek(0)
         return output_buffer.read()
+    
+    def generate_valid_xlsx_bytes(self):
+        buffer = BytesIO()
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "Hello"
+        wb.save(buffer)
+        buffer.seek(0)
+        return buffer.read()
 
     def test_upload_pdf_success(self):
         pdf_doc = self.generate_valid_pdf_bytes()
@@ -108,15 +118,25 @@ class UploadEndpointTest(TestCase):
         self.assertTrue(resp.data["path"].endswith("doc.pdf"))
 
     def test_upload_xls_success(self):
-        resp = self._post_file("sheet.xls", b"data", "application/vnd.ms-excel")
+        xls_content = b"\xD0\xCF\x11\xE0" + b"\x00" * 100
+
+        resp = self._post_file(
+            "sheet.xls",
+            xls_content,
+            "application/vnd.ms-excel",
+        )
+
         self.assertEqual(resp.status_code, 200)
 
     def test_upload_xlsx_success(self):
+        xlsx_content = b"PK\x03\x04" + b"\x00" * 100
+
         resp = self._post_file(
             "sheet.xlsx",
-            b"data",
+            xlsx_content,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
         self.assertEqual(resp.status_code, 200)
 
     def test_upload_unsupported_type(self):
@@ -196,3 +216,41 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
+
+    def test_xls_extension_but_invalid_mime(self):
+        resp = self._post_file(
+            "fake.xls",
+            b"not an excel file",
+            "application/vnd.ms-excel",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+
+    def test_upload_xlsx_success(self):
+        xlsx_content = self.generate_valid_xlsx_bytes()
+
+        resp = self._post_file(
+            "sheet.xlsx",
+            xlsx_content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+
+    def test_mime_detection_exception(self):
+        with patch(
+            "file_processing.services.upload_service.magic.from_buffer"
+        ) as mock_magic:
+
+            mock_magic.side_effect = Exception("libmagic failure")
+
+            resp = self._post_file(
+                "sheet.xlsx",
+                b"dummy content",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+            self.assertEqual(resp.status_code, 400)
+            self.assertEqual(resp.data["status"], "error")
+            self.assertEqual(resp.data["message"], "Unable to determine file type.")
