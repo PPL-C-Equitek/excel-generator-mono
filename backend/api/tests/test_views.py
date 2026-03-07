@@ -2,6 +2,7 @@ from PyPDF2 import PdfReader, PdfWriter
 from django.test import TestCase
 from rest_framework.test import APIClient
 from django.core.files.uploadedfile import SimpleUploadedFile
+from unittest.mock import patch
 
 from api.models import GroupMember
 from io import BytesIO
@@ -129,6 +130,24 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
+
+    def test_invalid_file_path_detection(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        with patch(
+            "file_processing.services.upload_service.os.path.abspath"
+        ) as mock_abspath:
+
+            mock_abspath.side_effect = [
+                "/safe/base",
+                "/evil/path/file.pdf",
+            ]
+
+            with self.assertRaises(ValueError):
+                from file_processing.services.upload_service import save_temp_file
+
+                f = SimpleUploadedFile("doc.pdf", pdf_doc, content_type="application/pdf")
+                save_temp_file(f)
 
     def test_file_header_not_pdf_with_extension_pdf(self):
         resp = self._post_file("doc.pdf", b"data", "application/pdf")
