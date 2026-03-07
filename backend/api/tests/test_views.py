@@ -5,6 +5,7 @@ from rest_framework.test import APIClient, APISimpleTestCase
 
 from api.models import GroupMember
 from file_processing.services.export_service import (
+    OutputCSVGenerationError,
     OutputLLMValidationError,
 )
 
@@ -140,3 +141,34 @@ class ExportCSVViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data["status"], "error")
         self.assertIn("Failed to generate CSV", response.data["message"])
+
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_returns_500_on_generation_error(self, mocked_export):
+        mocked_export.side_effect = OutputCSVGenerationError("storage failure")
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertIn("storage failure", response.data["message"])
+
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_returns_500_when_response_metadata_invalid(
+        self,
+        mocked_export,
+    ):
+        mocked_export.return_value = {
+            "file_id": "csv_abc123",
+            "file_name": "../unsafe.csv",
+            "artifact_type": "csv",
+            "size_bytes": 128,
+            "created_at": "2026-03-07T10:00:00Z",
+        }
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertIn("invalid response metadata", response.data["message"])
