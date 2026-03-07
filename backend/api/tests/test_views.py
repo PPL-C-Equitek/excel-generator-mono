@@ -158,15 +158,21 @@ class UploadEndpointTest(TestCase):
             "file_processing.services.upload_service.os.path.abspath"
         ) as mock_abspath:
 
-            mock_abspath.side_effect = [
-                "/safe/base",
-                "/evil/path/file.pdf",
-            ]
+            def fake_abspath(path):
+                if "doc.pdf" in path:
+                    return "/evil/path/file.pdf"
+                return "/safe/base"
+
+            mock_abspath.side_effect = fake_abspath
 
             with self.assertRaises(ValueError):
                 from file_processing.services.upload_service import save_temp_file
 
-                f = SimpleUploadedFile("doc.pdf", pdf_doc, content_type="application/pdf")
+                f = SimpleUploadedFile(
+                    "doc.pdf",
+                    pdf_doc,
+                    content_type="application/pdf"
+                )
                 save_temp_file(f)
 
     def test_file_header_not_pdf_with_extension_pdf(self):
