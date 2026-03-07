@@ -153,3 +153,58 @@ describe("useLLMGenerator — service call & state transitions", () => {
         expect(result.current.loading).toBe(false);
     });
 });
+
+describe("useLLMGenerator — stale response guard", () => {
+    afterEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it("ignores response from a superseded request", async () => {
+        const staleOutput = { output_json: { from: "request-1" } };
+        const freshOutput = { output_json: { from: "request-2" } };
+
+        let resolveStale!: (v: typeof staleOutput) => void;
+        const stalePromise = new Promise<typeof staleOutput>(
+            (res) => { resolveStale = res; }
+        );
+
+        const service = makeService({
+            generate: vi.fn()
+                .mockReturnValueOnce(stalePromise)
+                .mockResolvedValueOnce(freshOutput),
+        });
+
+        const { result } = renderHook(() => useLLMGenerator(service));
+        act(() => { result.current.setInput(VALID_JSON_INPUT); });
+
+        act(() => { void result.current.handleSubmit(); });
+        await act(async () => { await result.current.handleSubmit(); });
+        await act(async () => { resolveStale(staleOutput); });
+
+        expect(result.current.result).toEqual(freshOutput);
+    });
+
+    it("ignores error from a superseded request", async () => {
+        const freshOutput = { output_json: { from: "request-2" } };
+
+        let rejectStale!: (reason: Error) => void;
+        const stalePromise = new Promise<never>(
+            (_, rej) => { rejectStale = rej; }
+        );
+
+        const service = makeService({
+            generate: vi.fn()
+                .mockReturnValueOnce(stalePromise)
+                .mockResolvedValueOnce(freshOutput),
+        });
+
+        const { result } = renderHook(() => useLLMGenerator(service));
+        act(() => { result.current.setInput(VALID_JSON_INPUT); });
+        act(() => { void result.current.handleSubmit(); });
+        await act(async () => { await result.current.handleSubmit(); });
+        await act(async () => { rejectStale(new Error("stale error")); });
+
+        expect(result.current.error).toBeNull();
+        expect(result.current.result).toEqual(freshOutput);
+    });
+});

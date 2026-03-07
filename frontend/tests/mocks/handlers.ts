@@ -42,7 +42,7 @@ export const handlerInvalidSchema = http.post(
 );
 
 export const handlerArrayOutput = http.post(
-    `${API_BASE}/api/llm/generate/`,
+    `${API_BASE}/llm/generate/`,
     () =>
         HttpResponse.json(
             { output_json: [{ id: 1, value: "row-a" }, { id: 2, value: "row-b" }] },
@@ -51,7 +51,7 @@ export const handlerArrayOutput = http.post(
 );
 
 export const handlerPrimitiveOutput = http.post(
-    `${API_BASE}/api/llm/generate/`,
+    `${API_BASE}/llm/generate/`,
     () =>
         HttpResponse.json(
             { output_json: "hanya sebuah string" },

@@ -35,4 +35,23 @@ describe("fetchAPI", () => {
 
         await expect(fetchAPI("health/")).rejects.toThrow("API error: 500");
     });
+
+    it("strips trailing slash from NEXT_PUBLIC_API_URL before building request URL", async () => {
+        vi.resetModules();
+        vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:9999/");
+
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ status: "trimmed" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const { fetchAPI: freshFetchAPI } = await import("@/lib/api");
+        const result = await freshFetchAPI("health/");
+
+        const calledUrl = mockedFetch.mock.calls[0][0] as string;
+        expect(calledUrl).toBe("http://localhost:9999/health/");
+        expect(result).toEqual({ status: "trimmed" });
+    });
 });

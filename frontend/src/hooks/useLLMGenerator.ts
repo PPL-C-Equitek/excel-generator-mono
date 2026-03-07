@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { isJsonObjectOrArray } from "@/utils/schemaValidator";
 import type { JsonValue } from "@/utils/schemaValidator";
 import type { LLMResponse } from "@/services/llm";
@@ -20,6 +20,7 @@ export function useLLMGenerator(service: ILLMService): UseLLMGeneratorReturn {
     const [result, setResult] = useState<LLMResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState<boolean>(false);
+    const requestIdRef = useRef<number>(0);
 
     async function handleSubmit(): Promise<void> {
         setError(null);
@@ -42,19 +43,25 @@ export function useLLMGenerator(service: ILLMService): UseLLMGeneratorReturn {
             setError("Input harus berupa JSON yang valid");
             return;
         }
+        requestIdRef.current += 1;
+        const currentRequestId = requestIdRef.current;
 
         setLoading(true);
         try {
             const response = await service.generate(parsedInput);
+            if (currentRequestId !== requestIdRef.current) return;
             setResult(response);
         } catch (err: unknown) {
+            if (currentRequestId !== requestIdRef.current) return;
             setError(
                 err instanceof Error
                     ? err.message
                     : "Terjadi kesalahan tidak diketahui"
             );
         } finally {
-            setLoading(false);
+            if (currentRequestId === requestIdRef.current) {
+                setLoading(false);
+            }
         }
     }
 

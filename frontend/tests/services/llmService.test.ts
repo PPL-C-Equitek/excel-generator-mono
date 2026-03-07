@@ -121,7 +121,7 @@ describe("generateJson array input & schema type validation", () => {
 
   it("throws schema error when output_json is a primitive number", async () => {
     server.use(
-      http.post(`${API_BASE}/api/llm/generate/`, () =>
+      http.post(`${API_BASE}/llm/generate/`, () =>
         HttpResponse.json({ output_json: 42 }, { status: 200 })
       )
     );
