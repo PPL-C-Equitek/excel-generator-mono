@@ -2,6 +2,7 @@ import os
 from uuid import uuid4
 from django.conf import settings
 from django.utils.text import get_valid_filename
+from .excel_service import process_uploaded_excel
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
 MAX_FILE_SIZE = 10 * 1024 * 1024  #10MB
@@ -41,3 +42,14 @@ def save_temp_file(uploaded_file):
             destination.write(chunk)
 
     return file_path
+
+def handle_excel_upload(uploaded_file):
+    is_valid, error = validate_file(uploaded_file)
+    if not is_valid:
+        return False, error, None
+
+    file_path = save_temp_file(uploaded_file)
+
+    success, error, data = process_uploaded_excel(file_path)
+    
+    return success, error, data

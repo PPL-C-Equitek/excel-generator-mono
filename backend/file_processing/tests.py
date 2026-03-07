@@ -6,9 +6,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 class ExcelParsingErrorHandlingTests(TestCase):
     def setUp(self):
         self.client = Client()
-        # TODO: Sesuaikan dengan URL endpoint API yang sebenarnya
-        # self.upload_url = reverse('nama-url-upload') 
-        self.upload_url = '/api/file-processing/upload/' 
+        self.upload_url = '/upload/' 
 
     def test_upload_without_file_returns_400(self):
         response = self.client.post(self.upload_url, {})
