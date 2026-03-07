@@ -16,22 +16,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_json"], {"status": "ok"})
-        mock_generate_json.assert_called_once_with(input_json={"sheet": "Sheet1"}, model=None)
-
-    @patch("llm.views.generate_json")
-    def test_llm_generate_accepts_custom_model(self, mock_generate_json):
-        mock_generate_json.return_value = {"status": "ok", "model": "custom"}
-        client = APIClient()
-
-        response = client.post(
-            "/llm/generate/",
-            {"input_json": {"hello": "world"}, "model": "gpt-4.1-mini"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["output_json"], {"status": "ok", "model": "custom"})
-        mock_generate_json.assert_called_once_with(input_json={"hello": "world"}, model="gpt-4.1-mini")
+        mock_generate_json.assert_called_once_with(input_json={"sheet": "Sheet1"})
 
     def test_llm_generate_rejects_missing_input_json(self):
         client = APIClient()
@@ -45,9 +30,13 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("input_json", response.data)
 
-    def test_llm_generate_rejects_invalid_model(self):
+    def test_llm_generate_rejects_client_model_field(self):
         client = APIClient()
-        response = client.post("/llm/generate/", {"input_json": {"ok": True}, "model": ""}, format="json")
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"ok": True}, "model": "gpt-4.1-mini"},
+            format="json",
+        )
         self.assertEqual(response.status_code, 400)
         self.assertIn("model", response.data)
 

@@ -9,7 +9,6 @@ export type { JsonValue } from "@/utils/schemaValidator";
 
 export interface LLMRequest {
     input_json: JsonValue;
-    model?: string;
 }
 
 export interface LLMResponse {

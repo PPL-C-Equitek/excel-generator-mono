@@ -13,12 +13,13 @@ def llm_generate(request):
     request_serializer.is_valid(raise_exception=True)
 
     input_json = request_serializer.validated_data["input_json"]
-    model = request_serializer.validated_data.get("model")
-
     try:
-        output_json = generate_json(input_json=input_json, model=model)
+        print("test here")
+        output_json = generate_json(input_json=input_json)
     except OpenAIServiceError as exc:
+        print(exc)
         message = str(exc)
+        print(message)
         status_code = 503 if "not configured" in message.lower() else 502
         if status_code == 503:
             detail = "Service unavailable. Please try again later."

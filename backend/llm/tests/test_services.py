@@ -5,7 +5,11 @@ from llm.services.openai_client import OpenAIServiceError, generate_json, genera
 
 
 class OpenAIClientServiceTest(SimpleTestCase):
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_SYSTEM_PROMPT="",
+    )
     @patch("llm.services.openai_client.OpenAI")
     def test_generate_text_uses_default_model(self, mock_openai):
         mock_client = Mock()
@@ -41,21 +45,6 @@ class OpenAIClientServiceTest(SimpleTestCase):
             instructions="Return strict JSON only.",
         )
 
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_uses_explicit_model(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.return_value = Mock(output_text="custom model result")
-
-        result = generate_text("Say hi", model="gpt-4.1")
-
-        self.assertEqual(result, "custom model result")
-        mock_client.responses.create.assert_called_once_with(
-            model="gpt-4.1",
-            input="Say hi",
-        )
-
     @override_settings(OPENAI_API_KEY="", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.OpenAI")
     def test_generate_text_raises_when_key_missing(self, mock_openai):
@@ -84,7 +73,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
         result = generate_json({"source": "upload"})
 
         self.assertEqual(result, {"status": "ok", "rows": [1, 2]})
-        mock_generate_text.assert_called_once_with(prompt='{"source": "upload"}', model=None)
+        mock_generate_text.assert_called_once_with(prompt='{"source": "upload"}')
 
     @patch("llm.services.openai_client.generate_text")
     def test_generate_json_parses_array_response(self, mock_generate_text):
@@ -93,7 +82,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
         result = generate_json([{"input": 1}])
 
         self.assertEqual(result, [{"a": 1}])
-        mock_generate_text.assert_called_once_with(prompt='[{"input": 1}]', model=None)
+        mock_generate_text.assert_called_once_with(prompt='[{"input": 1}]')
 
     def test_generate_json_rejects_non_json_object_or_array_input(self):
         with self.assertRaises(ValueError):
