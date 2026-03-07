@@ -1,5 +1,8 @@
 import csv
 import io
+import os
+import re
+import tempfile
 import unittest
 import zipfile
 from copy import deepcopy
@@ -833,6 +836,127 @@ class GenerateCSVTest(unittest.TestCase):
                     ["A-1", "15000"],
                 ],
             )
+
+
+class ExportCSVToFilesystemTest(unittest.TestCase):
+    def _build_valid_output_json(self):
+        return {
+            "document_info": {
+                "source_type": "Excel",
+                "filename": "laporan_tahunan.xlsx",
+            },
+            "summary": {
+                "grand_total": 1500000,
+                "period": "2026",
+            },
+            "content_data": [
+                {
+                    "table_name": "Sheet1_Januari",
+                    "headers": ["item_name", "quantity", "price"],
+                    "rows": [
+                        {"item_name": "Kertas", "quantity": 10, "price": 50000},
+                        {"item_name": "Pena", "quantity": 5, "price": 10000},
+                    ],
+                }
+            ],
+        }
+
+    def test_export_csv_to_filesystem_exposes_expected_api(self):
+        self.assertTrue(
+            hasattr(export_service, "export_csv_to_filesystem"),
+            "export_csv_to_filesystem must be implemented in export_service.",
+        )
+
+    def test_export_csv_to_filesystem_saves_single_sheet_as_csv(self):
+        output_json = self._build_valid_output_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = export_service.export_csv_to_filesystem(
+                output_json=output_json,
+                storage_dir=temp_dir,
+            )
+
+            self.assertTrue(re.match(r"^csv_[a-z0-9]{32}$", result["file_id"]))
+            self.assertEqual(result["artifact_type"], "csv")
+            self.assertTrue(result["file_name"].startswith("export_"))
+            self.assertTrue(result["file_name"].endswith(".csv"))
+            self.assertGreater(result["size_bytes"], 0)
+            self.assertIn("created_at", result)
+
+            file_path = os.path.join(temp_dir, result["file_name"])
+            self.assertTrue(os.path.exists(file_path))
+            with open(file_path, encoding="utf-8") as generated:
+                rows = list(csv.reader(generated))
+            self.assertEqual(rows[0], ["item_name", "quantity", "price"])
+
+    def test_export_csv_to_filesystem_saves_multi_sheet_as_zip(self):
+        output_json = self._build_valid_output_json()
+        output_json["content_data"].append(
+            {
+                "table_name": "Sheet2_Februari",
+                "headers": ["item_name", "quantity", "price"],
+                "rows": [{"item_name": "Tinta", "quantity": 1, "price": 400000}],
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = export_service.export_csv_to_filesystem(
+                output_json=output_json,
+                storage_dir=temp_dir,
+            )
+
+            self.assertEqual(result["artifact_type"], "zip")
+            self.assertTrue(result["file_name"].startswith("export_"))
+            self.assertTrue(result["file_name"].endswith(".zip"))
+
+            file_path = os.path.join(temp_dir, result["file_name"])
+            self.assertTrue(os.path.exists(file_path))
+            with zipfile.ZipFile(file_path, "r") as archive:
+                self.assertEqual(sorted(archive.namelist()), ["Sheet1_Januari.csv", "Sheet2_Februari.csv"])
+
+    def test_export_csv_to_filesystem_rejects_invalid_output_json(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(OutputLLMValidationError):
+                export_service.export_csv_to_filesystem(
+                    output_json={},
+                    storage_dir=temp_dir,
+                )
+
+    def test_export_csv_to_filesystem_rejects_invalid_storage_dir(self):
+        output_json = self._build_valid_output_json()
+
+        with self.assertRaises(export_service.OutputCSVGenerationError):
+            export_service.export_csv_to_filesystem(
+                output_json=output_json,
+                storage_dir="",
+            )
+
+    def test_export_csv_to_filesystem_supports_test_doubles_for_id_and_timestamp(self):
+        output_json = self._build_valid_output_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = export_service.export_csv_to_filesystem(
+                output_json=output_json,
+                storage_dir=temp_dir,
+                token_generator=lambda: "abc123",
+                now_provider=lambda: "2026-03-07T10:00:00Z",
+            )
+
+            self.assertEqual(result["file_id"], "csv_abc123")
+            self.assertEqual(result["created_at"], "2026-03-07T10:00:00Z")
+            self.assertEqual(result["file_name"], "export_abc123.csv")
+
+    def test_export_csv_to_filesystem_generates_unique_file_id(self):
+        output_json = self._build_valid_output_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            first = export_service.export_csv_to_filesystem(
+                output_json=output_json,
+                storage_dir=temp_dir,
+            )
+            second = export_service.export_csv_to_filesystem(
+                output_json=output_json,
+                storage_dir=temp_dir,
+            )
+
+            self.assertNotEqual(first["file_id"], second["file_id"])
+            self.assertNotEqual(first["file_name"], second["file_name"])
 
 
 if __name__ == "__main__":
