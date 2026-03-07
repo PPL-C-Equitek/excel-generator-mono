@@ -20,9 +20,13 @@ def llm_generate(request):
     except OpenAIServiceError as exc:
         message = str(exc)
         status_code = 503 if "not configured" in message.lower() else 502
-        return Response({"detail": message}, status=status_code)
-    except ValueError as exc:
-        return Response({"detail": str(exc)}, status=400)
+        if status_code == 503:
+            detail = "Service unavailable. Please try again later."
+        else:
+            detail = "Failed to generate response from OpenAI."
+        return Response({"detail": detail}, status=status_code)
+    except ValueError:
+        return Response({"detail": "Invalid request payload."}, status=400)
     except Exception:
         return Response({"detail": "Failed to generate response from OpenAI."}, status=502)
 

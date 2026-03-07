@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import LLMClient from "@/components/LLMClient";
-import { generateJson } from "@/services/llm";
+import type { ILLMService } from "@/lib/ILLMService";
 
 vi.mock("react-syntax-highlighter", () => ({
   Prism: ({ children }: { children: string }) => <pre data-testid="syntax-hl">{children}</pre>,
@@ -11,16 +11,13 @@ vi.mock("react-syntax-highlighter/dist/esm/styles/prism", () => ({
   atomDark: {},
 }));
 
-vi.mock("@/services/llm", () => ({
-  generateJson: vi.fn(),
-}));
-
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
 const VALID_INPUT = JSON.stringify({ key: "value" });
+const mockService: ILLMService = { generate: vi.fn() };
 
 function fillTextarea(value: string) {
   fireEvent.change(screen.getByRole("textbox"), { target: { value } });
@@ -28,16 +25,16 @@ function fillTextarea(value: string) {
 
 describe("LLMClient", () => {
   it("shows empty state on first render", () => {
-    render(<LLMClient />);
+    render(<LLMClient service={mockService} />);
     expect(screen.getByText("Hasil akan tampil di sini")).toBeInTheDocument();
   });
 
   it("renders output_json on successful submit", async () => {
-    vi.mocked(generateJson).mockResolvedValue({
+    vi.mocked(mockService.generate).mockResolvedValue({
       output_json: { summary: "Extracted", rows: [{ id: 1 }] },
     });
 
-    render(<LLMClient />);
+    render(<LLMClient service={mockService} />);
     fillTextarea(VALID_INPUT);
     await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
@@ -45,9 +42,9 @@ describe("LLMClient", () => {
   });
 
   it("shows loading state while waiting for response", async () => {
-    vi.mocked(generateJson).mockReturnValue(new Promise(() => {}));
+    vi.mocked(mockService.generate).mockReturnValue(new Promise(() => { }));
 
-    render(<LLMClient />);
+    render(<LLMClient service={mockService} />);
     fillTextarea(VALID_INPUT);
     await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
@@ -56,9 +53,9 @@ describe("LLMClient", () => {
   });
 
   it("shows known error message from service", async () => {
-    vi.mocked(generateJson).mockRejectedValue(new Error("API Key tidak valid"));
+    vi.mocked(mockService.generate).mockRejectedValue(new Error("API Key tidak valid"));
 
-    render(<LLMClient />);
+    render(<LLMClient service={mockService} />);
     fillTextarea(VALID_INPUT);
     await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
@@ -66,31 +63,31 @@ describe("LLMClient", () => {
   });
 
   it("validates empty input and does not call service", async () => {
-    render(<LLMClient />);
+    render(<LLMClient service={mockService} />);
 
     await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Input tidak boleh kosong")).toBeInTheDocument();
     });
-    expect(generateJson).not.toHaveBeenCalled();
+    expect(mockService.generate).not.toHaveBeenCalled();
   });
 
   it("validates invalid JSON and does not call service", async () => {
-    render(<LLMClient />);
+    render(<LLMClient service={mockService} />);
     fillTextarea("ini bukan json { tidak valid");
     await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Input harus berupa JSON yang valid")).toBeInTheDocument();
     });
-    expect(generateJson).not.toHaveBeenCalled();
+    expect(mockService.generate).not.toHaveBeenCalled();
   });
 
   it("shows fallback message when service rejects non-Error", async () => {
-    vi.mocked(generateJson).mockRejectedValue("unexpected");
+    vi.mocked(mockService.generate).mockRejectedValue("unexpected");
 
-    render(<LLMClient />);
+    render(<LLMClient service={mockService} />);
     fillTextarea(VALID_INPUT);
     await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
