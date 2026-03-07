@@ -9,10 +9,14 @@ class OpenAIServiceError(Exception):
     """Raised when the OpenAI integration cannot return a valid result."""
 
 
+class OpenAIConfigurationError(OpenAIServiceError):
+    """Raised when OpenAI settings are missing or invalid."""
+
+
 def _build_client() -> OpenAI:
     api_key = settings.OPENAI_API_KEY.strip()
     if not api_key:
-        raise OpenAIServiceError("OPENAI_API_KEY is not configured.")
+        raise OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
     return OpenAI(api_key=api_key)
 
 
@@ -44,8 +48,8 @@ def generate_json(input_json: dict[str, Any] | list[Any]) -> dict[str, Any] | li
     output_text = generate_text(prompt=json.dumps(input_json))
     try:
         parsed_output = json.loads(output_text)
-    except json.JSONDecodeError as exc:
-        raise OpenAIServiceError("OpenAI response is not valid JSON.") from exc
+    except json.JSONDecodeError:
+        raise OpenAIServiceError("OpenAI response is not valid JSON.")
 
     if not isinstance(parsed_output, (dict, list)):
         raise OpenAIServiceError("OpenAI response JSON must be an object or array.")
