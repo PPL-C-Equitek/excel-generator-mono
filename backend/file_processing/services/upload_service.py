@@ -53,8 +53,13 @@ def validate_file(uploaded_file):
     ext = os.path.splitext(filename)[1].lower()
 
     # Validate extension
+    # Validate extension
     if ext not in ALLOWED_EXTENSIONS:
         return False, "Unsupported file type. Only PDF, XLS, and XLSX are allowed."
+
+    # Validate size
+    if uploaded_file.size > MAX_FILE_SIZE:
+        return False, "File too large. Maximum allowed size is 10MB."
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
