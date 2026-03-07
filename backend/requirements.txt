@@ -1,6 +1,6 @@
 asgiref==3.11.1
 coverage==7.13.4
-Django==5.2.11
+Django==6.0.3
 django-cors-headers==4.9.0
 djangorestframework==3.16.1
 gunicorn==25.1.0
