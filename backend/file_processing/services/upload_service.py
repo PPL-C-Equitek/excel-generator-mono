@@ -69,7 +69,7 @@ def validate_pdf_not_password_protected(uploaded_file):
 
         return True, None
 
-    except (PermissionError, Exception):
+    except (Exception):
         return False, "The PDF file is password-protected and cannot be accessed"
 
 
