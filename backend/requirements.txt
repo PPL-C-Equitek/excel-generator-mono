@@ -1,9 +1,9 @@
 asgiref==3.11.1
-coverage==7.10.6
+coverage==7.13.4
 Django==5.2.11
 django-cors-headers==4.9.0
 djangorestframework==3.16.1
-gunicorn==25.0.3
+gunicorn==25.1.0
 openai>=1.0.0,<2.0.0
 packaging==26.0
 psycopg2-binary==2.9.11

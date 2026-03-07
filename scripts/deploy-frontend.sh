@@ -1,9 +1,8 @@
 #!/bin/bash
 set -e
 
-set -a
-source ~/apps/.env
-set +a
+source "$(dirname "$0")/load-env.sh"
+load_env_file "$HOME/apps/.env"
 
 export NVM_DIR="$HOME/.nvm"
 source "$NVM_DIR/nvm.sh"
