@@ -59,7 +59,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.data["detail"], "OPENAI_API_KEY is not configured.")
+        self.assertEqual(response.data["detail"], "Service unavailable. Please try again later.")
 
     @patch("llm.views.generate_json")
     def test_llm_generate_returns_502_for_invalid_json_response(self, mock_generate_json):
@@ -69,7 +69,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.data["detail"], "OpenAI response is not valid JSON.")
+        self.assertEqual(response.data["detail"], "Failed to generate response from OpenAI.")
 
     @patch("llm.views.generate_json")
     def test_llm_generate_returns_502_for_unexpected_error(self, mock_generate_json):
@@ -80,6 +80,16 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from OpenAI.")
+
+    @patch("llm.views.generate_json")
+    def test_llm_generate_returns_400_for_value_error(self, mock_generate_json):
+        mock_generate_json.side_effect = ValueError("input_json must be an object or array.")
+        client = APIClient()
+
+        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
 
     def test_llm_generate_rejects_get(self):
         client = APIClient()
