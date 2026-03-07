@@ -57,7 +57,7 @@ describe('UploadZone', () => {
     it('renders button with correct initial state', () => {
       render(<UploadZone />)
       const button = screen.getByText('Upload File')
-      expect(button).not.toBeDisabled()
+      expect(button).toBeInTheDocument()
       expect(button).toHaveClass('bg-red-700', 'text-white')
     })
 
@@ -76,7 +76,6 @@ describe('UploadZone', () => {
     it('renders drop zone with accessible attributes', () => {
       render(<UploadZone />)
       const dropZone = screen.getByTestId('drop-zone')
-
       expect(dropZone).toHaveAttribute('aria-label', 'File upload drop zone')
     })
   })
@@ -113,18 +112,13 @@ describe('UploadZone', () => {
       })
     })
 
-    it('triggers file input click when button is clicked', async () => {
-      mockUploadFile.mockResolvedValue({ filename: 'test.pdf' })
-
+    it('triggers file input when drop zone label is clicked', () => {
       render(<UploadZone />)
-      const button = screen.getByText('Upload File')
+      const dropZone = screen.getByTestId('drop-zone') as HTMLLabelElement
       const input = screen.getByTestId('file-input') as HTMLInputElement
 
-      const clickSpy = vi.spyOn(input, 'click')
-
-      await userEvent.click(button)
-
-      expect(clickSpy).toHaveBeenCalled()
+      expect(dropZone.tagName).toBe('LABEL')
+      expect(dropZone.control).toBe(input)
     })
 
     it('handles multiple file selections correctly', async () => {
@@ -200,7 +194,6 @@ describe('UploadZone', () => {
       render(<UploadZone />)
       const dropZone = screen.getByTestId('drop-zone')
 
-      // Drag over should not throw and should change visual state
       expect(() => fireEvent.dragOver(dropZone)).not.toThrow()
       expect(dropZone).toHaveClass('border-red-600')
     })
@@ -214,10 +207,8 @@ describe('UploadZone', () => {
       const file = createMockFile()
       const dragEvent = createDragEvent([file])
 
-      // Drop should not throw
       expect(() => fireEvent.drop(dropZone, dragEvent)).not.toThrow()
 
-      // File should be processed
       await waitFor(() => {
         expect(mockUploadFile).toHaveBeenCalledWith(file)
       })
@@ -256,19 +247,20 @@ describe('UploadZone', () => {
       expect(screen.getByText('Uploading...')).toBeInTheDocument()
     })
 
-    it('disables button while uploading', async () => {
+    it('disables file input while uploading', async () => {
       mockUploadFile.mockImplementation(
         () => new Promise((resolve) => setTimeout(() => resolve({ filename: 'test.pdf' }), 1000))
       )
 
       render(<UploadZone />)
       const file = createMockFile()
-      const input = screen.getByTestId('file-input')
+      const input = screen.getByTestId('file-input') as HTMLInputElement
 
       await userEvent.upload(input, file)
 
-      const button = screen.getByText('Uploading...')
-      expect(button).toBeDisabled()
+      // The <input> carries disabled, not the <span> label text
+      expect(screen.getByText('Uploading...')).toBeInTheDocument()
+      expect(input).toBeDisabled()
     })
 
     it('re-enables button after upload completes', async () => {
@@ -276,13 +268,13 @@ describe('UploadZone', () => {
 
       render(<UploadZone />)
       const file = createMockFile()
-      const input = screen.getByTestId('file-input')
+      const input = screen.getByTestId('file-input') as HTMLInputElement
 
       await userEvent.upload(input, file)
 
       await waitFor(() => {
-        const button = screen.getByText('Upload File')
-        expect(button).not.toBeDisabled()
+        expect(screen.getByText('Upload File')).toBeInTheDocument()
+        expect(input).not.toBeDisabled()
       })
     })
   })
@@ -323,12 +315,10 @@ describe('UploadZone', () => {
       render(<UploadZone />)
       const input = screen.getByTestId('file-input')
 
-      // First upload fails
       const file1 = createMockFile('fail.pdf')
       await userEvent.upload(input, file1)
       await waitFor(() => expect(screen.getByText('First error')).toBeInTheDocument())
 
-      // Second upload succeeds
       const file2 = createMockFile('success.pdf')
       await userEvent.upload(input, file2)
 
@@ -386,10 +376,8 @@ describe('UploadZone', () => {
 
       await userEvent.upload(input, file)
 
-      // Should not be called yet
       expect(mockOnFileSelect).not.toHaveBeenCalled()
 
-      // Resolve the upload
       resolveUpload!({ filename: 'test.pdf' })
 
       await waitFor(() => {
