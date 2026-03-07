@@ -89,11 +89,11 @@ class ExportCSVViewTest(APISimpleTestCase):
         }
 
     def test_export_csv_endpoint_rejects_get_method(self):
-        response = self.client.get("/api/export/csv")
+        response = self.client.get("/export/csv")
         self.assertEqual(response.status_code, 405)
 
     def test_export_csv_endpoint_returns_400_if_output_json_missing(self):
-        response = self.client.post("/api/export/csv", data={}, format="json")
+        response = self.client.post("/export/csv", data={}, format="json")
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("output_json", response.data)
@@ -109,7 +109,7 @@ class ExportCSVViewTest(APISimpleTestCase):
         }
         payload = {"output_json": self._valid_output_json()}
 
-        response = self.client.post("/api/export/csv", data=payload, format="json")
+        response = self.client.post("/export/csv", data=payload, format="json")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["file_id"], "csv_abc123")
@@ -124,7 +124,7 @@ class ExportCSVViewTest(APISimpleTestCase):
         mocked_export.side_effect = OutputLLMValidationError("invalid schema")
         payload = {"output_json": self._valid_output_json()}
 
-        response = self.client.post("/api/export/csv", data=payload, format="json")
+        response = self.client.post("/export/csv", data=payload, format="json")
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["status"], "error")
@@ -135,7 +135,7 @@ class ExportCSVViewTest(APISimpleTestCase):
         mocked_export.side_effect = RuntimeError("disk full")
         payload = {"output_json": self._valid_output_json()}
 
-        response = self.client.post("/api/export/csv", data=payload, format="json")
+        response = self.client.post("/export/csv", data=payload, format="json")
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data["status"], "error")
