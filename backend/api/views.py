@@ -8,10 +8,6 @@ from file_processing.services.upload_service import (
     process_upload,
 )
 
-ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-
-
 @api_view(["GET"])
 def health(request):
     return Response({"status": "ok", "message": "Backend is running!"})
