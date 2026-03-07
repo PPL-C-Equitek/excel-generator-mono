@@ -1,4 +1,5 @@
 from django.test import SimpleTestCase
+from django.core.cache import cache
 from rest_framework.test import APIClient
 from unittest.mock import patch
 
@@ -6,6 +7,10 @@ from llm.services.openai_client import OpenAIConfigurationError, OpenAIServiceEr
 
 
 class LlmGenerateEndpointTest(SimpleTestCase):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+
     @patch("llm.views.generate_json")
     def test_llm_generate_returns_200(self, mock_generate_json):
         mock_generate_json.return_value = {"status": "ok"}
@@ -100,4 +105,19 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         client = APIClient()
         response = client.get("/llm/generate/")
         self.assertEqual(response.status_code, 405)
+
+    @patch("llm.views.generate_json")
+    def test_llm_generate_rate_limited_5_per_minute(self, mock_generate_json):
+        mock_generate_json.return_value = {"status": "ok"}
+        client = APIClient()
+        payload = {"input_json": {"hello": "world"}}
+
+        for _ in range(5):
+            response = client.post("/llm/generate/", payload, format="json", REMOTE_ADDR="127.0.0.99")
+            self.assertEqual(response.status_code, 200)
+
+        blocked = client.post("/llm/generate/", payload, format="json", REMOTE_ADDR="127.0.0.99")
+        self.assertEqual(blocked.status_code, 429)
+        self.assertIn("detail", blocked.data)
+        self.assertEqual(blocked["X-RateLimit-Limit"], "5")
 
