@@ -11,3 +11,5 @@ sqlparse==0.5.5
 tzdata==2025.3
 PyPDF2==3.0.1
 reportlab==4.1.0
+python-magic==0.4.27
+openpyxl==3.1.3

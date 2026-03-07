@@ -1,4 +1,5 @@
 import os
+import magic
 from uuid import uuid4
 from django.conf import settings
 from django.utils.text import get_valid_filename
@@ -6,6 +7,19 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
+ALLOWED_MIME_TYPES = {
+    ".pdf": ["application/pdf"],
+    ".xls": [
+        "application/vnd.ms-excel",
+        "application/octet-stream",
+    ],
+    ".xlsx": [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/zip",
+        "application/x-zip",
+        "application/octet-stream",
+    ],
+}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 def process_upload(uploaded_file):
@@ -14,6 +28,10 @@ def process_upload(uploaded_file):
         return False, error, None
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+    is_valid, error = validate_mime_type(uploaded_file, ext)
+    if not is_valid:
+        return False, error, None
 
     if ext == ".pdf":
 
@@ -71,6 +89,23 @@ def validate_pdf_not_password_protected(uploaded_file):
 
     except (Exception):
         return False, "The PDF file is password-protected and cannot be accessed"
+    
+
+def validate_mime_type(uploaded_file, ext):
+    try:
+        uploaded_file.seek(0)
+        mime = magic.from_buffer(uploaded_file.read(2048), mime=True)
+        uploaded_file.seek(0)
+
+        expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
+
+        if mime not in expected_mimes:
+            return False, "File content does not match its extension."
+
+        return True, None
+
+    except Exception:
+        return False, "Unable to determine file type."
 
 
 def save_temp_file(uploaded_file):
