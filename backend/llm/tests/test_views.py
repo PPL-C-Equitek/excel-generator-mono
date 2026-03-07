@@ -86,7 +86,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_generate_json.side_effect = ValueError("input_json must be an object or array.")
         client = APIClient()
 
-        response = client.post("/api/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["detail"], "Invalid request payload.")
