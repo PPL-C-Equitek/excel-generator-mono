@@ -35,7 +35,7 @@ function Alert({ message }: Readonly<{ message: string }>) {
     );
 }
 
-export default function LLMClient({ service = defaultService }: Props) {
+export default function LLMClient({ service = defaultService }: Readonly<Props>) {
     const { input, setInput, result, error, loading, handleSubmit } =
         useLLMGenerator(service);
 
