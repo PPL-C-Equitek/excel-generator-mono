@@ -125,3 +125,124 @@ Badge files:
 - Workflow files:
   - `.github/workflows/backend.yml`
   - `.github/workflows/frontend.yml`
+
+## 8) TLS / HTTPS Setup
+
+The application is served over HTTPS using **Nginx** as a reverse proxy and **Let's Encrypt** (via Certbot) for TLS certificates.
+
+### Domains
+
+| Domain | Proxies to | Nginx config file |
+|---|---|---|
+| `excelproject.equitek.id` | `127.0.0.1:3000` (Next.js frontend) | `/etc/nginx/sites-enabled/excelproject` |
+| `excelproject-api.equitek.id` | `127.0.0.1:8000` (Django backend) | `/etc/nginx/sites-enabled/excelproject-api` |
+
+Both domains also cover their `www.` variants. HTTP (port 80) requests are automatically redirected to HTTPS (port 443) by Certbot-managed server blocks.
+
+### Certificate Details
+
+Certificates are issued by Let's Encrypt using ECDSA keys and stored at:
+
+- `/etc/letsencrypt/live/excelproject.equitek.id/fullchain.pem`
+- `/etc/letsencrypt/live/excelproject-api.equitek.id/fullchain.pem`
+
+Shared TLS settings are in `/etc/letsencrypt/options-ssl-nginx.conf` and DH params in `/etc/letsencrypt/ssl-dhparams.pem` (both managed by Certbot).
+
+### Auto-Renewal
+
+Certbot runs twice daily via systemd timer (`certbot.timer`). Certificates are renewed automatically when fewer than 30 days remain before expiry. Nginx is reloaded automatically after successful renewal.
+
+Verify renewal is working:
+
+```bash
+sudo certbot renew --dry-run
+```
+
+Check timer status:
+
+```bash
+sudo systemctl status certbot.timer
+```
+
+### Firewall
+
+UFW is currently **inactive** on the server. If enabled in the future, ensure ports 80 and 443 are allowed:
+
+```bash
+sudo ufw allow 'Nginx Full'
+sudo ufw enable
+```
+
+### Initial Setup (for new server or domain)
+
+1. Install Nginx and Certbot:
+
+   ```bash
+   sudo apt update
+   sudo apt install nginx certbot python3-certbot-nginx
+   ```
+
+2. Create an Nginx site config in `/etc/nginx/sites-available/yoursite`:
+
+   **Frontend example:**
+
+   ```nginx
+   server {
+       listen 80;
+       server_name yourdomain.equitek.id www.yourdomain.equitek.id;
+
+       location / {
+           proxy_pass http://127.0.0.1:3000;
+           proxy_http_version 1.1;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection 'upgrade';
+           proxy_set_header Host $host;
+       }
+   }
+   ```
+
+   **Backend example:**
+
+   ```nginx
+   server {
+       listen 80;
+       server_name yourdomain-api.equitek.id www.yourdomain-api.equitek.id;
+
+       location / {
+           proxy_pass http://127.0.0.1:8000;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+   ```
+
+3. Enable the site and test:
+
+   ```bash
+   sudo ln -s /etc/nginx/sites-available/yoursite /etc/nginx/sites-enabled/
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+4. Run Certbot to obtain certificates and auto-configure SSL (this modifies the config above to add the `listen 443 ssl` block and HTTP→HTTPS redirect):
+
+   ```bash
+   sudo certbot --nginx -d yourdomain.equitek.id -d www.yourdomain.equitek.id
+   ```
+
+5. Verify the certbot timer is active:
+
+   ```bash
+   sudo systemctl enable certbot.timer
+   sudo systemctl start certbot.timer
+   ```
+
+### Troubleshooting
+
+- **Check certificate expiry:** `sudo certbot certificates`
+- **Test Nginx config:** `sudo nginx -t`
+- **Reload Nginx after manual config changes:** `sudo systemctl reload nginx`
+- **Check Nginx error logs:** `sudo tail -f /var/log/nginx/error.log`
+- **Force renewal (if needed):** `sudo certbot renew --force-renewal`
