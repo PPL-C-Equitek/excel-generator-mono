@@ -4,6 +4,7 @@ from unittest.mock import patch
 from rest_framework.test import APIClient, APISimpleTestCase
 
 from api.models import GroupMember
+from api.views import _resolve_download_filename, _sanitize_download_filename
 from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
@@ -336,3 +337,31 @@ class DownloadCSVViewTest(APISimpleTestCase):
         response = self.client.post("/export/csv/csv_abc123/download")
 
         self.assertEqual(response.status_code, 405)
+
+
+class DownloadFilenameHelperTest(APISimpleTestCase):
+    def test_sanitize_download_filename_rejects_empty_after_trim(self):
+        self.assertIsNone(_sanitize_download_filename("   \r\n   "))
+
+    def test_sanitize_download_filename_rejects_null_byte(self):
+        self.assertIsNone(_sanitize_download_filename("report\x00.csv"))
+
+    def test_sanitize_download_filename_rejects_dot_and_dotdot(self):
+        self.assertIsNone(_sanitize_download_filename("."))
+        self.assertIsNone(_sanitize_download_filename(".."))
+
+    def test_resolve_download_filename_rewrites_wrong_extension(self):
+        resolved = _resolve_download_filename(
+            requested_name="laporan.txt",
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+        )
+        self.assertEqual(resolved, "laporan.csv")
+
+    def test_resolve_download_filename_keeps_matching_extension_case_insensitive(self):
+        resolved = _resolve_download_filename(
+            requested_name="laporan.CSV",
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+        )
+        self.assertEqual(resolved, "laporan.CSV")
