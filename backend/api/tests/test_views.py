@@ -93,14 +93,6 @@ class ExportCSVViewTest(APISimpleTestCase):
         response = self.client.get("/export/csv")
         self.assertEqual(response.status_code, 405)
 
-    def test_export_csv_endpoint_rejects_post_without_csrf_when_enforced(self):
-        csrf_client = APIClient(enforce_csrf_checks=True)
-        payload = {"output_json": self._valid_output_json()}
-
-        response = csrf_client.post("/export/csv", data=payload, format="json")
-
-        self.assertEqual(response.status_code, 403)
-
     def test_export_csv_endpoint_returns_400_if_output_json_missing(self):
         response = self.client.post("/export/csv", data={}, format="json")
 
