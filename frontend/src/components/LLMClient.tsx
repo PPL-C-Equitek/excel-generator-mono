@@ -23,7 +23,7 @@ function SkeletonLoader() {
     );
 }
 
-function Alert({ message }: { message: string }) {
+function Alert({ message }: Readonly<{ message: string }>) {
     return (
         <div
             role="alert"
