@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { uploadFile } from '@/lib/api'
 import { generateJson } from '@/services/llm'
 import { isJsonObjectOrArray } from '@/utils/schemaValidator'
@@ -28,8 +28,12 @@ export function useConvertFlow(
     const [isConverting, setIsConverting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
+    const requestIdRef = useRef<number>(0)
 
     const handleFileSelect = async (file: File): Promise<void> => {
+        requestIdRef.current += 1
+        const currentRequestId = requestIdRef.current
+
         setError(null)
         setOutputFile(null)
         setIsConverting(true)
@@ -37,6 +41,7 @@ export function useConvertFlow(
         let uploadResult: JsonValue
         try {
             const raw: unknown = await uploadFile(file)
+            if (currentRequestId !== requestIdRef.current) return
             if (!isJsonObjectOrArray(raw)) {
                 setError('Respons upload tidak valid')
                 setIsConverting(false)
@@ -44,6 +49,7 @@ export function useConvertFlow(
             }
             uploadResult = raw
         } catch (err) {
+            if (currentRequestId !== requestIdRef.current) return
             setError(err instanceof Error ? err.message : 'Upload failed')
             setIsConverting(false)
             return
@@ -51,18 +57,38 @@ export function useConvertFlow(
 
         try {
             await llmService.generate(uploadResult)
-            const record = uploadResult as Record<string, unknown>
-            const inputName = String(record.filename ?? file.name)
+            if (currentRequestId !== requestIdRef.current) return
+
+            const isArrayResult = Array.isArray(uploadResult)
+            const record = !isArrayResult && uploadResult !== null && typeof uploadResult === 'object'
+                ? (uploadResult as Record<string, unknown>)
+                : null
+
+            const rawFilename = record?.filename
+            const inputName = typeof rawFilename === 'string' && rawFilename.trim().length > 0
+                ? rawFilename
+                : file.name
             const baseName = inputName.replace(/\.[^/.]+$/, '')
+
+            const rawSize = record?.size
+            const parsedSize = typeof rawSize === 'number'
+                ? rawSize
+                : typeof rawSize === 'string'
+                    ? Number(rawSize)
+                    : file.size
+
             setOutputFile({
                 filename: `${baseName}.xlsx`,
                 format: 'xlsx',
-                size: Number(record.size ?? 0),
+                size: parsedSize || 0,
             })
         } catch (err) {
+            if (currentRequestId !== requestIdRef.current) return
             setError(err instanceof Error ? err.message : 'Conversion failed')
         } finally {
-            setIsConverting(false)
+            if (currentRequestId === requestIdRef.current) {
+                setIsConverting(false)
+            }
         }
     }
 

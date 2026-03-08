@@ -7,6 +7,7 @@ describe("fetchAPI", () => {
     afterEach(() => {
         vi.restoreAllMocks();
         vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
     });
 
     it("calls API endpoint and returns parsed JSON", async () => {
@@ -67,6 +68,7 @@ describe("uploadFile", () => {
         process.env.NEXT_PUBLIC_API_URL = originalApiUrl;
         vi.restoreAllMocks();
         vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
     });
 
     it("uploads file as FormData and returns parsed response", async () => {

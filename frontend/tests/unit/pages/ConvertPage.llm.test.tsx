@@ -200,10 +200,19 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(screen.getByTestId('file-size')).toHaveTextContent('20 KB')
         })
 
-        it('shows Download button', () => {
+        it('shows Download button and handles click', async () => {
+            const user = userEvent.setup()
+            const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {})
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
-            expect(screen.getByTestId('download-btn')).toBeInTheDocument()
+            
+            const btn = screen.getByTestId('download-btn')
+            expect(btn).toBeInTheDocument()
+            
+            await user.click(btn)
+            expect(alertMock).toHaveBeenCalledWith('Downloaded report.xlsx')
+            
+            alertMock.mockRestore()
         })
     })
 

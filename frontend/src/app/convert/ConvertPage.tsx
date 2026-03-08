@@ -23,17 +23,16 @@ export default function ConvertPage({ llmService }: ConvertPageProps) {
                     Replace manual entry with AI-driven extraction and seamless Excel template mapping.
                 </p>
                 <div className="w-full max-w-3xl">
-                    <UploadZone onFileSelect={handleFileSelect} />
+                    <UploadZone onFileSelect={handleFileSelect} disabled={isConverting} />
 
                     {isConverting && (
-                        <div
-                            role="status"
+                        <output
                             data-testid="loading-indicator"
                             className="mt-6 flex flex-col items-center gap-3 py-8"
                         >
                             <div className="animate-spin w-8 h-8 border-4 border-red-700 border-t-transparent rounded-full" />
                             <p className="text-gray-500 text-sm">Converting...</p>
-                        </div>
+                        </output>
                     )}
 
                     {error && (
@@ -55,6 +54,7 @@ export default function ConvertPage({ llmService }: ConvertPageProps) {
                             </p>
                             <button
                                 data-testid="download-btn"
+                                onClick={() => alert(`Downloaded ${outputFile.filename}`)}
                                 className="mt-4 bg-red-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-red-800 transition"
                             >
                                 Download
