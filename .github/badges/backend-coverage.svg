@@ -8,13 +8,13 @@
   </clipPath>
   <g clip-path="url(#r)">
     <rect width="106" height="20" fill="#555"/>
-    <rect x="106" width="31" height="20" fill="hsl(90, 85%, 40%)"/>
+    <rect x="106" width="31" height="20" fill="hsl(111, 85%, 40%)"/>
     <rect width="137" height="20" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
     <text x="53" y="15" fill="#010101" fill-opacity=".3">backend coverage</text>
     <text x="53" y="14">backend coverage</text>
-    <text x="121" y="15" fill="#010101" fill-opacity=".3">75%</text>
-    <text x="121" y="14">75%</text>
+    <text x="121" y="15" fill="#010101" fill-opacity=".3">93%</text>
+    <text x="121" y="14">93%</text>
   </g>
 </svg>
