@@ -171,7 +171,7 @@ def export_csv(request):
 
     return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
 
-
+@require_POST
 @api_view(["GET"])
 def download_csv(request, file_id):
     try:
