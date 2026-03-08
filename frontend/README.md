@@ -27,7 +27,7 @@ This is the frontend application for EQUITEK Excel Generator, built with Next.js
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ or 20+
+- Node.js 20+
 - npm, yarn, pnpm, or bun
 
 ### Installation
@@ -227,9 +227,6 @@ Mobile-first approach using Tailwind breakpoints:
 ```bash
 # Run all tests
 npm test
-
-# Watch mode
-npm run test:watch
 
 # Coverage report
 npm run test:coverage

@@ -28,7 +28,7 @@ This document outlines the design system, visual guidelines, and technical imple
 | Color Name | Hex Code | Tailwind Class | Usage |
 |------------|----------|----------------|-------|
 | Background | `#ffffff` | `bg-white` | Page background |
-| Foreground | `#171717` | `text-gray-900` | Primary text |
+| Foreground | `#171717` | Custom var (`var(--foreground)`) | Primary text |
 | Surface Light | `#f9fafb` | `gray-50` | Card backgrounds, secondary surfaces |
 | Surface | `#f3f4f6` | `gray-100` | Upload zones, input backgrounds |
 | Border | `#d1d5db` | `gray-300` | Borders, dividers |
@@ -153,7 +153,7 @@ Using Tailwind's default spacing scale (1 unit = 0.25rem = 4px):
 
 #### Light Surface Card
 ```tsx
-<div className="rounded-2xl bg-gray-800/60 p-5 shadow-xl ring-1 ring-white/5">
+<div className="rounded-2xl bg-white p-5 shadow-xl ring-1 ring-white/5">
   {/* Content */}
 </div>
 ```
@@ -246,7 +246,7 @@ Using Tailwind's default spacing scale (1 unit = 0.25rem = 4px):
 
 ### Container Sizing
 ```tsx
-<div className="mx-auto max-w-5xl">  {/* Centered container, max 80rem */}
+<div className="mx-auto max-w-5xl">  {/* Centered container, max 64rem */}
 <div className="max-w-3xl">          {/* Medium container, max 48rem */}
 <div className="max-w-md">           {/* Small container, max 28rem */}
 ```

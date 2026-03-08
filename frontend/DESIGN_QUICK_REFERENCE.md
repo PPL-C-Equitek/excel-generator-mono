@@ -26,7 +26,7 @@ bg-gray-950         // Darkest (#030712)
 
 ### Text
 ```tsx
-text-gray-900       // Primary text (#171717)
+text-gray-900       // Primary text (#111827)
 text-gray-600       // Secondary text (#4b5563)
 text-gray-400       // Placeholder (#9ca3af)
 text-white          // White text
