@@ -35,6 +35,12 @@ describe('HeroSection', () => {
             expect(screen.getByTestId('hero-overlay')).toBeInTheDocument()
         })
 
+        it('applies default background image', () => {
+            render(<HeroSection />)
+            const hero = screen.getByTestId('hero-section')
+            expect(hero).toHaveStyle("background-image: url('/hero-bg.png')")
+        })
+
         it('applies background image when provided', () => {
             render(<HeroSection backgroundImage="/custom-bg.jpg" />)
             const hero = screen.getByTestId('hero-section')

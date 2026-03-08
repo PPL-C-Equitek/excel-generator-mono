@@ -7,7 +7,7 @@ interface HeroSectionProps {
 export default function HeroSection({
     heading = 'Automated Intelligence for Seamless Unstructured Data Transformation',
     subtitle = 'Empowering your workflow with traceable AI extraction and seamless Excel template mapping.',
-    backgroundImage = '/hero-bg.jpg',
+    backgroundImage = '/hero-bg.png',
 }: HeroSectionProps) {
     return (
         <section
