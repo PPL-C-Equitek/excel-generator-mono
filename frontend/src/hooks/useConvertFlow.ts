@@ -15,6 +15,32 @@ export interface OutputFile {
     size: number
 }
 
+function parseOutputFile(uploadResult: JsonValue, fallbackFile: File): OutputFile {
+    const record = (!Array.isArray(uploadResult) && uploadResult !== null && typeof uploadResult === 'object')
+        ? (uploadResult as Record<string, unknown>)
+        : null
+
+    const rawFilename = record?.filename
+    const inputName = typeof rawFilename === 'string' && rawFilename.trim().length > 0
+        ? rawFilename
+        : fallbackFile.name
+    const baseName = inputName.replace(/\.[^/.]+$/, '')
+
+    const rawSize = record?.size
+    let parsedSize = fallbackFile.size
+    if (typeof rawSize === 'number') {
+        parsedSize = rawSize
+    } else if (typeof rawSize === 'string') {
+        parsedSize = Number(rawSize)
+    }
+
+    return {
+        filename: `${baseName}.xlsx`,
+        format: 'xlsx',
+        size: parsedSize || 0,
+    }
+}
+
 export interface UseConvertFlowReturn {
     isConverting: boolean
     error: string | null
@@ -59,29 +85,8 @@ export function useConvertFlow(
             await llmService.generate(uploadResult)
             if (currentRequestId !== requestIdRef.current) return
 
-            const isArrayResult = Array.isArray(uploadResult)
-            const record = !isArrayResult && uploadResult !== null && typeof uploadResult === 'object'
-                ? (uploadResult as Record<string, unknown>)
-                : null
-
-            const rawFilename = record?.filename
-            const inputName = typeof rawFilename === 'string' && rawFilename.trim().length > 0
-                ? rawFilename
-                : file.name
-            const baseName = inputName.replace(/\.[^/.]+$/, '')
-
-            const rawSize = record?.size
-            const parsedSize = typeof rawSize === 'number'
-                ? rawSize
-                : typeof rawSize === 'string'
-                    ? Number(rawSize)
-                    : file.size
-
-            setOutputFile({
-                filename: `${baseName}.xlsx`,
-                format: 'xlsx',
-                size: parsedSize || 0,
-            })
+            const parsedOutput = parseOutputFile(uploadResult, file)
+            setOutputFile(parsedOutput)
         } catch (err) {
             if (currentRequestId !== requestIdRef.current) return
             setError(err instanceof Error ? err.message : 'Conversion failed')
