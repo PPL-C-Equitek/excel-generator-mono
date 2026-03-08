@@ -1,6 +1,7 @@
 import logging
 
 from django.conf import settings
+from django.views.decorators.csrf import csrf_protect
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
@@ -80,6 +81,7 @@ def upload(request):
 
 
 @api_view(["POST"])
+@csrf_protect
 def export_csv(request):
     serializer = CsvExportRequestSerializer(data=request.data)
     if not serializer.is_valid():
