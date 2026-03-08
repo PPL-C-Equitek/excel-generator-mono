@@ -27,28 +27,43 @@ def members(request):
 @api_view(["POST"])
 @parser_classes([MultiPartParser])
 def upload(request):
+    try:
+        if "file" not in request.FILES:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "No file provided"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-    if "file" not in request.FILES:
+        uploaded_file = request.FILES["file"]
+
+        success, error, _ = process_upload(uploaded_file)
+
+        if not success:
+            return Response(
+                {
+                    "status": "error",
+                    "message": error
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         return Response(
-            {"status": "error", "message": "No file provided"},
-            status=status.HTTP_400_BAD_REQUEST,
+            {
+                "status": "success",
+                "message": "File uploaded successfully",
+                "filename": uploaded_file.name,
+            },
+            status=status.HTTP_200_OK,
         )
 
-    uploaded_file = request.FILES["file"]
-
-    success, error, _ = process_upload(uploaded_file)
-
-    if not success:
+    except Exception:
         return Response(
-            {"status": "error", "message": error},
-            status=status.HTTP_400_BAD_REQUEST,
+            {
+                "status": "error",
+                "message": "Internal server error while processing the file.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-
-    return Response(
-        {
-            "status": "success",
-            "message": "File uploaded successfully",
-            "filename": uploaded_file.name,
-        },
-        status=status.HTTP_200_OK,
-    )
