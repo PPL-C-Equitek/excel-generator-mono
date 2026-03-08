@@ -70,17 +70,17 @@ Each workflow has 3 jobs: `test`, `sonar`, `deploy`.
 
 ## 4) Coverage Badge Update Behavior
 
-Coverage badge update runs on:
+Coverage badge updates only run for:
 
-- `push`
-- internal `pull_request` (same repository, not fork PR)
+- `push` events on `main`
+- internal `pull_request` events targeting `main` (same repository, not fork PR)
 
-The workflow resolves target branch dynamically:
+For these events, the workflow resolves the target branch dynamically:
 
-- PR: `GITHUB_HEAD_REF`
-- Push: `GITHUB_REF_NAME`
+- PR: `GITHUB_HEAD_REF` (source branch of the PR within this repository)
+- Push to `main`: `GITHUB_REF_NAME` (which is `main` with the current workflow config)
 
-Then it commits and pushes badge changes to that branch.
+It then commits and pushes badge changes back to that branch.
 
 Badge files:
 
@@ -117,7 +117,7 @@ Badge files:
 
 - If `test` fails: `sonar` and `deploy` do not run.
 - If `sonar` quality gate fails: `deploy` does not run.
-- If badge update push fails: workflow retries up to 3 times.
+- If the badge update `git push` fails: the workflow retries the push command up to 3 times; failures in earlier git steps (`fetch`/`checkout`) fail immediately and are not retried.
 
 ## 7) How to Monitor
 
