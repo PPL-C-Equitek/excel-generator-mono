@@ -1,6 +1,7 @@
 import logging
 
 from django.conf import settings
+from django.http import FileResponse
 from django.views.decorators.http import require_POST
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
@@ -17,10 +18,12 @@ from file_processing.serializers import (
     CsvExportResponseSerializer,
 )
 from file_processing.services.export_service import (
+    OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
     OutputCSVMappingError,
     OutputLLMValidationError,
     export_csv_to_filesystem,
+    resolve_csv_download_artifact,
 )
 
 logger = logging.getLogger(__name__)
@@ -131,3 +134,49 @@ def export_csv(request):
         )
 
     return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+def download_csv(request, file_id):
+    try:
+        artifact = resolve_csv_download_artifact(
+            file_id=file_id,
+            storage_dir=settings.CSV_EXPORT_DIR,
+        )
+    except OutputCSVDownloadLookupError:
+        logger.warning("CSV download file not found or invalid file_id.", exc_info=True)
+        return Response(
+            {
+                "status": "error",
+                "message": "CSV file not found.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    try:
+        file_handle = open(artifact["file_path"], "rb")
+    except OSError:
+        logger.exception("CSV download failed while reading generated artifact.")
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    except Exception:
+        logger.exception("Unexpected error while preparing CSV download.")
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=artifact["file_name"],
+        content_type=artifact["content_type"],
+    )
