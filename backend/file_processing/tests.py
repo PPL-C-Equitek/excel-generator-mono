@@ -411,3 +411,81 @@ class FileValidationTests(TestCase):
             self.assertNotIn("raise ", error_msg)
             self.assertTrue(len(error_msg) > 0,
                             "Pesan error untuk file corrupted harus informatif.")
+
+class HeaderOffsetDetectionTests(TestCase):
+    UPLOAD_URL = '/upload/'
+
+    def _upload(self, sheets: dict):
+        data = _build_excel(sheets)
+        f = _uploaded("test.xlsx", data)
+        return self.client.post(self.UPLOAD_URL, {'file': f})
+
+    def _get_rows(self, body: dict, sheet_name: str):
+        if "data" in body and isinstance(body["data"], dict):
+            return body["data"].get(sheet_name)
+        return body.get(sheet_name)
+
+    def test_find_header_row_index_no_offset(self):
+        from file_processing.services.excel_service import _find_header_row_index
+        rows = [
+            ("Item", "Tipe", "Nilai"),
+            ("Laptop", "cost", 15000000),
+        ]
+        self.assertEqual(_find_header_row_index(rows), 0)
+
+    def test_find_header_row_index_single_preamble_row(self):
+        from file_processing.services.excel_service import _find_header_row_index
+        rows = [
+            ("LAPORAN KEUANGAN", None, None),
+            ("Unit", "Item", "Nilai"),
+            ("IT", "Server", 20000000),
+        ]
+        self.assertEqual(_find_header_row_index(rows), 1)
+
+    def test_find_header_row_index_multiple_preamble_rows(self):
+        from file_processing.services.excel_service import _find_header_row_index
+        rows = [
+            ("LAPORAN BULANAN", None, None),
+            ("Periode: Januari 2024", None, None),
+            (None, None, None),
+            ("Unit", "Item", "Nilai"),
+            ("IT", "Server", 20000000),
+        ]
+        self.assertEqual(_find_header_row_index(rows), 3)
+
+    def test_find_header_row_index_all_empty_returns_zero(self):
+        from file_processing.services.excel_service import _find_header_row_index
+        rows = [
+            (None, None, None),
+            (None, None, None),
+        ]
+        self.assertEqual(_find_header_row_index(rows), 0)
+
+    def test_find_header_row_index_single_row_is_header(self):
+        from file_processing.services.excel_service import _find_header_row_index
+        rows = [("Nama", "Nilai")]
+        self.assertEqual(_find_header_row_index(rows), 0)
+
+    def test_find_header_row_index_custom_min_string_cols(self):
+        from file_processing.services.excel_service import _find_header_row_index
+        rows = [
+            ("A", "B", None),
+            ("X", "Y", "Z"),
+        ]
+        self.assertEqual(_find_header_row_index(rows, min_string_cols=3), 1)
+
+    def test_find_header_row_index_strips_whitespace(self):
+        from file_processing.services.excel_service import _find_header_row_index
+        rows = [
+            ("   ", "  ", None),
+            ("Unit", "Item", None),
+        ]
+        self.assertEqual(_find_header_row_index(rows), 1)
+
+    def test_find_header_row_index_numeric_values_not_counted(self):
+        from file_processing.services.excel_service import _find_header_row_index
+        rows = [
+            (12345, 67890, None),
+            ("Nama", "NIM", None),
+        ]
+        self.assertEqual(_find_header_row_index(rows), 1)

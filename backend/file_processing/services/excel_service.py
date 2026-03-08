@@ -23,19 +23,32 @@ def _load_workbook(file_or_path: str | IO[bytes] | Any):
             f"File Excel corrupted atau cannot read: {exc}"
         ) from exc
 
+def _find_header_row_index(raw_rows: list, min_string_cols: int = 2) -> int:
+    for idx, row in enumerate(raw_rows):
+        string_cols = sum(
+            1 for cell in row
+            if cell is not None and isinstance(cell, str) and cell.strip() != ""
+        )
+        if string_cols >= min_string_cols:
+            return idx
+    return 0
+
 def _sheet_to_rows(ws) -> list[dict[str, Any]]:
     raw_rows = list(ws.iter_rows(values_only=True))
 
     if not raw_rows:
         return []
 
-    header_row = raw_rows[0]
+    header_idx = _find_header_row_index(raw_rows)
+    header_row = raw_rows[header_idx]
     headers = [
         (str(h) if h is not None else "") for h in header_row
     ]
 
     data_rows: list[dict[str, Any]] = []
-    for row in raw_rows[1:]:
+    for row in raw_rows[header_idx + 1:]:
+        if all(cell is None for cell in row):
+            continue
         row_dict: dict[str, Any] = {}
         for col_idx, header in enumerate(headers):
             value = row[col_idx] if col_idx < len(row) else None
