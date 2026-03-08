@@ -3,7 +3,7 @@ import os
 
 from django.conf import settings
 from django.http import FileResponse
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
@@ -171,7 +171,7 @@ def export_csv(request):
 
     return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
 
-@require_POST
+@require_GET
 @api_view(["GET"])
 def download_csv(request, file_id):
     try:
