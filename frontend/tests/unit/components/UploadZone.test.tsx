@@ -73,6 +73,16 @@ describe('UploadZone', () => {
         expect(screen.getByText('laporan.pdf')).toBeInTheDocument()
       })
     })
+
+    it('does nothing when input change has no file', () => {
+      const mockOnFileSelect = vi.fn()
+      render(<UploadZone onFileSelect={mockOnFileSelect} />)
+
+      const input = screen.getByTestId('file-input')
+      fireEvent.change(input, { target: { files: undefined } })
+
+      expect(mockOnFileSelect).not.toHaveBeenCalled()
+    })
   })
 
   describe('Drag and Drop Functionality', () => {
@@ -109,6 +119,20 @@ describe('UploadZone', () => {
       await waitFor(() => {
         expect(mockOnFileSelect).toHaveBeenCalledWith(file)
       })
+    })
+
+    it('handles empty file drop gracefully', async () => {
+      const mockOnFileSelect = vi.fn()
+      render(<UploadZone onFileSelect={mockOnFileSelect} />)
+      const dropZone = screen.getByTestId('drop-zone')
+
+      const event = {
+        preventDefault: vi.fn(),
+        dataTransfer: { files: [] as unknown as FileList },
+      }
+
+      expect(() => fireEvent.drop(dropZone, event)).not.toThrow()
+      expect(mockOnFileSelect).not.toHaveBeenCalled()
     })
   })
 

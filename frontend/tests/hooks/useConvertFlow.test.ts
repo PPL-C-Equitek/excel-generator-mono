@@ -226,8 +226,8 @@ describe('useConvertFlow', () => {
     // -----------------------------------------------------------------------
     describe('edge cases & race conditions', () => {
         it('ignores stale request if a new request is started before upload completes', async () => {
-            let resolveFirst: (v: any) => void = () => {}
-            let resolveSecond: (v: any) => void = () => {}
+            let resolveFirst: (v: unknown) => void = () => {}
+            let resolveSecond: (v: unknown) => void = () => {}
 
             mockUploadFile
                 .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
@@ -261,7 +261,7 @@ describe('useConvertFlow', () => {
         })
 
         it('ignores stale request if a new request is started before generate completes', async () => {
-            let resolveGenerateFirst: (v: any) => void = () => {}
+            let resolveGenerateFirst: (v: unknown) => void = () => {}
             mockUploadFile.mockResolvedValue({ filename: 'test.pdf' })
 
             const service = makeMockService({
@@ -309,7 +309,7 @@ describe('useConvertFlow', () => {
             // Test string size fallback
             mockUploadFile.mockResolvedValue({ filename: 'str.pdf', size: '150' })
             const service = makeMockService()
-            const { result, rerender } = renderHook(() => useConvertFlow(service))
+            const { result } = renderHook(() => useConvertFlow(service))
 
             await act(async () => {
                 await result.current.handleFileSelect(testFile)
@@ -347,6 +347,37 @@ describe('useConvertFlow', () => {
             })
 
             // Error should NOT be set because the rejection was on a stale request
+            expect(result.current.error).toBeNull()
+        })
+
+        it('ignores stale request if a new request is started before generate fails', async () => {
+            let rejectGenerateFirst: (e: Error) => void = () => {}
+            mockUploadFile.mockResolvedValue(validUploadResponse)
+
+            const service = makeMockService({
+                generate: vi.fn()
+                    .mockImplementationOnce(() => new Promise((_, rej) => { rejectGenerateFirst = rej }))
+                    .mockResolvedValueOnce({ output_json: { ok: true } }) // Second request
+            })
+
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            // Start first
+            await act(async () => {
+                result.current.handleFileSelect(testFile)
+            })
+
+            // Start second (finishes mock immediately)
+            await act(async () => {
+                result.current.handleFileSelect(testFile)
+            })
+
+            // Reject first (stale)
+            await act(async () => {
+                rejectGenerateFirst(new Error('Stale generate error'))
+            })
+
+            // Output should not have the stale error set
             expect(result.current.error).toBeNull()
         })
     })

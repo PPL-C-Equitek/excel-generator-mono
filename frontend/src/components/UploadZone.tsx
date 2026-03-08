@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, DragEvent, ChangeEvent } from 'react'
+import { useState, DragEvent, ChangeEvent } from 'react'
 
 interface UploadZoneProps {
     readonly onFileSelect?: (file: File) => void
@@ -10,7 +10,6 @@ interface UploadZoneProps {
 export default function UploadZone({ onFileSelect, disabled }: UploadZoneProps) {
     const [isDragging, setIsDragging] = useState(false)
     const [selectedFile, setSelectedFile] = useState<string | null>(null)
-    const inputRef = useRef<HTMLInputElement>(null)
 
     const handleFile = (file: File) => {
         setSelectedFile(file.name)
@@ -20,7 +19,7 @@ export default function UploadZone({ onFileSelect, disabled }: UploadZoneProps) 
     const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (file) handleFile(file)
-        if (inputRef.current) inputRef.current.value = '' // allow re-selecting same file
+        e.target.value = '' // allow re-selecting same file
     }
 
     const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
@@ -44,7 +43,6 @@ export default function UploadZone({ onFileSelect, disabled }: UploadZoneProps) 
             <input
                 data-testid="file-input"
                 type="file"
-                ref={inputRef}
                 onChange={handleChange}
                 disabled={disabled}
                 className="hidden"
