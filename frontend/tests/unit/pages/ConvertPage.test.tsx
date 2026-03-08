@@ -181,7 +181,7 @@ describe('ConvertPage', () => {
 
             await waitFor(() => {
                 expect(mockUploadFile).toHaveBeenCalledTimes(1)
-                expect(mockUploadFile).toHaveBeenCalledWith(expect.any(File))
+                expect(mockUploadFile).toHaveBeenCalledWith(expect.any(File), expect.any(Object))
             })
         })
 

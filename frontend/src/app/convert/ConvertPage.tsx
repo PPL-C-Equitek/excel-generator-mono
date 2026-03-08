@@ -54,8 +54,20 @@ export default function ConvertPage({ llmService }: ConvertPageProps) {
                             </p>
                             <button
                                 data-testid="download-btn"
-                                onClick={() => alert(`Downloaded ${outputFile.filename}`)}
-                                className="mt-4 bg-red-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-red-800 transition"
+                                onClick={() => {
+                                    const dummyData = new Uint8Array(outputFile.size);
+                                    const blob = new Blob([dummyData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement("a");
+                                    a.href = url;
+                                    a.download = outputFile.filename;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                    URL.revokeObjectURL(url);
+                                }}
+                                disabled={!outputFile}
+                                className="mt-4 bg-red-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-red-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 Download
                             </button>

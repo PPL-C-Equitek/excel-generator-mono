@@ -202,7 +202,12 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
 
         it('shows Download button and handles click', async () => {
             const user = userEvent.setup()
-            const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {})
+            const createObjURLMock = vi.fn().mockReturnValue('blob:mock')
+            global.URL.createObjectURL = createObjURLMock
+            global.URL.revokeObjectURL = vi.fn()
+            
+            const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
             
@@ -210,9 +215,12 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(btn).toBeInTheDocument()
             
             await user.click(btn)
-            expect(alertMock).toHaveBeenCalledWith('Downloaded report.xlsx')
+            expect(createObjURLMock).toHaveBeenCalled()
+            expect(clickSpy).toHaveBeenCalled()
             
-            alertMock.mockRestore()
+            clickSpy.mockRestore()
+            delete (global as any).URL.createObjectURL
+            delete (global as any).URL.revokeObjectURL
         })
     })
 

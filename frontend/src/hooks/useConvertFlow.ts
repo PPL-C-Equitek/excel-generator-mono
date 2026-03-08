@@ -3,9 +3,9 @@
 import { useState, useRef } from 'react'
 import { uploadFile } from '@/lib/api'
 import { generateJson } from '@/services/llm'
-import { isJsonObjectOrArray } from '@/utils/schemaValidator'
+import { isJsonObject } from '@/utils/schemaValidator'
 import type { ILLMService } from '@/lib/ILLMService'
-import type { JsonValue } from '@/utils/schemaValidator'
+import type { JsonObject } from '@/utils/schemaValidator'
 
 const defaultService: ILLMService = { generate: generateJson }
 
@@ -15,18 +15,14 @@ export interface OutputFile {
     size: number
 }
 
-function parseOutputFile(uploadResult: JsonValue, fallbackFile: File): OutputFile {
-    const record = (!Array.isArray(uploadResult) && uploadResult !== null && typeof uploadResult === 'object')
-        ? (uploadResult as Record<string, unknown>)
-        : null
-
-    const rawFilename = record?.filename
+function parseOutputFile(uploadResult: JsonObject, fallbackFile: File): OutputFile {
+    const rawFilename = uploadResult.filename
     const inputName = typeof rawFilename === 'string' && rawFilename.trim().length > 0
         ? rawFilename
         : fallbackFile.name
     const baseName = inputName.replace(/\.[^/.]+$/, '')
 
-    const rawSize = record?.size
+    const rawSize = uploadResult.size
     let parsedSize = fallbackFile.size
     if (typeof rawSize === 'number') {
         parsedSize = rawSize
@@ -54,28 +50,32 @@ export function useConvertFlow(
     const [isConverting, setIsConverting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
-    const requestIdRef = useRef<number>(0)
+    const abortControllerRef = useRef<AbortController | null>(null)
 
     const handleFileSelect = async (file: File): Promise<void> => {
-        requestIdRef.current += 1
-        const currentRequestId = requestIdRef.current
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+        }
+        const abortController = new AbortController()
+        abortControllerRef.current = abortController
 
         setError(null)
         setOutputFile(null)
         setIsConverting(true)
 
-        let uploadResult: JsonValue
+        let uploadResult: JsonObject
         try {
-            const raw: unknown = await uploadFile(file)
-            if (currentRequestId !== requestIdRef.current) return
-            if (!isJsonObjectOrArray(raw)) {
+            const raw: unknown = await uploadFile(file, { signal: abortController.signal })
+            if (abortController.signal.aborted) return
+            if (!isJsonObject(raw)) {
                 setError('Respons upload tidak valid')
                 setIsConverting(false)
                 return
             }
             uploadResult = raw
-        } catch (err) {
-            if (currentRequestId !== requestIdRef.current) return
+        } catch (err: unknown) {
+            if (abortController.signal.aborted) return
+            if (err instanceof DOMException && err.name === 'AbortError') return
             setError(err instanceof Error ? err.message : 'Upload failed')
             setIsConverting(false)
             return
@@ -83,15 +83,15 @@ export function useConvertFlow(
 
         try {
             await llmService.generate(uploadResult)
-            if (currentRequestId !== requestIdRef.current) return
+            if (abortController.signal.aborted) return
 
             const parsedOutput = parseOutputFile(uploadResult, file)
             setOutputFile(parsedOutput)
-        } catch (err) {
-            if (currentRequestId !== requestIdRef.current) return
+        } catch (err: unknown) {
+            if (abortController.signal.aborted) return
             setError(err instanceof Error ? err.message : 'Conversion failed')
         } finally {
-            if (currentRequestId === requestIdRef.current) {
+            if (!abortController.signal.aborted) {
                 setIsConverting(false)
             }
         }

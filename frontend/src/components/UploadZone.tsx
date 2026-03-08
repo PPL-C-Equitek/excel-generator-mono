@@ -9,10 +9,8 @@ interface UploadZoneProps {
 
 export default function UploadZone({ onFileSelect, disabled }: UploadZoneProps) {
     const [isDragging, setIsDragging] = useState(false)
-    const [selectedFile, setSelectedFile] = useState<string | null>(null)
 
     const handleFile = (file: File) => {
-        setSelectedFile(file.name)
         onFileSelect?.(file)
     }
 
@@ -51,13 +49,10 @@ export default function UploadZone({ onFileSelect, disabled }: UploadZoneProps) 
                 className={`bg-red-700 text-white font-bold px-8 py-3 rounded-xl transition pointer-events-none
                     ${disabled ? 'opacity-50' : 'hover:bg-red-800'}`}
             >
-                {selectedFile ? 'Change File' : 'Upload File'}
+                Upload File
             </span>
 
-            {selectedFile
-                ? <p className="text-gray-600 text-sm">{selectedFile}</p>
-                : <p className="text-gray-400 text-sm">Or drop file here</p>
-            }
+            <p className="text-gray-400 text-sm">Or drop file here</p>
         </label>
     )
 }

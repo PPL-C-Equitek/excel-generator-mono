@@ -62,18 +62,6 @@ describe('UploadZone', () => {
       })
     })
 
-    it('shows file name after file is selected', async () => {
-      render(<UploadZone />)
-      const file = createMockFile('laporan.pdf')
-      const input = screen.getByTestId('file-input')
-
-      await userEvent.upload(input, file)
-
-      await waitFor(() => {
-        expect(screen.getByText('laporan.pdf')).toBeInTheDocument()
-      })
-    })
-
     it('does nothing when input change has no file', () => {
       const mockOnFileSelect = vi.fn()
       render(<UploadZone onFileSelect={mockOnFileSelect} />)

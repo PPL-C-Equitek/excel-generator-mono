@@ -1,5 +1,5 @@
 import { renderHook, act } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useConvertFlow } from '../../src/hooks/useConvertFlow'
 import type { ILLMService } from '../../src/lib/ILLMService'
 
@@ -44,6 +44,10 @@ describe('useConvertFlow', () => {
         mockUploadFile.mockResolvedValue(validUploadResponse)
     })
 
+    afterEach(() => {
+        vi.unstubAllEnvs()
+    })
+
     // -----------------------------------------------------------------------
     // Initial state
     // -----------------------------------------------------------------------
@@ -77,7 +81,7 @@ describe('useConvertFlow', () => {
                 await result.current.handleFileSelect(testFile)
             })
 
-            expect(mockUploadFile).toHaveBeenCalledWith(testFile)
+            expect(mockUploadFile).toHaveBeenCalledWith(testFile, expect.any(Object))
             expect(mockUploadFile).toHaveBeenCalledTimes(1)
         })
 
@@ -291,7 +295,7 @@ describe('useConvertFlow', () => {
             expect(result.current.isConverting).toBe(false)
         })
 
-        it('computes correct outputFile when uploadResult is an array instead of object', async () => {
+        it('sets error if uploadFile resolves with an array value', async () => {
             mockUploadFile.mockResolvedValue([1, 2, 3])
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
@@ -300,9 +304,8 @@ describe('useConvertFlow', () => {
                 await result.current.handleFileSelect(testFile)
             })
 
-            // Because it's an array, record is null, falls back to file.name and file.size (or 0)
-            expect(result.current.outputFile?.filename).toBe('report.xlsx')
-            expect(result.current.outputFile?.size).toBe(7)
+            expect(result.current.error).toBe('Respons upload tidak valid')
+            expect(service.generate).not.toHaveBeenCalled()
         })
 
         it('parses size correctly if backend returns an empty size or a string size', async () => {
@@ -435,6 +438,21 @@ describe('useConvertFlow', () => {
             })
 
             expect(result.current.error).toBe('Conversion failed')
+        })
+
+        it('does not set error if uploadFile throws DOMException with name AbortError', async () => {
+            const abortError = new DOMException('Aborted', 'AbortError')
+            mockUploadFile.mockRejectedValue(abortError)
+            
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.error).toBeNull() // because aborted requests are ignored
+            expect(result.current.isConverting).toBe(true)
         })
     })
 })
