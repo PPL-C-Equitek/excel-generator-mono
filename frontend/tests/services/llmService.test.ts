@@ -7,7 +7,9 @@ import {
   handler401,
   handler429,
   handler504,
+  handlerArrayOutput,
   handlerInvalidSchema,
+  handlerPrimitiveOutput,
   successHandler,
 } from "../mocks/handlers";
 
@@ -76,6 +78,10 @@ describe("generateJson edge cases", () => {
     await expect(generateJson({})).rejects.toThrow("Input tidak boleh kosong");
   });
 
+  it("throws validation error for empty array input", async () => {
+    await expect(generateJson([])).rejects.toThrow("Input tidak boleh kosong");
+  });
+
   it("throws schema error when output_json is missing", async () => {
     server.use(handlerInvalidSchema);
     await expect(generateJson({ key: "value" })).rejects.toThrow("Respons tidak sesuai skema");
@@ -89,5 +95,30 @@ describe("generateJson edge cases", () => {
   it("rethrows non-Error rejection as-is", async () => {
     vi.spyOn(api, "fetchAPI").mockRejectedValue("fatal");
     await expect(generateJson({ key: "value" })).rejects.toBe("fatal");
+  });
+});
+
+describe("generateJson array input & schema type validation", () => {
+  afterEach(() => {
+    server.resetHandlers();
+  });
+
+  it("throws schema error when output_json is an array", async () => {
+    server.use(handlerArrayOutput);
+    await expect(generateJson({ key: "value" })).rejects.toThrow("Respons tidak sesuai skema");
+  });
+
+  it("throws schema error when output_json is a primitive string", async () => {
+    server.use(handlerPrimitiveOutput);
+    await expect(generateJson({ key: "value" })).rejects.toThrow("Respons tidak sesuai skema");
+  });
+
+  it("throws schema error when output_json is a primitive number", async () => {
+    server.use(
+      http.post(`${API_BASE}/llm/generate/`, () =>
+        HttpResponse.json({ output_json: 42 }, { status: 200 })
+      )
+    );
+    await expect(generateJson({ key: "value" })).rejects.toThrow("Respons tidak sesuai skema");
   });
 });

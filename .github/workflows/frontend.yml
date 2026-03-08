@@ -20,10 +20,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
@@ -58,21 +60,27 @@ jobs:
           echo "FRONTEND_COVERAGE=${FRONTEND_COVERAGE}" >> $GITHUB_ENV
 
       - name: Upload frontend coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-coverage
           path: frontend/coverage
 
       - name: Update frontend coverage badge
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
         run: |
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          TARGET_BRANCH="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            TARGET_BRANCH="${GITHUB_HEAD_REF}"
+          fi
+          echo "Updating frontend badge on branch: ${TARGET_BRANCH}"
+
           for attempt in 1 2 3; do
-            git fetch origin main
-            git checkout -B main origin/main
+            git fetch origin "${TARGET_BRANCH}"
+            git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
 
             mkdir -p .github/badges
             LABEL="frontend coverage"
@@ -120,7 +128,7 @@ jobs:
 
             git add .github/badges/frontend-coverage.svg
             git commit -m "ci: update frontend coverage badge" || true
-            if git push origin main; then
+            if git push origin "HEAD:${TARGET_BRANCH}"; then
               echo "Frontend coverage badge updated."
               exit 0
             fi
@@ -134,12 +142,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
@@ -156,7 +164,7 @@ jobs:
           ls -la coverage
 
       - name: SonarCloud scan (frontend)
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
