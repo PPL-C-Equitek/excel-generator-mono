@@ -307,6 +307,15 @@ export default function MyComponent({ }: Props) {
 
 ---
 
+## Design System
+
+EQUITEK uses a cohesive design system built with Tailwind CSS.
+
+- **[DESIGN_GUIDELINES.md](./DESIGN_GUIDELINES.md)** – Complete design system documentation  
+- **[DESIGN_QUICK_REFERENCE.md](./DESIGN_QUICK_REFERENCE.md)** – Quick reference for common UI patterns and styling
+
+---
+
 ## Contributing
 
 1. Follow the design guidelines in [DESIGN_GUIDELINES.md](./DESIGN_GUIDELINES.md)
