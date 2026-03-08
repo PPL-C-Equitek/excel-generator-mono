@@ -2,6 +2,7 @@ import logging
 
 from django.conf import settings
 from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.http import require_POST
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
@@ -80,6 +81,7 @@ def upload(request):
     )
 
 
+@require_POST
 @api_view(["POST"])
 @csrf_protect
 def export_csv(request):
