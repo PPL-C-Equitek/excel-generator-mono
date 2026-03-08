@@ -9,7 +9,7 @@ from rest_framework import status
 from .models import GroupMember
 
 from file_processing.services.upload_service import (
-    validate_extension,
+    validate_file,
     save_temp_file,
 )
 from file_processing.serializers import (
@@ -26,6 +26,7 @@ from file_processing.services.export_service import (
 logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
+MAX_FILE_SIZE = 10 * 1024 * 1024  #10MB
 
 @api_view(['GET'])
 def health(request):
@@ -57,7 +58,7 @@ def upload(request):
 
     uploaded_file = request.FILES["file"]
 
-    is_valid, error = validate_extension(uploaded_file)
+    is_valid, error = validate_file(uploaded_file)
     if not is_valid:
         return Response(
             {

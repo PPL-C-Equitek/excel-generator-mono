@@ -35,10 +35,10 @@ jobs:
           --health-retries=5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -93,7 +93,7 @@ jobs:
           echo "BACKEND_COVERAGE=${BACKEND_COVERAGE}" >> $GITHUB_ENV
 
       - name: Upload backend coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
           path: |
@@ -171,18 +171,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Download backend coverage artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: backend-coverage
           path: backend
 
       - name: SonarCloud scan (backend)
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -196,8 +196,8 @@ jobs:
             -Dsonar.tests=.
             -Dsonar.inclusions=**/*.py
             -Dsonar.test.inclusions=**/tests/**/*.py,**/tests.py,**/test_*.py,**/*_test.py
-            -Dsonar.exclusions=**/migrations/**
-            -Dsonar.coverage.exclusions=**/tests/**,**/tests.py,**/test_*.py,**/*_test.py,**/migrations/**,config/**/*.py,manage.py,**/apps.py,**/admin.py,**/urls.py,**/wsgi.py,**/asgi.py
+            -Dsonar.exclusions=**/migrations/**,**/management/**
+            -Dsonar.coverage.exclusions=**/tests/**,**/tests.py,**/test_*.py,**/*_test.py,**/migrations/**,**/management/**,config/**/*.py,manage.py,**/apps.py,**/admin.py,**/urls.py,**/wsgi.py,**/asgi.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
