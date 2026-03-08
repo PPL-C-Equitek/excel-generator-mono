@@ -219,7 +219,9 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(clickSpy).toHaveBeenCalled()
             
             clickSpy.mockRestore()
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             delete (global as any).URL.createObjectURL
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             delete (global as any).URL.revokeObjectURL
         })
     })
