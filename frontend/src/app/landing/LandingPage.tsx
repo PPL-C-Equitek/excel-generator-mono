@@ -1,5 +1,6 @@
 import Navbar from '@/components/Navbar'
 import HeroSection from '@/components/HeroSection'
+import FeatureCard from '@/components/FeatureCard'
 
 const FEATURES = [
     {
@@ -30,47 +31,64 @@ const FEATURES = [
 
 export default function LandingPage() {
     return (
-        <div className="min-h-screen flex flex-col">
+        <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--background)' }}>
             <Navbar />
             <HeroSection />
 
             {/* Features Section */}
             <section className="py-20 px-8">
-                <h2 className="text-3xl font-extrabold text-center text-gray-900 mb-12">
+                <h2
+                    className="text-3xl font-extrabold text-center mb-12 tracking-tight"
+                    style={{ color: 'var(--foreground)' }}
+                >
                     Why Use Our Service?
                 </h2>
-                <div className="grid grid-cols-3 gap-8 max-w-5xl mx-auto">
+                <div className="grid grid-cols-1 gap-8 lg:grid-cols-3 max-w-5xl mx-auto">
                     {FEATURES.map((feature) => (
-                        <div key={feature.title} className="flex gap-4">
-                            <div className="w-10 h-10 bg-red-100 rounded-lg flex-shrink-0" />
-                            <div>
-                                <h3 className="font-bold text-gray-900 text-sm mb-1">
-                                    {feature.title}
-                                </h3>
-                                <p className="text-gray-500 text-sm">{feature.desc}</p>
-                            </div>
-                        </div>
+                        <FeatureCard key={feature.title} {...feature} />
                     ))}
                 </div>
             </section>
 
             {/* CTA Section */}
-            <section className="py-12 text-center">
-                <h2 className="text-xl font-bold text-gray-900 mb-6">
+            <section className="py-12 text-center border-t" style={{ borderColor: 'var(--border-default)' }}>
+                <h2
+                    className="text-xl font-bold mb-6"
+                    style={{ color: 'var(--foreground)' }}
+                >
                     Ready to Automate Your Data Workflow?
                 </h2>
                 <a
                     href="/convert"
-                    className="bg-red-700 text-white font-bold px-8 py-3 rounded hover:bg-red-800 transition"
+                    className="inline-block font-bold px-8 py-3 rounded-xl text-white transition active:scale-[0.98]"
+                    style={{
+                        backgroundColor: 'var(--brand-primary)',
+                    }}
+                    onMouseEnter={(e) =>
+                        (e.currentTarget.style.backgroundColor = 'var(--brand-primary-hover)')
+                    }
+                    onMouseLeave={(e) =>
+                        (e.currentTarget.style.backgroundColor = 'var(--brand-primary)')
+                    }
                 >
                     Get Started
                 </a>
             </section>
 
             {/* Footer */}
-            <footer className="mt-auto px-8 py-6 flex justify-between items-center border-t border-gray-200">
-                <p className="text-gray-500 text-sm">© Equitek. All rights reserved.</p>
-                <a href="/privacy" className="text-gray-500 text-sm hover:underline">
+            <footer
+                className="mt-auto px-8 py-6 flex justify-between items-center border-t text-sm"
+                style={{
+                    borderColor: 'var(--border-default)',
+                    color: 'var(--text-muted)',
+                }}
+            >
+                <p>© Equitek. All rights reserved.</p>
+                <a
+                    href="/privacy"
+                    className="hover:underline transition"
+                    style={{ color: 'var(--text-muted)' }}
+                >
                     Privacy Policy
                 </a>
             </footer>
