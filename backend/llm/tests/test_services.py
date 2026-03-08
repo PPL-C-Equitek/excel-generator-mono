@@ -18,6 +18,20 @@ class DummyTimeoutError(Exception):
     pass
 
 
+class DummyAPIStatusError(Exception):
+    def __init__(self, message="API status failure", status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class DummyAPIError(Exception):
+    pass
+
+
+class DummyAPIConnectionError(Exception):
+    pass
+
+
 class OpenAIClientServiceTest(SimpleTestCase):
     @override_settings(
         OPENAI_API_KEY="test-key",
@@ -118,6 +132,45 @@ class OpenAIClientServiceTest(SimpleTestCase):
             generate_text("Hello")
 
         self.assertEqual(exc_ctx.exception.status_code, 504)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_maps_api_status_error(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyAPIStatusError("api status", status_code=418)
+
+        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
+            generate_text("Hello")
+
+        self.assertEqual(exc_ctx.exception.status_code, 502)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIError", new=DummyAPIError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_maps_api_error(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyAPIError("api failure")
+
+        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
+            generate_text("Hello")
+
+        self.assertEqual(exc_ctx.exception.status_code, 502)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIConnectionError", new=DummyAPIConnectionError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_maps_api_connection_error(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyAPIConnectionError("connection aborted")
+
+        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
+            generate_text("Hello")
+
+        self.assertEqual(exc_ctx.exception.status_code, 502)
 
     @patch("llm.services.openai_client.generate_text")
     def test_generate_json_parses_object_response(self, mock_generate_text):
