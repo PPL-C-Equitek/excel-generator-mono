@@ -1,4 +1,5 @@
 import logging
+import os
 
 from django.conf import settings
 from django.http import FileResponse
@@ -29,6 +30,40 @@ from file_processing.services.export_service import (
 logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
+
+
+def _sanitize_download_filename(candidate):
+    if not isinstance(candidate, str):
+        return None
+
+    normalized = candidate.strip().replace("\r", "").replace("\n", "")
+    if not normalized:
+        return None
+    if "\x00" in normalized:
+        return None
+
+    basename = os.path.basename(normalized)
+    if basename in {"", ".", ".."}:
+        return None
+    if basename != normalized:
+        return None
+
+    return basename
+
+
+def _resolve_download_filename(requested_name, default_name, artifact_type):
+    safe_name = _sanitize_download_filename(requested_name)
+    if not safe_name:
+        return default_name
+
+    expected_ext = ".zip" if artifact_type == "zip" else ".csv"
+    root, ext = os.path.splitext(safe_name)
+    if ext.lower() != expected_ext:
+        if ext:
+            return f"{root}{expected_ext}"
+        return f"{safe_name}{expected_ext}"
+
+    return safe_name
 
 @api_view(['GET'])
 def health(request):
@@ -174,9 +209,15 @@ def download_csv(request, file_id):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
+    download_name = _resolve_download_filename(
+        requested_name=request.query_params.get("filename"),
+        default_name=artifact["file_name"],
+        artifact_type=artifact["artifact_type"],
+    )
+
     return FileResponse(
         file_handle,
         as_attachment=True,
-        filename=artifact["file_name"],
+        filename=download_name,
         content_type=artifact["content_type"],
     )

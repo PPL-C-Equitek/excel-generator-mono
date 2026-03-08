@@ -199,10 +199,60 @@ class DownloadCSVViewTest(APISimpleTestCase):
         }
         mocked_open.return_value.__enter__.return_value = b"name,age\r\nZufar,21\r\n"
 
-        response = self.client.get("/export/csv/download/csv_abc123")
+        response = self.client.get("/export/csv/csv_abc123/download")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn(
+            'attachment; filename="export_abc123.csv"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_uses_custom_filename_from_query(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "file_path": "/safe/storage/export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+        mocked_open.return_value.__enter__.return_value = b"name,age\r\nZufar,21\r\n"
+
+        response = self.client.get(
+            "/export/csv/csv_abc123/download?filename=laporan_tahunan"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="laporan_tahunan.csv"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_falls_back_to_default_filename_when_query_is_unsafe(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "file_path": "/safe/storage/export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+        mocked_open.return_value.__enter__.return_value = b"name,age\r\nZufar,21\r\n"
+
+        response = self.client.get(
+            "/export/csv/csv_abc123/download?filename=..%2Fevil.csv"
+        )
+
+        self.assertEqual(response.status_code, 200)
         self.assertIn(
             'attachment; filename="export_abc123.csv"',
             response["Content-Disposition"],
@@ -215,7 +265,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
     ):
         mocked_resolver.side_effect = OutputCSVDownloadLookupError("invalid file id")
 
-        response = self.client.get("/export/csv/download/csv_bad-token")
+        response = self.client.get("/export/csv/csv_bad-token/download")
         response_data = self._response_data(response)
 
         self.assertEqual(response.status_code, 404)
@@ -229,7 +279,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
     ):
         mocked_resolver.side_effect = OutputCSVDownloadLookupError("missing file")
 
-        response = self.client.get("/export/csv/download/csv_deadbeef")
+        response = self.client.get("/export/csv/csv_deadbeef/download")
         response_data = self._response_data(response)
 
         self.assertEqual(response.status_code, 404)
@@ -250,7 +300,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
             "content_type": "text/csv",
         }
 
-        response = self.client.get("/export/csv/download/csv_abc123")
+        response = self.client.get("/export/csv/csv_abc123/download")
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data["status"], "error")
@@ -260,6 +310,6 @@ class DownloadCSVViewTest(APISimpleTestCase):
         )
 
     def test_download_csv_endpoint_rejects_post_method(self):
-        response = self.client.post("/export/csv/download/csv_abc123")
+        response = self.client.post("/export/csv/csv_abc123/download")
 
         self.assertEqual(response.status_code, 405)
