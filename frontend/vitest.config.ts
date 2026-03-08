@@ -6,12 +6,15 @@ export default defineConfig({
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx", "tests/**/*.spec.ts", "tests/**/*.spec.tsx"],
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
+    globals: true,
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
       exclude: [
         "**/*.d.ts",
         "tests/**",
+        // Pure TypeScript interface — compile-time only, tidak ada JS runtime yang bisa diukur
+        "src/lib/ILLMService.ts",
       ],
       reporter: ["text", "lcov", "cobertura", "json-summary"],
       reportsDirectory: "coverage",

@@ -1,24 +1,28 @@
 import { fetchAPI } from "@/lib/api";
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
-
-// Re-export agar import yang sudah ada tidak rusak
+import { isJsonObjectOrArray } from "@/utils/schemaValidator";
+import type { JsonValue } from "@/utils/schemaValidator";
 export { ERROR_MESSAGES };
+export type { JsonValue } from "@/utils/schemaValidator";
+
+
 
 export interface LLMRequest {
-    input_json: Record<string, unknown>;
-    model?: string;
+    input_json: JsonValue;
 }
 
 export interface LLMResponse {
-    output_json: Record<string, unknown>;
+    output_json: JsonValue;
 }
 
-// ERROR_MESSAGES dipindahkan ke @/constants/errorMessages
-
 export async function generateJson(
-    inputJson: Record<string, unknown>
+    inputJson: JsonValue
 ): Promise<LLMResponse> {
-    if (Object.keys(inputJson).length === 0) {
+    const isEmpty = Array.isArray(inputJson)
+        ? inputJson.length === 0
+        : Object.keys(inputJson).length === 0;
+
+    if (isEmpty) {
         throw new Error("Input tidak boleh kosong");
     }
 
@@ -46,7 +50,8 @@ export async function generateJson(
     if (
         typeof data !== "object" ||
         data === null ||
-        !("output_json" in data)
+        !("output_json" in data) ||
+        !isJsonObjectOrArray((data as Record<string, unknown>)["output_json"])
     ) {
         throw new Error("Respons tidak sesuai skema");
     }

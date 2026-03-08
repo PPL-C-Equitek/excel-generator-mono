@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { generateJson } from "@/services/llm";
-import type { LLMResponse } from "@/services/llm";
+import { useLLMGenerator } from "@/hooks/useLLMGenerator";
+import type { ILLMService } from "@/lib/ILLMService";
 
-// ─── Sub-components ────────────────────────────────────────────────────────────
+const defaultService: ILLMService = { generate: generateJson };
+
+interface Props {
+    readonly service?: ILLMService;
+}
 
 function SkeletonLoader() {
     return (
@@ -31,52 +35,13 @@ function Alert({ message }: { message: string }) {
     );
 }
 
-// ─── Main Component ─────────────────────────────────────────────────────────────
-
-export default function LLMClient() {
-    const [input, setInput] = useState<string>("");
-    const [result, setResult] = useState<LLMResponse | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [loading, setLoading] = useState<boolean>(false);
-
-    async function handleSubmit() {
-        setError(null);
-        setResult(null);
-
-        // Edge Case: input kosong setelah di-trim
-        if (!input.trim()) {
-            setError("Input tidak boleh kosong");
-            return;
-        }
-
-        // Edge Case: bukan JSON valid
-        let parsedInput: Record<string, unknown>;
-        try {
-            parsedInput = JSON.parse(input);
-        } catch {
-            setError("Input harus berupa JSON yang valid");
-            return;
-        }
-
-        setLoading(true);
-        try {
-            const response = await generateJson(parsedInput);
-            setResult(response);
-        } catch (err: unknown) {
-            setError(
-                err instanceof Error
-                    ? err.message
-                    : "Terjadi kesalahan tidak diketahui"
-            );
-        } finally {
-            setLoading(false);
-        }
-    }
+export default function LLMClient({ service = defaultService }: Props) {
+    const { input, setInput, result, error, loading, handleSubmit } =
+        useLLMGenerator(service);
 
     return (
         <div className="min-h-screen bg-gray-950 px-4 py-8 lg:px-8">
             <div className="mx-auto max-w-5xl">
-                {/* Header */}
                 <div className="mb-8">
                     <h1 className="text-3xl font-bold tracking-tight text-white">
                         LLM JSON Generator
@@ -86,10 +51,7 @@ export default function LLMClient() {
                     </p>
                 </div>
 
-                {/* Two-column on lg, single-column on mobile/tablet */}
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-
-                    {/* ── Input Panel ── */}
                     <div className="flex flex-col rounded-2xl bg-gray-800/60 p-5 shadow-xl ring-1 ring-white/5">
                         <label
                             htmlFor="llm-input"
@@ -116,19 +78,13 @@ export default function LLMClient() {
                         </button>
                     </div>
 
-                    {/* ── Output Panel ── */}
                     <div className="flex flex-col rounded-2xl bg-gray-800/60 p-5 shadow-xl ring-1 ring-white/5">
                         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
                             Output
                         </p>
 
-                        {/* Loading skeleton */}
                         {loading && <SkeletonLoader />}
-
-                        {/* Error alert */}
                         {!loading && error && <Alert message={error} />}
-
-                        {/* Success: syntax-highlighted JSON */}
                         {!loading && result && (
                             <SyntaxHighlighter
                                 language="json"
@@ -146,7 +102,6 @@ export default function LLMClient() {
                             </SyntaxHighlighter>
                         )}
 
-                        {/* Empty state */}
                         {!loading && !error && !result && (
                             <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-gray-700 py-16 text-sm text-gray-600">
                                 Hasil akan tampil di sini

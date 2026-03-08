@@ -4,6 +4,7 @@ source =
     .
 omit =
     */migrations/*
+    */management/*
     */tests/*
     */tests.py
     manage.py
