@@ -1,3 +1,5 @@
+'use client'
+
 import Navbar from '@/components/Navbar'
 import HeroSection from '@/components/HeroSection'
 import FeatureCard from '@/components/FeatureCard'
@@ -31,7 +33,12 @@ const FEATURES = [
 
 export default function LandingPage() {
     return (
-        <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--background)' }}>
+        <div className="force-light min-h-screen flex flex-col"
+            style={{
+                colorScheme: 'light',
+                backgroundColor: 'var(--background)',
+                color: '#171717',
+            }}>
             <Navbar />
             <HeroSection />
 

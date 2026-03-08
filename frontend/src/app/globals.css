@@ -24,3 +24,22 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Force light mode */
+.force-light {
+  --background: #ffffff;
+  --foreground: #171717;
+  --surface-1: #f9fafb;
+  --surface-2: #f3f4f6;
+  --border-default: #d1d5db;
+  --text-muted: #4b5563;
+  --text-subtle: #9ca3af;
+  --danger-bg: #fef2f2;
+  --danger-border: #f87171;
+  --danger-text: #b91c1c;
+  --brand-primary: #b91c1c;
+  --brand-primary-hover: #dc2626;
+  --brand-primary-active: #991b1b;
+  --brand-accent: #2563eb;
+  --brand-accent-hover: #3b82f6;
+}
