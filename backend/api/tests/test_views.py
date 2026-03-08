@@ -309,6 +309,29 @@ class DownloadCSVViewTest(APISimpleTestCase):
             "Failed to download CSV due to internal error.",
         )
 
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", side_effect=RuntimeError("unexpected read failure"), create=True)
+    def test_download_csv_endpoint_returns_500_for_unexpected_error_when_opening_file(
+        self,
+        _mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "file_path": "/safe/storage/export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+
+        response = self.client.get("/export/csv/csv_abc123/download")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download CSV due to internal error.",
+        )
+
     def test_download_csv_endpoint_rejects_post_method(self):
         response = self.client.post("/export/csv/csv_abc123/download")
 
