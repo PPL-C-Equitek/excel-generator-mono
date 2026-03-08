@@ -3,7 +3,19 @@ import json
 from django.test import SimpleTestCase, override_settings
 from unittest.mock import Mock, patch
 
-from llm.services.openai_client import OpenAIServiceError, generate_json, generate_text
+from llm.services.openai_client import OpenAIServiceError, OpenAIUpstreamError, generate_json, generate_text
+
+
+class DummyAuthenticationError(Exception):
+    pass
+
+
+class DummyRateLimitError(Exception):
+    pass
+
+
+class DummyTimeoutError(Exception):
+    pass
 
 
 class OpenAIClientServiceTest(SimpleTestCase):
@@ -67,6 +79,45 @@ class OpenAIClientServiceTest(SimpleTestCase):
     def test_generate_text_raises_for_empty_prompt(self):
         with self.assertRaises(ValueError):
             generate_text("")
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.AuthenticationError", new=DummyAuthenticationError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_maps_authentication_error(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyAuthenticationError("bad auth")
+
+        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
+            generate_text("Hello")
+
+        self.assertEqual(exc_ctx.exception.status_code, 401)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.RateLimitError", new=DummyRateLimitError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_maps_rate_limit_error(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyRateLimitError("rate limit")
+
+        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
+            generate_text("Hello")
+
+        self.assertEqual(exc_ctx.exception.status_code, 429)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APITimeoutError", new=DummyTimeoutError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_maps_timeout_error(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyTimeoutError("timeout")
+
+        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
+            generate_text("Hello")
+
+        self.assertEqual(exc_ctx.exception.status_code, 504)
 
     @patch("llm.services.openai_client.generate_text")
     def test_generate_json_parses_object_response(self, mock_generate_text):
