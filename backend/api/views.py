@@ -36,7 +36,7 @@ def upload(request):
 
     uploaded_file = request.FILES["file"]
 
-    success, error, file_path = process_upload(uploaded_file)
+    success, error, file_path, extracted_text = process_upload(uploaded_file)
 
     if not success:
         return Response(
@@ -44,12 +44,17 @@ def upload(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    response_data = {
+        "status": "success",
+        "message": "File uploaded successfully",
+        "filename": uploaded_file.name,
+        "path": file_path,
+    }
+    
+    if extracted_text is not None:
+        response_data["extracted_text"] = extracted_text
+
     return Response(
-        {
-            "status": "success",
-            "message": "File uploaded successfully",
-            "filename": uploaded_file.name,
-            "path": file_path,
-        },
+        response_data,
         status=status.HTTP_200_OK,
     )

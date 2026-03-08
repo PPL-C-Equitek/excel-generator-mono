@@ -5,6 +5,7 @@ from django.conf import settings
 from django.utils.text import get_valid_filename
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
+from file_processing.services.ocr_service import OCRService
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
 ALLOWED_MIME_TYPES = {
@@ -25,27 +26,35 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
     if not is_valid:
-        return False, error, None
+        return False, error, None, None
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
     is_valid, error = validate_mime_type(uploaded_file, ext)
     if not is_valid:
-        return False, error, None
+        return False, error, None, None
 
     if ext == ".pdf":
 
         is_valid, error = validate_pdf_not_corrupt(uploaded_file)
         if not is_valid:
-            return False, error, None
+            return False, error, None, None
 
         is_valid, error = validate_pdf_not_password_protected(uploaded_file)
         if not is_valid:
-            return False, error, None
+            return False, error, None, None
 
     file_path = save_temp_file(uploaded_file)
+    
+    extracted_text = None
+    if ext == ".pdf":
+        try:
+            extracted_text = OCRService.process_pdf(file_path)
+        except Exception as e:
+            print("OCR failed, but file is saved. Error details are logged on the server.", e)
+            extracted_text = None
 
-    return True, None, file_path
+    return True, None, file_path, extracted_text
 
 
 def validate_file(uploaded_file):
