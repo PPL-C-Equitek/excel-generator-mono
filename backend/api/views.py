@@ -36,7 +36,7 @@ def upload(request):
 
     uploaded_file = request.FILES["file"]
 
-    success, error, file_path = process_upload(uploaded_file)
+    success, error, _ = process_upload(uploaded_file)
 
     if not success:
         return Response(
@@ -49,7 +49,6 @@ def upload(request):
             "status": "success",
             "message": "File uploaded successfully",
             "filename": uploaded_file.name,
-            "path": file_path,
         },
         status=status.HTTP_200_OK,
     )
