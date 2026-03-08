@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
@@ -19,6 +21,8 @@ from file_processing.services.export_service import (
     OutputLLMValidationError,
     export_csv_to_filesystem,
 )
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
 
@@ -86,23 +90,26 @@ def export_csv(request):
             output_json=serializer.validated_data["output_json"],
             storage_dir=settings.CSV_EXPORT_DIR,
         )
-    except (OutputLLMValidationError, OutputCSVMappingError) as exc:
+    except (OutputLLMValidationError, OutputCSVMappingError):
+        logger.warning("Validation or mapping error during CSV export.", exc_info=True)
         return Response(
             {
                 "status": "error",
-                "message": str(exc),
+                "message": "Invalid CSV export request.",
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
-    except OutputCSVGenerationError as exc:
+    except OutputCSVGenerationError:
+        logger.exception("CSV generation error during CSV export.")
         return Response(
             {
                 "status": "error",
-                "message": str(exc),
+                "message": "Failed to generate CSV due to internal error.",
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     except Exception:
+        logger.exception("Unexpected error during CSV export.")
         return Response(
             {
                 "status": "error",

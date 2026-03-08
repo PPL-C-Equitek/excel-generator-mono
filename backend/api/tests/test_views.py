@@ -129,7 +129,7 @@ class ExportCSVViewTest(APISimpleTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["status"], "error")
-        self.assertIn("invalid schema", response.data["message"])
+        self.assertEqual(response.data["message"], "Invalid CSV export request.")
 
     @patch("api.views.export_csv_to_filesystem")
     def test_export_csv_endpoint_returns_500_on_internal_error(self, mocked_export):
@@ -151,7 +151,10 @@ class ExportCSVViewTest(APISimpleTestCase):
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data["status"], "error")
-        self.assertIn("storage failure", response.data["message"])
+        self.assertEqual(
+            response.data["message"],
+            "Failed to generate CSV due to internal error.",
+        )
 
     @patch("api.views.export_csv_to_filesystem")
     def test_export_csv_endpoint_returns_500_when_response_metadata_invalid(
