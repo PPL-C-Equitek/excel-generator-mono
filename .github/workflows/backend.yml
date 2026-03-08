@@ -101,15 +101,21 @@ jobs:
             backend/coverage.json
 
       - name: Update backend coverage badge
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
         run: |
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          TARGET_BRANCH="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            TARGET_BRANCH="${GITHUB_HEAD_REF}"
+          fi
+          echo "Updating backend badge on branch: ${TARGET_BRANCH}"
+
           for attempt in 1 2 3; do
-            git fetch origin main
-            git checkout -B main origin/main
+            git fetch origin "${TARGET_BRANCH}"
+            git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
 
             mkdir -p .github/badges
             LABEL="backend coverage"
@@ -157,7 +163,7 @@ jobs:
 
             git add .github/badges/backend-coverage.svg
             git commit -m "ci: update backend coverage badge" || true
-            if git push origin main; then
+            if git push origin "HEAD:${TARGET_BRANCH}"; then
               echo "Backend coverage badge updated."
               exit 0
             fi
