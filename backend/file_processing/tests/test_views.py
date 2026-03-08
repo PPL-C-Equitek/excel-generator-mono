@@ -3,7 +3,10 @@ from unittest.mock import patch
 from django.test import SimpleTestCase
 from rest_framework.test import APIClient
 
-from file_processing.services.export_service import OutputLLMValidationError
+from file_processing.services.export_service import (
+    OutputCSVGenerationError,
+    OutputLLMValidationError,
+)
 
 
 class ExportCsvEndpointTest(SimpleTestCase):
@@ -32,24 +35,12 @@ class ExportCsvEndpointTest(SimpleTestCase):
             ],
         }
 
-    @patch("file_processing.views.save_export_artifact", create=True)
-    @patch("file_processing.views.generate_csv_download_artifact", create=True)
-    @patch("file_processing.views.map_output_csv", create=True)
-    @patch("file_processing.views.validate_output_llm", create=True)
+    @patch("api.views.export_csv_to_filesystem")
     def test_export_csv_returns_200_and_metadata_for_valid_payload(
         self,
-        mock_validate_output_llm,
-        mock_map_output_csv,
-        mock_generate_csv_download_artifact,
-        mock_save_export_artifact,
+        mock_export_csv_to_filesystem,
     ):
         output_json = self._valid_output_json()
-        mapped_output = {"sheets": [{"name": "Sheet1", "headers": ["a"], "rows": [[1]]}]}
-        artifact = {
-            "type": "csv",
-            "name": "Sheet1.csv",
-            "content": b"header\r\nvalue\r\n",
-        }
         saved_metadata = {
             "file_id": "csv_8fa2e3d1",
             "file_name": "export_123.csv",
@@ -58,13 +49,10 @@ class ExportCsvEndpointTest(SimpleTestCase):
             "created_at": "2026-03-06T10:00:00Z",
         }
 
-        mock_validate_output_llm.return_value = output_json
-        mock_map_output_csv.return_value = mapped_output
-        mock_generate_csv_download_artifact.return_value = artifact
-        mock_save_export_artifact.return_value = saved_metadata
+        mock_export_csv_to_filesystem.return_value = saved_metadata
 
         response = self.client.post(
-            "/api/export/csv",
+            "/export/csv",
             {"output_json": output_json},
             format="json",
         )
@@ -77,25 +65,25 @@ class ExportCsvEndpointTest(SimpleTestCase):
         self.assertNotIn("path", response.data)
         self.assertNotIn("file_path", response.data)
 
-        mock_validate_output_llm.assert_called_once_with(output_json)
-        mock_map_output_csv.assert_called_once_with(output_json)
-        mock_generate_csv_download_artifact.assert_called_once_with(mapped_output)
-        mock_save_export_artifact.assert_called_once_with(artifact)
+        mock_export_csv_to_filesystem.assert_called_once()
 
     def test_export_csv_rejects_missing_output_json(self):
-        response = self.client.post("/api/export/csv", {}, format="json")
+        response = self.client.post("/export/csv", {}, format="json")
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("output_json", response.data)
 
-    @patch("file_processing.views.validate_output_llm", create=True)
-    def test_export_csv_rejects_invalid_schema_payload(self, mock_validate_output_llm):
-        mock_validate_output_llm.side_effect = OutputLLMValidationError(
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_rejects_invalid_schema_payload(
+        self,
+        mock_export_csv_to_filesystem,
+    ):
+        mock_export_csv_to_filesystem.side_effect = OutputLLMValidationError(
             "Invalid output schema."
         )
 
         response = self.client.post(
-            "/api/export/csv",
+            "/export/csv",
             {"output_json": self._valid_output_json()},
             format="json",
         )
@@ -103,30 +91,18 @@ class ExportCsvEndpointTest(SimpleTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertTrue("detail" in response.data or "message" in response.data)
 
-    @patch("file_processing.views.save_export_artifact", create=True)
-    @patch("file_processing.views.generate_csv_download_artifact", create=True)
-    @patch("file_processing.views.map_output_csv", create=True)
-    @patch("file_processing.views.validate_output_llm", create=True)
+    @patch("api.views.export_csv_to_filesystem")
     def test_export_csv_returns_500_when_filesystem_save_fails(
         self,
-        mock_validate_output_llm,
-        mock_map_output_csv,
-        mock_generate_csv_download_artifact,
-        mock_save_export_artifact,
+        mock_export_csv_to_filesystem,
     ):
-        output_json = self._valid_output_json()
-        mock_validate_output_llm.return_value = output_json
-        mock_map_output_csv.return_value = {"sheets": []}
-        mock_generate_csv_download_artifact.return_value = {
-            "type": "csv",
-            "name": "Sheet1.csv",
-            "content": b"header\r\nvalue\r\n",
-        }
-        mock_save_export_artifact.side_effect = OSError("Disk write failed")
+        mock_export_csv_to_filesystem.side_effect = OutputCSVGenerationError(
+            "Disk write failed"
+        )
 
         response = self.client.post(
-            "/api/export/csv",
-            {"output_json": output_json},
+            "/export/csv",
+            {"output_json": self._valid_output_json()},
             format="json",
         )
 
@@ -134,5 +110,5 @@ class ExportCsvEndpointTest(SimpleTestCase):
         self.assertTrue("detail" in response.data or "message" in response.data)
 
     def test_export_csv_rejects_get(self):
-        response = self.client.get("/api/export/csv")
+        response = self.client.get("/export/csv")
         self.assertEqual(response.status_code, 405)
