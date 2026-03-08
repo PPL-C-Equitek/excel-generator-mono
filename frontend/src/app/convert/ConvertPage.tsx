@@ -63,7 +63,7 @@ export default function ConvertPage({ llmService }: ConvertPageProps) {
                                     a.download = outputFile.filename;
                                     document.body.appendChild(a);
                                     a.click();
-                                    document.body.removeChild(a);
+                                    a.remove();
                                     URL.revokeObjectURL(url);
                                 }}
                                 disabled={!outputFile}

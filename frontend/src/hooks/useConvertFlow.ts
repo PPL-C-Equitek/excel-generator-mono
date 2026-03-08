@@ -52,49 +52,64 @@ export function useConvertFlow(
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
 
-    const handleFileSelect = async (file: File): Promise<void> => {
+    const abortPreviousRequest = (): AbortSignal => {
         if (abortControllerRef.current) {
             abortControllerRef.current.abort()
         }
-        const abortController = new AbortController()
-        abortControllerRef.current = abortController
+        const controller = new AbortController()
+        abortControllerRef.current = controller
+        return controller.signal
+    }
+
+    const handleProcessError = (err: unknown, defaultMsg: string, signal: AbortSignal) => {
+        if (signal.aborted) return
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setError(err instanceof Error ? err.message : defaultMsg)
+        setIsConverting(false)
+    }
+
+    const processUpload = async (file: File, signal: AbortSignal): Promise<JsonObject | null> => {
+        try {
+            const raw: unknown = await uploadFile(file, { signal })
+            if (signal.aborted) return null
+            if (!isJsonObject(raw)) {
+                setError('Respons upload tidak valid')
+                setIsConverting(false)
+                return null
+            }
+            return raw
+        } catch (err: unknown) {
+            handleProcessError(err, 'Upload failed', signal)
+            return null
+        }
+    }
+
+    const processConversion = async (uploadResult: JsonObject, file: File, signal: AbortSignal) => {
+        try {
+            await llmService.generate(uploadResult)
+            if (signal.aborted) return
+
+            setOutputFile(parseOutputFile(uploadResult, file))
+        } catch (err: unknown) {
+            handleProcessError(err, 'Conversion failed', signal)
+        } finally {
+            if (!signal.aborted) {
+                setIsConverting(false)
+            }
+        }
+    }
+
+    const handleFileSelect = async (file: File): Promise<void> => {
+        const signal = abortPreviousRequest()
 
         setError(null)
         setOutputFile(null)
         setIsConverting(true)
 
-        let uploadResult: JsonObject
-        try {
-            const raw: unknown = await uploadFile(file, { signal: abortController.signal })
-            if (abortController.signal.aborted) return
-            if (!isJsonObject(raw)) {
-                setError('Respons upload tidak valid')
-                setIsConverting(false)
-                return
-            }
-            uploadResult = raw
-        } catch (err: unknown) {
-            if (abortController.signal.aborted) return
-            if (err instanceof DOMException && err.name === 'AbortError') return
-            setError(err instanceof Error ? err.message : 'Upload failed')
-            setIsConverting(false)
-            return
-        }
+        const uploadResult = await processUpload(file, signal)
+        if (!uploadResult) return
 
-        try {
-            await llmService.generate(uploadResult)
-            if (abortController.signal.aborted) return
-
-            const parsedOutput = parseOutputFile(uploadResult, file)
-            setOutputFile(parsedOutput)
-        } catch (err: unknown) {
-            if (abortController.signal.aborted) return
-            setError(err instanceof Error ? err.message : 'Conversion failed')
-        } finally {
-            if (!abortController.signal.aborted) {
-                setIsConverting(false)
-            }
-        }
+        await processConversion(uploadResult, file, signal)
     }
 
     return { isConverting, error, outputFile, handleFileSelect }
