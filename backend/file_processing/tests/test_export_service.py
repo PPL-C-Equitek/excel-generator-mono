@@ -1110,7 +1110,8 @@ class ResolveCSVDownloadArtifactTest(unittest.TestCase):
                 )
 
         self.assertEqual(result["artifact_type"], "csv")
-        mocked_exists.assert_called_once_with(f"/safe/storage/export_{token}.csv")
+        expected_csv_path = os.path.join("/safe/storage", f"export_{token}.csv")
+        mocked_exists.assert_called_once_with(expected_csv_path)
 
     def test_resolve_csv_download_artifact_rejects_invalid_storage_dir(self):
         with self.assertRaises(export_service.OutputCSVDownloadLookupError):

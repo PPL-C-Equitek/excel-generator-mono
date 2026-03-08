@@ -19,6 +19,10 @@ class OutputCSVGenerationError(Exception):
     """Raised when mapped output cannot be generated into CSV content."""
 
 
+class OutputCSVDownloadLookupError(Exception):
+    """Raised when generated CSV artifact cannot be resolved for download."""
+
+
 class CSVSanitizationPolicy:
     """Strategy extension point for CSV header/value sanitization."""
 
@@ -437,6 +441,28 @@ def export_csv_to_filesystem(
     }
 
 
+def resolve_csv_download_artifact(file_id, storage_dir):
+    token = _resolve_download_token(file_id)
+    base_dir = _resolve_download_storage_dir(storage_dir)
+
+    candidate_files = (
+        ("csv", "text/csv"),
+        ("zip", "application/zip"),
+    )
+    for extension, content_type in candidate_files:
+        file_name = f"export_{token}.{extension}"
+        file_path = _build_safe_file_path(base_dir, file_name)
+        if os.path.exists(file_path):
+            return {
+                "file_name": file_name,
+                "file_path": file_path,
+                "artifact_type": extension,
+                "content_type": content_type,
+            }
+
+    raise OutputCSVDownloadLookupError("CSV artifact not found for given file_id.")
+
+
 def _validate_csv_headers(headers, sheet_index):
     if not isinstance(headers, list):
         raise OutputCSVGenerationError(f"Sheet {sheet_index} headers must be a list.")
@@ -546,6 +572,13 @@ def _resolve_storage_dir(storage_dir):
     return base_dir
 
 
+def _resolve_download_storage_dir(storage_dir):
+    if not isinstance(storage_dir, str) or not storage_dir.strip():
+        raise OutputCSVDownloadLookupError("storage_dir must be a non-empty string.")
+
+    return os.path.abspath(storage_dir)
+
+
 def _resolve_export_token(token_generator):
     if token_generator is None:
         token = uuid.uuid4().hex
@@ -564,6 +597,18 @@ def _resolve_export_token(token_generator):
         )
 
     return normalized_token
+
+
+def _resolve_download_token(file_id):
+    if not isinstance(file_id, str) or not file_id.strip():
+        raise OutputCSVDownloadLookupError("file_id must be a non-empty string.")
+
+    normalized_file_id = file_id.strip().lower()
+    match = re.fullmatch(r"csv_([a-z0-9]+)", normalized_file_id)
+    if not match:
+        raise OutputCSVDownloadLookupError("file_id format is invalid.")
+
+    return match.group(1)
 
 
 def _build_safe_file_path(base_dir, file_name):
