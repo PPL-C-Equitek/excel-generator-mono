@@ -5,6 +5,7 @@ from rest_framework.test import APIClient, APISimpleTestCase
 
 from api.models import GroupMember
 from file_processing.services.export_service import (
+    OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
     OutputLLMValidationError,
 )
@@ -175,3 +176,90 @@ class ExportCSVViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data["status"], "error")
         self.assertIn("invalid response metadata", response.data["message"])
+
+
+class DownloadCSVViewTest(APISimpleTestCase):
+    def _response_data(self, response):
+        if hasattr(response, "data"):
+            return response.data
+        return {}
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_returns_200_with_attachment_headers(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "file_path": "/safe/storage/export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+        mocked_open.return_value.__enter__.return_value = b"name,age\r\nZufar,21\r\n"
+
+        response = self.client.get("/export/csv/download/csv_abc123")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn(
+            'attachment; filename="export_abc123.csv"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    def test_download_csv_endpoint_returns_404_for_invalid_file_id(
+        self,
+        mocked_resolver,
+    ):
+        mocked_resolver.side_effect = OutputCSVDownloadLookupError("invalid file id")
+
+        response = self.client.get("/export/csv/download/csv_bad-token")
+        response_data = self._response_data(response)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response_data.get("status"), "error")
+        self.assertEqual(response_data.get("message"), "CSV file not found.")
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    def test_download_csv_endpoint_returns_404_for_missing_file(
+        self,
+        mocked_resolver,
+    ):
+        mocked_resolver.side_effect = OutputCSVDownloadLookupError("missing file")
+
+        response = self.client.get("/export/csv/download/csv_deadbeef")
+        response_data = self._response_data(response)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response_data.get("status"), "error")
+        self.assertEqual(response_data.get("message"), "CSV file not found.")
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", side_effect=OSError("disk read failed"), create=True)
+    def test_download_csv_endpoint_returns_500_when_reading_file_fails(
+        self,
+        _mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "file_path": "/safe/storage/export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+
+        response = self.client.get("/export/csv/download/csv_abc123")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download CSV due to internal error.",
+        )
+
+    def test_download_csv_endpoint_rejects_post_method(self):
+        response = self.client.post("/export/csv/download/csv_abc123")
+
+        self.assertEqual(response.status_code, 405)
