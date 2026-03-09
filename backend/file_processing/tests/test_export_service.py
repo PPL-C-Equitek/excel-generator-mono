@@ -1019,6 +1019,14 @@ class ExportCSVToFilesystemTest(unittest.TestCase):
             with self.assertRaises(export_service.OutputCSVGenerationError):
                 export_service._build_safe_file_path(temp_dir, "../evil.csv")
 
+    def test_build_safe_file_path_raises_when_commonpath_fails(self):
+        with patch(
+            "file_processing.services.export_service.os.path.commonpath",
+            side_effect=ValueError("invalid path roots"),
+        ):
+            with self.assertRaises(export_service.OutputCSVGenerationError):
+                export_service._build_safe_file_path(r"C:\safe\storage", "export_abc123.csv")
+
 
 class ResolveCSVDownloadArtifactTest(unittest.TestCase):
     def test_resolve_csv_download_artifact_exposes_expected_api(self):
@@ -1125,5 +1133,126 @@ class ResolveCSVDownloadArtifactTest(unittest.TestCase):
             )
 
 
-if __name__ == "__main__":
-    unittest.main()
+class _StaticScandir:
+    def __init__(self, entries):
+        self._entries = entries
+
+    def __enter__(self):
+        return self._entries
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+
+class _FakeDirEntry:
+    def __init__(self, name, path, is_file_result):
+        self.name = name
+        self.path = path
+        self._is_file_result = is_file_result
+
+    def is_file(self, follow_symlinks=False):
+        return self._is_file_result
+
+
+class DiscoverDownloadArtifactsTest(unittest.TestCase):
+    def test_discover_download_artifacts_skips_non_file_entries(self):
+        base_dir = r"C:\safe\storage"
+        entries = [
+            _FakeDirEntry("export_abc123.csv", r"C:\safe\storage\export_abc123.csv", False),
+            _FakeDirEntry("export_def456.csv", r"C:\safe\storage\export_def456.csv", True),
+        ]
+
+        with patch(
+            "file_processing.services.export_service.os.scandir",
+            return_value=_StaticScandir(entries),
+        ):
+            with patch(
+                "file_processing.services.export_service.os.path.realpath",
+                side_effect=lambda value: value,
+            ):
+                with patch(
+                    "file_processing.services.export_service.os.path.commonpath",
+                    side_effect=lambda paths: paths[0],
+                ):
+                    discovered = export_service._discover_download_artifacts(base_dir)
+
+        self.assertNotIn("export_abc123.csv", discovered)
+        self.assertIn("export_def456.csv", discovered)
+
+    def test_discover_download_artifacts_skips_non_matching_file_names(self):
+        base_dir = r"C:\safe\storage"
+        entries = [
+            _FakeDirEntry("notes.txt", r"C:\safe\storage\notes.txt", True),
+            _FakeDirEntry("export_def456.csv", r"C:\safe\storage\export_def456.csv", True),
+        ]
+
+        with patch(
+            "file_processing.services.export_service.os.scandir",
+            return_value=_StaticScandir(entries),
+        ):
+            with patch(
+                "file_processing.services.export_service.os.path.realpath",
+                side_effect=lambda value: value,
+            ):
+                with patch(
+                    "file_processing.services.export_service.os.path.commonpath",
+                    side_effect=lambda paths: paths[0],
+                ):
+                    discovered = export_service._discover_download_artifacts(base_dir)
+
+        self.assertNotIn("notes.txt", discovered)
+        self.assertIn("export_def456.csv", discovered)
+
+    def test_discover_download_artifacts_skips_entries_when_commonpath_raises(self):
+        base_dir = r"C:\safe\storage"
+        entries = [
+            _FakeDirEntry("export_abc123.csv", r"C:\safe\storage\export_abc123.csv", True),
+            _FakeDirEntry("export_def456.csv", r"C:\safe\storage\export_def456.csv", True),
+        ]
+
+        with patch(
+            "file_processing.services.export_service.os.scandir",
+            return_value=_StaticScandir(entries),
+        ):
+            with patch(
+                "file_processing.services.export_service.os.path.realpath",
+                side_effect=lambda value: value,
+            ):
+                with patch(
+                    "file_processing.services.export_service.os.path.commonpath",
+                    side_effect=[ValueError("invalid path"), base_dir],
+                ):
+                    discovered = export_service._discover_download_artifacts(base_dir)
+
+        self.assertNotIn("export_abc123.csv", discovered)
+        self.assertIn("export_def456.csv", discovered)
+
+    def test_discover_download_artifacts_skips_entries_outside_base_dir(self):
+        base_dir = r"C:\safe\storage"
+        entries = [
+            _FakeDirEntry("export_abc123.csv", r"C:\other\export_abc123.csv", True),
+        ]
+
+        with patch(
+            "file_processing.services.export_service.os.scandir",
+            return_value=_StaticScandir(entries),
+        ):
+            with patch(
+                "file_processing.services.export_service.os.path.realpath",
+                side_effect=lambda value: value,
+            ):
+                with patch(
+                    "file_processing.services.export_service.os.path.commonpath",
+                    return_value=r"C:\other",
+                ):
+                    discovered = export_service._discover_download_artifacts(base_dir)
+
+        self.assertEqual(discovered, {})
+
+    def test_discover_download_artifacts_raises_lookup_error_when_scandir_fails(self):
+        with patch(
+            "file_processing.services.export_service.os.scandir",
+            side_effect=OSError("storage not readable"),
+        ):
+            with self.assertRaises(export_service.OutputCSVDownloadLookupError):
+                export_service._discover_download_artifacts(r"C:\safe\storage")
