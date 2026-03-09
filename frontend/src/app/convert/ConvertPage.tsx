@@ -9,8 +9,8 @@ interface ConvertPageProps {
     readonly llmService?: ILLMService
 }
 
-export default function ConvertPage({ llmService }: ConvertPageProps) {
-    const { isConverting, error, outputFile, csvMetadata, handleFileSelect } = useConvertFlow(llmService)
+export default function ConvertPage({ llmService: injectedService }: ConvertPageProps) {
+    const { isConverting, error, outputFile, csvMetadata, handleFileSelect, llmService } = useConvertFlow(injectedService)
 
     return (
         <div className="flex min-h-screen">
@@ -72,12 +72,12 @@ export default function ConvertPage({ llmService }: ConvertPageProps) {
                                 Download Excel
                             </button>
 
-                            {csvMetadata && llmService?.getDownloadUrl && (
+                            {llmService.getDownloadUrl && (
                                 <button
                                     data-testid="download-csv-btn"
                                     onClick={() => {
                                         const url = llmService.getDownloadUrl!(
-                                            csvMetadata.file_id,
+                                            csvMetadata!.file_id,
                                             outputFile.filename.replace(/\.xlsx$/, '.csv')
                                         );
                                         const a = document.createElement("a");
@@ -87,6 +87,7 @@ export default function ConvertPage({ llmService }: ConvertPageProps) {
                                         a.click();
                                         a.remove();
                                     }}
+                                    disabled={isConverting || !csvMetadata}
                                     className="mt-4 ml-4 bg-green-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-green-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     Download CSV

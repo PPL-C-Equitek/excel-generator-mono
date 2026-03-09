@@ -52,6 +52,7 @@ export interface UseConvertFlowReturn {
     outputFile: OutputFile | null
     csvMetadata: CsvMetadata | null
     handleFileSelect: (file: File) => Promise<void>
+    llmService: ILLMService
 }
 
 export function useConvertFlow(
@@ -117,7 +118,11 @@ export function useConvertFlow(
                     const sanitizedJSON = sanitizeCSVCell(out) as JsonValue
                     const csvResult = await llmService.exportToCsv(sanitizedJSON)
                     if (!signal.aborted) {
-                        setCsvMetadata({ file_id: csvResult.file_id })
+                        if (csvResult.file_id && csvResult.file_id.startsWith('csv_')) {
+                            setCsvMetadata({ file_id: csvResult.file_id })
+                        } else {
+                            throw new Error('ID File CSV tidak valid')
+                        }
                     }
                 } catch (csvErr: unknown) {
                     handleProcessError(csvErr, 'CSV Export failed', signal)
@@ -146,5 +151,5 @@ export function useConvertFlow(
         await processConversion(uploadResult, file, signal)
     }
 
-    return { isConverting, error, outputFile, csvMetadata, handleFileSelect }
+    return { isConverting, error, outputFile, csvMetadata, handleFileSelect, llmService }
 }

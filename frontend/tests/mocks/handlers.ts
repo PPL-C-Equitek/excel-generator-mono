@@ -60,17 +60,17 @@ export const handlerPrimitiveOutput = http.post(
 );
 
 export const exportCsvSuccessHandler = http.post(
-    `${API_BASE}/api/export/csv`,
+    `${API_BASE}/export/csv`,
     () => HttpResponse.json({ file_id: "csv_12345" }, { status: 200 })
 );
 
 export const exportCsvInvalidSchemaHandler = http.post(
-    `${API_BASE}/api/export/csv`,
+    `${API_BASE}/export/csv`,
     () => HttpResponse.json({ missing: "file_id" }, { status: 200 })
 );
 
 export const exportCsvInvalidPrefixHandler = http.post(
-    `${API_BASE}/api/export/csv`,
+    `${API_BASE}/export/csv`,
     () => HttpResponse.json({ file_id: "wrong_999" }, { status: 200 })
 );
 

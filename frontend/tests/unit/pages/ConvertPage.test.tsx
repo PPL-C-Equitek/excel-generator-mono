@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within, act } from '@testing-library/react'
+import { render, screen, waitFor, within, act, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ILLMService } from '../../../src/lib/ILLMService'
@@ -10,7 +10,7 @@ vi.mock('../../../src/lib/api', () => ({
 vi.mock('../../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
     exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_777' }),
-    getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_777/download?filename=test.csv'),
+    getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_777/download?filename=test.csv'),
 }))
 
 import { uploadFile } from '../../../src/lib/api'
@@ -320,23 +320,25 @@ describe('ConvertPage', () => {
 
         it('displays disabled Download CSV button during conversion', async () => {
             const user = userEvent.setup()
-            render(<ConvertPage />)
+            
+            const resolvers: Array<(value: unknown) => void> = []
+            const mockService = {
+                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+                exportToCsv: vi.fn().mockImplementationOnce(() => new Promise(res => resolvers.push(res))),
+                getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_pending/download?filename=test.csv')
+            }
+
+            render(<ConvertPage llmService={mockService as unknown as ILLMService} />)
             
             const uploadButton = screen.getByText('Upload File')
-            // Delaying the llm mock to stay in loading state
-            const resolvers: Array<(value: unknown) => void> = []
-            vi.mocked(uploadFile).mockImplementationOnce(() => new Promise(res => resolvers.push(res)))
-            
             await user.click(uploadButton)
             
-            const csvBtn = screen.queryByTestId('download-csv-btn')
-            if (csvBtn) {
-                expect(csvBtn).toBeDisabled()
-            }
+            const csvBtn = await screen.findByTestId('download-csv-btn')
+            expect(csvBtn).toBeDisabled()
             
             // cleanup
             await act(async () => {
-                resolvers.forEach(r => r({ filename: 'test.xlsx', size: 100, format: 'xlsx' }))
+                resolvers.forEach(r => r({ file_id: 'csv_999' }))
             })
             vi.unstubAllEnvs()
         })
@@ -347,7 +349,7 @@ describe('ConvertPage', () => {
             const mockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
-                getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_999/download?filename=test.csv')
+                getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_999/download?filename=test.csv')
             }
 
             render(<ConvertPage llmService={mockService as unknown as ILLMService} />)
@@ -369,7 +371,7 @@ describe('ConvertPage', () => {
             const mockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
-                getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_999/download?filename=test.csv')
+                getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_999/download?filename=test.csv')
             }
             
             const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
@@ -384,6 +386,47 @@ describe('ConvertPage', () => {
             
             expect(mockService.getDownloadUrl).toHaveBeenCalledWith('csv_999', 'test.csv')
             expect(clickSpy).toHaveBeenCalled()
+            
+            clickSpy.mockRestore()
+            vi.unstubAllEnvs()
+        })
+
+        it('does nothing if Download CSV is clicked while disabled/csvMetadata is null', async () => {
+            const user = userEvent.setup()
+            const mockService = {
+                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+                exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
+                getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_999/download?filename=test.csv')
+            }
+            
+            // Render a state where the button gets displayed but without metadata (forcefully via mock delay or by intercepting state)
+            // Wait, we can just use the previous test where we delayed the exportToCsv.
+            const resolvers: Array<(value: unknown) => void> = []
+            const delayedMockService = {
+                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+                exportToCsv: vi.fn().mockImplementationOnce(() => new Promise(res => resolvers.push(res))),
+                getDownloadUrl: vi.fn()
+            }
+
+            render(<ConvertPage llmService={delayedMockService as unknown as ILLMService} />)
+            
+            const uploadButton = screen.getByText('Upload File')
+            await user.click(uploadButton)
+            
+            // Wait for generate to resolve and output file to appear
+            const csvBtn = await screen.findByTestId('download-csv-btn')
+            expect(csvBtn).toBeDisabled()
+            
+            // Fire event forcefully by bypassing DOM disabled check to hit the internal component logic branch (line 79)
+            csvBtn.removeAttribute('disabled')
+            const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+            fireEvent.click(csvBtn)
+            expect(clickSpy).not.toHaveBeenCalled()
+            
+            // cleanup
+            await act(async () => {
+                resolvers.forEach(r => r({ file_id: 'csv_999' }))
+            })
             
             clickSpy.mockRestore()
             vi.unstubAllEnvs()
@@ -405,10 +448,8 @@ describe('ConvertPage', () => {
             const alertEl = await screen.findByRole('alert')
             expect(alertEl).toHaveTextContent(/CSV Export Error/i)
             
-            const csvBtn = screen.queryByTestId('download-csv-btn')
-            if (csvBtn) {
-                expect(csvBtn).toBeDisabled()
-            }
+            // Buttons block unmounts when there's an error
+            expect(screen.queryByTestId('download-csv-btn')).not.toBeInTheDocument()
             
             vi.unstubAllEnvs()
         })

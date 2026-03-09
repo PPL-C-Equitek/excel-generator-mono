@@ -31,7 +31,7 @@ function makeMockService(overrides?: Partial<ILLMService>): ILLMService {
     return {
         generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
         exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_12345' }),
-        getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_12345/download'),
+        getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_12345/download'),
         ...overrides,
     }
 }
@@ -645,6 +645,24 @@ describe('useConvertFlow', () => {
 
             // Expect that exportToCsv is called with the exact full structure spanning all sheets
             expect(service.exportToCsv).toHaveBeenCalledWith(rawOutput)
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('throws an error if the exported CSV file_id does not start with csv_', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: { test: 'ok' } }),
+                exportToCsv: vi.fn().mockResolvedValue({ file_id: 'invalid_id_123' })
+            })
+            
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.csvMetadata).toBeNull()
+            expect(result.current.error).toBe('ID File CSV tidak valid')
             
             vi.unstubAllEnvs()
         })
