@@ -72,35 +72,56 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
 
+    @patch("llm.views.logger")
     @patch("llm.views.generate_json")
-    def test_llm_generate_returns_401_for_upstream_auth_error(self, mock_generate_json):
+    def test_llm_generate_returns_401_for_upstream_auth_error(self, mock_generate_json, mock_logger):
         mock_generate_json.side_effect = OpenAIUpstreamError("LLM authentication failed.", status_code=401)
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.data["detail"], "LLM authentication failed.")
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
+        mock_logger.exception.assert_called_once_with("Upstream LLM provider error while handling llm_generate request.")
 
+    @patch("llm.views.logger")
     @patch("llm.views.generate_json")
-    def test_llm_generate_returns_429_for_upstream_rate_limit(self, mock_generate_json):
+    def test_llm_generate_returns_429_for_upstream_rate_limit(self, mock_generate_json, mock_logger):
         mock_generate_json.side_effect = OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429)
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 429)
-        self.assertEqual(response.data["detail"], "LLM rate limit exceeded.")
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
+        mock_logger.exception.assert_called_once_with("Upstream LLM provider error while handling llm_generate request.")
 
+    @patch("llm.views.logger")
     @patch("llm.views.generate_json")
-    def test_llm_generate_returns_504_for_upstream_timeout(self, mock_generate_json):
+    def test_llm_generate_returns_504_for_upstream_timeout(self, mock_generate_json, mock_logger):
         mock_generate_json.side_effect = OpenAIUpstreamError("LLM request timed out.", status_code=504)
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 504)
-        self.assertEqual(response.data["detail"], "LLM request timed out.")
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
+        mock_logger.exception.assert_called_once_with("Upstream LLM provider error while handling llm_generate request.")
+
+    @patch("llm.views.logger")
+    @patch("llm.views.generate_json")
+    def test_llm_generate_logs_upstream_error_without_exposing_exception(self, mock_generate_json, mock_logger):
+        mock_generate_json.side_effect = OpenAIUpstreamError("raw upstream details", status_code=502)
+        client = APIClient()
+
+        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
+        self.assertNotIn("raw upstream details", response.data["detail"])
+        mock_logger.exception.assert_called_once_with(
+            "Upstream LLM provider error while handling llm_generate request."
+        )
 
     @patch("llm.views.logger")
     @patch("llm.views.generate_json")
@@ -130,8 +151,9 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
         mock_response_serializer_class.assert_called_once_with(data={"output_json": {"status": "ok"}})
 
+    @patch("llm.views.logger")
     @patch("llm.views.generate_json")
-    def test_llm_generate_returns_400_for_value_error(self, mock_generate_json):
+    def test_llm_generate_returns_400_for_value_error(self, mock_generate_json, mock_logger):
         mock_generate_json.side_effect = ValueError("input_json must be an object or array.")
         client = APIClient()
 
@@ -139,7 +161,8 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["detail"], "Invalid request payload.")
-        self.assertIn("errors", response.data)
+        self.assertEqual(response.data["errors"]["input_json"], ["Invalid input_json payload."])
+        mock_logger.exception.assert_called_once_with("Invalid input_json payload.")
 
     def test_llm_generate_rejects_non_json_content_type(self):
         client = APIClient()

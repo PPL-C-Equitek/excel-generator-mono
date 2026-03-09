@@ -152,6 +152,45 @@ class OpenAIClientServiceTest(SimpleTestCase):
         self.assertEqual(exc_ctx.exception.status_code, 502)
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_maps_api_status_401_to_401(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyAPIStatusError("api status", status_code=401)
+
+        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
+            generate_text("Hello")
+
+        self.assertEqual(exc_ctx.exception.status_code, 401)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_maps_api_status_429_to_429(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyAPIStatusError("api status", status_code=429)
+
+        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
+            generate_text("Hello")
+
+        self.assertEqual(exc_ctx.exception.status_code, 429)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_maps_api_status_504_to_504(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyAPIStatusError("api status", status_code=504)
+
+        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
+            generate_text("Hello")
+
+        self.assertEqual(exc_ctx.exception.status_code, 504)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.APIError", new=DummyAPIError)
     @patch("llm.services.openai_client.OpenAI")
     def test_generate_text_maps_api_error(self, mock_openai):
@@ -276,4 +315,20 @@ class OpenAIClientServiceTest(SimpleTestCase):
         self.assertEqual(first_result, {"status": "ok"})
         self.assertEqual(second_result, {"status": "ok"})
         self.assertEqual(mock_generate_text.call_count, 2)
+
+    @override_settings(
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_SYSTEM_PROMPT="",
+        LLM_CACHE_TTL_SECONDS="bad-value",
+    )
+    @patch("llm.services.openai_client.cache.set")
+    @patch("llm.services.openai_client.generate_text")
+    def test_generate_json_uses_default_cache_ttl_when_setting_invalid(self, mock_generate_text, mock_cache_set):
+        mock_generate_text.return_value = '{"status":"ok"}'
+
+        result = generate_json({"source": "upload"})
+
+        self.assertEqual(result, {"status": "ok"})
+        mock_cache_set.assert_called_once()
+        self.assertEqual(mock_cache_set.call_args.kwargs["timeout"], 300)
 

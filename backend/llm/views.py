@@ -20,6 +20,7 @@ UNSUPPORTED_MEDIA_TYPE_DETAIL = "Content-Type must be application/json."
 SERVICE_UNAVAILABLE_DETAIL = "Service unavailable. Please try again later."
 UPSTREAM_FAILURE_DETAIL = "Failed to generate response from LLM provider."
 INTERNAL_FAILURE_DETAIL = "Internal server error."
+INVALID_INPUT_JSON_DETAIL = "Invalid input_json payload."
 
 
 @api_view(["POST"])
@@ -43,11 +44,19 @@ def llm_generate(request):
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     except OpenAIUpstreamError as exc:
-        return Response({"detail": str(exc)}, status=exc.status_code)
+        logger.exception("Upstream LLM provider error while handling llm_generate request.")
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
     except OpenAIServiceError:
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
     except ValueError as exc:
-        return Response({"detail": INVALID_REQUEST_DETAIL, "errors": {"input_json": [str(exc)]}}, status=400)
+        logger.exception("Invalid input_json payload.")
+        return Response(
+            {
+                "detail": INVALID_REQUEST_DETAIL,
+                "errors": {"input_json": [INVALID_INPUT_JSON_DETAIL]},
+            },
+            status=400,
+        )
     except Exception:
         logger.exception("Unexpected error while handling llm_generate request.")
         return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
