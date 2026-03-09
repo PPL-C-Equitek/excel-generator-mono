@@ -1,26 +1,24 @@
 from PyPDF2 import PdfReader, PdfWriter
+from PyPDF2.errors import PdfReadError
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, PropertyMock
 
 from io import BytesIO
 from reportlab.pdfgen import canvas
 from openpyxl import Workbook
 
-<<<<<<< HEAD
 from rest_framework.test import APIClient, APISimpleTestCase
 
 from api.models import GroupMember
 from file_processing.services.export_service import (
     OutputCSVGenerationError,
     OutputLLMValidationError,
-=======
-from file_processing.services.upload_service import (
-    validate_pdf_not_corrupt,
-    validate_pdf_not_password_protected,
-    validate_pdf_page_count,
->>>>>>> 9b3117c (GREEN: add new test to increase code coverage)
 )
+from file_processing.services.upload_service import (
+    validate_pdf_page_count,
+)
+from file_processing.services.upload_service import validate_pdf
 
 
 class BaseApiViewTest(TestCase):
@@ -279,60 +277,6 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
-    
-    def test_validate_pdf_not_corrupt_generic_exception(self):
-        with patch("file_processing.services.upload_service.PdfReader") as mock_reader:
-            mock_reader.side_effect = Exception("unexpected error")
-
-            f = SimpleUploadedFile(
-                "doc.pdf",
-                b"%PDF-test",
-                content_type="application/pdf",
-            )
-            is_valid, error = validate_pdf_not_corrupt(f)
-            self.assertFalse(is_valid)
-            self.assertIn("corrupt", error.lower())
-
-    def test_validate_pdf_not_password_protected_exception(self):
-        with patch("file_processing.services.upload_service.PdfReader") as mock_reader:
-            mock_reader.side_effect = Exception("unexpected error")
-
-            f = SimpleUploadedFile(
-                "doc.pdf",
-                b"dummy",
-                content_type="application/pdf",
-            )
-            is_valid, error = validate_pdf_not_password_protected(f)
-            self.assertFalse(is_valid)
-
-    def test_upload_pdf_too_many_pages(self):
-        pdf_doc = self.generate_valid_pdf_bytes()
-
-        with patch(
-            "file_processing.services.upload_service.PdfReader"
-        ) as mock_reader_cls:
-            mock_instance = MagicMock()
-            mock_instance.is_encrypted = False
-            mock_instance.pages = [MagicMock()] * 101
-            mock_reader_cls.return_value = mock_instance
-
-            resp = self._post_file("doc.pdf", pdf_doc, "application/pdf")
-            self.assertEqual(resp.status_code, 400)
-            self.assertEqual(resp.data["status"], "error")
-            self.assertIn("100", resp.data["message"])
-
-    def test_validate_pdf_page_count_exception(self):
-        with patch("file_processing.services.upload_service.PdfReader") as mock_reader:
-            mock_reader.side_effect = Exception("read error")
-
-            f = SimpleUploadedFile(
-                "doc.pdf",
-                b"dummy",
-                content_type="application/pdf",
-            )
-            is_valid, error = validate_pdf_page_count(f)
-            self.assertFalse(is_valid)
-            self.assertIn("Unable to read", error)
 
     def test_xls_extension_but_invalid_mime(self):
         resp = self._post_file(
@@ -371,6 +315,84 @@ class UploadEndpointTest(TestCase):
             self.assertEqual(resp.data["status"], "error")
             self.assertEqual(resp.data["message"], "Unable to determine file type.")
 
+    def test_validate_pdf_reader_creation_fails(self):
+        with patch("file_processing.services.upload_service.PdfReader") as mock_reader:
+            mock_reader.side_effect = Exception("parse error")
+
+            f = SimpleUploadedFile(
+                "doc.pdf",
+                b"%PDF-test",
+                content_type="application/pdf",
+            )
+            is_valid, error = validate_pdf(f)
+            self.assertFalse(is_valid)
+            self.assertIn("corrupt", error.lower())
+
+    def test_validate_pdf_structure_pdf_read_error(self):
+        with patch("file_processing.services.upload_service.PdfReader") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.is_encrypted = False
+            type(mock_instance).pages = PropertyMock(
+                side_effect=PdfReadError("bad xref")
+            )
+            mock_cls.return_value = mock_instance
+
+            f = SimpleUploadedFile(
+                "doc.pdf",
+                b"%PDF-test",
+                content_type="application/pdf",
+            )
+            is_valid, error = validate_pdf(f)
+            self.assertFalse(is_valid)
+            self.assertIn("corrupt", error.lower())
+
+    def test_validate_pdf_structure_generic_exception(self):
+        with patch("file_processing.services.upload_service.PdfReader") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.is_encrypted = False
+            type(mock_instance).pages = PropertyMock(
+                side_effect=Exception("unexpected")
+            )
+            mock_cls.return_value = mock_instance
+
+            f = SimpleUploadedFile(
+                "doc.pdf",
+                b"%PDF-test",
+                content_type="application/pdf",
+            )
+            is_valid, error = validate_pdf(f)
+            self.assertFalse(is_valid)
+            self.assertIn("corrupt", error.lower())
+
+    def test_upload_pdf_too_many_pages(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        with patch(
+            "file_processing.services.upload_service.PdfReader"
+        ) as mock_reader_cls:
+            mock_instance = MagicMock()
+            mock_instance.is_encrypted = False
+            mock_instance.pages = [MagicMock()] * 101
+            mock_reader_cls.return_value = mock_instance
+
+            resp = self._post_file("doc.pdf", pdf_doc, "application/pdf")
+            self.assertEqual(resp.status_code, 400)
+            self.assertEqual(resp.data["status"], "error")
+            self.assertIn("100", resp.data["message"])
+
+    def test_validate_pdf_page_count_exception(self):
+        with patch("file_processing.services.upload_service.PdfReader") as mock_reader:
+            mock_reader.side_effect = Exception("read error")
+
+            f = SimpleUploadedFile(
+                "doc.pdf",
+                b"dummy",
+                content_type="application/pdf",
+            )
+            is_valid, error = validate_pdf_page_count(f)
+            self.assertFalse(is_valid)
+            self.assertIn("Unable to read", error)
+
     @patch("api.views.process_upload")
     def test_upload_returns_extracted_text(self, mock_process):
         mock_process.return_value = (
@@ -382,13 +404,17 @@ class UploadEndpointTest(TestCase):
 
         resp = self.client.post(
             "/upload/",
-            {"file": SimpleUploadedFile("doc.pdf", b"%PDF-1.4", content_type="application/pdf")},
+            {
+                "file": SimpleUploadedFile(
+                    "doc.pdf", b"%PDF-1.4", content_type="application/pdf"
+                )
+            },
             format="multipart",
         )
 
         self.assertEqual(resp.status_code, 200)
         self.assertIn("extracted", resp.data)
-    
+
     @patch("file_processing.services.upload_service.OCRService.process_pdf")
     def test_ocr_failure_is_logged_and_returns_success(self, mock_ocr):
         mock_ocr.side_effect = Exception("OCR crash")
@@ -417,6 +443,7 @@ class UploadEndpointTest(TestCase):
         )
 
         self.assertEqual(resp.status_code, 200)
+
 
 class ExportCSVViewTest(APISimpleTestCase):
     def _valid_output_json(self):
