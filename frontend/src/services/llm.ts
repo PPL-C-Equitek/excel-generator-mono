@@ -1,6 +1,6 @@
 import { fetchAPI } from "@/lib/api";
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
-import { isJsonObjectOrArray } from "@/utils/schemaValidator";
+import { isJsonObject } from "@/utils/schemaValidator";
 import type { JsonValue } from "@/utils/schemaValidator";
 export { ERROR_MESSAGES };
 export type { JsonValue } from "@/utils/schemaValidator";
@@ -51,7 +51,7 @@ export async function generateJson(
         typeof data !== "object" ||
         data === null ||
         !("output_json" in data) ||
-        !isJsonObjectOrArray((data as Record<string, unknown>)["output_json"])
+        !isJsonObject((data as Record<string, unknown>)["output_json"])
     ) {
         throw new Error("Respons tidak sesuai skema");
     }
