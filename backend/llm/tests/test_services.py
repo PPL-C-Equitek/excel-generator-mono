@@ -1,5 +1,6 @@
 import json
 
+from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
 from unittest.mock import Mock, patch
 
@@ -33,6 +34,10 @@ class DummyAPIConnectionError(Exception):
 
 
 class OpenAIClientServiceTest(SimpleTestCase):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+
     @override_settings(
         OPENAI_API_KEY="test-key",
         OPENAI_MODEL="gpt-4.1-mini",
@@ -208,4 +213,67 @@ class OpenAIClientServiceTest(SimpleTestCase):
 
         with self.assertRaises(OpenAIServiceError):
             generate_json({"source": "upload"})
+
+    @override_settings(
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_SYSTEM_PROMPT="",
+        LLM_CACHE_TTL_SECONDS=300,
+    )
+    @patch("llm.services.openai_client.generate_text")
+    def test_generate_json_caches_identical_input(self, mock_generate_text):
+        mock_generate_text.return_value = '{"status":"ok"}'
+
+        first_result = generate_json({"source": "upload"})
+        second_result = generate_json({"source": "upload"})
+
+        self.assertEqual(first_result, {"status": "ok"})
+        self.assertEqual(second_result, {"status": "ok"})
+        mock_generate_text.assert_called_once_with(prompt='{"source": "upload"}')
+
+    @override_settings(
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_SYSTEM_PROMPT="",
+        LLM_CACHE_TTL_SECONDS=300,
+    )
+    @patch("llm.services.openai_client.generate_text")
+    def test_generate_json_cache_key_is_order_independent_for_objects(self, mock_generate_text):
+        mock_generate_text.return_value = '{"status":"ok"}'
+
+        first_result = generate_json({"b": 2, "a": 1})
+        second_result = generate_json({"a": 1, "b": 2})
+
+        self.assertEqual(first_result, {"status": "ok"})
+        self.assertEqual(second_result, {"status": "ok"})
+        self.assertEqual(mock_generate_text.call_count, 1)
+
+    @override_settings(OPENAI_MODEL="gpt-4.1-mini", OPENAI_SYSTEM_PROMPT="", LLM_CACHE_TTL_SECONDS=300)
+    @patch("llm.services.openai_client.generate_text")
+    def test_generate_json_cache_key_includes_model_and_system_prompt(self, mock_generate_text):
+        mock_generate_text.side_effect = ['{"source":"model-1"}', '{"source":"model-2"}']
+
+        with override_settings(OPENAI_MODEL="gpt-4.1-mini", OPENAI_SYSTEM_PROMPT="prompt-a"):
+            first_result = generate_json({"source": "upload"})
+
+        with override_settings(OPENAI_MODEL="gpt-4.1", OPENAI_SYSTEM_PROMPT="prompt-b"):
+            second_result = generate_json({"source": "upload"})
+
+        self.assertEqual(first_result, {"source": "model-1"})
+        self.assertEqual(second_result, {"source": "model-2"})
+        self.assertEqual(mock_generate_text.call_count, 2)
+
+    @override_settings(
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_SYSTEM_PROMPT="",
+        LLM_CACHE_TTL_SECONDS=0,
+    )
+    @patch("llm.services.openai_client.generate_text")
+    def test_generate_json_does_not_cache_when_ttl_is_zero(self, mock_generate_text):
+        mock_generate_text.return_value = '{"status":"ok"}'
+
+        first_result = generate_json({"source": "upload"})
+        second_result = generate_json({"source": "upload"})
+
+        self.assertEqual(first_result, {"status": "ok"})
+        self.assertEqual(second_result, {"status": "ok"})
+        self.assertEqual(mock_generate_text.call_count, 2)
 
