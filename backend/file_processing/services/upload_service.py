@@ -172,7 +172,7 @@ def save_temp_file(uploaded_file):
     return file_path
 
 
-def extract_pdf_to_json(file_path: str) -> dict:
+def extract_non_ocr_pdf_to_json(file_path: str) -> dict:
     """
     Extract text content from a non-OCR PDF file and return structured JSON.
 

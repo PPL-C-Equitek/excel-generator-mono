@@ -9,7 +9,8 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-from file_processing.services.upload_service import extract_pdf_to_json
+
+from file_processing.services.upload_service import extract_non_ocr_pdf_to_json
 
 from django.test import SimpleTestCase
 from rest_framework.test import APIClient
@@ -222,7 +223,7 @@ class ExtractPdfToJsonTest(TestCase):
         """Plain-text page → text is a list of line strings."""
         path = self._create_pdf(["Hello World"])
         try:
-            result = extract_pdf_to_json(path)
+            result = extract_non_ocr_pdf_to_json(path)
             self.assertEqual(result["document_info"]["source_type"], "pdf")
             self.assertTrue(result["document_info"]["file_name"].endswith(".pdf"))
             self.assertEqual(result["document_info"]["total_pages"], 1)
@@ -240,7 +241,7 @@ class ExtractPdfToJsonTest(TestCase):
         """Covers loop iteration for multiple pages."""
         path = self._create_pdf(["Page one", "Page two", "Page three"])
         try:
-            result = extract_pdf_to_json(path)
+            result = extract_non_ocr_pdf_to_json(path)
             self.assertEqual(result["document_info"]["total_pages"], 3)
             self.assertEqual(len(result["content"]), 3)
             for i, entry in enumerate(result["content"], start=1):
@@ -253,7 +254,7 @@ class ExtractPdfToJsonTest(TestCase):
         """Covers the branch when page has no text and no tables."""
         path = self._create_blank_pdf()
         try:
-            result = extract_pdf_to_json(path)
+            result = extract_non_ocr_pdf_to_json(path)
             self.assertEqual(result["document_info"]["total_pages"], 1)
             self.assertEqual(result["content"][0]["text"], [])
         finally:
@@ -263,7 +264,7 @@ class ExtractPdfToJsonTest(TestCase):
         """Pages with tables → text is list of row-arrays."""
         path = self._create_table_pdf()
         try:
-            result = extract_pdf_to_json(path)
+            result = extract_non_ocr_pdf_to_json(path)
             text = result["content"][0]["text"]
             self.assertIsInstance(text, list)
             self.assertGreaterEqual(len(text), 3)
@@ -278,7 +279,7 @@ class ExtractPdfToJsonTest(TestCase):
         """None cells in tables are replaced with empty strings."""
         path = self._create_table_with_none_cell_pdf()
         try:
-            result = extract_pdf_to_json(path)
+            result = extract_non_ocr_pdf_to_json(path)
             text = result["content"][0]["text"]
             for row in text:
                 if isinstance(row, list):
@@ -292,7 +293,7 @@ class ExtractPdfToJsonTest(TestCase):
         """Text outside table area is also captured as plain strings."""
         path = self._create_table_plus_text_pdf()
         try:
-            result = extract_pdf_to_json(path)
+            result = extract_non_ocr_pdf_to_json(path)
             text = result["content"][0]["text"]
 
             table_rows = [e for e in text if isinstance(e, list)]
@@ -308,7 +309,7 @@ class ExtractPdfToJsonTest(TestCase):
     def test_document_info_file_name(self):
         path = self._create_pdf(["test"])
         try:
-            result = extract_pdf_to_json(path)
+            result = extract_non_ocr_pdf_to_json(path)
             expected_name = os.path.basename(path)
             self.assertEqual(result["document_info"]["file_name"], expected_name)
         finally:
@@ -317,7 +318,7 @@ class ExtractPdfToJsonTest(TestCase):
     def test_document_info_source_type_is_pdf(self):
         path = self._create_pdf(["abc"])
         try:
-            result = extract_pdf_to_json(path)
+            result = extract_non_ocr_pdf_to_json(path)
             self.assertEqual(result["document_info"]["source_type"], "pdf")
         finally:
             os.unlink(path)
@@ -328,18 +329,18 @@ class ExtractPdfToJsonTest(TestCase):
         tmp.close()
         try:
             with self.assertRaises(Exception):
-                extract_pdf_to_json(tmp.name)
+                extract_non_ocr_pdf_to_json(tmp.name)
         finally:
             os.unlink(tmp.name)
 
     def test_nonexistent_file_raises_exception(self):
         with self.assertRaises(Exception):
-            extract_pdf_to_json("/tmp/nonexistent_file_12345.pdf")
+            extract_non_ocr_pdf_to_json("/tmp/nonexistent_file_12345.pdf")
 
     def test_return_structure_keys(self):
         path = self._create_pdf(["structure test"])
         try:
-            result = extract_pdf_to_json(path)
+            result = extract_non_ocr_pdf_to_json(path)
             self.assertIn("document_info", result)
             self.assertIn("content", result)
             info = result["document_info"]
@@ -352,7 +353,7 @@ class ExtractPdfToJsonTest(TestCase):
     def test_content_entry_keys(self):
         path = self._create_pdf(["key test"])
         try:
-            result = extract_pdf_to_json(path)
+            result = extract_non_ocr_pdf_to_json(path)
             for entry in result["content"]:
                 self.assertIn("page", entry)
                 self.assertIn("text", entry)
