@@ -79,9 +79,9 @@ export async function exportToCsv(
         });
     } catch (err: unknown) {
         if (err instanceof Error) {
-            const statusMatch = err.message.match(/API error: (\d+)/);
+            const statusMatch = /API error: (\d+)/.exec(err.message);
             if (statusMatch) {
-                const status = parseInt(statusMatch[1], 10);
+                const status = Number.parseInt(statusMatch[1], 10);
                 const userMessage = ERROR_MESSAGES[status];
                 if (userMessage) {
                     throw new Error(userMessage);
