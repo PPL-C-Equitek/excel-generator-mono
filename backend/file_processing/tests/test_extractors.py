@@ -70,14 +70,16 @@ class TestPdfOcrExtractor(TestCase):
 
     @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
     def test_error_handling_corrupted_pdf(self, mock_convert):
-        mock_convert.side_effect = Exception("Unable to get page count.")
-        
+        from pdf2image.exceptions import PDFPageCountError
+
+        mock_convert.side_effect = PDFPageCountError("Unable to get page count.")
+
         engine = DummyOCREngine()
         extractor = PdfOcrExtractor(ocr_engine=engine)
-        
+
         with self.assertRaises(ValueError) as context:
             extractor.extract("corrupted.pdf")
-            
+
         self.assertIn("corrupt", str(context.exception).lower())
 
     def test_accuracy_empty_strings(self):
@@ -100,6 +102,52 @@ class TestPdfOcrExtractor(TestCase):
 
         with self.assertRaises(ImportError):
             extractor.extract("file.pdf")
+
+    @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
+    def test_poppler_not_installed(self, mock_convert):
+        from pdf2image.exceptions import PDFInfoNotInstalledError
+
+        mock_convert.side_effect = PDFInfoNotInstalledError("poppler missing")
+
+        extractor = PdfOcrExtractor(DummyOCREngine())
+
+        with self.assertRaises(RuntimeError) as context:
+            extractor.extract("file.pdf")
+
+        self.assertIn("poppler", str(context.exception).lower())
+
+    @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
+    def test_pdf_pagecount_error(self, mock_convert):
+        from pdf2image.exceptions import PDFPageCountError
+
+        mock_convert.side_effect = PDFPageCountError("page count failed")
+
+        extractor = PdfOcrExtractor(DummyOCREngine())
+
+        with self.assertRaises(ValueError):
+            extractor.extract("broken.pdf")
+
+    @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
+    def test_pdf_syntax_error(self, mock_convert):
+        from pdf2image.exceptions import PDFSyntaxError
+
+        mock_convert.side_effect = PDFSyntaxError("syntax error")
+
+        extractor = PdfOcrExtractor(DummyOCREngine())
+
+        with self.assertRaises(ValueError):
+            extractor.extract("malformed.pdf")
+
+    @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
+    def test_empty_ocr_result(self, mock_convert):
+        mock_convert.return_value = [MagicMock()]
+
+        engine = DummyOCREngine(text_to_return="")
+        extractor = PdfOcrExtractor(engine)
+
+        result = extractor.extract("file.pdf")
+
+        self.assertEqual(result, "")
 
 class TestTesseractEngine(TestCase):
 
