@@ -11,7 +11,9 @@ from openpyxl import Workbook
 from rest_framework.test import APIClient, APISimpleTestCase
 
 from api.models import GroupMember
+from api.views import _resolve_download_filename, _sanitize_download_filename
 from file_processing.services.export_service import (
+    OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
     OutputLLMValidationError,
 )
@@ -553,3 +555,212 @@ class ExportCSVViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data["status"], "error")
         self.assertIn("invalid response metadata", response.data["message"])
+
+
+class DownloadCSVViewTest(APISimpleTestCase):
+    def _response_data(self, response):
+        if hasattr(response, "data"):
+            return response.data
+        return {}
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_returns_200_with_attachment_headers(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "file_path": "/safe/storage/export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+        mocked_open.return_value.__enter__.return_value = b"name,age\r\nZufar,21\r\n"
+
+        response = self.client.get("/export/csv/csv_abc123/download")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn(
+            'attachment; filename="export_abc123.csv"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_uses_custom_filename_from_query(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "file_path": "/safe/storage/export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+        mocked_open.return_value.__enter__.return_value = b"name,age\r\nZufar,21\r\n"
+
+        response = self.client.get(
+            "/export/csv/csv_abc123/download?filename=laporan_tahunan"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="laporan_tahunan.csv"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_falls_back_to_default_filename_when_query_is_unsafe(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "file_path": "/safe/storage/export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+        mocked_open.return_value.__enter__.return_value = b"name,age\r\nZufar,21\r\n"
+
+        response = self.client.get(
+            "/export/csv/csv_abc123/download?filename=..%2Fevil.csv"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="export_abc123.csv"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    def test_download_csv_endpoint_returns_404_for_invalid_file_id(
+        self,
+        mocked_resolver,
+    ):
+        mocked_resolver.side_effect = OutputCSVDownloadLookupError("invalid file id")
+
+        response = self.client.get("/export/csv/csv_bad-token/download")
+        response_data = self._response_data(response)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response_data.get("status"), "error")
+        self.assertEqual(response_data.get("message"), "CSV file not found.")
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    def test_download_csv_endpoint_returns_404_for_missing_file(
+        self,
+        mocked_resolver,
+    ):
+        mocked_resolver.side_effect = OutputCSVDownloadLookupError("missing file")
+
+        response = self.client.get("/export/csv/csv_deadbeef/download")
+        response_data = self._response_data(response)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response_data.get("status"), "error")
+        self.assertEqual(response_data.get("message"), "CSV file not found.")
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_returns_404_for_unsafe_artifact_filename(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "../evil.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+
+        response = self.client.get("/export/csv/csv_abc123/download")
+        response_data = self._response_data(response)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response_data.get("status"), "error")
+        self.assertEqual(response_data.get("message"), "CSV file not found.")
+        mocked_open.assert_not_called()
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", side_effect=OSError("disk read failed"), create=True)
+    def test_download_csv_endpoint_returns_500_when_reading_file_fails(
+        self,
+        _mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "file_path": "/safe/storage/export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+
+        response = self.client.get("/export/csv/csv_abc123/download")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download CSV due to internal error.",
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", side_effect=RuntimeError("unexpected read failure"), create=True)
+    def test_download_csv_endpoint_returns_500_for_unexpected_error_when_opening_file(
+        self,
+        _mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "file_path": "/safe/storage/export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+
+        response = self.client.get("/export/csv/csv_abc123/download")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download CSV due to internal error.",
+        )
+
+    def test_download_csv_endpoint_rejects_post_method(self):
+        response = self.client.post("/export/csv/csv_abc123/download")
+
+        self.assertEqual(response.status_code, 405)
+
+
+class DownloadFilenameHelperTest(APISimpleTestCase):
+    def test_sanitize_download_filename_rejects_empty_after_trim(self):
+        self.assertIsNone(_sanitize_download_filename("   \r\n   "))
+
+    def test_sanitize_download_filename_rejects_null_byte(self):
+        self.assertIsNone(_sanitize_download_filename("report\x00.csv"))
+
+    def test_sanitize_download_filename_rejects_dot_and_dotdot(self):
+        self.assertIsNone(_sanitize_download_filename("."))
+        self.assertIsNone(_sanitize_download_filename(".."))
+
+    def test_resolve_download_filename_rewrites_wrong_extension(self):
+        resolved = _resolve_download_filename(
+            requested_name="laporan.txt",
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+        )
+        self.assertEqual(resolved, "laporan.csv")
+
+    def test_resolve_download_filename_keeps_matching_extension_case_insensitive(self):
+        resolved = _resolve_download_filename(
+            requested_name="laporan.CSV",
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+        )
+        self.assertEqual(resolved, "laporan.CSV")
