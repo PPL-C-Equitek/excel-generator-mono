@@ -47,6 +47,13 @@ def process_upload(uploaded_file):
             return False, error, None, None
 
     file_path = save_temp_file(uploaded_file)
+    # extracted_data = None
+    # if ext == ".pdf":
+    #     try:
+    #         extracted_data = extract_non_ocr_pdf_to_json(file_path)
+    #     except Exception:
+    #         logging.exception("Failed to extract PDF during upload")
+    #         return False, "Failed to extract PDF content", None
 
     extracted_text = None
 
@@ -187,11 +194,6 @@ def extract_non_ocr_pdf_to_json(file_path: str) -> dict:
     Returns:
         dict with structure:
         {
-            "document_info": {
-                "source_type": "pdf",
-                "file_name": "<file name>",
-                "total_pages": <int>
-            },
             "content": [
                 {
                     "page": 1,
@@ -252,15 +254,6 @@ def extract_non_ocr_pdf_to_json(file_path: str) -> dict:
                 }
             )
 
-        total_pages = len(pdf.pages)
-
-        file_name = os.path.basename(file_path)
-
     return {
-        "document_info": {
-            "source_type": "pdf",
-            "file_name": file_name,
-            "total_pages": total_pages,
-        },
         "content": pages_content,
     }
