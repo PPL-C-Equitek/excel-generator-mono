@@ -341,6 +341,35 @@ class UploadEndpointTest(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertIn("extracted", resp.data)
+    
+    @patch("file_processing.services.upload_service.OCRService.process_pdf")
+    def test_ocr_failure_is_logged_and_returns_success(self, mock_ocr):
+        mock_ocr.side_effect = Exception("OCR crash")
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "doc.pdf",
+            pdf_doc,
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "success")
+
+    @patch("file_processing.services.upload_service.os.remove")
+    def test_cleanup_failure_logged(self, mock_remove):
+        mock_remove.side_effect = Exception("delete failed")
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "doc.pdf",
+            pdf_doc,
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 200)
 
 class ExportCSVViewTest(APISimpleTestCase):
     def _valid_output_json(self):
