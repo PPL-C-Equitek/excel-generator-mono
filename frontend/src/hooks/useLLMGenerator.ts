@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { isJsonObjectOrArray } from "@/utils/schemaValidator";
+import { isJsonObject } from "@/utils/schemaValidator";
 import type { JsonValue } from "@/utils/schemaValidator";
 import type { LLMResponse } from "@/services/llm";
 import type { ILLMService } from "@/lib/ILLMService";
@@ -35,8 +35,8 @@ export function useLLMGenerator(service: ILLMService): UseLLMGeneratorReturn {
         let parsedInput: JsonValue;
         try {
             const raw: unknown = JSON.parse(input);
-            if (!isJsonObjectOrArray(raw)) {
-                setError("Input harus berupa JSON object atau array");
+            if (!isJsonObject(raw)) {
+                setError("Input harus berupa JSON object");
                 return;
             }
             parsedInput = raw;

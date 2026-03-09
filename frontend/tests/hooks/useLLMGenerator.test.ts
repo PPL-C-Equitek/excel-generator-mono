@@ -72,7 +72,7 @@ describe("useLLMGenerator — input validation (no service call)", () => {
         act(() => { result.current.setInput("42"); });
         await act(async () => { await result.current.handleSubmit(); });
 
-        expect(result.current.error).toBe("Input harus berupa JSON object atau array");
+        expect(result.current.error).toBe("Input harus berupa JSON object");
         expect(service.generate).not.toHaveBeenCalled();
     });
 });
@@ -98,17 +98,15 @@ describe("useLLMGenerator — service call & state transitions", () => {
         expect(result.current.loading).toBe(false);
     });
 
-    it("calls service and sets result on success (array input)", async () => {
-        const mockOutput = { output_json: [{ id: 1 }] };
-        service = makeService({ generate: vi.fn().mockResolvedValue(mockOutput) });
+    it("sets error and does not call service when input is an array", async () => {
+        service = makeService();
 
         const { result } = renderHook(() => useLLMGenerator(service));
         act(() => { result.current.setInput(VALID_ARRAY_INPUT); });
         await act(async () => { await result.current.handleSubmit(); });
 
-        expect(service.generate).toHaveBeenCalledWith([{ id: 1 }]);
-        expect(result.current.result).toEqual(mockOutput);
-        expect(result.current.loading).toBe(false);
+        expect(service.generate).not.toHaveBeenCalled();
+        expect(result.current.error).toBe("Input harus berupa JSON object");
     });
 
     it("sets error message when service throws an Error", async () => {
