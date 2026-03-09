@@ -152,7 +152,7 @@ describe("exportToCsv", () => {
 
   it("maps HTTP errors properly using existing ERROR_MESSAGES", async () => {
     server.use(
-      http.post(`${API_BASE}/api/export/csv`, () =>
+      http.post(`${API_BASE}/export/csv`, () =>
         HttpResponse.json({ detail: "Gateway Timeout" }, { status: 504 })
       )
     );
@@ -161,7 +161,7 @@ describe("exportToCsv", () => {
 
   it("passes through unmapped HTTP errors", async () => {
     server.use(
-      http.post(`${API_BASE}/api/export/csv`, () =>
+      http.post(`${API_BASE}/export/csv`, () =>
         HttpResponse.json({ detail: "Teapot" }, { status: 418 })
       )
     );
@@ -182,12 +182,12 @@ describe("exportToCsv", () => {
 describe("getDownloadUrl", () => {
   it("returns a valid download URL without filename", () => {
     const url = getDownloadUrl("csv_abc");
-    expect(url).toBe(`${API_BASE}/api/export/csv/csv_abc/download`);
+    expect(url).toBe(`${API_BASE}/export/csv/csv_abc/download`);
   });
 
   it("appends and URI-encodes the filename parameter", () => {
     const url = getDownloadUrl("csv_abc", "laporan keuangan 2024.csv");
-    expect(url).toBe(`${API_BASE}/api/export/csv/csv_abc/download?filename=laporan%20keuangan%202024.csv`);
+    expect(url).toBe(`${API_BASE}/export/csv/csv_abc/download?filename=laporan%20keuangan%202024.csv`);
   });
 
   it("falls back to localhost:8000 if URL parsing fails", () => {
@@ -198,7 +198,7 @@ describe("getDownloadUrl", () => {
     
     // Note: getDownloadUrl initializes NEXT_PUBLIC_API_URL locally in its body each call
     const url = getDownloadUrl("csv_abc");
-    expect(url).toBe("http://localhost:8000/api/export/csv/csv_abc/download");
+    expect(url).toBe("http://localhost:8000/export/csv/csv_abc/download");
     
     process.env.NEXT_PUBLIC_API_URL = original;
   });

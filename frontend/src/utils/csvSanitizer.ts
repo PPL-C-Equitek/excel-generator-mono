@@ -4,7 +4,7 @@
  * tambahkan karakter quote (') di depannya agar spreadsheet program
  * membacanya sebagai teks alih-alih mengeksekusi rumus macro.
  * 
- * Fungsi ini melakukan deep copy sederhana dan murni non-muting.
+ * Fungsi ini melakukan deep copy sederhana dan murni non-mutating.
  */
 export function sanitizeCSVCell(data: unknown): unknown {
     if (typeof data === 'string') {
@@ -15,8 +15,8 @@ export function sanitizeCSVCell(data: unknown): unknown {
         return data.map(sanitizeCSVCell)
     } else if (data !== null && typeof data === 'object') {
         const obj = data as Record<string, unknown>
-        const newObj: Record<string, unknown> = {}
-        for (const key in obj) {
+        const newObj: Record<string, unknown> = Object.create(null)
+        for (const key of Object.keys(obj)) {
             newObj[key] = sanitizeCSVCell(obj[key])
         }
         return newObj

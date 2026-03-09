@@ -61,7 +61,7 @@ export async function generateJson(
 
 /**
  * Mengekspor hasil generasi JSON ke format CSV.
- * Berkomunikasi dengan endpoint REST (POST /api/export/csv)
+ * Berkomunikasi dengan endpoint REST (POST /export/csv)
  * dan mengembalikan file_id dengan prefix keamanan 'csv_'.
  *
  * @param outputJson JSON hasil LLM yang valid.
@@ -73,7 +73,7 @@ export async function exportToCsv(
     let data: unknown;
 
     try {
-        data = await fetchAPI("api/export/csv", {
+        data = await fetchAPI("export/csv", {
             method: "POST",
             body: JSON.stringify({ output_json: outputJson }),
         });
@@ -106,7 +106,7 @@ export async function exportToCsv(
 
 /**
  * Menghasilkan URL lengkap untuk mengunduh hasil konversi CSV.
- * Pemanggilan URL ini akan menuju ke GET /api/export/csv/{fileId}/download
+ * Pemanggilan URL ini akan menuju ke GET /export/csv/{fileId}/download
  * bersama param filename opsional.
  *
  * @param fileId string ID dengan prefix 'csv_'.
@@ -121,7 +121,7 @@ export function getDownloadUrl(fileId: string, filename?: string): string {
             return "http://localhost:8000";
         }
     })();
-    let url = `${base}/api/export/csv/${fileId}/download`;
+    let url = `${base}/export/csv/${fileId}/download`;
     if (filename) {
         url += `?filename=${encodeURIComponent(filename)}`;
     }
