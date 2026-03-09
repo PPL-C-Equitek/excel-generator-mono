@@ -134,6 +134,17 @@ class TestPdfOcrExtractor(TestCase):
 
         self.assertEqual(result, "")
 
+    @patch("file_processing.extractors.pdf_ocr_extractor.convert_from_path")
+    def test_unexpected_conversion_error(self, mock_convert):
+        mock_convert.side_effect = Exception("random failure")
+
+        extractor = PdfOcrExtractor(DummyOCREngine())
+
+        with self.assertRaises(RuntimeError) as context:
+            extractor.extract("file.pdf")
+
+        self.assertIn("Unexpected error", str(context.exception))
+
 class TestTesseractEngine(TestCase):
 
     @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
@@ -175,3 +186,13 @@ class TestBaseOCREngine(TestCase):
         engine = DummyEngine()
 
         self.assertEqual(engine.extract_text(None), "dummy")
+
+    def test_base_ocr_engine_not_implemented(self):
+        class Dummy(BaseOCREngine):
+            def extract_text(self, image):
+                return super().extract_text(image)
+
+        engine = Dummy()
+
+        with self.assertRaises(NotImplementedError):
+            engine.extract_text(None)
