@@ -1,10 +1,14 @@
 import os
 import magic
+import logging
 from uuid import uuid4
 from django.conf import settings
 from django.utils.text import get_valid_filename
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
+from file_processing.services.ocr_service import OCRService
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
 ALLOWED_MIME_TYPES = {
@@ -25,27 +29,48 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
     if not is_valid:
-        return False, error, None
+        return False, error, None, None
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
     is_valid, error = validate_mime_type(uploaded_file, ext)
     if not is_valid:
-        return False, error, None
+        return False, error, None, None
 
     if ext == ".pdf":
 
         is_valid, error = validate_pdf_not_corrupt(uploaded_file)
         if not is_valid:
-            return False, error, None
+            return False, error, None, None
 
         is_valid, error = validate_pdf_not_password_protected(uploaded_file)
         if not is_valid:
-            return False, error, None
+            return False, error, None, None
 
     file_path = save_temp_file(uploaded_file)
 
-    return True, None, file_path
+    extracted_text = None
+
+    try:
+        if ext == ".pdf":
+            extracted_text = OCRService.process_pdf(file_path)
+
+    except Exception:
+        logger.exception(
+            "OCR failed for uploaded PDF: %s. File saved at %s",
+            uploaded_file.name,
+            file_path,
+        )
+        extracted_text = None
+
+    finally:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            logger.exception("Failed to delete temporary file: %s", file_path)
+
+    return True, None, file_path, extracted_text
 
 
 def validate_file(uploaded_file):

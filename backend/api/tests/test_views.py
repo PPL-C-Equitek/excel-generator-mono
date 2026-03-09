@@ -1,13 +1,19 @@
 from PyPDF2 import PdfReader, PdfWriter
 from django.test import TestCase
-from rest_framework.test import APIClient
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch
 
-from api.models import GroupMember
 from io import BytesIO
 from reportlab.pdfgen import canvas
 from openpyxl import Workbook
+
+from rest_framework.test import APIClient, APISimpleTestCase
+
+from api.models import GroupMember
+from file_processing.services.export_service import (
+    OutputCSVGenerationError,
+    OutputLLMValidationError,
+)
 
 
 class BaseApiViewTest(TestCase):
@@ -317,3 +323,159 @@ class UploadEndpointTest(TestCase):
             self.assertEqual(resp.status_code, 400)
             self.assertEqual(resp.data["status"], "error")
             self.assertEqual(resp.data["message"], "Unable to determine file type.")
+
+    @patch("api.views.process_upload")
+    def test_upload_returns_extracted_text(self, mock_process):
+        mock_process.return_value = (
+            True,
+            None,
+            "/tmp/file.pdf",
+            {"content": [{"page": 1, "type": "text", "lines": ["hello"]}]},
+        )
+
+        resp = self.client.post(
+            "/upload/",
+            {"file": SimpleUploadedFile("doc.pdf", b"%PDF-1.4", content_type="application/pdf")},
+            format="multipart",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("extracted", resp.data)
+    
+    @patch("file_processing.services.upload_service.OCRService.process_pdf")
+    def test_ocr_failure_is_logged_and_returns_success(self, mock_ocr):
+        mock_ocr.side_effect = Exception("OCR crash")
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "doc.pdf",
+            pdf_doc,
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "success")
+
+    @patch("file_processing.services.upload_service.os.remove")
+    def test_cleanup_failure_logged(self, mock_remove):
+        mock_remove.side_effect = Exception("delete failed")
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "doc.pdf",
+            pdf_doc,
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+
+class ExportCSVViewTest(APISimpleTestCase):
+    def _valid_output_json(self):
+        return {
+            "document_info": {
+                "source_type": "Excel",
+                "filename": "laporan_tahunan.xlsx",
+            },
+            "summary": {
+                "grand_total": 1500000,
+                "period": "2026",
+            },
+            "content_data": [
+                {
+                    "table_name": "Sheet1_Januari",
+                    "headers": ["item_name", "quantity", "price"],
+                    "rows": [
+                        {"item_name": "Kertas", "quantity": 10, "price": 50000},
+                    ],
+                }
+            ],
+        }
+
+    def test_export_csv_endpoint_rejects_get_method(self):
+        response = self.client.get("/export/csv")
+        self.assertEqual(response.status_code, 405)
+
+    def test_export_csv_endpoint_returns_400_if_output_json_missing(self):
+        response = self.client.post("/export/csv", data={}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("output_json", response.data)
+
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_returns_200_with_metadata(self, mocked_export):
+        mocked_export.return_value = {
+            "file_id": "csv_abc123",
+            "file_name": "export_abc123.csv",
+            "artifact_type": "csv",
+            "size_bytes": 128,
+            "created_at": "2026-03-07T10:00:00Z",
+        }
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["file_id"], "csv_abc123")
+        self.assertEqual(response.data["file_name"], "export_abc123.csv")
+        mocked_export.assert_called_once()
+
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_returns_400_when_service_validation_fails(
+        self,
+        mocked_export,
+    ):
+        mocked_export.side_effect = OutputLLMValidationError("invalid schema")
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(response.data["message"], "Invalid CSV export request.")
+
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_returns_500_on_internal_error(self, mocked_export):
+        mocked_export.side_effect = RuntimeError("disk full")
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertIn("Failed to generate CSV", response.data["message"])
+
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_returns_500_on_generation_error(self, mocked_export):
+        mocked_export.side_effect = OutputCSVGenerationError("storage failure")
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to generate CSV due to internal error.",
+        )
+
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_returns_500_when_response_metadata_invalid(
+        self,
+        mocked_export,
+    ):
+        mocked_export.return_value = {
+            "file_id": "csv_abc123",
+            "file_name": "../unsafe.csv",
+            "artifact_type": "csv",
+            "size_bytes": 128,
+            "created_at": "2026-03-07T10:00:00Z",
+        }
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertIn("invalid response metadata", response.data["message"])
