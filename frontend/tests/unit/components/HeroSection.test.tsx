@@ -2,15 +2,6 @@ import { render, screen } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import HeroSection from '../../../src/components/HeroSection'
 
-/**
- * HeroSection Component Tests
- * 
- * SOLID principles demonstrated:
- * - SRP: Component renders hero section only
- * - OCP: Fully customizable via props (heading, subtitle, backgroundImage)
- * - ISP: Clear interface contract with optional props
- * - DIP: Content data injected via props, not hardcoded
- */
 describe('HeroSection', () => {
     // Positive tests
     describe('positive', () => {

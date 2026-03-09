@@ -1,8 +1,6 @@
 import type { Feature } from '@/constants/landing'
 
-interface FeatureCardProps extends Feature { }
-
-export default function FeatureCard({ title, desc, icon }: FeatureCardProps) {
+export default function FeatureCard({ title, desc, icon }: Feature) {
     return (
         <div className="flex gap-4">
             <div

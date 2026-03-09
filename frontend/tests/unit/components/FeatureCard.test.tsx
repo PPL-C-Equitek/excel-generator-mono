@@ -3,15 +3,6 @@ import { describe, it, expect } from 'vitest'
 import FeatureCard from '../../../src/components/FeatureCard'
 import type { Feature } from '../../../src/constants/landing'
 
-/**
- * FeatureCard Component Tests
- * 
- * SOLID principles demonstrated:
- * - SRP: Component has single responsibility - render a feature card
- * - ISP: Accepts Feature interface (only title, desc, icon it needs)
- * - OCP: Easy to extend - accepts custom icon prop
- * - DIP: Data injected via props, not hardcoded
- */
 describe('FeatureCard', () => {
     const defaultProps: Feature = {
         title: 'Advanced AI Transformation',
