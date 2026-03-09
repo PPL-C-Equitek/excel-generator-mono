@@ -189,7 +189,7 @@ def extract_pdf_to_json(file_path: str) -> dict:
         {
             "document_info": {
                 "source_type": "pdf",
-                "file_name": "<original filename>",
+                "file_name": "<file name>",
                 "total_pages": <int>
             },
             "content": [
@@ -209,51 +209,52 @@ def extract_pdf_to_json(file_path: str) -> dict:
         FileNotFoundError: If the file does not exist.
     """
 
-    pdf = pdfplumber.open(file_path)
-    pages_content = []
+    with pdfplumber.open(file_path) as pdf:
+        pages_content = []
 
-    for page_number, page in enumerate(pdf.pages, start=1):
-        page_data: list = []
+        for page_number, page in enumerate(pdf.pages, start=1):
+            page_data: list = []
 
-        tables = page.extract_tables() or []
-        table_bboxes = [t.bbox for t in page.find_tables()] if tables else []
+            tables = page.extract_tables() or []
+            table_bboxes = [t.bbox for t in page.find_tables()] if tables else []
 
-        if tables:
-            # Collect text outside table regions
-            filtered_page = page
-            for bbox in table_bboxes:
-                filtered_page = filtered_page.outside_bbox(bbox)
+            if tables:
+                # Collect text outside table regions
+                filtered_page = page
+                for bbox in table_bboxes:
+                    filtered_page = filtered_page.outside_bbox(bbox)
 
-            outside_text = filtered_page.extract_text() or ""
-            outside_lines = outside_text.splitlines() if outside_text else []
+                outside_text = filtered_page.extract_text() or ""
+                outside_lines = outside_text.splitlines() if outside_text else []
 
-            # Add table rows
-            for table in tables:
-                for row in table:
-                    page_data.append([cell if cell is not None else "" for cell in row])
+                # Add table rows
+                for table in tables:
+                    for row in table:
+                        page_data.append(
+                            [cell if cell is not None else "" for cell in row]
+                        )
 
-            # Add non-table text lines
-            for line in outside_lines:
-                stripped = line.strip()
-                if stripped:
-                    page_data.append(stripped)
-        else:
-            raw_text = page.extract_text() or ""
-            if raw_text:
-                page_data = raw_text.splitlines()
-            # else: page_data stays []
+                # Add non-table text lines
+                for line in outside_lines:
+                    stripped = line.strip()
+                    if stripped:
+                        page_data.append(stripped)
+            else:
+                raw_text = page.extract_text() or ""
+                if raw_text:
+                    page_data = raw_text.splitlines()
+                # else: page_data stays []
 
-        pages_content.append(
-            {
-                "page": page_number,
-                "text": page_data,
-            }
-        )
+            pages_content.append(
+                {
+                    "page": page_number,
+                    "text": page_data,
+                }
+            )
 
-    total_pages = len(pdf.pages)
-    pdf.close()
+        total_pages = len(pdf.pages)
 
-    file_name = os.path.basename(file_path)
+        file_name = os.path.basename(file_path)
 
     return {
         "document_info": {
