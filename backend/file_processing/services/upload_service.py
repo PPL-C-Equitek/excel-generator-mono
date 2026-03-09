@@ -1,11 +1,14 @@
 import os
 import magic
+import logging
 from uuid import uuid4
 from django.conf import settings
 from django.utils.text import get_valid_filename
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
 ALLOWED_MIME_TYPES = {
@@ -50,8 +53,12 @@ def process_upload(uploaded_file):
     if ext == ".pdf":
         try:
             extracted_text = OCRService.process_pdf(file_path)
-        except Exception as e:
-            print("OCR failed, but file is saved. Error details are logged on the server.", e)
+        except Exception:
+            logger.exception(
+                "OCR failed for uploaded PDF: %s. File saved at %s",
+                uploaded_file.name,
+                file_path,
+            )
             extracted_text = None
 
     return True, None, file_path, extracted_text
