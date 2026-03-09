@@ -25,6 +25,8 @@ ALLOWED_MIME_TYPES = {
     ],
 }
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_PDF_PAGES = 100
+
 
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
@@ -38,7 +40,6 @@ def process_upload(uploaded_file):
         return False, error, None, None
 
     if ext == ".pdf":
-
         is_valid, error = validate_pdf_not_corrupt(uploaded_file)
         if not is_valid:
             return False, error, None, None
@@ -91,15 +92,18 @@ def validate_file(uploaded_file):
 def validate_pdf_not_corrupt(uploaded_file):
     try:
         uploaded_file.seek(0)
-        header = uploaded_file.read(5)
+        reader = PdfReader(uploaded_file, strict=True)
 
-        if not header.startswith(b"%PDF"):
-            return False, "The file does not have a valid PDF header."
+        if reader.is_encrypted:
+            return True, None
 
+        _ = len(reader.pages)
         return True, None
 
     except PdfReadError:
-        return False, "The PDF file is corrupt."
+        return False, "The PDF file is corrupt or has an invalid structure."
+    except Exception:
+        return False, "The PDF file is corrupt or has an invalid structure."
 
 
 def validate_pdf_not_password_protected(uploaded_file):
@@ -112,9 +116,9 @@ def validate_pdf_not_password_protected(uploaded_file):
 
         return True, None
 
-    except (Exception):
+    except Exception:
         return False, "The PDF file is password-protected and cannot be accessed"
-    
+
 
 def validate_mime_type(uploaded_file, ext):
     try:
