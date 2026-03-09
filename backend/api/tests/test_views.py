@@ -430,6 +430,20 @@ class UploadEndpointTest(TestCase):
 
         self.assertEqual(resp.status_code, 200)
 
+    @patch("file_processing.services.upload_service.os.path.exists")
+    def test_cleanup_when_temp_file_not_exists(self, mock_exists):
+        mock_exists.return_value = False
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "doc.pdf",
+            pdf_doc,
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+
 
 class ExportCSVViewTest(APISimpleTestCase):
     def _valid_output_json(self):
