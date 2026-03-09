@@ -444,6 +444,7 @@ def export_csv_to_filesystem(
 def resolve_csv_download_artifact(file_id, storage_dir):
     token = _resolve_download_token(file_id)
     base_dir = _resolve_download_storage_dir(storage_dir)
+    discovered_artifacts = _discover_download_artifacts(base_dir)
 
     candidate_files = (
         ("csv", "text/csv"),
@@ -451,8 +452,8 @@ def resolve_csv_download_artifact(file_id, storage_dir):
     )
     for extension, content_type in candidate_files:
         file_name = f"export_{token}.{extension}"
-        file_path = _build_safe_file_path(base_dir, file_name)
-        if os.path.exists(file_path):
+        file_path = discovered_artifacts.get(file_name)
+        if file_path:
             return {
                 "file_name": file_name,
                 "file_path": file_path,
@@ -461,6 +462,35 @@ def resolve_csv_download_artifact(file_id, storage_dir):
             }
 
     raise OutputCSVDownloadLookupError("CSV artifact not found for given file_id.")
+
+
+def _discover_download_artifacts(base_dir):
+    discovered = {}
+    try:
+        with os.scandir(base_dir) as entries:
+            for entry in entries:
+                # Avoid following symlinks; only serve regular files under base_dir.
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+
+                entry_name = entry.name.lower()
+                if not re.fullmatch(r"export_[a-z0-9]+\.(csv|zip)", entry_name):
+                    continue
+
+                entry_path = os.path.realpath(entry.path)
+                try:
+                    common_path = os.path.commonpath([base_dir, entry_path])
+                except ValueError:
+                    continue
+
+                if common_path != base_dir:
+                    continue
+
+                discovered[entry_name] = entry_path
+    except OSError as exc:
+        raise OutputCSVDownloadLookupError("CSV artifact storage is unavailable.") from exc
+
+    return discovered
 
 
 def _validate_csv_headers(headers, sheet_index):

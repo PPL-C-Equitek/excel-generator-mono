@@ -1096,27 +1096,26 @@ class ResolveCSVDownloadArtifactTest(unittest.TestCase):
 
     def test_resolve_csv_download_artifact_prefers_csv_before_zip(self):
         token = "abc123"
-        storage_dir = r"C:\safe\storage"
-        with patch(
-            "file_processing.services.export_service.os.path.exists",
-            return_value=True,
-        ) as mocked_exists:
-            with patch(
-                "file_processing.services.export_service.os.path.abspath",
-                side_effect=lambda value: value,
-            ):
-                with patch(
-                    "file_processing.services.export_service.os.path.realpath",
-                    side_effect=lambda value: value,
-                ):
-                    result = export_service.resolve_csv_download_artifact(
-                        file_id=f"csv_{token}",
-                        storage_dir=storage_dir,
-                    )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_file_name = f"export_{token}.csv"
+            zip_file_name = f"export_{token}.zip"
+            csv_file_path = os.path.join(temp_dir, csv_file_name)
+            zip_file_path = os.path.join(temp_dir, zip_file_name)
 
-        self.assertEqual(result["artifact_type"], "csv")
-        expected_csv_path = os.path.join(storage_dir, f"export_{token}.csv")
-        mocked_exists.assert_called_once_with(expected_csv_path)
+            with open(csv_file_path, "w", encoding="utf-8") as generated:
+                generated.write("name,age\r\nZufar,21\r\n")
+            with zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("Sheet1.csv", "name,age\r\nZufar,21\r\n")
+
+            result = export_service.resolve_csv_download_artifact(
+                file_id=f"csv_{token}",
+                storage_dir=temp_dir,
+            )
+
+            self.assertEqual(result["artifact_type"], "csv")
+            self.assertEqual(result["file_name"], csv_file_name)
+            self.assertEqual(result["file_path"], csv_file_path)
+            self.assertEqual(result["content_type"], "text/csv")
 
     def test_resolve_csv_download_artifact_rejects_invalid_storage_dir(self):
         with self.assertRaises(export_service.OutputCSVDownloadLookupError):
