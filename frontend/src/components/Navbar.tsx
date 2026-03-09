@@ -1,19 +1,24 @@
-const NAV_LINKS = [
-    { label: 'Login', href: '/login' },
-    { label: 'Register', href: '/register' },
-]
+import type { NavLink } from '@/constants/landing'
 
-export default function Navbar() {
+interface NavbarProps {
+    readonly links: readonly NavLink[]
+    readonly brandName?: string
+}
+
+export default function Navbar({
+    links,
+    brandName = 'EQUITEK',
+}: NavbarProps) {
     return (
         <nav
             className="flex items-center justify-between px-8 py-4"
             style={{ backgroundColor: 'var(--brand-primary)' }}
         >
             <span className="text-white font-extrabold text-xl tracking-widest">
-                EQUITEK
+                {brandName}
             </span>
             <div className="flex gap-6">
-                {NAV_LINKS.map((link) => (
+                {links.map((link) => (
                     <a
                         key={link.href}
                         href={link.href}

@@ -3,33 +3,11 @@
 import Navbar from '@/components/Navbar'
 import HeroSection from '@/components/HeroSection'
 import FeatureCard from '@/components/FeatureCard'
-
-const FEATURES = [
-    {
-        title: 'Advanced AI Transformation',
-        desc: 'Leverage advanced LLMs to accurately interpret unstructured data',
-    },
-    {
-        title: 'Instance Excel Mapping',
-        desc: 'Maps messy data into your Excel template automatically.',
-    },
-    {
-        title: 'Verified Logic',
-        desc: 'Multi-step CoT to reduce errors and preserves data integrity.',
-    },
-    {
-        title: 'Full Traceability',
-        desc: 'Each extraction decision is recorded for accountability.',
-    },
-    {
-        title: 'Consultant-Grade Standards',
-        desc: 'Focused on professional methods and strong technical documentation.',
-    },
-    {
-        title: 'Seamless Automation',
-        desc: 'Replaces slow manual data entry with a ready-to-use automated workflow.',
-    },
-]
+import {
+    LANDING_FEATURES,
+    LANDING_NAV_LINKS,
+    LANDING_HERO_CONFIG,
+} from '@/constants/landing'
 
 export default function LandingPage() {
     return (
@@ -39,8 +17,15 @@ export default function LandingPage() {
                 backgroundColor: 'var(--background)',
                 color: '#171717',
             }}>
-            <Navbar />
-            <HeroSection />
+            <Navbar
+                links={LANDING_NAV_LINKS}
+                brandName="EQUITEK"
+            />
+            <HeroSection
+                heading={LANDING_HERO_CONFIG.heading}
+                subtitle={LANDING_HERO_CONFIG.subtitle}
+                backgroundImage={LANDING_HERO_CONFIG.backgroundImage}
+            />
 
             {/* Features Section */}
             <section className="py-20 px-8">
@@ -51,7 +36,7 @@ export default function LandingPage() {
                     Why Use Our Service?
                 </h2>
                 <div className="grid grid-cols-1 gap-8 lg:grid-cols-3 max-w-5xl mx-auto">
-                    {FEATURES.map((feature) => (
+                    {LANDING_FEATURES.map((feature) => (
                         <FeatureCard key={feature.title} {...feature} />
                     ))}
                 </div>

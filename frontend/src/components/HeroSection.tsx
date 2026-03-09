@@ -1,7 +1,7 @@
 interface HeroSectionProps {
-    heading?: string
-    subtitle?: string
-    backgroundImage?: string
+    readonly heading?: string
+    readonly subtitle?: string
+    readonly backgroundImage?: string
 }
 
 export default function HeroSection({
