@@ -1,7 +1,10 @@
+import copy
+import hashlib
 import json
 from typing import Any
 
 from django.conf import settings
+from django.core.cache import cache
 from openai import (
     APIConnectionError,
     APIError,
@@ -27,6 +30,26 @@ class OpenAIUpstreamError(OpenAIServiceError):
     def __init__(self, message: str, status_code: int):
         super().__init__(message)
         self.status_code = status_code
+
+
+def _get_cache_ttl_seconds() -> int:
+    raw_value = getattr(settings, "LLM_CACHE_TTL_SECONDS", 300)
+    try:
+        ttl_seconds = int(raw_value)
+    except (TypeError, ValueError):
+        return 300
+    return max(0, ttl_seconds)
+
+
+def _build_generate_json_cache_key(input_json: dict[str, Any] | list[Any]) -> str:
+    canonical_payload = json.dumps(input_json, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    key_material = (
+        f"model:{settings.OPENAI_MODEL}\n"
+        f"system_prompt:{settings.OPENAI_SYSTEM_PROMPT}\n"
+        f"payload:{canonical_payload}"
+    )
+    digest = hashlib.sha256(key_material.encode("utf-8")).hexdigest()
+    return f"llm:generate_json:{digest}"
 
 
 def _build_client() -> OpenAI:
@@ -84,6 +107,11 @@ def generate_json(input_json: dict[str, Any] | list[Any]) -> dict[str, Any] | li
     if not isinstance(input_json, (dict, list)):
         raise ValueError("input_json must be an object or array.")
 
+    cache_key = _build_generate_json_cache_key(input_json)
+    cached_output = cache.get(cache_key)
+    if isinstance(cached_output, (dict, list)):
+        return copy.deepcopy(cached_output)
+
     output_text = generate_text(prompt=json.dumps(input_json))
     try:
         parsed_output = json.loads(output_text)
@@ -92,4 +120,9 @@ def generate_json(input_json: dict[str, Any] | list[Any]) -> dict[str, Any] | li
 
     if not isinstance(parsed_output, (dict, list)):
         raise OpenAIServiceError("OpenAI response JSON must be an object or array.")
+
+    ttl_seconds = _get_cache_ttl_seconds()
+    if ttl_seconds > 0:
+        cache.set(cache_key, parsed_output, timeout=ttl_seconds)
+
     return parsed_output
