@@ -13,9 +13,6 @@ class PdfOcrExtractor:
         self.ocr_engine = ocr_engine
 
     def extract(self, file_path: str) -> str:
-        if convert_from_path is None:
-            raise ImportError("pdf2image is not installed or available.")
-
         extracted_texts = []
 
         try:

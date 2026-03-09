@@ -88,21 +88,6 @@ class TestPdfOcrExtractor(TestCase):
         acc = calculate_accuracy("", "")
         self.assertEqual(acc, 1.0)
 
-    @patch("file_processing.extractors.pdf_ocr_extractor.convert_from_path", None)
-    def test_pdf2image_not_installed(self):
-
-        from file_processing.extractors.pdf_ocr_extractor import PdfOcrExtractor
-        from file_processing.extractors.ocr.base_ocr_engine import BaseOCREngine
-
-        class Dummy(BaseOCREngine):
-            def extract_text(self, image):
-                return "text"
-
-        extractor = PdfOcrExtractor(Dummy())
-
-        with self.assertRaises(ImportError):
-            extractor.extract("file.pdf")
-
     @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
     def test_poppler_not_installed(self, mock_convert):
         from pdf2image.exceptions import PDFInfoNotInstalledError
