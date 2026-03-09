@@ -16,6 +16,7 @@ import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -145,6 +146,10 @@ MEDIA_ROOT = os.environ.get(
 MEDIA_URL = '/media/'
 
 UPLOAD_TEMP_DIR = os.path.join(MEDIA_ROOT, 'uploads', 'tmp')
+CSV_EXPORT_DIR = os.environ.get(
+    'CSV_EXPORT_DIR',
+    os.path.join(MEDIA_ROOT, 'exports', 'csv')
+)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
