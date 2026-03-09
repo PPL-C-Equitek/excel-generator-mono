@@ -9,22 +9,27 @@ class OpenAIServiceError(Exception):
     """Raised when the OpenAI integration cannot return a valid result."""
 
 
+class OpenAIConfigurationError(OpenAIServiceError):
+    """Raised when OpenAI settings are missing or invalid."""
+
+
 def _build_client() -> OpenAI:
     api_key = settings.OPENAI_API_KEY.strip()
     if not api_key:
-        raise OpenAIServiceError("OPENAI_API_KEY is not configured.")
+        raise OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
     return OpenAI(api_key=api_key)
 
 
-def generate_text(prompt: str, model: str | None = None) -> str:
+def generate_text(prompt: str) -> str:
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("Prompt must be a non-empty string.")
 
     client = _build_client()
     request_payload = {
-        "model": (model or settings.OPENAI_MODEL),
+        "model": settings.OPENAI_MODEL,
         "input": prompt,
     }
+
     system_prompt = settings.OPENAI_SYSTEM_PROMPT.strip()
     if system_prompt:
         request_payload["instructions"] = system_prompt
@@ -36,11 +41,11 @@ def generate_text(prompt: str, model: str | None = None) -> str:
     return output_text
 
 
-def generate_json(input_json: dict[str, Any] | list[Any], model: str | None = None) -> dict[str, Any] | list[Any]:
+def generate_json(input_json: dict[str, Any] | list[Any]) -> dict[str, Any] | list[Any]:
     if not isinstance(input_json, (dict, list)):
         raise ValueError("input_json must be an object or array.")
 
-    output_text = generate_text(prompt=json.dumps(input_json), model=model)
+    output_text = generate_text(prompt=json.dumps(input_json))
     try:
         parsed_output = json.loads(output_text)
     except json.JSONDecodeError as exc:
@@ -49,4 +54,3 @@ def generate_json(input_json: dict[str, Any] | list[Any], model: str | None = No
     if not isinstance(parsed_output, (dict, list)):
         raise OpenAIServiceError("OpenAI response JSON must be an object or array.")
     return parsed_output
-

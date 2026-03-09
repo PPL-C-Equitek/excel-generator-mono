@@ -18,7 +18,7 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
   return res.json();
 }
 
-export async function uploadFile(file: File) {
+export async function uploadFile(file: File, options?: RequestInit) {
   const base = (() => {
     try {
       return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").origin;
@@ -33,6 +33,7 @@ export async function uploadFile(file: File) {
   const res = await fetch(`${base}/api/upload/`, {
     method: "POST",
     body,
+    ...options,
   });
 
   if (!res.ok) {
@@ -41,4 +42,4 @@ export async function uploadFile(file: File) {
   }
 
   return res.json();
-}
+}
