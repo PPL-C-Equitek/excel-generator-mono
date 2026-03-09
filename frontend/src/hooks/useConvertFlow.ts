@@ -100,7 +100,7 @@ export function useConvertFlow(
         if (!llmService.exportToCsv || signal.aborted) return
 
         try {
-            const isStringEmpty = typeof out === 'string' && (out as string).trim() === ''
+            const isStringEmpty = typeof out === 'string' && out.trim() === ''
             const isEmpty = out === null || isStringEmpty || 
                 (Array.isArray(out) && out.length === 0) || 
                 (typeof out === 'object' && out !== null && Object.keys(out).length === 0)
