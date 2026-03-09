@@ -120,8 +120,8 @@ class UploadEndpointTest(TestCase):
         pdf_doc = self.generate_valid_pdf_bytes()
         resp = self._post_file("doc.pdf", pdf_doc, "application/pdf")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("path", resp.data)
-        self.assertTrue(resp.data["path"].endswith("doc.pdf"))
+        self.assertEqual(resp.data["status"], "success")
+        self.assertEqual(resp.data["filename"], "doc.pdf")
 
     def test_upload_xls_success(self):
         xls_content = b"\xD0\xCF\x11\xE0" + b"\x00" * 100
@@ -156,6 +156,37 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
+
+    def test_upload_response_does_not_expose_path(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "doc.pdf",
+            pdf_doc,
+            "application/pdf"
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("path", resp.data)
+
+    def test_upload_internal_server_error(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        with patch(
+            "api.views.process_upload"
+        ) as mock_process_upload:
+
+            mock_process_upload.side_effect = Exception("Unexpected failure")
+
+            resp = self._post_file(
+                "doc.pdf",
+                pdf_doc,
+                "application/pdf"
+            )
+
+            self.assertEqual(resp.status_code, 500)
+            self.assertEqual(resp.data["status"], "error")
+            self.assertIn("message", resp.data)
 
     def test_invalid_file_path_detection(self):
         pdf_doc = self.generate_valid_pdf_bytes()
