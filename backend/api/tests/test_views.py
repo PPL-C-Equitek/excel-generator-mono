@@ -17,9 +17,6 @@ from file_processing.services.export_service import (
     OutputCSVGenerationError,
     OutputLLMValidationError,
 )
-from file_processing.services.upload_service import (
-    validate_pdf_page_count,
-)
 from file_processing.services.upload_service import validate_pdf
 
 
@@ -381,19 +378,6 @@ class UploadEndpointTest(TestCase):
             self.assertEqual(resp.status_code, 400)
             self.assertEqual(resp.data["status"], "error")
             self.assertIn("100", resp.data["message"])
-
-    def test_validate_pdf_page_count_exception(self):
-        with patch("file_processing.services.upload_service.PdfReader") as mock_reader:
-            mock_reader.side_effect = Exception("read error")
-
-            f = SimpleUploadedFile(
-                "doc.pdf",
-                b"dummy",
-                content_type="application/pdf",
-            )
-            is_valid, error = validate_pdf_page_count(f)
-            self.assertFalse(is_valid)
-            self.assertIn("Unable to read", error)
 
     @patch("api.views.process_upload")
     def test_upload_returns_extracted_text(self, mock_process):

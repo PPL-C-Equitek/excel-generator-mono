@@ -42,7 +42,7 @@ def process_upload(uploaded_file):
     if ext == ".pdf":
         is_valid, error = validate_pdf(uploaded_file)
         if not is_valid:
-            return False, error, None
+            return False, error, None, None
 
     file_path = save_temp_file(uploaded_file)
 
