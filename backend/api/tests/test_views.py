@@ -288,6 +288,27 @@ class DownloadCSVViewTest(APISimpleTestCase):
         self.assertEqual(response_data.get("message"), "CSV file not found.")
 
     @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_returns_404_for_unsafe_artifact_filename(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "../evil.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+
+        response = self.client.get("/export/csv/csv_abc123/download")
+        response_data = self._response_data(response)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response_data.get("status"), "error")
+        self.assertEqual(response_data.get("message"), "CSV file not found.")
+        mocked_open.assert_not_called()
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
     @patch("api.views.open", side_effect=OSError("disk read failed"), create=True)
     def test_download_csv_endpoint_returns_500_when_reading_file_fails(
         self,

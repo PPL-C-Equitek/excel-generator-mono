@@ -576,7 +576,7 @@ def _resolve_download_storage_dir(storage_dir):
     if not isinstance(storage_dir, str) or not storage_dir.strip():
         raise OutputCSVDownloadLookupError("storage_dir must be a non-empty string.")
 
-    return os.path.abspath(storage_dir)
+    return os.path.realpath(os.path.abspath(storage_dir))
 
 
 def _resolve_export_token(token_generator):
@@ -612,9 +612,15 @@ def _resolve_download_token(file_id):
 
 
 def _build_safe_file_path(base_dir, file_name):
-    candidate = os.path.abspath(os.path.join(base_dir, file_name))
-    expected_prefix = base_dir + os.sep
-    if candidate != base_dir and not candidate.startswith(expected_prefix):
+    base_dir_real = os.path.realpath(os.path.abspath(base_dir))
+    candidate = os.path.realpath(os.path.join(base_dir_real, file_name))
+
+    try:
+        common_path = os.path.commonpath([base_dir_real, candidate])
+    except ValueError as exc:
+        raise OutputCSVGenerationError("Invalid storage path detected.") from exc
+
+    if common_path != base_dir_real:
         raise OutputCSVGenerationError("Invalid storage path detected.")
 
     return candidate

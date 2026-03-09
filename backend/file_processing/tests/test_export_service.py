@@ -1096,6 +1096,7 @@ class ResolveCSVDownloadArtifactTest(unittest.TestCase):
 
     def test_resolve_csv_download_artifact_prefers_csv_before_zip(self):
         token = "abc123"
+        storage_dir = r"C:\safe\storage"
         with patch(
             "file_processing.services.export_service.os.path.exists",
             return_value=True,
@@ -1104,13 +1105,17 @@ class ResolveCSVDownloadArtifactTest(unittest.TestCase):
                 "file_processing.services.export_service.os.path.abspath",
                 side_effect=lambda value: value,
             ):
-                result = export_service.resolve_csv_download_artifact(
-                    file_id=f"csv_{token}",
-                    storage_dir="/safe/storage",
-                )
+                with patch(
+                    "file_processing.services.export_service.os.path.realpath",
+                    side_effect=lambda value: value,
+                ):
+                    result = export_service.resolve_csv_download_artifact(
+                        file_id=f"csv_{token}",
+                        storage_dir=storage_dir,
+                    )
 
         self.assertEqual(result["artifact_type"], "csv")
-        expected_csv_path = os.path.join("/safe/storage", f"export_{token}.csv")
+        expected_csv_path = os.path.join(storage_dir, f"export_{token}.csv")
         mocked_exists.assert_called_once_with(expected_csv_path)
 
     def test_resolve_csv_download_artifact_rejects_invalid_storage_dir(self):

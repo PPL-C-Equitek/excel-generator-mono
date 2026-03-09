@@ -2,7 +2,9 @@ import logging
 import os
 
 from django.conf import settings
+from django.core.exceptions import SuspiciousFileOperation
 from django.http import FileResponse
+from django.utils._os import safe_join
 from django.views.decorators.http import require_GET, require_POST
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
@@ -190,7 +192,17 @@ def download_csv(request, file_id):
         )
 
     try:
-        file_handle = open(artifact["file_path"], "rb")
+        safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
+        file_handle = open(safe_file_path, "rb")
+    except (KeyError, SuspiciousFileOperation, ValueError):
+        logger.warning("CSV download resolved unsafe artifact metadata.", exc_info=True)
+        return Response(
+            {
+                "status": "error",
+                "message": "CSV file not found.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
     except OSError:
         logger.exception("CSV download failed while reading generated artifact.")
         return Response(
