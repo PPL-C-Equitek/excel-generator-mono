@@ -103,15 +103,9 @@ describe("generateJson array input & schema type validation", () => {
     server.resetHandlers();
   });
 
-  it("accepts array input and returns array output_json", async () => {
+  it("throws schema error when output_json is an array", async () => {
     server.use(handlerArrayOutput);
-    const result = await generateJson([{ key: "value" }]);
-    expect(result).toHaveProperty("output_json");
-    expect(Array.isArray(result.output_json)).toBe(true);
-    expect(result.output_json).toEqual([
-      { id: 1, value: "row-a" },
-      { id: 2, value: "row-b" },
-    ]);
+    await expect(generateJson({ key: "value" })).rejects.toThrow("Respons tidak sesuai skema");
   });
 
   it("throws schema error when output_json is a primitive string", async () => {
