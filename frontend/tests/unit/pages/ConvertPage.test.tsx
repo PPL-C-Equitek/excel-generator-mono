@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { ILLMService } from '../../../src/lib/ILLMService'
 
 vi.mock('../../../src/lib/api', () => ({
     uploadFile: vi.fn(),
@@ -323,7 +324,7 @@ describe('ConvertPage', () => {
             
             const uploadButton = screen.getByText('Upload File')
             // Delaying the llm mock to stay in loading state
-            const resolvers: any[] = []
+            const resolvers: Array<(value: unknown) => void> = []
             vi.mocked(uploadFile).mockImplementationOnce(() => new Promise(res => resolvers.push(res)))
             
             await user.click(uploadButton)
@@ -349,7 +350,7 @@ describe('ConvertPage', () => {
                 getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_999/download?filename=test.csv')
             }
 
-            render(<ConvertPage llmService={mockService as any} />)
+            render(<ConvertPage llmService={mockService as unknown as ILLMService} />)
             
             const uploadButton = screen.getByText('Upload File')
             await user.click(uploadButton)
@@ -373,7 +374,7 @@ describe('ConvertPage', () => {
             
             const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 
-            render(<ConvertPage llmService={mockService as any} />)
+            render(<ConvertPage llmService={mockService as unknown as ILLMService} />)
             
             const uploadButton = screen.getByText('Upload File')
             await user.click(uploadButton)
@@ -396,7 +397,7 @@ describe('ConvertPage', () => {
                 getDownloadUrl: vi.fn()
             }
 
-            render(<ConvertPage llmService={mockService as any} />)
+            render(<ConvertPage llmService={mockService as unknown as ILLMService} />)
             
             const uploadButton = screen.getByText('Upload File')
             await user.click(uploadButton)

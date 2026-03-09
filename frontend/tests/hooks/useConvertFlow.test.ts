@@ -546,4 +546,107 @@ describe('useConvertFlow', () => {
             vi.unstubAllEnvs()
         })
     })
+
+    // -----------------------------------------------------------------------
+    // Security & Edge Cases (CSV Export)
+    // -----------------------------------------------------------------------
+    describe('security & edge cases for CSV export', () => {
+        it('prevents CSV Injection by prepending single quotes to cells starting with =, +, -, @', async () => {
+            const rawOutput = {
+                sheet1: [
+                    { col1: '=1+1', col2: '-cmd', col3: '+alert(1)', col4: '@sum' }
+                ]
+            }
+            const expectedPayload = {
+                sheet1: [
+                    { col1: "'=1+1", col2: "'-cmd", col3: "'+alert(1)", col4: "'@sum" }
+                ]
+            }
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: rawOutput })
+            })
+            
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            // generate() receives exactly what was originally intended by standard flows
+            // but exportToCsv expects the SANITIZED version
+            expect(service.exportToCsv).toHaveBeenCalledWith(expectedPayload)
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('preserves special characters like commas, quotes, and newlines correctly without breaking JSON', async () => {
+            const rawOutput = {
+                sheet1: [
+                    { col1: 'hello, world', col2: 'say "hi"', col3: 'line1\nline2' }
+                ]
+            }
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: rawOutput })
+            })
+            
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            // These characters do not require prepending single quotes, they just pass through cleanly
+            expect(service.exportToCsv).toHaveBeenCalledWith(rawOutput)
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('blocks empty API calls and sets warning if LLM returns an empty string or empty object/array', async () => {
+            const emptyOutputs = [{}, [], "", null]
+            
+            for (const emptyVal of emptyOutputs) {
+                const service = makeMockService({
+                    generate: vi.fn().mockResolvedValue({ output_json: emptyVal })
+                })
+                
+                const { result } = renderHook(() => useConvertFlow(service))
+
+                await act(async () => {
+                    await result.current.handleFileSelect(testFile)
+                })
+
+                expect(service.exportToCsv).not.toHaveBeenCalled()
+                expect(result.current.csvMetadata).toBeNull()
+                // Assuming we want to set a specific error message for empty payload edge cases
+                expect(result.current.error).toBe('Data tidak valid atau kosong, tidak dapat mengekspor CSV')
+            }
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('synchronizes and exports all multi-sheet data without omitting any payload sheets', async () => {
+            const rawOutput = {
+                sheet1: [{ id: 1, val: 'a' }],
+                sheet2: [{ id: 2, val: 'b' }],
+                sheet3: [{ id: 3, val: 'c' }]
+            }
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: rawOutput })
+            })
+            
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            // Expect that exportToCsv is called with the exact full structure spanning all sheets
+            expect(service.exportToCsv).toHaveBeenCalledWith(rawOutput)
+            
+            vi.unstubAllEnvs()
+        })
+    })
 })
