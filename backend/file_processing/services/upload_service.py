@@ -89,7 +89,7 @@ def validate_pdf(uploaded_file):
     """Single-parse PDF validation: encryption, structure, and page count."""
     try:
         uploaded_file.seek(0)
-        reader = PdfReader(uploaded_file, strict=False)
+        reader = PdfReader(uploaded_file, strict=True)
     except Exception:
         return False, "The PDF file is corrupt or has an invalid structure."
 
