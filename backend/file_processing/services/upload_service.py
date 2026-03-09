@@ -40,15 +40,7 @@ def process_upload(uploaded_file):
         return False, error, None, None
 
     if ext == ".pdf":
-        is_valid, error = validate_pdf_not_corrupt(uploaded_file)
-        if not is_valid:
-            return False, error, None, None
-
-        is_valid, error = validate_pdf_not_password_protected(uploaded_file)
-        if not is_valid:
-            return False, error, None, None
-
-        is_valid, error = validate_pdf_page_count(uploaded_file)
+        is_valid, error = validate_pdf(uploaded_file)
         if not is_valid:
             return False, error, None
 
@@ -93,52 +85,52 @@ def validate_file(uploaded_file):
     return True, None
 
 
-def validate_pdf_not_corrupt(uploaded_file):
+def validate_pdf(uploaded_file):
+    """Single-parse PDF validation: encryption, structure, and page count."""
     try:
         uploaded_file.seek(0)
-        reader = PdfReader(uploaded_file, strict=True)
+        reader = PdfReader(uploaded_file, strict=False)
+    except Exception:
+        return False, "The PDF file is corrupt or has an invalid structure."
 
-        if reader.is_encrypted:
-            return True, None
+    is_valid, error = check_pdf_encrypted(reader)
+    if not is_valid:
+        return False, error
 
+    is_valid, error = check_pdf_structure(reader)
+    if not is_valid:
+        return False, error
+
+    is_valid, error = check_pdf_page_count(reader)
+    if not is_valid:
+        return False, error
+
+    return True, None
+
+
+def check_pdf_encrypted(reader):
+    if reader.is_encrypted:
+        return False, "The PDF file is password-protected."
+    return True, None
+
+
+def check_pdf_structure(reader):
+    try:
         _ = len(reader.pages)
         return True, None
-
     except PdfReadError:
         return False, "The PDF file is corrupt or has an invalid structure."
     except Exception:
         return False, "The PDF file is corrupt or has an invalid structure."
 
 
-def validate_pdf_not_password_protected(uploaded_file):
-    try:
-        uploaded_file.seek(0)
-        reader = PdfReader(uploaded_file)
-
-        if reader.is_encrypted:
-            return False, "The PDF file is password-protected."
-
-        return True, None
-
-    except Exception:
-        return False, "The PDF file is password-protected and cannot be accessed"
-
-
-def validate_pdf_page_count(uploaded_file):
-    try:
-        uploaded_file.seek(0)
-        reader = PdfReader(uploaded_file)
-
-        if len(reader.pages) > MAX_PDF_PAGES:
-            return (
-                False,
-                f"PDF exceeds the maximum allowed page count of {MAX_PDF_PAGES}.",
-            )
-
-        return True, None
-
-    except Exception:
-        return False, "Unable to read PDF page count."
+def check_pdf_page_count(reader):
+    if len(reader.pages) > MAX_PDF_PAGES:
+        return (
+            False,
+            f"PDF exceeds the maximum allowed page count of {MAX_PDF_PAGES}.",
+        )
+    return True, None
 
 
 def validate_mime_type(uploaded_file, ext):
