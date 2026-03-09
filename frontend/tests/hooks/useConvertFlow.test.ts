@@ -14,6 +14,8 @@ vi.mock('../../src/lib/api', () => ({
 
 vi.mock('../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: {} }),
+    exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_123' }),
+    getDownloadUrl: vi.fn().mockReturnValue('/mock/url'),
 }))
 
 import { uploadFile } from '../../src/lib/api'

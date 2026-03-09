@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
@@ -334,7 +334,9 @@ describe('ConvertPage', () => {
             }
             
             // cleanup
-            resolvers.forEach(r => r({ filename: 'test.xlsx', size: 100, format: 'xlsx' }))
+            await act(async () => {
+                resolvers.forEach(r => r({ filename: 'test.xlsx', size: 100, format: 'xlsx' }))
+            })
             vi.unstubAllEnvs()
         })
 
@@ -344,7 +346,7 @@ describe('ConvertPage', () => {
             const mockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
-                getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_999/download?filename=test.pdf')
+                getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_999/download?filename=test.csv')
             }
 
             render(<ConvertPage llmService={mockService as any} />)
@@ -366,7 +368,7 @@ describe('ConvertPage', () => {
             const mockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
-                getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_999/download?filename=test.pdf')
+                getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_999/download?filename=test.csv')
             }
             
             const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
@@ -379,7 +381,7 @@ describe('ConvertPage', () => {
             const csvBtn = await screen.findByTestId('download-csv-btn')
             await user.click(csvBtn)
             
-            expect(mockService.getDownloadUrl).toHaveBeenCalledWith('csv_999', 'test.pdf')
+            expect(mockService.getDownloadUrl).toHaveBeenCalledWith('csv_999', 'test.csv')
             expect(clickSpy).toHaveBeenCalled()
             
             clickSpy.mockRestore()

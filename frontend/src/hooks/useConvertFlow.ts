@@ -2,12 +2,16 @@
 
 import { useState, useRef } from 'react'
 import { uploadFile } from '@/lib/api'
-import { generateJson } from '@/services/llm'
+import { generateJson, exportToCsv, getDownloadUrl } from '@/services/llm'
 import { isJsonObject } from '@/utils/schemaValidator'
 import type { ILLMService } from '@/lib/ILLMService'
 import type { JsonObject } from '@/utils/schemaValidator'
 
-const defaultService: ILLMService = { generate: generateJson }
+const defaultService: ILLMService = { 
+    generate: generateJson, 
+    exportToCsv,
+    getDownloadUrl
+}
 
 export interface OutputFile {
     filename: string
@@ -55,6 +59,7 @@ export function useConvertFlow(
     const [isConverting, setIsConverting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
+    const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
 
     const abortPreviousRequest = (): AbortSignal => {
@@ -91,10 +96,21 @@ export function useConvertFlow(
 
     const processConversion = async (uploadResult: JsonObject, file: File, signal: AbortSignal) => {
         try {
-            await llmService.generate(uploadResult)
+            const llmResult = await llmService.generate(uploadResult)
             if (signal.aborted) return
 
             setOutputFile(parseOutputFile(uploadResult, file))
+
+            if (llmService.exportToCsv) {
+                try {
+                    const csvResult = await llmService.exportToCsv(llmResult.output_json)
+                    if (!signal.aborted) {
+                        setCsvMetadata({ file_id: csvResult.file_id })
+                    }
+                } catch (csvErr: unknown) {
+                    handleProcessError(csvErr, 'CSV Export failed', signal)
+                }
+            }
         } catch (err: unknown) {
             handleProcessError(err, 'Conversion failed', signal)
         } finally {
@@ -109,6 +125,7 @@ export function useConvertFlow(
 
         setError(null)
         setOutputFile(null)
+        setCsvMetadata(null)
         setIsConverting(true)
 
         const uploadResult = await processUpload(file, signal)
@@ -117,5 +134,5 @@ export function useConvertFlow(
         await processConversion(uploadResult, file, signal)
     }
 
-    return { isConverting, error, outputFile, csvMetadata: null, handleFileSelect }
+    return { isConverting, error, outputFile, csvMetadata, handleFileSelect }
 }
