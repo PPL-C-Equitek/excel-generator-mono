@@ -1,4 +1,4 @@
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useConvertFlow } from '../../src/hooks/useConvertFlow'
 import type { ILLMService } from '../../src/lib/ILLMService'
@@ -500,6 +500,48 @@ describe('useConvertFlow', () => {
             expect(result.current.error).toBe('CSV Export failed')
             expect(result.current.csvMetadata).toBeNull()
             expect(result.current.isConverting).toBe(false)
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('does not call exportToCsv if the service does not implement it', async () => {
+            const service: ILLMService = { generate: vi.fn().mockResolvedValue({ output_json: { ok: true } }) }
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.csvMetadata).toBeNull()
+            expect(result.current.outputFile?.filename).toBe('report.xlsx')
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('ignores setting csvMetadata if request is aborted during exportToCsv', async () => {
+            let resolveExport: (v: unknown) => void = () => {}
+            const service = makeMockService({
+                exportToCsv: vi.fn()
+                   .mockImplementationOnce(() => new Promise((resolve) => { resolveExport = resolve }))
+                   .mockResolvedValueOnce({ file_id: 'csv_999' }) // second request
+            })
+            
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            // Start first
+            act(() => { result.current.handleFileSelect(testFile) })
+            
+            // Wait for it to specifically reach exportToCsv
+            await waitFor(() => expect(service.exportToCsv).toHaveBeenCalledTimes(1))
+            
+            // Start second request (which will abort the first)
+            await act(async () => { await result.current.handleFileSelect(testFile) })
+            
+            // Now resolve the first request which is stale and aborted
+            await act(async () => { resolveExport({ file_id: 'csv_stale' }) })
+
+            // The active request will set it to csv_999, so it should not be 'csv_stale'
+            expect(result.current.csvMetadata?.file_id).toBe('csv_999')
             
             vi.unstubAllEnvs()
         })
