@@ -37,10 +37,15 @@ function parseOutputFile(uploadResult: JsonObject, fallbackFile: File): OutputFi
     }
 }
 
+export interface CsvMetadata {
+    file_id: string;
+}
+
 export interface UseConvertFlowReturn {
     isConverting: boolean
     error: string | null
     outputFile: OutputFile | null
+    csvMetadata: CsvMetadata | null
     handleFileSelect: (file: File) => Promise<void>
 }
 
@@ -112,5 +117,5 @@ export function useConvertFlow(
         await processConversion(uploadResult, file, signal)
     }
 
-    return { isConverting, error, outputFile, handleFileSelect }
+    return { isConverting, error, outputFile, csvMetadata: null, handleFileSelect }
 }

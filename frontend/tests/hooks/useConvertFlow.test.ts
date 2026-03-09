@@ -28,6 +28,8 @@ const validUploadResponse = { filename: 'report.pdf', size: 20480, format: 'pdf'
 function makeMockService(overrides?: Partial<ILLMService>): ILLMService {
     return {
         generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+        exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_12345' }),
+        getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_12345/download'),
         ...overrides,
     }
 }
@@ -453,6 +455,51 @@ describe('useConvertFlow', () => {
 
             expect(result.current.error).toBeNull() // because aborted requests are ignored
             expect(result.current.isConverting).toBe(true)
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // Export to CSV Flow
+    // -----------------------------------------------------------------------
+    describe('export to CSV flow', () => {
+        it('initializes csvMetadata as null', () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+            expect(result.current.csvMetadata).toBeNull()
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('calls exportToCsv after successful LLM generation and sets csvMetadata', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(service.exportToCsv).toHaveBeenCalledWith({ status: 'ok' })
+            expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
+            expect(result.current.outputFile?.filename).toBe('report.xlsx')
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('handles exportToCsv error properly', async () => {
+            const service = makeMockService({
+                exportToCsv: vi.fn().mockRejectedValue(new Error('CSV Export failed'))
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.error).toBe('CSV Export failed')
+            expect(result.current.csvMetadata).toBeNull()
+            expect(result.current.isConverting).toBe(false)
+            
+            vi.unstubAllEnvs()
         })
     })
 })

@@ -8,6 +8,8 @@ vi.mock('../../../src/lib/api', () => ({
 }))
 vi.mock('../../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+    exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_777' }),
+    getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_777/download?filename=test.csv'),
 }))
 
 import { uploadFile } from '../../../src/lib/api'
@@ -305,6 +307,107 @@ describe('ConvertPage', () => {
                 unmount1()
                 unmount2()
             }).not.toThrow()
+        })
+    })
+
+    describe('Export to CSV Integration UI', () => {
+        it('does not display Download CSV when initial mount or csvMetadata is null', () => {
+            render(<ConvertPage />)
+            expect(screen.queryByTestId('download-csv-btn')).not.toBeInTheDocument()
+            vi.unstubAllEnvs()
+        })
+
+        it('displays disabled Download CSV button during conversion', async () => {
+            const user = userEvent.setup()
+            render(<ConvertPage />)
+            
+            const uploadButton = screen.getByText('Upload File')
+            // Delaying the llm mock to stay in loading state
+            const resolvers: any[] = []
+            vi.mocked(uploadFile).mockImplementationOnce(() => new Promise(res => resolvers.push(res)))
+            
+            await user.click(uploadButton)
+            
+            const csvBtn = screen.queryByTestId('download-csv-btn')
+            if (csvBtn) {
+                expect(csvBtn).toBeDisabled()
+            }
+            
+            // cleanup
+            resolvers.forEach(r => r({ filename: 'test.xlsx', size: 100, format: 'xlsx' }))
+            vi.unstubAllEnvs()
+        })
+
+        it('shows enabled Download CSV button after successful conversion', async () => {
+            const user = userEvent.setup()
+            
+            const mockService = {
+                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+                exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
+                getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_999/download?filename=test.pdf')
+            }
+
+            render(<ConvertPage llmService={mockService as any} />)
+            
+            const uploadButton = screen.getByText('Upload File')
+            await user.click(uploadButton)
+            
+            await waitFor(() => {
+                const csvBtn = screen.getByTestId('download-csv-btn')
+                expect(csvBtn).toBeInTheDocument()
+                expect(csvBtn).not.toBeDisabled()
+            })
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('triggers download with correct URL when Download CSV is clicked', async () => {
+            const user = userEvent.setup()
+            const mockService = {
+                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+                exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
+                getDownloadUrl: vi.fn().mockReturnValue('/api/export/csv/csv_999/download?filename=test.pdf')
+            }
+            
+            const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+            render(<ConvertPage llmService={mockService as any} />)
+            
+            const uploadButton = screen.getByText('Upload File')
+            await user.click(uploadButton)
+            
+            const csvBtn = await screen.findByTestId('download-csv-btn')
+            await user.click(csvBtn)
+            
+            expect(mockService.getDownloadUrl).toHaveBeenCalledWith('csv_999', 'test.pdf')
+            expect(clickSpy).toHaveBeenCalled()
+            
+            clickSpy.mockRestore()
+            vi.unstubAllEnvs()
+        })
+
+        it('shows error message if CSV export fails', async () => {
+            const user = userEvent.setup()
+            const mockService = {
+                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+                exportToCsv: vi.fn().mockRejectedValue(new Error('CSV Export Error')),
+                getDownloadUrl: vi.fn()
+            }
+
+            render(<ConvertPage llmService={mockService as any} />)
+            
+            const uploadButton = screen.getByText('Upload File')
+            await user.click(uploadButton)
+            
+            const alertEl = await screen.findByRole('alert')
+            expect(alertEl).toHaveTextContent(/CSV Export Error/i)
+            
+            const csvBtn = screen.queryByTestId('download-csv-btn')
+            if (csvBtn) {
+                expect(csvBtn).toBeDisabled()
+            }
+            
+            vi.unstubAllEnvs()
         })
     })
 })
