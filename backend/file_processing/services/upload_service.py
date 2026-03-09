@@ -48,18 +48,27 @@ def process_upload(uploaded_file):
             return False, error, None, None
 
     file_path = save_temp_file(uploaded_file)
-    
+
     extracted_text = None
-    if ext == ".pdf":
-        try:
+
+    try:
+        if ext == ".pdf":
             extracted_text = OCRService.process_pdf(file_path)
+
+    except Exception:
+        logger.exception(
+            "OCR failed for uploaded PDF: %s. File saved at %s",
+            uploaded_file.name,
+            file_path,
+        )
+        extracted_text = None
+
+    finally:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
         except Exception:
-            logger.exception(
-                "OCR failed for uploaded PDF: %s. File saved at %s",
-                uploaded_file.name,
-                file_path,
-            )
-            extracted_text = None
+            logger.exception("Failed to delete temporary file: %s", file_path)
 
     return True, None, file_path, extracted_text
 
