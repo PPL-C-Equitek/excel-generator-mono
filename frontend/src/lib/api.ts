@@ -30,7 +30,7 @@ export async function uploadFile(file: File, options?: RequestInit) {
   const body = new FormData();
   body.append("file", file);
 
-  const res = await fetch(`${base}/api/upload/`, {
+  const res = await fetch(`${base}/upload/`, {
     method: "POST",
     body,
     ...options,
