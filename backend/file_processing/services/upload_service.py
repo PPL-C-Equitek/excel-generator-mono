@@ -26,6 +26,7 @@ ALLOWED_MIME_TYPES = {
 }
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_PDF_PAGES = 100
+PDF_CORRUPT_ERROR = "The PDF file is corrupt or has an invalid structure."
 
 
 def process_upload(uploaded_file):
@@ -87,7 +88,7 @@ def validate_pdf(uploaded_file):
         uploaded_file.seek(0)
         reader = PdfReader(uploaded_file, strict=True)
     except Exception:
-        return False, "The PDF file is corrupt or has an invalid structure."
+        return False, PDF_CORRUPT_ERROR
 
     is_valid, error = check_pdf_encrypted(reader)
     if not is_valid:
@@ -117,9 +118,9 @@ def check_pdf_structure(reader):
         page_count = len(reader.pages)
         return True, page_count
     except PdfReadError:
-        return False, "The PDF file is corrupt or has an invalid structure."
+        return False, PDF_CORRUPT_ERROR
     except Exception:
-        return False, "The PDF file is corrupt or has an invalid structure."
+        return False, PDF_CORRUPT_ERROR
 
 
 def check_pdf_page_count(page_count):
