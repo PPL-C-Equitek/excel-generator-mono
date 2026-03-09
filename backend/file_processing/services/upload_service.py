@@ -48,6 +48,10 @@ def process_upload(uploaded_file):
         if not is_valid:
             return False, error, None, None
 
+        is_valid, error = validate_pdf_page_count(uploaded_file)
+        if not is_valid:
+            return False, error, None
+
     file_path = save_temp_file(uploaded_file)
 
     extracted_text = None
@@ -118,6 +122,23 @@ def validate_pdf_not_password_protected(uploaded_file):
 
     except Exception:
         return False, "The PDF file is password-protected and cannot be accessed"
+
+
+def validate_pdf_page_count(uploaded_file):
+    try:
+        uploaded_file.seek(0)
+        reader = PdfReader(uploaded_file)
+
+        if len(reader.pages) > MAX_PDF_PAGES:
+            return (
+                False,
+                f"PDF exceeds the maximum allowed page count of {MAX_PDF_PAGES}.",
+            )
+
+        return True, None
+
+    except Exception:
+        return False, "Unable to read PDF page count."
 
 
 def validate_mime_type(uploaded_file, ext):
