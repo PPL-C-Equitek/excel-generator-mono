@@ -1,7 +1,29 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import LandingPage from '../../../src/app/landing/LandingPage'
+import { LANDING_FEATURES, LANDING_NAV_LINKS, LANDING_HERO_CONFIG } from '../../../src/constants/landing'
 
+/**
+ * LandingPage Integration Tests
+ * 
+ * Tests verify that SOLID principles are correctly applied:
+ * 
+ * SRP (Single Responsibility Principle):
+ *  - LandingPage assembles sections, doesn't contain business data
+ *  - Data lives in constants/landing.ts
+ * 
+ * DIP (Dependency Inversion Principle):
+ *  - Components accept data via props (NavLink[], Feature[], etc.)
+ *  - Not hardcoded, making components reusable and testable
+ * 
+ * OCP (Open/Closed Principle):
+ *  - Easy to extend: Add features to LANDING_FEATURES, they auto-render
+ *  - Easy to modify: Change brand name, hero text in constants without touching component logic
+ * 
+ * ISP (Interface Segregation Principle):
+ *  - Each component uses minimal interface contracts (Feature, NavLink, etc.)
+ *  - Not coupled to unnecessary data
+ */
 describe('LandingPage', () => {
     // ✅ POSITIVE TESTS
     describe('positive', () => {
@@ -11,14 +33,20 @@ describe('LandingPage', () => {
             expect(screen.getByText('EQUITEK')).toBeInTheDocument()
         })
 
-        it('renders Login link in navbar', () => {
+        it('renders all navigation links from LANDING_NAV_LINKS constant', () => {
             render(<LandingPage />)
-            expect(screen.getByText('Login')).toBeInTheDocument()
+            LANDING_NAV_LINKS.forEach((link) => {
+                expect(screen.getByText(link.label)).toBeInTheDocument()
+                expect(screen.getByText(link.label)).toHaveAttribute('href', link.href)
+            })
         })
 
-        it('renders Register link in navbar', () => {
+        it('renders correct number of nav links (DIP: data from constant)', () => {
             render(<LandingPage />)
-            expect(screen.getByText('Register')).toBeInTheDocument()
+            const navLinks = screen.getAllByRole('link')
+            // Filter only navbar links (exclude CTA and footer links)
+            const navbarLinks = navLinks.slice(0, LANDING_NAV_LINKS.length)
+            expect(navbarLinks).toHaveLength(LANDING_NAV_LINKS.length)
         })
 
         // — Hero —
@@ -32,14 +60,14 @@ describe('LandingPage', () => {
             expect(screen.getByTestId('hero-overlay')).toBeInTheDocument()
         })
 
-        it('renders hero heading text', () => {
+        it('renders hero heading from LANDING_HERO_CONFIG', () => {
             render(<LandingPage />)
-            expect(screen.getByText(/Automated Intelligence/i)).toBeInTheDocument()
+            expect(screen.getByText(LANDING_HERO_CONFIG.heading)).toBeInTheDocument()
         })
 
-        it('renders hero subtitle text', () => {
+        it('renders hero subtitle from LANDING_HERO_CONFIG', () => {
             render(<LandingPage />)
-            expect(screen.getByText(/Empowering your workflow/i)).toBeInTheDocument()
+            expect(screen.getByText(LANDING_HERO_CONFIG.subtitle)).toBeInTheDocument()
         })
 
         // — Features —
@@ -48,40 +76,30 @@ describe('LandingPage', () => {
             expect(screen.getByText('Why Use Our Service?')).toBeInTheDocument()
         })
 
-        it('renders all 6 feature card titles', () => {
+        it('renders all feature titles from LANDING_FEATURES constant (OCP: extensible)', () => {
             render(<LandingPage />)
-            const titles = [
-                'Advanced AI Transformation',
-                'Instance Excel Mapping',
-                'Verified Logic',
-                'Full Traceability',
-                'Consultant-Grade Standards',
-                'Seamless Automation',
-            ]
-            titles.forEach((title) => {
-                expect(screen.getByText(title)).toBeInTheDocument()
+            LANDING_FEATURES.forEach((feature) => {
+                expect(screen.getByText(feature.title)).toBeInTheDocument()
             })
         })
 
-        it('renders all 6 feature card descriptions', () => {
+        it('renders all feature descriptions from LANDING_FEATURES constant', () => {
             render(<LandingPage />)
-            const descs = [
-                /Leverage advanced LLMs/i,
-                /Maps messy data/i,
-                /Multi-step CoT/i,
-                /Each extraction decision/i,
-                /Focused on professional methods/i,
-                /Replaces slow manual data entry/i,
-            ]
-            descs.forEach((desc) => {
-                expect(screen.getByText(desc)).toBeInTheDocument()
+            LANDING_FEATURES.forEach((feature) => {
+                expect(screen.getByText(feature.desc)).toBeInTheDocument()
             })
+        })
+
+        it('renders correct number of feature cards (SRP + DIP: data-driven)', () => {
+            render(<LandingPage />)
+            const featureHeadings = screen.getAllByRole('heading', { level: 3 })
+            expect(featureHeadings).toHaveLength(LANDING_FEATURES.length)
         })
 
         it('renders features in a grid container', () => {
             render(<LandingPage />)
             const featureHeadings = screen.getAllByRole('heading', { level: 3 })
-            expect(featureHeadings).toHaveLength(6)
+            expect(featureHeadings.length).toBe(LANDING_FEATURES.length)
         })
 
         // — CTA —
@@ -174,16 +192,17 @@ describe('LandingPage', () => {
             expect(screen.queryByText('Or drop file here')).not.toBeInTheDocument()
         })
 
-        it('does not render more than 6 feature card headings', () => {
+        it('does not render more feature cards than in LANDING_FEATURES', () => {
             render(<LandingPage />)
             const headings = screen.getAllByRole('heading', { level: 3 })
-            expect(headings.length).toBe(6)
+            expect(headings.length).toBe(LANDING_FEATURES.length)
         })
 
-        it('does not render Login or Register more than once', () => {
+        it('does not render nav links more than once', () => {
             render(<LandingPage />)
-            expect(screen.getAllByText('Login').length).toBe(1)
-            expect(screen.getAllByText('Register').length).toBe(1)
+            LANDING_NAV_LINKS.forEach((link) => {
+                expect(screen.getAllByText(link.label)).toHaveLength(1)
+            })
         })
 
         it('does not render error or loading state on initial render', () => {

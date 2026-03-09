@@ -1,9 +1,19 @@
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import FeatureCard from '../../../src/components/FeatureCard'
+import type { Feature } from '../../../src/constants/landing'
 
+/**
+ * FeatureCard Component Tests
+ * 
+ * SOLID principles demonstrated:
+ * - SRP: Component has single responsibility - render a feature card
+ * - ISP: Accepts Feature interface (only title, desc, icon it needs)
+ * - OCP: Easy to extend - accepts custom icon prop
+ * - DIP: Data injected via props, not hardcoded
+ */
 describe('FeatureCard', () => {
-    const defaultProps = {
+    const defaultProps: Feature = {
         title: 'Advanced AI Transformation',
         desc: 'Leverage advanced LLMs to accurately interpret unstructured data',
     }
@@ -23,7 +33,11 @@ describe('FeatureCard', () => {
         })
 
         it('renders custom icon when provided', () => {
-            render(<FeatureCard {...defaultProps} icon={<span>🤖</span>} />)
+            const propsWithIcon: Feature = {
+                ...defaultProps,
+                icon: <span>🤖</span>
+            }
+            render(<FeatureCard {...propsWithIcon} />)
             expect(screen.getByText('🤖')).toBeInTheDocument()
         })
 
@@ -35,6 +49,16 @@ describe('FeatureCard', () => {
         it('renders title as heading element', () => {
             render(<FeatureCard {...defaultProps} />)
             expect(screen.getByRole('heading', { level: 3 })).toBeInTheDocument()
+        })
+
+        it('accepts Feature interface contract (ISP)', () => {
+            const customFeature: Feature = {
+                title: 'Custom Feature',
+                desc: 'Custom description for testing',
+            }
+            render(<FeatureCard {...customFeature} />)
+            expect(screen.getByText('Custom Feature')).toBeInTheDocument()
+            expect(screen.getByText('Custom description for testing')).toBeInTheDocument()
         })
     })
 

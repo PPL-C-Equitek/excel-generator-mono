@@ -2,6 +2,15 @@ import { render, screen } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import HeroSection from '../../../src/components/HeroSection'
 
+/**
+ * HeroSection Component Tests
+ * 
+ * SOLID principles demonstrated:
+ * - SRP: Component renders hero section only
+ * - OCP: Fully customizable via props (heading, subtitle, backgroundImage)
+ * - ISP: Clear interface contract with optional props
+ * - DIP: Content data injected via props, not hardcoded
+ */
 describe('HeroSection', () => {
     // Positive tests
     describe('positive', () => {
@@ -15,12 +24,12 @@ describe('HeroSection', () => {
             expect(screen.getByText(/Empowering your workflow/i)).toBeInTheDocument()
         })
 
-        it('renders custom heading when provided', () => {
+        it('renders custom heading when provided (OCP)', () => {
             render(<HeroSection heading="Custom Heading" />)
             expect(screen.getByText('Custom Heading')).toBeInTheDocument()
         })
 
-        it('renders custom subtitle when provided', () => {
+        it('renders custom subtitle when provided (OCP)', () => {
             render(<HeroSection subtitle="Custom subtitle text" />)
             expect(screen.getByText('Custom subtitle text')).toBeInTheDocument()
         })
@@ -41,10 +50,25 @@ describe('HeroSection', () => {
             expect(hero).toHaveStyle("background-image: url('/hero-bg.png')")
         })
 
-        it('applies background image when provided', () => {
+        it('applies custom background image when provided (OCP)', () => {
             render(<HeroSection backgroundImage="/custom-bg.jpg" />)
             const hero = screen.getByTestId('hero-section')
             expect(hero).toHaveStyle("background-image: url('/custom-bg.jpg')")
+        })
+
+        it('accepts combination of custom props (ISP)', () => {
+            render(
+                <HeroSection
+                    heading="New Heading"
+                    subtitle="New Subtitle"
+                    backgroundImage="/images/bg.jpg"
+                />
+            )
+            expect(screen.getByText('New Heading')).toBeInTheDocument()
+            expect(screen.getByText('New Subtitle')).toBeInTheDocument()
+            expect(screen.getByTestId('hero-section')).toHaveStyle(
+                "background-image: url('/images/bg.jpg')"
+            )
         })
     })
 
