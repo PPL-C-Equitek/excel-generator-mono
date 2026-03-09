@@ -45,14 +45,14 @@ def members(request):
 def upload(request):
     try:
         if "file" not in request.FILES:
-        return Response(
-            {"status": "error", "message": "No file provided"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+            return Response(
+                {"status": "error", "message": "No file provided"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         uploaded_file = request.FILES["file"]
 
-        success, error, file_path, extracted_text = process_upload(uploaded_file)
+        success, error, file_path, extracted = process_upload(uploaded_file)
 
         if not success:
             return Response(
@@ -64,11 +64,10 @@ def upload(request):
             "status": "success",
             "message": "File uploaded successfully",
             "filename": uploaded_file.name,
-            "path": file_path,
         }
 
-        if extracted_text is not None:
-            response_data["extracted_text"] = extracted_text
+        if extracted is not None:
+            response_data["extracted"] = extracted
 
         return Response(
             response_data,

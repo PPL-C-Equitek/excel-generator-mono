@@ -340,7 +340,8 @@ class UploadEndpointTest(TestCase):
         )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("extracted_text", resp.data)
+        self.assertIn("extracted", resp.data)
+
 class ExportCSVViewTest(APISimpleTestCase):
     def _valid_output_json(self):
         return {
