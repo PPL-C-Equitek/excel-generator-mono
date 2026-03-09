@@ -96,6 +96,34 @@ export function useConvertFlow(
         }
     }
 
+    const processCsvExport = async (out: unknown, signal: AbortSignal) => {
+        if (!llmService.exportToCsv || signal.aborted) return
+
+        try {
+            const isStringEmpty = typeof out === 'string' && (out as string).trim() === ''
+            const isEmpty = out === null || isStringEmpty || 
+                (Array.isArray(out) && out.length === 0) || 
+                (typeof out === 'object' && out !== null && Object.keys(out).length === 0)
+                
+            if (isEmpty) {
+                throw new Error('Data tidak valid atau kosong, tidak dapat mengekspor CSV')
+            }
+
+            const sanitizedJSON = sanitizeCSVCell(out) as JsonValue
+            const csvResult = await llmService.exportToCsv(sanitizedJSON)
+            
+            if (!signal.aborted) {
+                if (csvResult.file_id?.startsWith('csv_')) {
+                    setCsvMetadata({ file_id: csvResult.file_id })
+                } else {
+                    throw new Error('ID File CSV tidak valid')
+                }
+            }
+        } catch (csvErr: unknown) {
+            handleProcessError(csvErr, 'CSV Export failed', signal)
+        }
+    }
+
     const processConversion = async (uploadResult: JsonObject, file: File, signal: AbortSignal) => {
         try {
             const llmResult = await llmService.generate(uploadResult)
@@ -103,31 +131,7 @@ export function useConvertFlow(
 
             setOutputFile(parseOutputFile(uploadResult, file))
 
-            if (llmService.exportToCsv) {
-                try {
-                    const out = llmResult.output_json
-                    const isStringEmpty = typeof out === 'string' && (out as string).trim() === ''
-                    const isEmpty = out === null || isStringEmpty || 
-                        (Array.isArray(out) && out.length === 0) || 
-                        (typeof out === 'object' && out !== null && Object.keys(out).length === 0)
-                        
-                    if (isEmpty) {
-                        throw new Error('Data tidak valid atau kosong, tidak dapat mengekspor CSV')
-                    }
-
-                    const sanitizedJSON = sanitizeCSVCell(out) as JsonValue
-                    const csvResult = await llmService.exportToCsv(sanitizedJSON)
-                    if (!signal.aborted) {
-                        if (csvResult.file_id && csvResult.file_id.startsWith('csv_')) {
-                            setCsvMetadata({ file_id: csvResult.file_id })
-                        } else {
-                            throw new Error('ID File CSV tidak valid')
-                        }
-                    }
-                } catch (csvErr: unknown) {
-                    handleProcessError(csvErr, 'CSV Export failed', signal)
-                }
-            }
+            await processCsvExport(llmResult.output_json, signal)
         } catch (err: unknown) {
             handleProcessError(err, 'Conversion failed', signal)
         } finally {
