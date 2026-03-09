@@ -96,7 +96,7 @@ def upload(request):
 
         uploaded_file = request.FILES["file"]
 
-        success, error, file_path, extracted = process_upload(uploaded_file)
+        success, error, _, extracted = process_upload(uploaded_file)
 
         if not success:
             return Response(
