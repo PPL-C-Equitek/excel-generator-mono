@@ -48,7 +48,7 @@ def llm_generate(request):
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
     except OpenAIServiceError:
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
-    except ValueError as exc:
+    except ValueError:
         logger.exception("Invalid input_json payload.")
         return Response(
             {
