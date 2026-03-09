@@ -19,6 +19,10 @@ class OutputCSVGenerationError(Exception):
     """Raised when mapped output cannot be generated into CSV content."""
 
 
+class OutputCSVDownloadLookupError(Exception):
+    """Raised when generated CSV artifact cannot be resolved for download."""
+
+
 class CSVSanitizationPolicy:
     """Strategy extension point for CSV header/value sanitization."""
 
@@ -437,6 +441,58 @@ def export_csv_to_filesystem(
     }
 
 
+def resolve_csv_download_artifact(file_id, storage_dir):
+    token = _resolve_download_token(file_id)
+    base_dir = _resolve_download_storage_dir(storage_dir)
+    discovered_artifacts = _discover_download_artifacts(base_dir)
+
+    candidate_files = (
+        ("csv", "text/csv"),
+        ("zip", "application/zip"),
+    )
+    for extension, content_type in candidate_files:
+        file_name = f"export_{token}.{extension}"
+        file_path = discovered_artifacts.get(file_name)
+        if file_path:
+            return {
+                "file_name": file_name,
+                "file_path": file_path,
+                "artifact_type": extension,
+                "content_type": content_type,
+            }
+
+    raise OutputCSVDownloadLookupError("CSV artifact not found for given file_id.")
+
+
+def _discover_download_artifacts(base_dir):
+    discovered = {}
+    try:
+        with os.scandir(base_dir) as entries:
+            for entry in entries:
+                # Avoid following symlinks; only serve regular files under base_dir.
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+
+                entry_name = entry.name.lower()
+                if not re.fullmatch(r"export_[a-z0-9]+\.(csv|zip)", entry_name):
+                    continue
+
+                entry_path = os.path.realpath(entry.path)
+                try:
+                    common_path = os.path.commonpath([base_dir, entry_path])
+                except ValueError:
+                    continue
+
+                if common_path != base_dir:
+                    continue
+
+                discovered[entry_name] = entry_path
+    except OSError as exc:
+        raise OutputCSVDownloadLookupError("CSV artifact storage is unavailable.") from exc
+
+    return discovered
+
+
 def _validate_csv_headers(headers, sheet_index):
     if not isinstance(headers, list):
         raise OutputCSVGenerationError(f"Sheet {sheet_index} headers must be a list.")
@@ -546,6 +602,13 @@ def _resolve_storage_dir(storage_dir):
     return base_dir
 
 
+def _resolve_download_storage_dir(storage_dir):
+    if not isinstance(storage_dir, str) or not storage_dir.strip():
+        raise OutputCSVDownloadLookupError("storage_dir must be a non-empty string.")
+
+    return os.path.realpath(os.path.abspath(storage_dir))
+
+
 def _resolve_export_token(token_generator):
     if token_generator is None:
         token = uuid.uuid4().hex
@@ -566,10 +629,28 @@ def _resolve_export_token(token_generator):
     return normalized_token
 
 
+def _resolve_download_token(file_id):
+    if not isinstance(file_id, str) or not file_id.strip():
+        raise OutputCSVDownloadLookupError("file_id must be a non-empty string.")
+
+    normalized_file_id = file_id.strip().lower()
+    match = re.fullmatch(r"csv_([a-z0-9]+)", normalized_file_id)
+    if not match:
+        raise OutputCSVDownloadLookupError("file_id format is invalid.")
+
+    return match.group(1)
+
+
 def _build_safe_file_path(base_dir, file_name):
-    candidate = os.path.abspath(os.path.join(base_dir, file_name))
-    expected_prefix = base_dir + os.sep
-    if candidate != base_dir and not candidate.startswith(expected_prefix):
+    base_dir_real = os.path.realpath(os.path.abspath(base_dir))
+    candidate = os.path.realpath(os.path.join(base_dir_real, file_name))
+
+    try:
+        common_path = os.path.commonpath([base_dir_real, candidate])
+    except ValueError as exc:
+        raise OutputCSVGenerationError("Invalid storage path detected.") from exc
+
+    if common_path != base_dir_real:
         raise OutputCSVGenerationError("Invalid storage path detected.")
 
     return candidate
