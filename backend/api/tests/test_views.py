@@ -3,7 +3,6 @@ from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch
 
-from api.models import GroupMember
 from io import BytesIO
 from reportlab.pdfgen import canvas
 from openpyxl import Workbook
