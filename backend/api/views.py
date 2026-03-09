@@ -1,3 +1,4 @@
+import os
 import logging
 
 from django.conf import settings
@@ -24,7 +25,6 @@ from file_processing.services.export_service import (
 )
 
 logger = logging.getLogger(__name__)
-import os
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
 MAX_FILE_SIZE = 10 * 1024 * 1024  #10MB

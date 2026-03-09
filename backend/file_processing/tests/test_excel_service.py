@@ -1,6 +1,5 @@
 import io
-from django.test import TestCase, Client
-from django.urls import reverse
+from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 def _build_excel(sheets: dict) -> bytes:

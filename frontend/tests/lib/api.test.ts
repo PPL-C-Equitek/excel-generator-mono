@@ -86,7 +86,7 @@ describe("uploadFile", () => {
         const result = await uploadFile(file);
 
         expect(mockedFetch).toHaveBeenCalledWith(
-            "http://localhost:8000/api/upload/",
+            "http://localhost:8000/upload/",
             expect.objectContaining({
                 method: "POST",
                 body: expect.any(FormData),
