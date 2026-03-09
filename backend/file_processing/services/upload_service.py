@@ -97,11 +97,13 @@ def validate_pdf(uploaded_file):
     if not is_valid:
         return False, error
 
-    is_valid, error = check_pdf_structure(reader)
+    is_valid, page_count_or_error = check_pdf_structure(reader)
     if not is_valid:
-        return False, error
+        return False, page_count_or_error
 
-    is_valid, error = check_pdf_page_count(reader)
+    page_count = page_count_or_error
+
+    is_valid, error = check_pdf_page_count(page_count)
     if not is_valid:
         return False, error
 
@@ -116,16 +118,16 @@ def check_pdf_encrypted(reader):
 
 def check_pdf_structure(reader):
     try:
-        _ = len(reader.pages)
-        return True, None
+        page_count = len(reader.pages)
+        return True, page_count
     except PdfReadError:
         return False, "The PDF file is corrupt or has an invalid structure."
     except Exception:
         return False, "The PDF file is corrupt or has an invalid structure."
 
 
-def check_pdf_page_count(reader):
-    if len(reader.pages) > MAX_PDF_PAGES:
+def check_pdf_page_count(page_count):
+    if page_count > MAX_PDF_PAGES:
         return (
             False,
             f"PDF exceeds the maximum allowed page count of {MAX_PDF_PAGES}.",
