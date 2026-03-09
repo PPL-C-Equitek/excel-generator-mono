@@ -137,6 +137,6 @@ describe("uploadFile", () => {
         await freshUploadFile(file);
 
         const calledUrl = mockedFetch.mock.calls[0][0] as string;
-        expect(calledUrl).toBe("http://localhost:8000/api/upload/");
+        expect(calledUrl).toBe("http://localhost:8000/upload/");
     });
 });
