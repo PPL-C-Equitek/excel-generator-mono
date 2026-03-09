@@ -286,3 +286,21 @@ class UploadEndpointTest(TestCase):
             self.assertEqual(resp.status_code, 400)
             self.assertEqual(resp.data["status"], "error")
             self.assertEqual(resp.data["message"], "Unable to determine file type.")
+
+    @patch("api.views.process_upload")
+    def test_upload_returns_extracted_text(self, mock_process):
+        mock_process.return_value = (
+            True,
+            None,
+            "/tmp/file.pdf",
+            {"content": [{"page": 1, "type": "text", "lines": ["hello"]}]},
+        )
+
+        resp = self.client.post(
+            "/upload/",
+            {"file": SimpleUploadedFile("doc.pdf", b"%PDF-1.4", content_type="application/pdf")},
+            format="multipart",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("extracted_text", resp.data)
