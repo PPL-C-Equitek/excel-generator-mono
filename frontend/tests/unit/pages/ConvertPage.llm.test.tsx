@@ -60,8 +60,8 @@ vi.mock('../../../src/hooks/useConvertFlow', () => ({
 // ---------------------------------------------------------------------------
 
 const sampleOutput: OutputFile = {
-    filename: 'report.xlsx',
-    format: 'xlsx',
+    filename: 'report.pdf',
+    format: 'pdf',
     size: 20480,
 }
 
@@ -186,20 +186,27 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
         it('shows output filename', () => {
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
-            expect(screen.getByText('report.xlsx')).toBeInTheDocument()
+            expect(screen.getByText('report.pdf')).toBeInTheDocument()
         })
 
         it('shows output format', () => {
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
-            const xlsxMatches = screen.getAllByText(/xlsx/i)
-            expect(xlsxMatches.length).toBeGreaterThan(0)
+            const pdfMatches = screen.getAllByText(/pdf/i)
+            expect(pdfMatches.length).toBeGreaterThan(0)
         })
 
         it('shows file size in KB', () => {
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
             expect(screen.getByTestId('file-size')).toHaveTextContent('20 KB')
+        })
+
+        it('shows Download Input and Download Output labels', () => {
+            mockHookReturn.outputFile = sampleOutput
+            render(<ConvertPage />)
+            expect(screen.getByText('Download Input')).toBeInTheDocument()
+            expect(screen.getByText('Download Output')).toBeInTheDocument()
         })
 
         it('shows Download button and handles click', async () => {
