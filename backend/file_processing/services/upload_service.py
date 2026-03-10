@@ -34,6 +34,28 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_PDF_PAGES = 100
 PDF_CORRUPT_ERROR = "The PDF file is corrupt or has an invalid structure."
 
+def _has_extracted_text(extracted_data):
+    """Return True if any page contains extracted text."""
+    if not extracted_data or "content" not in extracted_data:
+        return False
+
+    for page in extracted_data["content"]:
+        if page.get("text"):
+            return True
+
+    return False
+
+
+def _get_empty_page_numbers(extracted_data):
+    """Return list of page numbers whose 'text' list is empty."""
+    empty = []
+    if not extracted_data or "content" not in extracted_data:
+        return empty
+    for page in extracted_data["content"]:
+        if not page.get("text"):
+            empty.append(page["page"])
+    return empty
+
 
 def _process_pdf(file_path, uploaded_file):
     is_valid, error = validate_pdf(uploaded_file)
@@ -43,8 +65,21 @@ def _process_pdf(file_path, uploaded_file):
     try:
         extracted_data = NonOCRPDFService.extract_non_ocr_pdf_to_json(file_path)
 
-        if not extracted_data:
+        if not _has_extracted_text(extracted_data):
+            # Fully scanned PDF — run OCR on all pages
             extracted_data = OCRService.process_pdf(file_path)
+        else:
+            # Check for mixed PDF (some pages have text, some don't)
+            empty_pages = _get_empty_page_numbers(extracted_data)
+            if empty_pages:
+                ocr_data = OCRService.process_pdf_pages(file_path, empty_pages)
+                # Merge OCR results into the extracted data
+                ocr_by_page = {
+                    p["page"]: p for p in ocr_data.get("content", [])
+                }
+                for page in extracted_data["content"]:
+                    if page["page"] in ocr_by_page:
+                        page["text"] = ocr_by_page[page["page"]]["text"]
 
     except Exception:
         logger.exception("Non-OCR extraction failed, fallback to OCR")
