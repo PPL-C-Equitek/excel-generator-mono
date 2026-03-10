@@ -42,29 +42,44 @@ def process_upload(uploaded_file):
     if not is_valid:
         return False, error, None, None
 
-    if ext == ".pdf":
-        is_valid, error = validate_pdf(uploaded_file)
-        if not is_valid:
-            return False, error, None, None
-
     file_path = save_temp_file(uploaded_file)
-    # extracted_data = None
-    # if ext == ".pdf":
-    #     try:
-    #         extracted_data = extract_non_ocr_pdf_to_json(file_path)
-    #     except Exception:
-    #         logging.exception("Failed to extract PDF during upload")
-    #         return False, "Failed to extract PDF content", None
 
-    extracted_text = None
+    extracted_data = None
 
     try:
+        # -------- PDF handling --------
         if ext == ".pdf":
-            extracted_text = OCRService.process_pdf(file_path)
+            is_valid, error = validate_pdf(uploaded_file)
+            if not is_valid:
+                return False, error, None, None
+
+            try:
+                # try normal extraction first
+                extracted_data = NonOCRPDFService.extract_non_ocr_pdf_to_json(file_path)
+
+                # if empty -> fallback to OCR
+                if not extracted_data:
+                    extracted_data = OCRService.process_pdf(file_path)
+
+            except Exception:
+                logger.exception("Non-OCR extraction failed, fallback to OCR")
+                extracted_data = OCRService.process_pdf(file_path)
+
+        # -------- Excel handling --------
+        elif ext in [".xlsx", ".xls"]:
+            success, error, data = process_uploaded_excel(file_path)
+
+            if not success:
+                return False, error, None, None
+
+            extracted_data = data
+
+        else:
+            return False, "Unsupported file type", None, None
 
     except Exception:
-        logger.exception("OCR processing failed for uploaded PDF.")
-        extracted_text = None
+        logger.exception("Processing failed.")
+        return False, "File processing failed", None, None
 
     finally:
         try:
@@ -73,52 +88,7 @@ def process_upload(uploaded_file):
         except Exception:
             logger.exception("Failed to delete temporary upload file.")
 
-    return True, None, file_path, extracted_text
-
-
-FILE_SIGNATURES = {
-    ".xlsx": {
-        "mimes": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
-        "magic": [b"\x50\x4B\x03\x04", b"\x50\x4B\x05\x06"]
-    },
-    ".xls": {
-        "mimes": {"application/vnd.ms-excel"},
-        "magic": [b"\xD0\xCF\x11\xE0"]
-    },
-    ".pdf": {
-        "mimes": {"application/pdf"},
-        "magic": [b"\x25\x50\x44\x46"]
-    }
-}
-
-def validate_mime_type(uploaded_file, ext):
-    if ext not in FILE_SIGNATURES:
-        return False, f"Ekstensi {ext} tidak didukung."
-
-    expected_mimes = FILE_SIGNATURES[ext]["mimes"]
-    expected_magics = FILE_SIGNATURES[ext]["magic"]
-
-    content_type = getattr(uploaded_file, "content_type", "") or ""
-    mime = content_type.split(";")[0].strip().lower()
-
-    if mime not in expected_mimes:
-        if ext == ".xls" and ("excel" in mime or "spreadsheet" in mime):
-            pass
-        else:
-            return False, f"MIME type '{mime}' tidak sesuai dengan ekstensi file {ext}."
-
-    uploaded_file.seek(0)
-    header = uploaded_file.read(8)
-    uploaded_file.seek(0)
-
-    for signature in expected_magics:
-        if header.startswith(signature):
-            return True, None
-
-    return False, (
-        "Isi file tidak sesuai dengan formatnya."
-        "File mungkin rusak atau disamarkan sebagai Excel/PDF."
-    )
+    return True, None, file_path, extracted_data
 
 
 def validate_file(uploaded_file):
@@ -228,14 +198,3 @@ def save_temp_file(uploaded_file):
             destination.write(chunk)
 
     return file_path
-
-def handle_excel_upload(uploaded_file):
-    is_valid, error = validate_file(uploaded_file)
-    if not is_valid:
-        return False, error, None
-
-    file_path = save_temp_file(uploaded_file)
-
-    success, error, data = process_uploaded_excel(file_path)
-    
-    return success, error, data

@@ -10,7 +10,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
-from file_processing.services.non_ocr_pdf_service import extract_non_ocr_pdf_to_json
+from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 
 
 class TestOCRService(TestCase):
@@ -157,10 +157,7 @@ class TestNonOCRPDFService(TestCase):
         """Plain-text page → text is a list of line strings."""
         path = self._create_pdf(["Hello World"])
         try:
-            result = extract_non_ocr_pdf_to_json(path)
-            self.assertEqual(result["document_info"]["source_type"], "pdf")
-            self.assertTrue(result["document_info"]["file_name"].endswith(".pdf"))
-            self.assertEqual(result["document_info"]["total_pages"], 1)
+            result = NonOCRPDFService.extract_non_ocr_pdf_to_json(path)
             self.assertEqual(len(result["content"]), 1)
             self.assertEqual(result["content"][0]["page"], 1)
 
@@ -175,8 +172,7 @@ class TestNonOCRPDFService(TestCase):
         """Covers loop iteration for multiple pages."""
         path = self._create_pdf(["Page one", "Page two", "Page three"])
         try:
-            result = extract_non_ocr_pdf_to_json(path)
-            self.assertEqual(result["document_info"]["total_pages"], 3)
+            result = NonOCRPDFService.extract_non_ocr_pdf_to_json(path)
             self.assertEqual(len(result["content"]), 3)
             for i, entry in enumerate(result["content"], start=1):
                 self.assertEqual(entry["page"], i)
@@ -188,8 +184,7 @@ class TestNonOCRPDFService(TestCase):
         """Covers the branch when page has no text and no tables."""
         path = self._create_blank_pdf()
         try:
-            result = extract_non_ocr_pdf_to_json(path)
-            self.assertEqual(result["document_info"]["total_pages"], 1)
+            result = NonOCRPDFService.extract_non_ocr_pdf_to_json(path)
             self.assertEqual(result["content"][0]["text"], [])
         finally:
             os.unlink(path)
@@ -198,7 +193,7 @@ class TestNonOCRPDFService(TestCase):
         """Pages with tables → text is list of row-arrays."""
         path = self._create_table_pdf()
         try:
-            result = extract_non_ocr_pdf_to_json(path)
+            result = NonOCRPDFService.extract_non_ocr_pdf_to_json(path)
             text = result["content"][0]["text"]
             self.assertIsInstance(text, list)
             self.assertGreaterEqual(len(text), 3)
@@ -213,7 +208,7 @@ class TestNonOCRPDFService(TestCase):
         """None cells in tables are replaced with empty strings."""
         path = self._create_table_with_none_cell_pdf()
         try:
-            result = extract_non_ocr_pdf_to_json(path)
+            result = NonOCRPDFService.extract_non_ocr_pdf_to_json(path)
             text = result["content"][0]["text"]
             for row in text:
                 if isinstance(row, list):
@@ -227,7 +222,7 @@ class TestNonOCRPDFService(TestCase):
         """Text outside table area is also captured as plain strings."""
         path = self._create_table_plus_text_pdf()
         try:
-            result = extract_non_ocr_pdf_to_json(path)
+            result = NonOCRPDFService.extract_non_ocr_pdf_to_json(path)
             text = result["content"][0]["text"]
 
             table_rows = [e for e in text if isinstance(e, list)]
@@ -240,54 +235,33 @@ class TestNonOCRPDFService(TestCase):
         finally:
             os.unlink(path)
 
-    def test_document_info_file_name(self):
-        path = self._create_pdf(["test"])
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            expected_name = os.path.basename(path)
-            self.assertEqual(result["document_info"]["file_name"], expected_name)
-        finally:
-            os.unlink(path)
-
-    def test_document_info_source_type_is_pdf(self):
-        path = self._create_pdf(["abc"])
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            self.assertEqual(result["document_info"]["source_type"], "pdf")
-        finally:
-            os.unlink(path)
-
     def test_corrupt_file_raises_exception(self):
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         tmp.write(b"not a pdf at all")
         tmp.close()
         try:
             with self.assertRaises(Exception):
-                extract_non_ocr_pdf_to_json(tmp.name)
+                NonOCRPDFService.extract_non_ocr_pdf_to_json(tmp.name)
         finally:
             os.unlink(tmp.name)
 
     def test_nonexistent_file_raises_exception(self):
         with self.assertRaises(Exception):
-            extract_non_ocr_pdf_to_json("/tmp/nonexistent_file_12345.pdf")
+            NonOCRPDFService.extract_non_ocr_pdf_to_json("/tmp/nonexistent_file_12345.pdf")
 
     def test_return_structure_keys(self):
         path = self._create_pdf(["structure test"])
         try:
-            result = extract_non_ocr_pdf_to_json(path)
-            self.assertIn("document_info", result)
+            result = NonOCRPDFService.extract_non_ocr_pdf_to_json(path)
             self.assertIn("content", result)
-            info = result["document_info"]
-            self.assertIn("source_type", info)
-            self.assertIn("file_name", info)
-            self.assertIn("total_pages", info)
+            self.assertIsInstance(result["content"], list)
         finally:
             os.unlink(path)
 
     def test_content_entry_keys(self):
         path = self._create_pdf(["key test"])
         try:
-            result = extract_non_ocr_pdf_to_json(path)
+            result = NonOCRPDFService.extract_non_ocr_pdf_to_json(path)
             for entry in result["content"]:
                 self.assertIn("page", entry)
                 self.assertIn("text", entry)

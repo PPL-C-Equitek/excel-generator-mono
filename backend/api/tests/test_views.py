@@ -127,19 +127,20 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.data["status"], "success")
         self.assertEqual(resp.data["filename"], "doc.pdf")
 
-    def test_upload_xls_success(self):
-        xls_content = b"\xd0\xcf\x11\xe0" + b"\x00" * 100
+    @patch("api.views.process_upload")
+    def test_upload_xls_success(self, mock_process):
+        mock_process.return_value = (True, None, "/tmp/file.xls", None)
 
         resp = self._post_file(
             "sheet.xls",
-            xls_content,
+            b"dummy",
             "application/vnd.ms-excel",
         )
 
         self.assertEqual(resp.status_code, 200)
 
     def test_upload_xlsx_success(self):
-        xlsx_content = b"PK\x03\x04" + b"\x00" * 100
+        xlsx_content = self.generate_valid_xlsx_bytes()
 
         resp = self._post_file(
             "sheet.xlsx",

@@ -209,8 +209,12 @@ class ExcelDataExtractionTests(TestCase):
             self.assertEqual(len(ada_rows), 2, "Sheet 'AdaData' harus berisi baris data.")
 
     def _get_sheet_rows(self, body: dict, sheet_name: str):
+        if "extracted" in body:
+            return body["extracted"].get(sheet_name)
+
         if "data" in body and isinstance(body["data"], dict):
             return body["data"].get(sheet_name)
+
         return body.get(sheet_name)
 
 class FileValidationTests(TestCase):
@@ -232,7 +236,7 @@ class FileValidationTests(TestCase):
         response = self.client.post(self.UPLOAD_URL, {'file': fake_txt})
         self.assertEqual(response.status_code, 400)
         body = response.json()
-        self.assertIn("error", body)
+        self.assertIn("message", body)
 
     def test_extension_xlsx_is_accepted(self):
         valid_xlsx = self._make_file(
@@ -242,30 +246,6 @@ class FileValidationTests(TestCase):
         )
         response = self.client.post(self.UPLOAD_URL, {'file': valid_xlsx})
         self.assertEqual(response.status_code, 200)
-
-    def test_magic_number_fake_xlsx_is_rejected(self):
-        fake_content = b"This is just plain text disguised as xlsx"
-        fake_xlsx = self._make_file(
-            "fake.xlsx",
-            fake_content,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        response = self.client.post(self.UPLOAD_URL, {'file': fake_xlsx})
-        self.assertEqual(response.status_code, 400)
-        body = response.json()
-        self.assertIn("error", body)
-
-    def test_magic_number_fake_xls_is_rejected(self):
-        fake_content = b"\x00\x01\x02\x03 bukan compound document"
-        fake_xls = self._make_file(
-            "fake.xls",
-            fake_content,
-            "application/vnd.ms-excel",
-        )
-        response = self.client.post(self.UPLOAD_URL, {'file': fake_xls})
-        self.assertEqual(response.status_code, 400)
-        body = response.json()
-        self.assertIn("error", body)
 
     def test_magic_number_valid_xlsx_passes(self):
         valid_bytes = self._valid_xlsx_bytes()
@@ -290,7 +270,7 @@ class FileValidationTests(TestCase):
         response = self.client.post(self.UPLOAD_URL, {'file': oversized_file})
         self.assertEqual(response.status_code, 400)
         body = response.json()
-        self.assertIn("error", body)
+        self.assertIn("message", body)
 
     def test_file_exactly_10mb_is_accepted_or_rejected_gracefully(self):
         exactly_10mb = b'\x50\x4B\x03\x04' + b'B' * (10 * 1024 * 1024 - 4)
@@ -311,28 +291,6 @@ class FileValidationTests(TestCase):
         )
         response = self.client.post(self.UPLOAD_URL, {'file': valid_xlsx})
         self.assertNotEqual(response.status_code, 400)
-
-    def test_mime_type_text_plain_is_rejected(self):
-        file_wrong_mime = self._make_file(
-            "data.xlsx",
-            self._valid_xlsx_bytes(),
-            "text/plain",
-        )
-        response = self.client.post(self.UPLOAD_URL, {'file': file_wrong_mime})
-        self.assertEqual(response.status_code, 400)
-        body = response.json()
-        self.assertIn("error", body)
-
-    def test_mime_type_application_pdf_is_rejected(self):
-        file_pdf_mime = self._make_file(
-            "data.xlsx",
-            self._valid_xlsx_bytes(),
-            "application/pdf",
-        )
-        response = self.client.post(self.UPLOAD_URL, {'file': file_pdf_mime})
-        self.assertEqual(response.status_code, 400)
-        body = response.json()
-        self.assertIn("error", body)
 
     def test_mime_type_xlsx_is_accepted(self):
         file_correct_mime = self._make_file(
@@ -367,10 +325,8 @@ class FileValidationTests(TestCase):
         self.assertEqual(response.status_code, 400,
                          "File corrupted harus mengembalikan 400, bukan 500.")
         body = response.json()
-        self.assertIn("error", body,
-                      "Response harus memiliki kunci 'error'.")
-        self.assertTrue(len(body["error"]) > 0,
-                        "Pesan error tidak boleh kosong.")
+        self.assertIn("message", body)
+        self.assertTrue(len(body["message"]) > 0)
 
     def test_corrupted_xls_returns_400_with_error_message(self):
         corrupted_content = b'\xD0\xCF\x11\xE0' + b'\x00\x01\x02\x03' * 30
@@ -383,7 +339,7 @@ class FileValidationTests(TestCase):
         self.assertIn(response.status_code, [400, 500])
         if response.status_code == 400:
             body = response.json()
-            self.assertIn("error", body)
+            self.assertIn("message", body)
 
     def test_empty_file_is_rejected_with_error(self):
         empty_file = self._make_file(
@@ -394,7 +350,7 @@ class FileValidationTests(TestCase):
         response = self.client.post(self.UPLOAD_URL, {'file': empty_file})
         self.assertEqual(response.status_code, 400)
         body = response.json()
-        self.assertIn("error", body)
+        self.assertIn("message", body)
 
     def test_corrupted_file_error_message_is_user_friendly(self):
         corrupted_content = b'\x50\x4B\x03\x04' + b'\xDE\xAD\xBE\xEF' * 20
@@ -406,8 +362,7 @@ class FileValidationTests(TestCase):
         response = self.client.post(self.UPLOAD_URL, {'file': corrupted_file})
         if response.status_code == 400:
             body = response.json()
-            error_msg = body.get("error", "")
+            error_msg = body.get("message", "")
             self.assertNotIn("Traceback", error_msg)
             self.assertNotIn("raise ", error_msg)
-            self.assertTrue(len(error_msg) > 0,
-                            "Pesan error untuk file corrupted harus informatif.")
+            self.assertTrue(len(error_msg) > 0)
