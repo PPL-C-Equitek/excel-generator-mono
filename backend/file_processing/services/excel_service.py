@@ -83,40 +83,50 @@ def _load_xls_workbook(file_path: str):
         ) from exc
 
 
+def _normalize_row(row_list: list[Any]) -> list[Any]:
+    for i, val in enumerate(row_list):
+        if isinstance(val, float) and val == int(val):
+            row_list[i] = str(int(val))
+        elif val == "":
+            row_list[i] = None
+    return row_list
+
+
+def _trim_trailing_nulls(row_list: list[Any]) -> tuple[list[Any], int]:
+    null_count = 0
+    while row_list and (row_list[-1] is None or row_list[-1] == ""):
+        row_list.pop()
+        null_count += 1
+    return row_list, null_count
+
+
+def _append_null_marker(row_list: list[Any], null_count: int):
+    if null_count > 1:
+        row_list.append(f"nullx{null_count}")
+    elif null_count == 1:
+        row_list.append("null")
+
+
 def _xls_sheet_to_rows(sheet) -> list[list[Any]]:
     data_rows: list[list[Any]] = []
 
     for row_idx in range(sheet.nrows):
-
         row_list = [
             sheet.cell_value(row_idx, col_idx)
             for col_idx in range(sheet.ncols)
         ]
 
-        # normalize values
-        for i, val in enumerate(row_list):
-            if isinstance(val, float) and val == int(val):
-                row_list[i] = str(int(val))
-            elif val == "":
-                row_list[i] = None
-
-        null_count = 0
-        while row_list and (row_list[-1] is None or row_list[-1] == ""):
-            row_list.pop()
-            null_count += 1
+        row_list = _normalize_row(row_list)
+        row_list, null_count = _trim_trailing_nulls(row_list)
 
         if not row_list and null_count == sheet.ncols:
             continue
 
-        if null_count > 1:
-            row_list.append(f"nullx{null_count}")
-        elif null_count == 1:
-            row_list.append("null")
+        _append_null_marker(row_list, null_count)
 
         data_rows.append(row_list)
 
     return data_rows
-
 
 def parse_xls(file_path: str) -> dict[str, list[list[Any]]]:
 
