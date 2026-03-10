@@ -1,6 +1,9 @@
 import io
+import builtins
+from unittest.mock import patch
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
+from file_processing.services.excel_service import process_uploaded_excel, _load_workbook
 
 def _build_excel(sheets: dict) -> bytes:
     try:
@@ -216,6 +219,25 @@ class ExcelDataExtractionTests(TestCase):
             return body["data"].get(sheet_name)
 
         return body.get(sheet_name)
+    
+    def test_process_uploaded_excel_with_nonexistent_path_returns_error(self):
+        success, error, data = process_uploaded_excel("/tmp/file_that_does_not_exist.xlsx")
+
+        self.assertFalse(success)
+        self.assertIsNone(data)
+        self.assertIn("File tidak ditemukan", error)
+
+    def test_openpyxl_not_installed_raises_runtime_error(self):
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "openpyxl":
+                raise ImportError("missing")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            with self.assertRaises(RuntimeError):
+                _load_workbook("dummy.xlsx")
 
 class FileValidationTests(TestCase):
     UPLOAD_URL = '/upload/'
