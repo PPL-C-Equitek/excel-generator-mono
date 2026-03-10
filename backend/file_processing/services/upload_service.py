@@ -1,10 +1,127 @@
 import os
+import magic
+import logging
 from uuid import uuid4
 from django.conf import settings
 from django.utils.text import get_valid_filename
+from .excel_service import process_uploaded_excel
+from PyPDF2 import PdfReader
+from PyPDF2.errors import PdfReadError
+from file_processing.services.ocr_service import OCRService
+from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 
-ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
-MAX_FILE_SIZE = 10 * 1024 * 1024  #10MB
+logger = logging.getLogger(__name__)
+
+EXT_XLSX = ".xlsx"
+EXT_XLS = ".xls"
+EXT_PDF = ".pdf"
+
+ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX]
+ALLOWED_MIME_TYPES = {
+    EXT_PDF: ["application/pdf"],
+    EXT_XLS: [
+        "application/vnd.ms-excel",
+        "application/octet-stream",
+    ],
+    EXT_XLSX: [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/zip",
+        "application/x-zip",
+        "application/octet-stream",
+    ],
+}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_PDF_PAGES = 100
+PDF_CORRUPT_ERROR = "The PDF file is corrupt or has an invalid structure."
+
+def _has_extracted_text(extracted_data):
+    """Return True if any page contains extracted text."""
+    if not extracted_data or "content" not in extracted_data:
+        return False
+
+    for page in extracted_data["content"]:
+        if page.get("text"):
+            return True
+
+    return False
+
+
+def _get_empty_page_numbers(extracted_data):
+    """Return list of page numbers whose 'text' list is empty."""
+    empty = []
+    if not extracted_data or "content" not in extracted_data:
+        return empty
+    for page in extracted_data["content"]:
+        if not page.get("text"):
+            empty.append(page["page"])
+    return empty
+
+
+def _process_pdf(file_path, uploaded_file):
+    is_valid, error = validate_pdf(uploaded_file)
+    if not is_valid:
+        return False, error, None
+
+    try:
+        extracted_data = NonOCRPDFService.extract_non_ocr_pdf_to_json(file_path)
+
+        if not _has_extracted_text(extracted_data):
+            # Fully scanned PDF — run OCR on all pages
+            extracted_data = OCRService.process_pdf(file_path)
+        else:
+            # Check for mixed PDF (some pages have text, some don't)
+            empty_pages = _get_empty_page_numbers(extracted_data)
+            if empty_pages:
+                ocr_data = OCRService.process_pdf_pages(file_path, empty_pages)
+                # Merge OCR results into the extracted data
+                ocr_by_page = {
+                    p["page"]: p for p in ocr_data.get("content", [])
+                }
+                for page in extracted_data["content"]:
+                    if page["page"] in ocr_by_page:
+                        page["text"] = ocr_by_page[page["page"]]["text"]
+
+    except Exception:
+        logger.exception("Non-OCR extraction failed, fallback to OCR")
+        extracted_data = OCRService.process_pdf(file_path)
+
+    return True, None, extracted_data
+
+def process_upload(uploaded_file):
+    is_valid, error = validate_file(uploaded_file)
+    if not is_valid:
+        return False, error, None, None
+
+    ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+    file_path = save_temp_file(uploaded_file)
+    extracted_data = None
+
+    try:
+        if ext == ".pdf":
+            success, error, data = _process_pdf(file_path, uploaded_file)
+            if not success:
+                return False, error, None, None
+            extracted_data = data
+
+        elif ext in [".xlsx", ".xls"]:
+            success, error, data = process_uploaded_excel(file_path)
+            if not success:
+                return False, error, None, None
+            extracted_data = data
+
+        else:
+            return False, "Unsupported file type", None, None
+
+    finally:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            logger.exception("Failed to delete temporary upload file.")
+
+    return True, None, None, extracted_data
+
 
 def validate_file(uploaded_file):
     filename = uploaded_file.name
@@ -18,7 +135,79 @@ def validate_file(uploaded_file):
     if uploaded_file.size > MAX_FILE_SIZE:
         return False, "File too large. Maximum allowed size is 10MB."
 
+    # Validate MIME type
+    is_valid_mime, mime_error = validate_mime_type(uploaded_file, ext)
+    if not is_valid_mime:
+        return False, mime_error
+
     return True, None
+
+
+def validate_pdf(uploaded_file):
+    """Single-parse PDF validation: encryption, structure, and page count."""
+    try:
+        uploaded_file.seek(0)
+        reader = PdfReader(uploaded_file, strict=True)
+    except Exception:
+        return False, PDF_CORRUPT_ERROR
+
+    is_valid, error = check_pdf_encrypted(reader)
+    if not is_valid:
+        return False, error
+
+    is_valid, page_count_or_error = check_pdf_structure(reader)
+    if not is_valid:
+        return False, page_count_or_error
+
+    page_count = page_count_or_error
+
+    is_valid, error = check_pdf_page_count(page_count)
+    if not is_valid:
+        return False, error
+
+    return True, None
+
+
+def check_pdf_encrypted(reader):
+    if reader.is_encrypted:
+        return False, "The PDF file is password-protected."
+    return True, None
+
+
+def check_pdf_structure(reader):
+    try:
+        page_count = len(reader.pages)
+        return True, page_count
+    except PdfReadError:
+        return False, PDF_CORRUPT_ERROR
+    except Exception:
+        return False, PDF_CORRUPT_ERROR
+
+
+def check_pdf_page_count(page_count):
+    if page_count > MAX_PDF_PAGES:
+        return (
+            False,
+            f"PDF exceeds the maximum allowed page count of {MAX_PDF_PAGES}.",
+        )
+    return True, None
+
+
+def validate_mime_type(uploaded_file, ext):
+    try:
+        uploaded_file.seek(0)
+        mime = magic.from_buffer(uploaded_file.read(2048), mime=True)
+        uploaded_file.seek(0)
+
+        expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
+
+        if mime not in expected_mimes:
+            return False, "File content does not match its extension."
+
+        return True, None
+
+    except Exception:
+        return False, "Unable to determine file type."
 
 
 def save_temp_file(uploaded_file):
