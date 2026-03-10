@@ -35,6 +35,23 @@ MAX_PDF_PAGES = 100
 PDF_CORRUPT_ERROR = "The PDF file is corrupt or has an invalid structure."
 
 
+def _process_pdf(file_path, uploaded_file):
+    is_valid, error = validate_pdf(uploaded_file)
+    if not is_valid:
+        return False, error, None
+
+    try:
+        extracted_data = NonOCRPDFService.extract_non_ocr_pdf_to_json(file_path)
+
+        if not extracted_data:
+            extracted_data = OCRService.process_pdf(file_path)
+
+    except Exception:
+        logger.exception("Non-OCR extraction failed, fallback to OCR")
+        extracted_data = OCRService.process_pdf(file_path)
+
+    return True, None, extracted_data
+
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
     if not is_valid:
@@ -47,35 +64,19 @@ def process_upload(uploaded_file):
         return False, error, None, None
 
     file_path = save_temp_file(uploaded_file)
-
     extracted_data = None
 
     try:
-        # -------- PDF handling --------
         if ext == ".pdf":
-            is_valid, error = validate_pdf(uploaded_file)
-            if not is_valid:
-                return False, error, None, None
-
-            try:
-                # try normal extraction first
-                extracted_data = NonOCRPDFService.extract_non_ocr_pdf_to_json(file_path)
-
-                # if empty -> fallback to OCR
-                if not extracted_data:
-                    extracted_data = OCRService.process_pdf(file_path)
-
-            except Exception:
-                logger.exception("Non-OCR extraction failed, fallback to OCR")
-                extracted_data = OCRService.process_pdf(file_path)
-
-        # -------- Excel handling --------
-        elif ext in [EXT_XLSX, EXT_XLS]:
-            success, error, data = process_uploaded_excel(file_path)
-
+            success, error, data = _process_pdf(file_path, uploaded_file)
             if not success:
                 return False, error, None, None
+            extracted_data = data
 
+        elif ext in [".xlsx", ".xls"]:
+            success, error, data = process_uploaded_excel(file_path)
+            if not success:
+                return False, error, None, None
             extracted_data = data
 
         else:
