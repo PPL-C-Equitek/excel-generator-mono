@@ -148,7 +148,7 @@ describe('useConvertFlow', () => {
     // Happy path — outputFile
     // -----------------------------------------------------------------------
     describe('happy path output', () => {
-        it('sets outputFile with .xlsx filename derived from upload response', async () => {
+        it('sets outputFile filename and format from upload response', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
 
@@ -157,8 +157,8 @@ describe('useConvertFlow', () => {
             })
 
             expect(result.current.outputFile).toEqual({
-                filename: 'report.xlsx',
-                format: 'xlsx',
+                filename: 'report.pdf',
+                format: 'pdf',
                 size: 20480,
             })
         })
@@ -172,8 +172,26 @@ describe('useConvertFlow', () => {
                 await result.current.handleFileSelect(testFile)
             })
 
-            expect(result.current.outputFile?.filename).toBe('report.xlsx')
+            expect(result.current.outputFile?.filename).toBe('report.pdf')
+            expect(result.current.outputFile?.format).toBe('pdf')
             expect(result.current.outputFile?.size).toBe(7)
+        })
+
+        it('uses document_info.filename when backend returns parsed upload payload', async () => {
+            mockUploadFile.mockResolvedValue({
+                document_info: { filename: 'from-parser.pdf', source_type: 'PDF' },
+                summary: { total_tables: 1, total_rows: 1, total_columns: 1 },
+                content_data: [{ table_name: 'PDF_Content', headers: ['text'], rows: [{ text: 'hello' }] }],
+            })
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.outputFile?.filename).toBe('from-parser.pdf')
+            expect(result.current.outputFile?.format).toBe('pdf')
         })
 
         it('clears previous error and outputFile when starting a new conversion', async () => {
@@ -265,7 +283,7 @@ describe('useConvertFlow', () => {
             })
 
             expect(service.generate).toHaveBeenCalledWith(expect.objectContaining({ filename: 'active.pdf' }))
-            expect(result.current.outputFile?.filename).toBe('active.xlsx')
+            expect(result.current.outputFile?.filename).toBe('active.pdf')
         })
 
         it('ignores stale request if a new request is started before generate completes', async () => {
@@ -482,7 +500,7 @@ describe('useConvertFlow', () => {
 
             expect(service.exportToCsv).toHaveBeenCalledWith({ status: 'ok' })
             expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
-            expect(result.current.outputFile?.filename).toBe('report.xlsx')
+            expect(result.current.outputFile?.filename).toBe('report.pdf')
             
             vi.unstubAllEnvs()
         })
@@ -513,7 +531,7 @@ describe('useConvertFlow', () => {
             })
 
             expect(result.current.csvMetadata).toBeNull()
-            expect(result.current.outputFile?.filename).toBe('report.xlsx')
+            expect(result.current.outputFile?.filename).toBe('report.pdf')
             
             vi.unstubAllEnvs()
         })

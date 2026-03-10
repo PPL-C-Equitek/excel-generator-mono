@@ -21,11 +21,18 @@ export interface OutputFile {
 }
 
 function parseOutputFile(uploadResult: JsonObject, fallbackFile: File): OutputFile {
-    const rawFilename = uploadResult.filename
-    const inputName = typeof rawFilename === 'string' && rawFilename.trim().length > 0
-        ? rawFilename
-        : fallbackFile.name
-    const baseName = inputName.replace(/\.[^/.]+$/, '')
+    const directFilename = uploadResult.filename
+    const documentInfo = uploadResult.document_info
+    const nestedFilename = isJsonObject(documentInfo) ? documentInfo.filename : undefined
+
+    const inputName = (
+        (typeof directFilename === 'string' && directFilename.trim().length > 0 && directFilename) ||
+        (typeof nestedFilename === 'string' && nestedFilename.trim().length > 0 && nestedFilename) ||
+        fallbackFile.name
+    )
+
+    const extensionMatch = /\.([^.]+)$/.exec(inputName)
+    const inferredFormat = extensionMatch?.[1]?.toLowerCase() || fallbackFile.type.split('/')[1] || 'bin'
 
     const rawSize = uploadResult.size
     let parsedSize = fallbackFile.size
@@ -36,8 +43,8 @@ function parseOutputFile(uploadResult: JsonObject, fallbackFile: File): OutputFi
     }
 
     return {
-        filename: `${baseName}.xlsx`,
-        format: 'xlsx',
+        filename: inputName,
+        format: inferredFormat,
         size: parsedSize || 0,
     }
 }
