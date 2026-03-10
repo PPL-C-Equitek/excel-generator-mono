@@ -477,15 +477,13 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
 
+    @patch("file_processing.services.upload_service.validate_file")
     @patch("file_processing.services.upload_service.process_uploaded_excel")
     @patch("file_processing.services.upload_service.save_temp_file")
-    @patch("file_processing.services.upload_service.validate_mime_type")
-    def test_process_upload_processing_exception(
-        self, mock_mime, mock_save, mock_excel
-    ):
+    def test_process_upload_processing_exception(self, mock_save, mock_excel, mock_validate):
         from file_processing.services.upload_service import process_upload
 
-        mock_mime.return_value = (True, None)
+        mock_validate.return_value = (True, None)
         mock_save.return_value = "/tmp/test.xlsx"
         mock_excel.side_effect = Exception("disk failure")
 
@@ -495,10 +493,8 @@ class UploadEndpointTest(TestCase):
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-        success, error, _, _ = process_upload(f)
-
-        self.assertFalse(success)
-        self.assertEqual(error, "File processing failed")
+        with self.assertRaises(Exception):
+            process_upload(f)
 
     @patch("file_processing.services.upload_service.OCRService.process_pdf")
     @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")

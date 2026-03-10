@@ -113,10 +113,6 @@ def process_upload(uploaded_file):
         else:
             return False, "Unsupported file type", None, None
 
-    except Exception:
-        logger.exception("Processing failed.")
-        return False, "File processing failed", None, None
-
     finally:
         try:
             if os.path.exists(file_path):
