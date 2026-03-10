@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
-MAX_FILE_SIZE = 10 * 1024 * 1024  #10MB
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
 def _sanitize_download_filename(candidate):
@@ -68,7 +68,8 @@ def _resolve_download_filename(requested_name, default_name, artifact_type):
 
     return safe_name
 
-@api_view(['GET'])
+
+@api_view(["GET"])
 def health(request):
     return Response({"status": "ok", "message": "Backend is running!"})
 
@@ -117,7 +118,7 @@ def upload(request):
             response_data,
             status=status.HTTP_200_OK,
         )
-      
+
     except Exception:
         return Response(
             {
@@ -179,6 +180,7 @@ def export_csv(request):
         )
 
     return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+
 
 @require_GET
 @api_view(["GET"])

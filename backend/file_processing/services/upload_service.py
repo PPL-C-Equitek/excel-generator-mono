@@ -7,6 +7,7 @@ from django.utils.text import get_valid_filename
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
+from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,13 @@ def process_upload(uploaded_file):
             return False, error, None, None
 
     file_path = save_temp_file(uploaded_file)
+    # extracted_data = None
+    # if ext == ".pdf":
+    #     try:
+    #         extracted_data = extract_non_ocr_pdf_to_json(file_path)
+    #     except Exception:
+    #         logging.exception("Failed to extract PDF during upload")
+    #         return False, "Failed to extract PDF content", None
 
     extracted_text = None
 
