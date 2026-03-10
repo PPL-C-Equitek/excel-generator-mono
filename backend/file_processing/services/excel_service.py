@@ -11,9 +11,8 @@ def _load_workbook(file_or_path: str | IO[bytes] | Any):
             "openpyxl tidak terinstall. Jalankan: pip install openpyxl"
         ) from exc
 
-    if isinstance(file_or_path, str):
-        if not os.path.exists(file_or_path):
-            raise FileNotFoundError(f"File tidak ditemukan: {file_or_path}")
+    if isinstance(file_or_path, str) and not os.path.exists(file_or_path):
+        raise FileNotFoundError(f"File tidak ditemukan: {file_or_path}")
 
     try:
         wb = load_workbook(file_or_path, read_only=True, data_only=True)
@@ -31,7 +30,7 @@ def _sheet_to_rows(ws) -> list[list[Any]]:
     
     data_rows: list[list[Any]] = []
     for row in raw_rows:
-        row_list = [cell for cell in row]
+        row_list = list(row)
 
         null_count = 0
         while row_list and (row_list[-1] is None or row_list[-1] == ""):

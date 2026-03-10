@@ -12,14 +12,18 @@ from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
+EXT_XLSX = ".xlsx"
+EXT_XLS = ".xls"
+EXT_PDF = ".pdf"
+
+ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX]
 ALLOWED_MIME_TYPES = {
-    ".pdf": ["application/pdf"],
-    ".xls": [
+    EXT_PDF: ["application/pdf"],
+    EXT_XLS: [
         "application/vnd.ms-excel",
         "application/octet-stream",
     ],
-    ".xlsx": [
+    EXT_XLSX: [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/zip",
         "application/x-zip",
@@ -66,7 +70,7 @@ def process_upload(uploaded_file):
                 extracted_data = OCRService.process_pdf(file_path)
 
         # -------- Excel handling --------
-        elif ext in [".xlsx", ".xls"]:
+        elif ext in [EXT_XLSX, EXT_XLS]:
             success, error, data = process_uploaded_excel(file_path)
 
             if not success:
