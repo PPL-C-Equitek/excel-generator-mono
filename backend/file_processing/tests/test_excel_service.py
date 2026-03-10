@@ -380,7 +380,7 @@ class FileValidationTests(TestCase):
             "application/vnd.ms-excel",
         )
         response = self.client.post(self.UPLOAD_URL, {'file': corrupted_xls})
-        self.assertIn(response.status_code, [400, 500])
+        self.assertEqual(response.status_code, 400)
         if response.status_code == 400:
             body = response.json()
             self.assertIn("message", body)

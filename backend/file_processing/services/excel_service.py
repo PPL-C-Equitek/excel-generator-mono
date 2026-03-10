@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 from typing import Any, IO
+from openpyxl.utils.exceptions import InvalidFileException
+from zipfile import BadZipFile
 
 def _load_workbook(file_or_path: str | IO[bytes] | Any):
     try:
@@ -66,7 +68,11 @@ def process_uploaded_excel(
 
     try:
         data = parse_excel(file_or_path)
-    except (ValueError, FileNotFoundError) as exc:
+
+    except FileNotFoundError as exc:
         return False, str(exc), None
+
+    except (ValueError, InvalidFileException, BadZipFile):
+        return False, "Invalid or corrupted Excel file.", None
 
     return True, None, data
