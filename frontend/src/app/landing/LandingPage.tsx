@@ -15,7 +15,7 @@ export default function LandingPage() {
             style={{
                 colorScheme: 'light',
                 backgroundColor: 'var(--background)',
-                color: '#171717',
+                color: 'var(--foreground)',
             }}>
             <Navbar
                 links={LANDING_NAV_LINKS}
@@ -35,7 +35,9 @@ export default function LandingPage() {
                 >
                     Why Use Our Service?
                 </h2>
-                <div className="grid grid-cols-1 gap-8 lg:grid-cols-3 max-w-5xl mx-auto">
+                <div
+                    data-testid="features-grid"
+                    className="grid grid-cols-1 gap-8 lg:grid-cols-3 max-w-5xl mx-auto">
                     {LANDING_FEATURES.map((feature) => (
                         <FeatureCard key={feature.title} {...feature} />
                     ))}

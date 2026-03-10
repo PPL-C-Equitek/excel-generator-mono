@@ -1,28 +1,37 @@
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import HeroSection from '../../../src/components/HeroSection'
+import { LANDING_HERO_CONFIG } from '../../../src/constants/landing'
 
 describe('HeroSection', () => {
     // Positive tests
     describe('positive', () => {
-        it('renders default heading', () => {
+        it('renders default heading from LANDING_HERO_CONFIG', () => {
             render(<HeroSection />)
-            expect(screen.getByText(/Automated Intelligence/i)).toBeInTheDocument()
+            expect(screen.getByText(LANDING_HERO_CONFIG.heading)).toBeInTheDocument()
         })
 
-        it('renders default subtitle', () => {
+        it('renders default subtitle from LANDING_HERO_CONFIG', () => {
             render(<HeroSection />)
-            expect(screen.getByText(/Empowering your workflow/i)).toBeInTheDocument()
+            expect(screen.getByText(LANDING_HERO_CONFIG.subtitle)).toBeInTheDocument()
         })
 
         it('renders custom heading when provided (OCP)', () => {
             render(<HeroSection heading="Custom Heading" />)
             expect(screen.getByText('Custom Heading')).toBeInTheDocument()
+            // default tidak muncul saat override
+            expect(
+                screen.queryByText(LANDING_HERO_CONFIG.heading)
+            ).not.toBeInTheDocument()
         })
 
         it('renders custom subtitle when provided (OCP)', () => {
             render(<HeroSection subtitle="Custom subtitle text" />)
             expect(screen.getByText('Custom subtitle text')).toBeInTheDocument()
+            // default tidak muncul saat override
+            expect(
+                screen.queryByText(LANDING_HERO_CONFIG.subtitle)
+            ).not.toBeInTheDocument()
         })
 
         it('renders hero section with correct testid', () => {
@@ -35,16 +44,22 @@ describe('HeroSection', () => {
             expect(screen.getByTestId('hero-overlay')).toBeInTheDocument()
         })
 
-        it('applies default background image', () => {
+        it('applies default background image from LANDING_HERO_CONFIG', () => {
             render(<HeroSection />)
             const hero = screen.getByTestId('hero-section')
-            expect(hero).toHaveStyle("background-image: url('/hero-bg.png')")
+            expect(hero).toHaveStyle(
+                `background-image: url('${LANDING_HERO_CONFIG.backgroundImage}')`
+            )
         })
 
         it('applies custom background image when provided (OCP)', () => {
             render(<HeroSection backgroundImage="/custom-bg.jpg" />)
             const hero = screen.getByTestId('hero-section')
             expect(hero).toHaveStyle("background-image: url('/custom-bg.jpg')")
+            // default tidak dipakai saat override
+            expect(hero).not.toHaveStyle(
+                `background-image: url('${LANDING_HERO_CONFIG.backgroundImage}')`
+            )
         })
 
         it('accepts combination of custom props (ISP)', () => {
@@ -60,6 +75,13 @@ describe('HeroSection', () => {
             expect(screen.getByTestId('hero-section')).toHaveStyle(
                 "background-image: url('/images/bg.jpg')"
             )
+            // semua default tidak muncul
+            expect(
+                screen.queryByText(LANDING_HERO_CONFIG.heading)
+            ).not.toBeInTheDocument()
+            expect(
+                screen.queryByText(LANDING_HERO_CONFIG.subtitle)
+            ).not.toBeInTheDocument()
         })
     })
 

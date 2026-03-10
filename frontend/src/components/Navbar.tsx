@@ -13,6 +13,7 @@ export default function Navbar({
         <nav
             className="flex items-center justify-between px-8 py-4"
             style={{ backgroundColor: 'var(--brand-primary)' }}
+            data-testid="navbar"
         >
             <span className="text-white font-extrabold text-xl tracking-widest">
                 {brandName}

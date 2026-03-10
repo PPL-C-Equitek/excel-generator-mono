@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import LandingPage from '../../../src/app/landing/LandingPage'
 import { LANDING_FEATURES, LANDING_NAV_LINKS, LANDING_HERO_CONFIG } from '../../../src/constants/landing'
@@ -25,7 +25,7 @@ import { LANDING_FEATURES, LANDING_NAV_LINKS, LANDING_HERO_CONFIG } from '../../
  *  - Not coupled to unnecessary data
  */
 describe('LandingPage', () => {
-    // ✅ POSITIVE TESTS
+    // POSITIVE TESTS
     describe('positive', () => {
         // — Navbar —
         it('renders Navbar with brand name', () => {
@@ -41,12 +41,11 @@ describe('LandingPage', () => {
             })
         })
 
-        it('renders correct number of nav links (DIP: data from constant)', () => {
+        it('renders correct number of nav links', () => {
             render(<LandingPage />)
-            const navLinks = screen.getAllByRole('link')
-            // Filter only navbar links (exclude CTA and footer links)
-            const navbarLinks = navLinks.slice(0, LANDING_NAV_LINKS.length)
-            expect(navbarLinks).toHaveLength(LANDING_NAV_LINKS.length)
+            const navbar = screen.getByTestId('navbar')
+            const navLinks = within(navbar).getAllByRole('link')
+            expect(navLinks).toHaveLength(LANDING_NAV_LINKS.length)
         })
 
         // — Hero —
@@ -98,8 +97,13 @@ describe('LandingPage', () => {
 
         it('renders features in a grid container', () => {
             render(<LandingPage />)
-            const featureHeadings = screen.getAllByRole('heading', { level: 3 })
-            expect(featureHeadings.length).toBe(LANDING_FEATURES.length)
+            const grid = screen.getByTestId('features-grid')
+            expect(grid).toBeInTheDocument()
+            expect(grid).toHaveClass('grid')
+            expect(grid).toHaveClass('grid-cols-1')
+
+            const featureCards = within(grid).getAllByRole('heading', { level: 3 })
+            expect(featureCards).toHaveLength(LANDING_FEATURES.length)
         })
 
         // — CTA —
@@ -178,7 +182,7 @@ describe('LandingPage', () => {
         })
     })
 
-    // ❌ NEGATIVE TESTS
+    // NEGATIVE TESTS
     describe('negative', () => {
         it('does not render sidebar', () => {
             render(<LandingPage />)
