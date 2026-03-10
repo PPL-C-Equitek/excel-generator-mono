@@ -634,27 +634,6 @@ class UploadEndpointTest(TestCase):
         self.assertFalse(success)
         self.assertEqual(error, "Unsupported file type")
 
-    @patch("file_processing.services.upload_service.validate_mime_type")
-    @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_service_mime_validation_failure(
-        self, mock_validate_file, mock_validate_mime
-    ):
-        from file_processing.services.upload_service import process_upload
-
-        mock_validate_file.return_value = (True, None)
-        mock_validate_mime.return_value = (False, "Invalid MIME type")
-
-        f = SimpleUploadedFile(
-            "doc.pdf",
-            b"%PDF-1.4",
-            content_type="application/pdf",
-        )
-
-        success, error, _, _ = process_upload(f)
-
-        self.assertFalse(success)
-        self.assertEqual(error, "Invalid MIME type")
-
 
 class ExportCSVViewTest(APISimpleTestCase):
     def _valid_output_json(self):

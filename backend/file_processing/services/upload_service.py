@@ -94,10 +94,6 @@ def process_upload(uploaded_file):
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
-    is_valid, error = validate_mime_type(uploaded_file, ext)
-    if not is_valid:
-        return False, error, None, None
-
     file_path = save_temp_file(uploaded_file)
     extracted_data = None
 
