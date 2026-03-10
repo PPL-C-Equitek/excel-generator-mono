@@ -115,6 +115,7 @@ def upload(request):
         )
               
     except Exception:
+        logger.exception("Unexpected error during file upload")
         return Response(
             {
                 "status": "error",
