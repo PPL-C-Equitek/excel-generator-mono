@@ -4,9 +4,6 @@ import os
 from typing import Any, IO
 import logging
 
-from openpyxl.utils.exceptions import InvalidFileException
-from zipfile import BadZipFile
-
 logger = logging.getLogger(__name__)
 
 def _load_workbook(file_or_path: str | IO[bytes] | Any):
