@@ -46,7 +46,9 @@ const mockHookReturn = {
     isConverting: false,
     error: null as string | null,
     outputFile: null as OutputFile | null,
+    csvMetadata: null as { file_id: string } | null,
     handleFileSelect: mockHandleFileSelect,
+    llmService: { getDownloadUrl: vi.fn() }
 }
 
 vi.mock('../../../src/hooks/useConvertFlow', () => ({
