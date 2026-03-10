@@ -29,6 +29,26 @@ def _build_excel(sheets: dict) -> bytes:
     return buf.read()
 
 
+def _build_xls(sheets: dict) -> bytes:
+    try:
+        import xlwt
+    except ImportError:
+        raise RuntimeError("xlwt is required for these tests.")
+
+    wb = xlwt.Workbook()
+    for sheet_name, rows in sheets.items():
+        ws = wb.add_sheet(sheet_name)
+        for row_idx, row in enumerate(rows):
+            for col_idx, cell_value in enumerate(row):
+                if cell_value is not None:
+                    ws.write(row_idx, col_idx, cell_value)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
 def _uploaded(name: str, data: bytes) -> SimpleUploadedFile:
     return SimpleUploadedFile(
         name, data,
@@ -269,6 +289,131 @@ class ExcelDataExtractionTests(TestCase):
             self.assertTrue(success)
             self.assertIsNone(error)
             self.assertEqual(data, {"Sheet1": [["A", "B"]]})
+
+    @patch('file_processing.services.upload_service.validate_file')
+    def test_xls_single_sheet_data_extraction(self, mock_validate):
+        mock_validate.return_value = (True, None)
+        data = _build_xls({
+            "Mahasiswa": [
+                ["NIM", "Nama"],
+                ["12345", "Alice"],
+            ]
+        })
+        f = SimpleUploadedFile("data.xls", data, content_type="application/vnd.ms-excel")
+        response = self.client.post(self.EXTRACT_URL, {'file': f})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        rows = self._get_sheet_rows(body, "Mahasiswa")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0], ["NIM", "Nama"])
+        self.assertEqual(rows[1], ["12345", "Alice"])
+
+    @patch('file_processing.services.upload_service.validate_file')
+    def test_xls_empty_cells_and_float_conversion(self, mock_validate):
+        mock_validate.return_value = (True, None)
+        data = _build_xls({
+            "Nilai": [
+                ["NIM", "Mata Kuliah", "Nilai", "Blank"],
+                [11111.0, "PPL", "", ""],
+                [22222.0, "", "A", ""],
+            ]
+        })
+        f = SimpleUploadedFile("nilai.xls", data, content_type="application/vnd.ms-excel")
+        response = self.client.post(self.EXTRACT_URL, {'file': f})
+
+        self.assertEqual(response.status_code, 200)
+        rows = self._get_sheet_rows(response.json(), "Nilai")
+
+        self.assertEqual(rows[0], ["NIM", "Mata Kuliah", "Nilai", "Blank"])
+        self.assertEqual(rows[1], ["11111", "PPL", "nullx2"])
+        self.assertEqual(rows[2], ["22222", None, "A", "null"])
+
+    @patch('file_processing.services.upload_service.validate_file')
+    def test_xls_completely_empty_sheet_returns_empty(self, mock_validate):
+        mock_validate.return_value = (True, None)
+        data = _build_xls({
+            "BenarBenarKosong": []
+        })
+        f = SimpleUploadedFile("all_empty.xls", data, content_type="application/vnd.ms-excel")
+        response = self.client.post(self.EXTRACT_URL, {'file': f})
+
+        self.assertEqual(response.status_code, 200)
+        rows = self._get_sheet_rows(response.json(), "BenarBenarKosong")
+        self.assertEqual(rows, [])
+
+    def test_xlrd_not_installed_raises_runtime_error(self):
+        from file_processing.services.excel_service import _load_xls_workbook
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "xlrd":
+                raise ImportError("missing")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            with self.assertRaises(RuntimeError):
+                _load_xls_workbook("dummy.xls")
+
+    def test_load_xls_workbook_file_not_found(self):
+        from file_processing.services.excel_service import _load_xls_workbook
+        with self.assertRaises(FileNotFoundError):
+            _load_xls_workbook("/nonexistent_fake_path.xls")
+
+    def test_load_xls_workbook_corrupted_file(self):
+        import tempfile
+        import os
+        from file_processing.services.excel_service import _load_xls_workbook
+
+        fd, path = tempfile.mkstemp(suffix=".xls")
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                f.write(b"NOT_A_VALID_XLS_FILE")
+            with self.assertRaises(ValueError):
+                _load_xls_workbook(path)
+        finally:
+            os.remove(path)
+
+    def test_process_uploaded_excel_with_file_object(self):
+        data = _build_excel({
+            "Sheet1": [["A", "B"]]
+        })
+
+        f = io.BytesIO(data)
+
+        success, error, result = process_uploaded_excel(f)
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertIn("Sheet1", result)
+
+    @patch('file_processing.services.upload_service.validate_file')
+    def test_xls_row_with_all_null_cells_is_skipped(self, mock_validate):
+        mock_validate.return_value = (True, None)
+
+        data = _build_xls({
+            "Sheet1": [
+                ["A", "B", "C"],
+                ["", "", ""],
+                ["1", "2", "3"]
+            ]
+        })
+
+        f = SimpleUploadedFile(
+            "null_row.xls",
+            data,
+            content_type="application/vnd.ms-excel"
+        )
+
+        response = self.client.post(self.EXTRACT_URL, {"file": f})
+
+        self.assertEqual(response.status_code, 200)
+
+        rows = self._get_sheet_rows(response.json(), "Sheet1")
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0], ["A", "B", "C"])
+        self.assertEqual(rows[1], ["1", "2", "3"])
 
 class FileValidationTests(TestCase):
     UPLOAD_URL = '/upload/'

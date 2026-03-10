@@ -17,7 +17,7 @@ from file_processing.services.export_service import (
     OutputCSVGenerationError,
     OutputLLMValidationError,
 )
-from file_processing.services.upload_service import validate_pdf
+from file_processing.services.upload_service import validate_pdf, _get_empty_page_numbers
 
 
 class BaseApiViewTest(TestCase):
@@ -126,6 +126,72 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["status"], "success")
         self.assertEqual(resp.data["filename"], "doc.pdf")
+
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    @patch("file_processing.services.upload_service.OCRService.process_pdf")
+    def test_upload_pdf_scanned_fallback(self, mock_process_pdf, mock_extract):
+        mock_extract.return_value = {"content": []}
+        mock_process_pdf.return_value = {"content": [{"page": 1, "text": ["Scanned Content"]}]}
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+        resp = self._post_file("scanned.pdf", pdf_doc, "application/pdf")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["extracted"]["content"][0]["text"], ["Scanned Content"])
+        mock_process_pdf.assert_called_once()
+
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    @patch("file_processing.services.upload_service.OCRService.process_pdf_pages")
+    def test_upload_pdf_mixed_pages(self, mock_process_pages, mock_extract):
+        # Page 1 has text, Page 2 does not.
+        mock_extract.return_value = {
+            "content": [
+                {"page": 1, "text": ["Native Text"]},
+                {"page": 2, "text": []}
+            ]
+        }
+        mock_process_pages.return_value = {
+            "content": [{"page": 2, "text": ["OCR Text"]}]
+        }
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+        resp = self._post_file("mixed.pdf", pdf_doc, "application/pdf")
+
+        self.assertEqual(resp.status_code, 200)
+        content = resp.data["extracted"]["content"]
+        self.assertEqual(content[0]["text"], ["Native Text"])
+        self.assertEqual(content[1]["text"], ["OCR Text"])
+        mock_process_pages.assert_called_once()
+
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    @patch("file_processing.services.upload_service.OCRService.process_pdf")
+    def test_upload_pdf_exception_fallback(self, mock_process_pdf, mock_extract):
+        mock_extract.side_effect = Exception("Native extract failed")
+        mock_process_pdf.return_value = {
+            "content": [{"page": 1, "text": ["Fallback OCR Content"]}]
+        }
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+        resp = self._post_file("fail.pdf", pdf_doc, "application/pdf")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["extracted"]["content"][0]["text"], ["Fallback OCR Content"])
+        mock_process_pdf.assert_called_once()
+
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    @patch("file_processing.services.upload_service.OCRService.process_pdf")
+    def test_upload_pdf_empty_extracted_data(self, mock_process_pdf, mock_extract):
+        mock_extract.return_value = {}  # Missing 'content' key, hitting line 53
+        mock_process_pdf.return_value = {
+            "content": [{"page": 1, "text": ["OCR Triggered"]}]
+        }
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+        resp = self._post_file("empty_struct.pdf", pdf_doc, "application/pdf")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["extracted"]["content"][0]["text"], ["OCR Triggered"])
+        mock_process_pdf.assert_called_once()
 
     @patch("api.views.process_upload")
     def test_upload_xls_success(self, mock_process):
@@ -637,6 +703,11 @@ class UploadEndpointTest(TestCase):
 
         self.assertFalse(success)
         self.assertEqual(error, "Unsupported file type")
+
+    def test_get_empty_page_numbers_invalid_data(self):
+        self.assertEqual(_get_empty_page_numbers(None), [])
+        self.assertEqual(_get_empty_page_numbers({}), [])
+        self.assertEqual(_get_empty_page_numbers({"other_key": "val"}), [])
 
 
 class ExportCSVViewTest(APISimpleTestCase):

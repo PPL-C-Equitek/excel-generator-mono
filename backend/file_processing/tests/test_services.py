@@ -59,6 +59,79 @@ class TestOCRService(TestCase):
 
         self.assertIn("OCRService failed", str(context.exception))
 
+    def test_split_sentences_basic(self):
+        text = "Hello world. How are you?\nFine."
+
+        result = OCRService.split_sentences(text)
+
+        self.assertEqual(
+            result,
+            ["Hello world.", "How are you?", "Fine."]
+        )
+
+    @patch("file_processing.services.ocr_service.convert_from_path")
+    @patch("file_processing.services.ocr_service.TesseractEngine")
+    def test_process_pdf_pages_success(self, mock_engine, mock_convert):
+
+        mock_image = MagicMock()
+        mock_convert.return_value = [mock_image]
+
+        mock_engine_instance = MagicMock()
+        mock_engine_instance.extract_text.return_value = "Hello OCR"
+        mock_engine.return_value = mock_engine_instance
+
+        result = OCRService.process_pdf_pages("/tmp/file.pdf", [1])
+
+        self.assertEqual(result["content"][0]["page"], 1)
+        self.assertEqual(result["content"][0]["text"], ["Hello OCR"])
+
+    @patch("file_processing.services.ocr_service.convert_from_path")
+    def test_process_pdf_pages_no_images(self, mock_convert):
+
+        mock_convert.return_value = []
+
+        result = OCRService.process_pdf_pages("/tmp/file.pdf", [1])
+
+        self.assertEqual(result["content"][0]["text"], [])
+
+    @patch("file_processing.services.ocr_service.convert_from_path")
+    def test_process_pdf_pages_exception(self, mock_convert):
+
+        mock_convert.side_effect = Exception("fail")
+
+        with self.assertRaises(ValueError):
+            OCRService.process_pdf_pages("/tmp/file.pdf", [1])
+
+    @patch("file_processing.services.ocr_service.PdfReader")
+    def test_process_pdf_text_based(self, mock_reader):
+
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "Hello world " * 20
+
+        mock_reader.return_value.pages = [mock_page]
+
+        result = OCRService.process_pdf("/tmp/file.pdf")
+
+        self.assertEqual(result["content"][0]["page"], 1)
+
+    @patch("file_processing.services.ocr_service.PdfReader")
+    @patch("file_processing.services.ocr_service.PdfOcrExtractor")
+    @patch("file_processing.services.ocr_service.TesseractEngine")
+    def test_process_pdf_ocr_branch(self, mock_engine, mock_extractor, mock_reader):
+
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = ""
+
+        mock_reader.return_value.pages = [mock_page]
+
+        extractor_instance = MagicMock()
+        extractor_instance.extract.return_value = "OCR TEXT"
+        mock_extractor.return_value = extractor_instance
+
+        result = OCRService.process_pdf("/tmp/file.pdf")
+
+        self.assertEqual(result["content"][0]["lines"], ["OCR TEXT"])
+
 
 class TestNonOCRPDFService(TestCase):
     """Tests covering extract_pdf_to_json."""
