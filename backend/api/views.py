@@ -1,5 +1,5 @@
-import logging
 import os
+import logging
 
 from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
@@ -11,10 +11,8 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
-
 from file_processing.services.upload_service import (
-    validate_file,
-    save_temp_file,
+    process_upload,
 )
 from file_processing.serializers import (
     CsvExportRequestSerializer,
@@ -30,9 +28,6 @@ from file_processing.services.export_service import (
 )
 
 logger = logging.getLogger(__name__)
-
-ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
-MAX_FILE_SIZE = 10 * 1024 * 1024  #10MB
 
 
 def _sanitize_download_filename(candidate):
@@ -68,16 +63,18 @@ def _resolve_download_filename(requested_name, default_name, artifact_type):
 
     return safe_name
 
-@api_view(['GET'])
+
+@api_view(["GET"])
 def health(request):
     return Response({"status": "ok", "message": "Backend is running!"})
 
-@api_view(['GET'])
+
+@api_view(["GET"])
 def about(request):
     return Response({"team": "PPL C - Equitek", "project": "Excel Generator"})
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 def members(request):
     data = list(GroupMember.objects.values("npm", "name"))
     return Response({"group": "Kelompok 7", "members": data})
@@ -86,39 +83,46 @@ def members(request):
 @api_view(["POST"])
 @parser_classes([MultiPartParser])
 def upload(request):
+    try:
+        if "file" not in request.FILES:
+            return Response(
+                {"status": "error", "message": "No file provided"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-    if "file" not in request.FILES:
-        return Response(
-            {
-                "status": "error",
-                "message": "No file provided"
-            },
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        uploaded_file = request.FILES["file"]
 
-    uploaded_file = request.FILES["file"]
+        success, error, _, extracted = process_upload(uploaded_file)
 
-    is_valid, error = validate_file(uploaded_file)
-    if not is_valid:
-        return Response(
-            {
-                "status": "error",
-                "message": error
-            },
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        if not success:
+            return Response(
+                {"status": "error", "message": error},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-    file_path = save_temp_file(uploaded_file)
-
-    return Response(
-        {
+        response_data = {
             "status": "success",
             "message": "File uploaded successfully",
             "filename": uploaded_file.name,
-            "path": file_path
-        },
-        status=status.HTTP_200_OK
-    )
+        }
+
+        if extracted is not None:
+            response_data["extracted"] = extracted
+
+        return Response(
+            response_data,
+            status=status.HTTP_200_OK,
+        )
+              
+    except Exception:
+        logger.exception("Unexpected error during file upload")
+        return Response(
+            {
+                "status": "error",
+                "message": "Internal server error while processing the file.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @require_POST
@@ -172,6 +176,7 @@ def export_csv(request):
         )
 
     return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+
 
 @require_GET
 @api_view(["GET"])
