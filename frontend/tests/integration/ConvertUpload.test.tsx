@@ -12,6 +12,8 @@ vi.mock('../../src/lib/api', () => ({
 }))
 vi.mock('../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+    exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_integration' }),
+    getDownloadUrl: vi.fn().mockReturnValue('/mock/url'),
 }))
 vi.mock('../../src/components/Sidebar', () => ({
     default: () => <div data-testid="sidebar">Sidebar</div>,

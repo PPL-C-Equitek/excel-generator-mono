@@ -1,4 +1,4 @@
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useConvertFlow } from '../../src/hooks/useConvertFlow'
 import type { ILLMService } from '../../src/lib/ILLMService'
@@ -14,6 +14,8 @@ vi.mock('../../src/lib/api', () => ({
 
 vi.mock('../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: {} }),
+    exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_123' }),
+    getDownloadUrl: vi.fn().mockReturnValue('/mock/url'),
 }))
 
 import { uploadFile } from '../../src/lib/api'
@@ -28,6 +30,8 @@ const validUploadResponse = { filename: 'report.pdf', size: 20480, format: 'pdf'
 function makeMockService(overrides?: Partial<ILLMService>): ILLMService {
     return {
         generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+        exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_12345' }),
+        getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_12345/download'),
         ...overrides,
     }
 }
@@ -453,6 +457,214 @@ describe('useConvertFlow', () => {
 
             expect(result.current.error).toBeNull() // because aborted requests are ignored
             expect(result.current.isConverting).toBe(true)
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // Export to CSV Flow
+    // -----------------------------------------------------------------------
+    describe('export to CSV flow', () => {
+        it('initializes csvMetadata as null', () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+            expect(result.current.csvMetadata).toBeNull()
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('calls exportToCsv after successful LLM generation and sets csvMetadata', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(service.exportToCsv).toHaveBeenCalledWith({ status: 'ok' })
+            expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
+            expect(result.current.outputFile?.filename).toBe('report.xlsx')
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('handles exportToCsv error properly', async () => {
+            const service = makeMockService({
+                exportToCsv: vi.fn().mockRejectedValue(new Error('CSV Export failed'))
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.error).toBe('CSV Export failed')
+            expect(result.current.csvMetadata).toBeNull()
+            expect(result.current.isConverting).toBe(false)
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('does not call exportToCsv if the service does not implement it', async () => {
+            const service: ILLMService = { generate: vi.fn().mockResolvedValue({ output_json: { ok: true } }) }
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.csvMetadata).toBeNull()
+            expect(result.current.outputFile?.filename).toBe('report.xlsx')
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('ignores setting csvMetadata if request is aborted during exportToCsv', async () => {
+            let resolveExport: (v: unknown) => void = () => {}
+            const service = makeMockService({
+                exportToCsv: vi.fn()
+                   .mockImplementationOnce(() => new Promise((resolve) => { resolveExport = resolve }))
+                   .mockResolvedValueOnce({ file_id: 'csv_999' }) // second request
+            })
+            
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            // Start first
+            act(() => { result.current.handleFileSelect(testFile) })
+            
+            // Wait for it to specifically reach exportToCsv
+            await waitFor(() => expect(service.exportToCsv).toHaveBeenCalledTimes(1))
+            
+            // Start second request (which will abort the first)
+            await act(async () => { await result.current.handleFileSelect(testFile) })
+            
+            // Now resolve the first request which is stale and aborted
+            await act(async () => { resolveExport({ file_id: 'csv_stale' }) })
+
+            // The active request will set it to csv_999, so it should not be 'csv_stale'
+            expect(result.current.csvMetadata?.file_id).toBe('csv_999')
+            
+            vi.unstubAllEnvs()
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // Security & Edge Cases (CSV Export)
+    // -----------------------------------------------------------------------
+    describe('security & edge cases for CSV export', () => {
+        it('prevents CSV Injection by prepending single quotes to cells starting with =, +, -, @', async () => {
+            const rawOutput = {
+                sheet1: [
+                    { col1: '=1+1', col2: '-cmd', col3: '+alert(1)', col4: '@sum' }
+                ]
+            }
+            const expectedPayload = {
+                sheet1: [
+                    { col1: "'=1+1", col2: "'-cmd", col3: "'+alert(1)", col4: "'@sum" }
+                ]
+            }
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: rawOutput })
+            })
+            
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            // generate() receives exactly what was originally intended by standard flows
+            // but exportToCsv expects the SANITIZED version
+            expect(service.exportToCsv).toHaveBeenCalledWith(expectedPayload)
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('preserves special characters like commas, quotes, and newlines correctly without breaking JSON', async () => {
+            const rawOutput = {
+                sheet1: [
+                    { col1: 'hello, world', col2: 'say "hi"', col3: 'line1\nline2' }
+                ]
+            }
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: rawOutput })
+            })
+            
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            // These characters do not require prepending single quotes, they just pass through cleanly
+            expect(service.exportToCsv).toHaveBeenCalledWith(rawOutput)
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('blocks empty API calls and sets warning if LLM returns an empty string or empty object/array', async () => {
+            const emptyOutputs = [{}, [], "", null]
+            
+            for (const emptyVal of emptyOutputs) {
+                const service = makeMockService({
+                    generate: vi.fn().mockResolvedValue({ output_json: emptyVal })
+                })
+                
+                const { result } = renderHook(() => useConvertFlow(service))
+
+                await act(async () => {
+                    await result.current.handleFileSelect(testFile)
+                })
+
+                expect(service.exportToCsv).not.toHaveBeenCalled()
+                expect(result.current.csvMetadata).toBeNull()
+                // Assuming we want to set a specific error message for empty payload edge cases
+                expect(result.current.error).toBe('Data tidak valid atau kosong, tidak dapat mengekspor CSV')
+            }
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('synchronizes and exports all multi-sheet data without omitting any payload sheets', async () => {
+            const rawOutput = {
+                sheet1: [{ id: 1, val: 'a' }],
+                sheet2: [{ id: 2, val: 'b' }],
+                sheet3: [{ id: 3, val: 'c' }]
+            }
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: rawOutput })
+            })
+            
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            // Expect that exportToCsv is called with the exact full structure spanning all sheets
+            expect(service.exportToCsv).toHaveBeenCalledWith(rawOutput)
+            
+            vi.unstubAllEnvs()
+        })
+
+        it('throws an error if the exported CSV file_id does not start with csv_', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: { test: 'ok' } }),
+                exportToCsv: vi.fn().mockResolvedValue({ file_id: 'invalid_id_123' })
+            })
+            
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.csvMetadata).toBeNull()
+            expect(result.current.error).toBe('ID File CSV tidak valid')
+            
+            vi.unstubAllEnvs()
         })
     })
 })

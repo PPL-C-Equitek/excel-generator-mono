@@ -2,12 +2,17 @@
 
 import { useState, useRef } from 'react'
 import { uploadFile } from '@/lib/api'
-import { generateJson } from '@/services/llm'
+import { generateJson, exportToCsv, getDownloadUrl } from '@/services/llm'
 import { isJsonObject } from '@/utils/schemaValidator'
+import { sanitizeCSVCell } from '@/utils/csvSanitizer'
 import type { ILLMService } from '@/lib/ILLMService'
-import type { JsonObject } from '@/utils/schemaValidator'
+import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
 
-const defaultService: ILLMService = { generate: generateJson }
+const defaultService: ILLMService = { 
+    generate: generateJson, 
+    exportToCsv,
+    getDownloadUrl
+}
 
 export interface OutputFile {
     filename: string
@@ -37,11 +42,17 @@ function parseOutputFile(uploadResult: JsonObject, fallbackFile: File): OutputFi
     }
 }
 
+export interface CsvMetadata {
+    file_id: string;
+}
+
 export interface UseConvertFlowReturn {
     isConverting: boolean
     error: string | null
     outputFile: OutputFile | null
+    csvMetadata: CsvMetadata | null
     handleFileSelect: (file: File) => Promise<void>
+    llmService: ILLMService
 }
 
 export function useConvertFlow(
@@ -50,6 +61,7 @@ export function useConvertFlow(
     const [isConverting, setIsConverting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
+    const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
 
     const abortPreviousRequest = (): AbortSignal => {
@@ -84,12 +96,42 @@ export function useConvertFlow(
         }
     }
 
+    const processCsvExport = async (out: unknown, signal: AbortSignal) => {
+        if (!llmService.exportToCsv || signal.aborted) return
+
+        try {
+            const isStringEmpty = typeof out === 'string' && out.trim() === ''
+            const isEmpty = out === null || isStringEmpty || 
+                (Array.isArray(out) && out.length === 0) || 
+                (typeof out === 'object' && out !== null && Object.keys(out).length === 0)
+                
+            if (isEmpty) {
+                throw new Error('Data tidak valid atau kosong, tidak dapat mengekspor CSV')
+            }
+
+            const sanitizedJSON = sanitizeCSVCell(out) as JsonValue
+            const csvResult = await llmService.exportToCsv(sanitizedJSON)
+            
+            if (!signal.aborted) {
+                if (csvResult.file_id?.startsWith('csv_')) {
+                    setCsvMetadata({ file_id: csvResult.file_id })
+                } else {
+                    throw new Error('ID File CSV tidak valid')
+                }
+            }
+        } catch (csvErr: unknown) {
+            handleProcessError(csvErr, 'CSV Export failed', signal)
+        }
+    }
+
     const processConversion = async (uploadResult: JsonObject, file: File, signal: AbortSignal) => {
         try {
-            await llmService.generate(uploadResult)
+            const llmResult = await llmService.generate(uploadResult)
             if (signal.aborted) return
 
             setOutputFile(parseOutputFile(uploadResult, file))
+
+            await processCsvExport(llmResult.output_json, signal)
         } catch (err: unknown) {
             handleProcessError(err, 'Conversion failed', signal)
         } finally {
@@ -104,6 +146,7 @@ export function useConvertFlow(
 
         setError(null)
         setOutputFile(null)
+        setCsvMetadata(null)
         setIsConverting(true)
 
         const uploadResult = await processUpload(file, signal)
@@ -112,5 +155,5 @@ export function useConvertFlow(
         await processConversion(uploadResult, file, signal)
     }
 
-    return { isConverting, error, outputFile, handleFileSelect }
+    return { isConverting, error, outputFile, csvMetadata, handleFileSelect, llmService }
 }

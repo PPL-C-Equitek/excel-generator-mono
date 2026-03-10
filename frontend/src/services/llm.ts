@@ -58,3 +58,72 @@ export async function generateJson(
 
     return data as LLMResponse;
 }
+
+/**
+ * Mengekspor hasil generasi JSON ke format CSV.
+ * Berkomunikasi dengan endpoint REST (POST /export/csv)
+ * dan mengembalikan file_id dengan prefix keamanan 'csv_'.
+ *
+ * @param outputJson JSON hasil LLM yang valid.
+ * @returns Promise berisi file_id yang digenerate oleh backend.
+ */
+export async function exportToCsv(
+    outputJson: JsonValue
+): Promise<{ file_id: string }> {
+    let data: unknown;
+
+    try {
+        data = await fetchAPI("export/csv", {
+            method: "POST",
+            body: JSON.stringify({ output_json: outputJson }),
+        });
+    } catch (err: unknown) {
+        if (err instanceof Error) {
+            const statusMatch = /API error: (\d+)/.exec(err.message);
+            if (statusMatch) {
+                const status = Number.parseInt(statusMatch[1], 10);
+                const userMessage = ERROR_MESSAGES[status];
+                if (userMessage) {
+                    throw new Error(userMessage);
+                }
+            }
+        }
+        throw err;
+    }
+
+    if (
+        typeof data !== "object" ||
+        data === null ||
+        !("file_id" in data) ||
+        typeof (data as Record<string, unknown>).file_id !== "string" ||
+        !(data as Record<string, string>).file_id.startsWith("csv_")
+    ) {
+        throw new Error("Respons ekspor CSV tidak valid");
+    }
+
+    return { file_id: (data as Record<string, string>).file_id };
+}
+
+/**
+ * Menghasilkan URL lengkap untuk mengunduh hasil konversi CSV.
+ * Pemanggilan URL ini akan menuju ke GET /export/csv/{fileId}/download
+ * bersama param filename opsional.
+ *
+ * @param fileId string ID dengan prefix 'csv_'.
+ * @param filename Opsional, nama file target untuk download.
+ * @returns URL valid untuk pengunduhan file dari API backend.
+ */
+export function getDownloadUrl(fileId: string, filename?: string): string {
+    const base = (() => {
+        try {
+            return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").origin;
+        } catch {
+            return "http://localhost:8000";
+        }
+    })();
+    let url = `${base}/export/csv/${fileId}/download`;
+    if (filename) {
+        url += `?filename=${encodeURIComponent(filename)}`;
+    }
+    return url;
+}
