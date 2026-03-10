@@ -124,7 +124,7 @@ def process_upload(uploaded_file):
         except Exception:
             logger.exception("Failed to delete temporary upload file.")
 
-    return True, None, file_path, extracted_data
+    return True, None, None, extracted_data
 
 
 def validate_file(uploaded_file):
