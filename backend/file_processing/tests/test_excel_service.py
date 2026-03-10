@@ -239,6 +239,28 @@ class ExcelDataExtractionTests(TestCase):
             with self.assertRaises(RuntimeError):
                 _load_workbook("dummy.xlsx")
 
+    def test_row_with_all_null_cells_is_skipped(self):
+        data = _build_excel({
+            "Sheet1": [
+                ["A", "B", "C"],
+                [None, None, None],
+                ["1", "2", "3"],
+            ]
+        })
+
+        response = self.client.post(
+            self.EXTRACT_URL,
+            {"file": _uploaded("null_row.xlsx", data)},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        rows = self._get_sheet_rows(response.json(), "Sheet1")
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0], ["A", "B", "C"])
+        self.assertEqual(rows[1], ["1", "2", "3"])
+
 class FileValidationTests(TestCase):
     UPLOAD_URL = '/upload/'
 

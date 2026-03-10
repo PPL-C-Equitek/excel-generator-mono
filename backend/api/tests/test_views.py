@@ -521,6 +521,96 @@ class UploadEndpointTest(TestCase):
         self.assertTrue(success)
         mock_ocr.assert_called_once()
 
+    @patch("file_processing.services.upload_service.OCRService.process_pdf")
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    def test_process_pdf_non_ocr_exception_triggers_ocr(self, mock_non_ocr, mock_ocr):
+        from file_processing.services.upload_service import _process_pdf
+
+        mock_non_ocr.side_effect = Exception("Non-OCR crash")
+        mock_ocr.return_value = {"content": "ocr"}
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            pdf_doc,
+            content_type="application/pdf",
+        )
+
+        success, error, data = _process_pdf("/tmp/file.pdf", f)
+
+        self.assertTrue(success)
+        mock_ocr.assert_called_once()
+
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    def test_upload_endpoint_mime_validation_failure(self, mock_validate):
+        mock_validate.return_value = (False, "Invalid MIME")
+
+        resp = self._post_file(
+            "file.pdf",
+            b"%PDF-1.4",
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+
+    def test_process_upload_service_unsupported_extension(self):
+        from file_processing.services.upload_service import process_upload
+
+        f = SimpleUploadedFile(
+            "file.xyz",
+            b"data",
+            content_type="application/octet-stream",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertIn("Unsupported file type", error)
+
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_validate_file_failure(self, mock_validate):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (False, "Invalid file")
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            b"%PDF-1.4",
+            content_type="application/pdf",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "Invalid file")
+
+    @patch("file_processing.services.upload_service._process_pdf")
+    @patch("file_processing.services.upload_service.save_temp_file")
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_pdf_processing_failure(
+        self, mock_validate_file, mock_mime, mock_save, mock_pdf
+    ):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate_file.return_value = (True, None)
+        mock_mime.return_value = (True, None)
+        mock_save.return_value = "/tmp/test.pdf"
+        mock_pdf.return_value = (False, "PDF error", None)
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            b"%PDF-1.4",
+            content_type="application/pdf",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "PDF error")
+
 
 class ExportCSVViewTest(APISimpleTestCase):
     def _valid_output_json(self):
