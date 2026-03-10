@@ -260,6 +260,16 @@ class ExcelDataExtractionTests(TestCase):
         self.assertEqual(rows[0], ["A", "B", "C"])
         self.assertEqual(rows[1], ["1", "2", "3"])
 
+    def test_process_uploaded_excel_xls_path_branch(self):
+        with patch("file_processing.services.excel_service.parse_xls") as mock_parse:
+            mock_parse.return_value = {"Sheet1": [["A", "B"]]}
+
+            success, error, data = process_uploaded_excel("/tmp/test.xls")
+
+            self.assertTrue(success)
+            self.assertIsNone(error)
+            self.assertEqual(data, {"Sheet1": [["A", "B"]]})
+
 class FileValidationTests(TestCase):
     UPLOAD_URL = '/upload/'
 
