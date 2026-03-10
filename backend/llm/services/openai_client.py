@@ -1,8 +1,19 @@
+import copy
+import hashlib
 import json
 from typing import Any
 
 from django.conf import settings
-from openai import OpenAI
+from django.core.cache import cache
+from openai import (
+    APIConnectionError,
+    APIError,
+    APIStatusError,
+    APITimeoutError,
+    AuthenticationError,
+    OpenAI,
+    RateLimitError,
+)
 
 
 class OpenAIServiceError(Exception):
@@ -13,11 +24,49 @@ class OpenAIConfigurationError(OpenAIServiceError):
     """Raised when OpenAI settings are missing or invalid."""
 
 
+class OpenAIUpstreamError(OpenAIServiceError):
+    """Raised when upstream OpenAI call fails with a known HTTP-like status."""
+
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _get_cache_ttl_seconds() -> int:
+    raw_value = getattr(settings, "LLM_CACHE_TTL_SECONDS", 300)
+    try:
+        ttl_seconds = int(raw_value)
+    except (TypeError, ValueError):
+        return 300
+    return max(0, ttl_seconds)
+
+
+def _build_generate_json_cache_key(input_json: dict[str, Any] | list[Any]) -> str:
+    canonical_payload = json.dumps(input_json, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    key_material = (
+        f"model:{settings.OPENAI_MODEL}\n"
+        f"system_prompt:{settings.OPENAI_SYSTEM_PROMPT}\n"
+        f"payload:{canonical_payload}"
+    )
+    digest = hashlib.sha256(key_material.encode("utf-8")).hexdigest()
+    return f"llm:generate_json:{digest}"
+
+
 def _build_client() -> OpenAI:
     api_key = settings.OPENAI_API_KEY.strip()
     if not api_key:
         raise OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
     return OpenAI(api_key=api_key)
+
+
+def _map_api_status_to_http(status_code: int | None) -> int:
+    if status_code == 401:
+        return 401
+    if status_code == 429:
+        return 429
+    if status_code in (408, 504):
+        return 504
+    return 502
 
 
 def generate_text(prompt: str) -> str:
@@ -34,7 +83,20 @@ def generate_text(prompt: str) -> str:
     if system_prompt:
         request_payload["instructions"] = system_prompt
 
-    response = client.responses.create(**request_payload)
+    try:
+        response = client.responses.create(**request_payload)
+    except AuthenticationError as exc:
+        raise OpenAIUpstreamError("LLM authentication failed.", status_code=401) from exc
+    except RateLimitError as exc:
+        raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
+    except APITimeoutError as exc:
+        raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
+    except APIStatusError as exc:
+        status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
+        raise OpenAIUpstreamError("LLM provider request failed.", status_code=status_code) from exc
+    except (APIConnectionError, APIError) as exc:
+        raise OpenAIUpstreamError("LLM provider request failed.", status_code=502) from exc
+
     output_text = getattr(response, "output_text", None)
     if not output_text:
         raise OpenAIServiceError("OpenAI response did not include output_text.")
@@ -45,6 +107,11 @@ def generate_json(input_json: dict[str, Any] | list[Any]) -> dict[str, Any] | li
     if not isinstance(input_json, (dict, list)):
         raise ValueError("input_json must be an object or array.")
 
+    cache_key = _build_generate_json_cache_key(input_json)
+    cached_output = cache.get(cache_key)
+    if isinstance(cached_output, (dict, list)):
+        return copy.deepcopy(cached_output)
+
     output_text = generate_text(prompt=json.dumps(input_json))
     try:
         parsed_output = json.loads(output_text)
@@ -53,4 +120,9 @@ def generate_json(input_json: dict[str, Any] | list[Any]) -> dict[str, Any] | li
 
     if not isinstance(parsed_output, (dict, list)):
         raise OpenAIServiceError("OpenAI response JSON must be an object or array.")
+
+    ttl_seconds = _get_cache_ttl_seconds()
+    if ttl_seconds > 0:
+        cache.set(cache_key, parsed_output, timeout=ttl_seconds)
+
     return parsed_output
