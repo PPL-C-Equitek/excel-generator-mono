@@ -9,6 +9,7 @@ packaging==26.0
 psycopg2-binary==2.9.11
 sqlparse==0.5.5
 tzdata==2025.3
+openpyxl==3.1.5
 PyPDF2==3.0.1
 reportlab==4.1.0
 python-magic==0.4.27

@@ -1,3 +1,4 @@
+import os
 import logging
 import os
 
@@ -11,8 +12,10 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
-
 from file_processing.services.upload_service import (
+    validate_file,
+    save_temp_file,
+    handle_excel_upload
     process_upload,
 )
 from file_processing.serializers import (
@@ -119,6 +122,26 @@ def upload(request):
             status=status.HTTP_200_OK,
         )
 
+        ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+        if ext in [".xlsx", ".xls"]:
+            success, error, data = handle_excel_upload(uploaded_file)
+            if not success:
+                return Response(
+                    {"error": error},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            return Response(
+                {"status": "success", "data": data},
+                status=status.HTTP_200_OK
+            )
+
+        is_valid, error = validate_file(uploaded_file)
+        if not is_valid:
+            return Response(
+                {"error": error},
+                status=status.HTTP_400_BAD_REQUEST
+              
     except Exception:
         return Response(
             {
