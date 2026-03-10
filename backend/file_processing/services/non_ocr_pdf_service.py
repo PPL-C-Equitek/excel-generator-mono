@@ -32,7 +32,7 @@ class NonOCRPDFService:
         table_bboxes = [t.bbox for t in page.find_tables()]
         page_data = NonOCRPDFService.extract_table_rows(tables)
         page_data.extend(
-            NonOCRPDFService._extract_text_outside_tables(page, table_bboxes)
+            NonOCRPDFService.extract_text_outside_tables(page, table_bboxes)
         )
         return page_data
 
