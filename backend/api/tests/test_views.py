@@ -1,5 +1,12 @@
+from PyPDF2 import PdfReader, PdfWriter
+from PyPDF2.errors import PdfReadError
 from django.test import TestCase
-from unittest.mock import patch
+from django.core.files.uploadedfile import SimpleUploadedFile
+from unittest.mock import patch, MagicMock, PropertyMock
+
+from io import BytesIO
+from reportlab.pdfgen import canvas
+from openpyxl import Workbook
 
 from rest_framework.test import APIClient, APISimpleTestCase
 
@@ -10,6 +17,7 @@ from file_processing.services.export_service import (
     OutputCSVGenerationError,
     OutputLLMValidationError,
 )
+from file_processing.services.upload_service import validate_pdf
 
 
 class BaseApiViewTest(TestCase):
@@ -67,6 +75,374 @@ class MembersViewTest(BaseApiViewTest):
     def test_members_endpoint_rejects_post(self):
         response = self.client.post("/members/")
         self.assertEqual(response.status_code, 405)
+
+
+class UploadEndpointTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def _post_file(self, name, content, content_type):
+        f = SimpleUploadedFile(name, content, content_type=content_type)
+        return self.client.post("/upload/", {"file": f}, format="multipart")
+
+    def generate_valid_pdf_bytes(self):
+        buffer = BytesIO()
+        p = canvas.Canvas(buffer)
+        p.drawString(100, 750, "Hello PDF")
+        p.save()
+        buffer.seek(0)
+        return buffer.read()
+
+    def generate_private_pdf_bytes(self, password="secret"):
+        valid_pdf_bytes = self.generate_valid_pdf_bytes()
+
+        input_buffer = BytesIO(valid_pdf_bytes)
+        output_buffer = BytesIO()
+
+        reader = PdfReader(input_buffer)
+        writer = PdfWriter()
+
+        for page in reader.pages:
+            writer.add_page(page)
+
+        writer.encrypt(password)
+        writer.write(output_buffer)
+
+        output_buffer.seek(0)
+        return output_buffer.read()
+
+    def generate_valid_xlsx_bytes(self):
+        buffer = BytesIO()
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "Hello"
+        wb.save(buffer)
+        buffer.seek(0)
+        return buffer.read()
+
+    def test_upload_pdf_success(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+        resp = self._post_file("doc.pdf", pdf_doc, "application/pdf")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "success")
+        self.assertEqual(resp.data["filename"], "doc.pdf")
+
+    def test_upload_xls_success(self):
+        xls_content = b"\xd0\xcf\x11\xe0" + b"\x00" * 100
+
+        resp = self._post_file(
+            "sheet.xls",
+            xls_content,
+            "application/vnd.ms-excel",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+
+    def test_upload_xlsx_success(self):
+        xlsx_content = b"PK\x03\x04" + b"\x00" * 100
+
+        resp = self._post_file(
+            "sheet.xlsx",
+            xlsx_content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+
+    def test_upload_unsupported_type(self):
+        resp = self._post_file("note.txt", b"hello", "text/plain")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_upload_no_file(self):
+        resp = self.client.post("/upload/", {}, format="multipart")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_upload_response_does_not_expose_path(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file("doc.pdf", pdf_doc, "application/pdf")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("path", resp.data)
+
+    def test_upload_internal_server_error(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        with patch("api.views.process_upload") as mock_process_upload:
+            mock_process_upload.side_effect = Exception("Unexpected failure")
+
+            resp = self._post_file("doc.pdf", pdf_doc, "application/pdf")
+
+            self.assertEqual(resp.status_code, 500)
+            self.assertEqual(resp.data["status"], "error")
+            self.assertIn("message", resp.data)
+
+    def test_invalid_file_path_detection(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        with patch(
+            "file_processing.services.upload_service.os.path.abspath"
+        ) as mock_abspath:
+
+            def fake_abspath(path):
+                if "doc.pdf" in path:
+                    return "/evil/path/file.pdf"
+                return "/safe/base"
+
+            mock_abspath.side_effect = fake_abspath
+
+            with self.assertRaises(ValueError):
+                from file_processing.services.upload_service import save_temp_file
+
+                f = SimpleUploadedFile(
+                    "doc.pdf", pdf_doc, content_type="application/pdf"
+                )
+                save_temp_file(f)
+
+    def test_save_temp_file_success(self):
+        from file_processing.services.upload_service import save_temp_file
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            pdf_doc,
+            content_type="application/pdf",
+        )
+
+        path = save_temp_file(f)
+
+        self.assertTrue(path.endswith(".pdf"))
+
+    def test_upload_pdf_uppercase_extension(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "DOC.PDF",
+            pdf_doc,
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+
+    def test_file_header_not_pdf_with_extension_pdf(self):
+        resp = self._post_file("doc.pdf", b"data", "application/pdf")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_file_is_corrupt_pdf(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+        corrupt_pdf = pdf_doc[:20]
+
+        resp = self._post_file("corrupt.pdf", corrupt_pdf, "application/pdf")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_upload_file_too_large(self):
+        big_content = b"a" * (11 * 1024 * 1024)
+        resp = self._post_file("big.pdf", big_content, "application/pdf")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_upload_file_exact_10mb_allowed(self):
+        valid_pdf = self.generate_valid_pdf_bytes()
+        remaining_size = (10 * 1024 * 1024) - len(valid_pdf)
+
+        padding = b"\0" * remaining_size
+        exact_content = valid_pdf + padding
+        resp = self._post_file("exact.pdf", exact_content, "application/pdf")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_upload_file_less_than_10mb_allowed(self):
+        valid_pdf = self.generate_valid_pdf_bytes()
+        padding = b"\0" * (5 * 1024 * 1024)
+        less_content = valid_pdf + padding
+        resp = self._post_file("small.pdf", less_content, "application/pdf")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_file_is_private_pdf(self):
+        private_pdf = self.generate_private_pdf_bytes(password="1234")
+
+        resp = self._post_file("private.pdf", private_pdf, "application/pdf")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_xls_extension_but_invalid_mime(self):
+        resp = self._post_file(
+            "fake.xls",
+            b"not an excel file",
+            "application/vnd.ms-excel",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+
+    def test_xlsx_extension_but_invalid_mime(self):
+        resp = self._post_file(
+            "fake.xlsx",
+            b"this is not an excel file",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("message", resp.data)
+
+    def test_mime_detection_exception(self):
+        with patch(
+            "file_processing.services.upload_service.magic.from_buffer"
+        ) as mock_magic:
+            mock_magic.side_effect = Exception("libmagic failure")
+
+            resp = self._post_file(
+                "sheet.xlsx",
+                b"dummy content",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+            self.assertEqual(resp.status_code, 400)
+            self.assertEqual(resp.data["status"], "error")
+            self.assertEqual(resp.data["message"], "Unable to determine file type.")
+
+    def test_validate_pdf_reader_creation_fails(self):
+        with patch("file_processing.services.upload_service.PdfReader") as mock_reader:
+            mock_reader.side_effect = Exception("parse error")
+
+            f = SimpleUploadedFile(
+                "doc.pdf",
+                b"%PDF-test",
+                content_type="application/pdf",
+            )
+            is_valid, error = validate_pdf(f)
+            self.assertFalse(is_valid)
+            self.assertIn("corrupt", error.lower())
+
+    def test_validate_pdf_structure_pdf_read_error(self):
+        with patch("file_processing.services.upload_service.PdfReader") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.is_encrypted = False
+            type(mock_instance).pages = PropertyMock(
+                side_effect=PdfReadError("bad xref")
+            )
+            mock_cls.return_value = mock_instance
+
+            f = SimpleUploadedFile(
+                "doc.pdf",
+                b"%PDF-test",
+                content_type="application/pdf",
+            )
+            is_valid, error = validate_pdf(f)
+            self.assertFalse(is_valid)
+            self.assertIn("corrupt", error.lower())
+
+    def test_validate_pdf_structure_generic_exception(self):
+        with patch("file_processing.services.upload_service.PdfReader") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.is_encrypted = False
+            type(mock_instance).pages = PropertyMock(
+                side_effect=Exception("unexpected")
+            )
+            mock_cls.return_value = mock_instance
+
+            f = SimpleUploadedFile(
+                "doc.pdf",
+                b"%PDF-test",
+                content_type="application/pdf",
+            )
+            is_valid, error = validate_pdf(f)
+            self.assertFalse(is_valid)
+            self.assertIn("corrupt", error.lower())
+
+    def test_upload_pdf_too_many_pages(self):
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        with patch(
+            "file_processing.services.upload_service.PdfReader"
+        ) as mock_reader_cls:
+            mock_instance = MagicMock()
+            mock_instance.is_encrypted = False
+            mock_instance.pages = [MagicMock()] * 101
+            mock_reader_cls.return_value = mock_instance
+
+            resp = self._post_file("doc.pdf", pdf_doc, "application/pdf")
+            self.assertEqual(resp.status_code, 400)
+            self.assertEqual(resp.data["status"], "error")
+            self.assertIn("100", resp.data["message"])
+
+    @patch("api.views.process_upload")
+    def test_upload_returns_extracted_text(self, mock_process):
+        mock_process.return_value = (
+            True,
+            None,
+            "/tmp/file.pdf",
+            {"content": [{"page": 1, "type": "text", "lines": ["hello"]}]},
+        )
+
+        resp = self.client.post(
+            "/upload/",
+            {
+                "file": SimpleUploadedFile(
+                    "doc.pdf", b"%PDF-1.4", content_type="application/pdf"
+                )
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("extracted", resp.data)
+
+    @patch("file_processing.services.upload_service.OCRService.process_pdf")
+    def test_ocr_failure_is_logged_and_returns_success(self, mock_ocr):
+        mock_ocr.side_effect = Exception("OCR crash")
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "doc.pdf",
+            pdf_doc,
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "success")
+
+    @patch("file_processing.services.upload_service.os.remove")
+    def test_cleanup_failure_logged(self, mock_remove):
+        mock_remove.side_effect = Exception("delete failed")
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "doc.pdf",
+            pdf_doc,
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+
+    @patch("file_processing.services.upload_service.os.path.exists")
+    def test_cleanup_when_temp_file_not_exists(self, mock_exists):
+        mock_exists.return_value = False
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        resp = self._post_file(
+            "doc.pdf",
+            pdf_doc,
+            "application/pdf",
+        )
+
+        self.assertEqual(resp.status_code, 200)
 
 
 class ExportCSVViewTest(APISimpleTestCase):
