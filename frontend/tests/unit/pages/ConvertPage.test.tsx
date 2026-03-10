@@ -72,6 +72,7 @@ describe('ConvertPage', () => {
         // Cleanup spies
         consoleLogSpy.mockRestore()
         vi.clearAllMocks()
+        vi.unstubAllEnvs()
     })
 
     describe('Component Rendering', () => {
@@ -315,7 +316,6 @@ describe('ConvertPage', () => {
         it('does not display Download CSV when initial mount or csvMetadata is null', () => {
             render(<ConvertPage />)
             expect(screen.queryByTestId('download-csv-btn')).not.toBeInTheDocument()
-            vi.unstubAllEnvs()
         })
 
         it('displays disabled Download CSV button during conversion', async () => {
@@ -340,7 +340,6 @@ describe('ConvertPage', () => {
             await act(async () => {
                 resolvers.forEach(r => r({ file_id: 'csv_999' }))
             })
-            vi.unstubAllEnvs()
         })
 
         it('shows enabled Download CSV button after successful conversion', async () => {
@@ -362,8 +361,6 @@ describe('ConvertPage', () => {
                 expect(csvBtn).toBeInTheDocument()
                 expect(csvBtn).not.toBeDisabled()
             })
-            
-            vi.unstubAllEnvs()
         })
 
         it('triggers download with correct URL when Download CSV is clicked', async () => {
@@ -388,7 +385,6 @@ describe('ConvertPage', () => {
             expect(clickSpy).toHaveBeenCalled()
             
             clickSpy.mockRestore()
-            vi.unstubAllEnvs()
         })
 
         it('does nothing if Download CSV is clicked while disabled/csvMetadata is null', async () => {
@@ -429,7 +425,6 @@ describe('ConvertPage', () => {
             })
             
             clickSpy.mockRestore()
-            vi.unstubAllEnvs()
         })
 
         it('shows error message if CSV export fails', async () => {
@@ -450,8 +445,6 @@ describe('ConvertPage', () => {
             
             // Buttons block unmounts when there's an error
             expect(screen.queryByTestId('download-csv-btn')).not.toBeInTheDocument()
-            
-            vi.unstubAllEnvs()
         })
     })
 })
