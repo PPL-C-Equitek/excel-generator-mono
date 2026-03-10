@@ -445,6 +445,82 @@ class UploadEndpointTest(TestCase):
 
         self.assertEqual(resp.status_code, 200)
 
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    def test_process_upload_mime_validation_failure(self, mock_validate):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (False, "Invalid MIME")
+
+        f = SimpleUploadedFile(
+            "file.pdf",
+            b"%PDF-1.4",
+            content_type="application/pdf",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "Invalid MIME")
+
+    @patch("file_processing.services.upload_service.process_uploaded_excel")
+    def test_process_upload_excel_failure(self, mock_excel):
+        mock_excel.return_value = (False, "Excel error", None)
+
+        xlsx_content = self.generate_valid_xlsx_bytes()
+
+        resp = self._post_file(
+            "sheet.xlsx",
+            xlsx_content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+
+    @patch("file_processing.services.upload_service.process_uploaded_excel")
+    @patch("file_processing.services.upload_service.save_temp_file")
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    def test_process_upload_processing_exception(
+        self, mock_mime, mock_save, mock_excel
+    ):
+        from file_processing.services.upload_service import process_upload
+
+        mock_mime.return_value = (True, None)
+        mock_save.return_value = "/tmp/test.xlsx"
+        mock_excel.side_effect = Exception("disk failure")
+
+        f = SimpleUploadedFile(
+            "file.xlsx",
+            b"dummy",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "File processing failed")
+
+    @patch("file_processing.services.upload_service.OCRService.process_pdf")
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    def test_process_pdf_ocr_fallback_called(self, mock_non_ocr, mock_ocr):
+        from file_processing.services.upload_service import _process_pdf
+
+        mock_non_ocr.return_value = None
+        mock_ocr.return_value = {"text": "ocr"}
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            pdf_doc,
+            content_type="application/pdf",
+        )
+
+        success, error, data = _process_pdf("/tmp/file.pdf", f)
+
+        self.assertTrue(success)
+        mock_ocr.assert_called_once()
+
 
 class ExportCSVViewTest(APISimpleTestCase):
     def _valid_output_json(self):

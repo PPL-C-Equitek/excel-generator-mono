@@ -30,10 +30,6 @@ from file_processing.services.export_service import (
 logger = logging.getLogger(__name__)
 
 
-ALLOWED_EXTENSIONS = [".pdf", ".xls", ".xlsx"]
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-
-
 def _sanitize_download_filename(candidate):
     if not isinstance(candidate, str):
         return None
