@@ -194,6 +194,33 @@ describe('useConvertFlow', () => {
             expect(result.current.outputFile?.format).toBe('pdf')
         })
 
+        it('infers format from fallback file mime type when filename has no extension', async () => {
+            mockUploadFile.mockResolvedValue({ filename: 'from-parser' })
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.outputFile?.filename).toBe('from-parser')
+            expect(result.current.outputFile?.format).toBe('pdf')
+        })
+
+        it('falls back to "bin" when filename has no extension and mime type is empty', async () => {
+            mockUploadFile.mockResolvedValue({ filename: 'noext' })
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+            const unknownFile = new File(['content'], 'noext', { type: '' })
+
+            await act(async () => {
+                await result.current.handleFileSelect(unknownFile)
+            })
+
+            expect(result.current.outputFile?.filename).toBe('noext')
+            expect(result.current.outputFile?.format).toBe('bin')
+        })
+
         it('clears previous error and outputFile when starting a new conversion', async () => {
             // First call fails
             mockUploadFile.mockRejectedValueOnce(new Error('Upload failed'))

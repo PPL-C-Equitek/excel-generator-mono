@@ -233,6 +233,67 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             delete (global as any).URL.revokeObjectURL
         })
+
+        it.each([
+            {
+                format: 'xls',
+                filename: 'report.xls',
+                expectedMime: 'application/vnd.ms-excel',
+            },
+            {
+                format: 'xlsx',
+                filename: 'report.xlsx',
+                expectedMime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            },
+            {
+                format: 'unknown',
+                filename: 'report.unknown',
+                expectedMime: 'application/octet-stream',
+            },
+        ])(
+            'uses correct mime type for input format $format',
+            async ({ format, filename, expectedMime }) => {
+                const user = userEvent.setup()
+                const createObjURLMock = vi.fn().mockReturnValue('blob:mock')
+                global.URL.createObjectURL = createObjURLMock
+                global.URL.revokeObjectURL = vi.fn()
+                const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+                mockHookReturn.outputFile = { filename, format, size: 1024 }
+                render(<ConvertPage />)
+
+                await user.click(screen.getByTestId('download-btn'))
+
+                const generatedBlob = createObjURLMock.mock.calls[0]?.[0] as Blob
+                expect(generatedBlob.type).toBe(expectedMime)
+
+                clickSpy.mockRestore()
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                delete (global as any).URL.createObjectURL
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                delete (global as any).URL.revokeObjectURL
+            }
+        )
+
+        it('triggers output download using .csv filename and service URL', async () => {
+            const user = userEvent.setup()
+            const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+            const mockGetDownloadUrl = vi.fn().mockReturnValue('/export/csv/csv_123/download?filename=report.csv')
+
+            mockHookReturn.outputFile = { filename: 'report.pdf', format: 'pdf', size: 20480 }
+            mockHookReturn.csvMetadata = { file_id: 'csv_123' }
+            mockHookReturn.llmService = { getDownloadUrl: mockGetDownloadUrl }
+
+            render(<ConvertPage />)
+            await user.click(screen.getByTestId('download-csv-btn'))
+
+            expect(mockGetDownloadUrl).toHaveBeenCalledWith('csv_123', 'report.csv')
+            expect(clickSpy).toHaveBeenCalled()
+
+            clickSpy.mockRestore()
+            mockHookReturn.csvMetadata = null
+            mockHookReturn.llmService = { getDownloadUrl: vi.fn() }
+        })
     })
 
     // -----------------------------------------------------------------------
