@@ -97,16 +97,15 @@ class ExcelDataExtractionTests(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0], ["NIM", "Nama", "Jurusan"])
 
-    def test_single_sheet_completely_empty_sheet_returns_error_or_empty(self):
+    def test_single_sheet_completely_empty_sheet_returns_empty(self):
         data = _build_excel({
             "BenarBenarKosong": []
         })
         response = self.client.post(self.EXTRACT_URL, {'file': _uploaded("all_empty.xlsx", data)})
 
-        self.assertIn(response.status_code, [200, 400])
-        if response.status_code == 200:
-            rows = self._get_sheet_rows(response.json(), "BenarBenarKosong")
-            self.assertEqual(rows, [])
+        self.assertEqual(response.status_code, 200)
+        rows = self._get_sheet_rows(response.json(), "BenarBenarKosong")
+        self.assertEqual(rows, [])
 
     def test_multi_sheet_each_sheet_is_separate_object_in_json(self):
         data = _build_excel({
