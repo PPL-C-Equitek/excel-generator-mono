@@ -403,7 +403,15 @@ class UploadEndpointTest(TestCase):
         self.assertIn("extracted", resp.data)
 
     @patch("file_processing.services.upload_service.OCRService.process_pdf")
-    def test_ocr_failure_is_logged_and_returns_success(self, mock_ocr):
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    def test_ocr_failure_returns_internal_server_error(
+        self, mock_non_ocr, mock_ocr
+    ):
+
+        mock_non_ocr.return_value = {
+            "content": [{"page": 1, "text": []}]
+        }
+
         mock_ocr.side_effect = Exception("OCR crash")
 
         pdf_doc = self.generate_valid_pdf_bytes()
@@ -414,8 +422,8 @@ class UploadEndpointTest(TestCase):
             "application/pdf",
         )
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data["status"], "success")
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.data["status"], "error")
 
     @patch("file_processing.services.upload_service.os.remove")
     def test_cleanup_failure_logged(self, mock_remove):
