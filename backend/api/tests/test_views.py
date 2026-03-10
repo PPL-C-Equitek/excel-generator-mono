@@ -611,6 +611,50 @@ class UploadEndpointTest(TestCase):
         self.assertFalse(success)
         self.assertEqual(error, "PDF error")
 
+    @patch("file_processing.services.upload_service.validate_file")
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    @patch("file_processing.services.upload_service.save_temp_file")
+    def test_process_upload_else_branch_unsupported_extension(
+        self, mock_save, mock_mime, mock_validate
+    ):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (True, None)
+        mock_mime.return_value = (True, None)
+        mock_save.return_value = "/tmp/test.doc"
+
+        f = SimpleUploadedFile(
+            "file.doc",
+            b"dummy",
+            content_type="application/msword",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "Unsupported file type")
+
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_service_mime_validation_failure(
+        self, mock_validate_file, mock_validate_mime
+    ):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate_file.return_value = (True, None)
+        mock_validate_mime.return_value = (False, "Invalid MIME type")
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            b"%PDF-1.4",
+            content_type="application/pdf",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "Invalid MIME type")
+
 
 class ExportCSVViewTest(APISimpleTestCase):
     def _valid_output_json(self):
