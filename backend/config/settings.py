@@ -31,8 +31,6 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_SYSTEM_PROMPT = os.environ.get("OPENAI_SYSTEM_PROMPT", "")
 
-print(os.getenv("POSTGRES_DB"))
-
 # Application definition
 
 INSTALLED_APPS = [
