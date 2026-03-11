@@ -584,7 +584,7 @@ class FileValidationTests(TestCase):
     def test_xls_with_more_than_100_sheets_is_rejected(self):
         sheets = {f"Sheet{i}": [["A"], [i]] for i in range(1, 102)}
         too_many_sheets = self._make_file(
-            "many_sheets.xls",
+            "many_sheets.xlsx",
             _build_xls(sheets),
             "application/vnd.ms-excel",
         )
