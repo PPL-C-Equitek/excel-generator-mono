@@ -120,6 +120,17 @@ class UploadEndpointTest(TestCase):
         buffer.seek(0)
         return buffer.read()
 
+    def generate_valid_xls_bytes(self):
+        import xlwt
+
+        buffer = BytesIO()
+        wb = xlwt.Workbook()
+        ws = wb.add_sheet("Sheet1")
+        ws.write(0, 0, "Hello XLS")
+        wb.save(buffer)
+        buffer.seek(0)
+        return buffer.read()
+
     def test_upload_pdf_success(self):
         pdf_doc = self.generate_valid_pdf_bytes()
         resp = self._post_file("doc.pdf", pdf_doc, "application/pdf")
@@ -388,7 +399,23 @@ class UploadEndpointTest(TestCase):
 
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
-        self.assertIn("message", resp.data)
+        self.assertEqual(resp.data["message"], "File content does not match its extension.")
+
+    @patch("file_processing.services.upload_service.magic.from_buffer")
+    def test_xlsx_octet_stream_without_zip_signature_returns_extension_mismatch(
+        self, mock_magic
+    ):
+        mock_magic.return_value = "application/octet-stream"
+
+        resp = self._post_file(
+            "fake.xlsx",
+            b"plain text masquerading as xlsx",
+            "application/octet-stream",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertEqual(resp.data["message"], "File content does not match its extension.")
 
     @patch("file_processing.services.upload_service._is_legacy_xls_content")
     @patch("file_processing.services.upload_service.magic.from_buffer")
@@ -414,24 +441,23 @@ class UploadEndpointTest(TestCase):
 
     @patch("file_processing.services.upload_service._is_legacy_xls_content")
     @patch("file_processing.services.upload_service.magic.from_buffer")
-    def test_legacy_xls_renamed_to_xlsx_returns_extension_mismatch(
+    def test_legacy_xls_renamed_to_xlsx_is_accepted(
         self,
         mock_magic,
         mock_is_legacy_xls,
     ):
         mock_magic.return_value = "application/vnd.ms-excel"
         mock_is_legacy_xls.return_value = True
-        ole_payload = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + b"X" * 2048
+        xls_content = self.generate_valid_xls_bytes()
 
         resp = self._post_file(
             "renamed.xlsx",
-            ole_payload,
+            xls_content,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data["status"], "error")
-        self.assertEqual(resp.data["message"], "File content does not match its extension.")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "success")
 
     def test_mime_detection_exception(self):
         with patch(

@@ -5,6 +5,7 @@ from typing import Any, IO
 import logging
 
 logger = logging.getLogger(__name__)
+OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 
 def _load_workbook(file_or_path: str | IO[bytes] | Any):
     try:
@@ -23,6 +24,14 @@ def _load_workbook(file_or_path: str | IO[bytes] | Any):
         raise ValueError(
             f"File Excel corrupted atau cannot read: {exc}"
         ) from exc
+
+
+def _has_ole_signature(file_path: str) -> bool:
+    try:
+        with open(file_path, "rb") as fh:
+            return fh.read(len(OLE_SIGNATURE)) == OLE_SIGNATURE
+    except Exception:
+        return False
 
 def _sheet_to_rows(ws) -> list[list[Any]]:
     raw_rows = list(ws.iter_rows(values_only=True))
@@ -141,6 +150,8 @@ def process_uploaded_excel(
             ext = os.path.splitext(file_or_path)[1].lower()
 
         if ext == ".xls":
+            data = parse_xls(file_or_path)
+        elif ext == ".xlsx" and isinstance(file_or_path, str) and _has_ole_signature(file_or_path):
             data = parse_xls(file_or_path)
         else:
             data = parse_excel(file_or_path)
