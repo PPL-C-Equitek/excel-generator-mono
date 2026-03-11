@@ -390,6 +390,49 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
 
+    @patch("file_processing.services.upload_service._is_legacy_xls_content")
+    @patch("file_processing.services.upload_service.magic.from_buffer")
+    def test_password_protected_xlsx_returns_specific_error(
+        self,
+        mock_magic,
+        mock_is_legacy_xls,
+    ):
+        mock_magic.return_value = "application/vnd.ms-excel"
+        mock_is_legacy_xls.return_value = False
+        ole_payload = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + b"X" * 2048
+
+        resp = self._post_file(
+            "protected.xlsx",
+            ole_payload,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("password-protected", resp.data["message"].lower())
+        self.assertIn("excel", resp.data["message"].lower())
+
+    @patch("file_processing.services.upload_service._is_legacy_xls_content")
+    @patch("file_processing.services.upload_service.magic.from_buffer")
+    def test_legacy_xls_renamed_to_xlsx_returns_extension_mismatch(
+        self,
+        mock_magic,
+        mock_is_legacy_xls,
+    ):
+        mock_magic.return_value = "application/vnd.ms-excel"
+        mock_is_legacy_xls.return_value = True
+        ole_payload = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + b"X" * 2048
+
+        resp = self._post_file(
+            "renamed.xlsx",
+            ole_payload,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertEqual(resp.data["message"], "File content does not match its extension.")
+
     def test_mime_detection_exception(self):
         with patch(
             "file_processing.services.upload_service.magic.from_buffer"
