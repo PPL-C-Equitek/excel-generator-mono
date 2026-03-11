@@ -4,7 +4,6 @@ from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from api.decorators import rate_limit
 from .serializers import LlmGenerateRequestSerializer, LlmGenerateResponseSerializer
 from .services.openai_client import (
     OpenAIConfigurationError,
