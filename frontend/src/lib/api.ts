@@ -19,6 +19,14 @@ function mapUploadErrorMessage(message: string): string {
     return "PDF has too many pages (maximum 100).";
   }
 
+  if (
+    normalized.includes("excel exceeds the maximum allowed sheet count") ||
+    normalized.includes("maximum allowed sheet count of 100") ||
+    (normalized.includes("excel") && normalized.includes("too many sheets"))
+  ) {
+    return "Excel has too many sheets (maximum 100).";
+  }
+
   if (normalized.includes("excel") && normalized.includes("password-protected")) {
     return "Excel is password-protected. Please remove the password and try again.";
   }
@@ -39,7 +47,15 @@ function mapUploadErrorMessage(message: string): string {
     (normalized.includes("excel") && normalized.includes("corrupt")) ||
     (normalized.includes("excel") && normalized.includes("cannot read"))
   ) {
-    return "Excel file is corrupted or invalid.";
+    return "Excel file is corrupt or has an invalid structure.";
+  }
+
+  if (
+    normalized.includes("rate limit") ||
+    normalized.includes("too many request") ||
+    normalized.includes("too many upload")
+  ) {
+    return "Rate limit exceeded. Please try again later.";
   }
 
   return message;
@@ -82,7 +98,11 @@ export async function uploadFile(file: File, options?: RequestInit) {
   if (!res.ok) {
     const data = await res.json();
     const rawMessage =
-      typeof data?.message === "string" ? data.message : "Upload failed";
+      typeof data?.message === "string"
+        ? data.message
+        : typeof data?.detail === "string"
+          ? data.detail
+          : "Upload failed";
     throw new Error(mapUploadErrorMessage(rawMessage));
   }
 

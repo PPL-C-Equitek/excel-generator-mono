@@ -136,11 +136,28 @@ describe("uploadFile", () => {
         await expect(uploadFile(file)).rejects.toThrow("PDF has too many pages (maximum 100).");
     });
 
+    it("maps max Excel sheet count error to user-friendly FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({
+                message: "Excel has too many sheets (maximum 100).",
+            }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "many.xlsx", {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Excel has too many sheets (maximum 100).");
+    });
+
     it("maps password-protected PDF error to dedicated FE message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
             status: 400,
-            json: async () => ({ message: "The PDF file is password-protected." }),
+            json: async () => ({ message: "PDF file is password-protected." }),
         });
         vi.stubGlobal("fetch", mockedFetch);
 
@@ -157,7 +174,7 @@ describe("uploadFile", () => {
             status: 400,
             json: async () => ({
                 message:
-                    "The Excel file is password-protected. Please remove the password and try again.",
+                    "Excel file is password-protected. Please remove the password and try again.",
             }),
         });
         vi.stubGlobal("fetch", mockedFetch);
@@ -175,7 +192,7 @@ describe("uploadFile", () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
             status: 400,
-            json: async () => ({ message: "The PDF file is corrupt or has an invalid structure." }),
+            json: async () => ({ message: "PDF file is corrupt or has an invalid structure." }),
         });
         vi.stubGlobal("fetch", mockedFetch);
 
@@ -196,7 +213,7 @@ describe("uploadFile", () => {
             type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         });
 
-        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupted or invalid.");
+        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupt or has an invalid structure.");
     });
 
     it("maps parser-level corrupted Excel error to dedicated FE message", async () => {
@@ -211,7 +228,37 @@ describe("uploadFile", () => {
             type: "application/vnd.ms-excel",
         });
 
-        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupted or invalid.");
+        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupt or has an invalid structure.");
+    });
+
+    it("maps rate-limit upload error from message field", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 429,
+            json: async () => ({ message: "Rate limit exceeded. Try again later." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "report.pdf", { type: "application/pdf" });
+
+        await expect(uploadFile(file)).rejects.toThrow(
+            "Rate limit exceeded. Please try again later."
+        );
+    });
+
+    it("maps rate-limit upload error from detail field", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 429,
+            json: async () => ({ detail: "Too many uploads." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "report.pdf", { type: "application/pdf" });
+
+        await expect(uploadFile(file)).rejects.toThrow(
+            "Rate limit exceeded. Please try again later."
+        );
     });
 
     it("throws default error when upload fails without message", async () => {

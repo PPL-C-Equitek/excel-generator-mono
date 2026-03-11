@@ -37,17 +37,21 @@ describe("generateJson positive", () => {
 describe("generateJson negative (HTTP errors)", () => {
   it("maps 401 to user-friendly message", async () => {
     server.use(handler401);
-    await expect(generateJson({ key: "value" })).rejects.toThrow("API Key tidak valid");
+    await expect(generateJson({ key: "value" })).rejects.toThrow("Invalid API key.");
   });
 
   it("maps 429 to user-friendly message", async () => {
     server.use(handler429);
-    await expect(generateJson({ key: "value" })).rejects.toThrow("Quota LLM habis, coba lagi nanti");
+    await expect(generateJson({ key: "value" })).rejects.toThrow(
+      "Rate limit exceeded. Please try again later."
+    );
   });
 
   it("maps 504 to user-friendly message", async () => {
     server.use(handler504);
-    await expect(generateJson({ key: "value" })).rejects.toThrow("Request timeout, coba lagi");
+    await expect(generateJson({ key: "value" })).rejects.toThrow(
+      "Request timed out. Please try again."
+    );
   });
 
   it("maps 503 to user-friendly message", async () => {
@@ -57,7 +61,7 @@ describe("generateJson negative (HTTP errors)", () => {
       )
     );
     await expect(generateJson({ key: "value" })).rejects.toThrow(
-      "Server sedang tidak tersedia, coba lagi nanti"
+      "Service is currently unavailable. Please try again later."
     );
   });
 
@@ -156,7 +160,9 @@ describe("exportToCsv", () => {
         HttpResponse.json({ detail: "Gateway Timeout" }, { status: 504 })
       )
     );
-    await expect(exportToCsv(mockJson)).rejects.toThrow("Request timeout, coba lagi");
+    await expect(exportToCsv(mockJson)).rejects.toThrow(
+      "Request timed out. Please try again."
+    );
   });
 
   it("passes through unmapped HTTP errors", async () => {
