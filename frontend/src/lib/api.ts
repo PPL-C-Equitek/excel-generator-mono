@@ -30,6 +30,14 @@ function mapUploadErrorMessage(message: string): string {
     return "PDF file is corrupted or invalid.";
   }
 
+  if (
+    normalized.includes("invalid or corrupted excel file") ||
+    (normalized.includes("excel") && normalized.includes("corrupt")) ||
+    (normalized.includes("excel") && normalized.includes("cannot read"))
+  ) {
+    return "Excel file is corrupted or invalid.";
+  }
+
   return message;
 }
 

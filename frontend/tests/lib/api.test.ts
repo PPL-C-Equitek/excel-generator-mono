@@ -164,6 +164,36 @@ describe("uploadFile", () => {
         await expect(uploadFile(file)).rejects.toThrow("PDF file is corrupted or invalid.");
     });
 
+    it("maps generic corrupted Excel error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Invalid or corrupted Excel file." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "corrupt.xlsx", {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupted or invalid.");
+    });
+
+    it("maps parser-level corrupted Excel error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "File Excel corrupted atau cannot read: broken stream" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "corrupt.xls", {
+            type: "application/vnd.ms-excel",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupted or invalid.");
+    });
+
     it("throws default error when upload fails without message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
