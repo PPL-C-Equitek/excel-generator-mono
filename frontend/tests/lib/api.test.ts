@@ -136,6 +136,23 @@ describe("uploadFile", () => {
         await expect(uploadFile(file)).rejects.toThrow("PDF has too many pages (maximum 100).");
     });
 
+    it("maps max Excel sheet count error to user-friendly FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({
+                message: "Excel has too many sheets (maximum 100).",
+            }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "many.xlsx", {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Excel has too many sheets (maximum 100).");
+    });
+
     it("maps password-protected PDF error to dedicated FE message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,

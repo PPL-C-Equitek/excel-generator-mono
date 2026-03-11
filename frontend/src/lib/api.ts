@@ -19,6 +19,14 @@ function mapUploadErrorMessage(message: string): string {
     return "PDF has too many pages (maximum 100).";
   }
 
+  if (
+    normalized.includes("excel exceeds the maximum allowed sheet count") ||
+    normalized.includes("maximum allowed sheet count of 100") ||
+    (normalized.includes("excel") && normalized.includes("too many sheets"))
+  ) {
+    return "Excel has too many sheets (maximum 100).";
+  }
+
   if (normalized.includes("excel") && normalized.includes("password-protected")) {
     return "Excel is password-protected. Please remove the password and try again.";
   }

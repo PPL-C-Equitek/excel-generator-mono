@@ -564,3 +564,35 @@ class FileValidationTests(TestCase):
             self.assertNotIn("Traceback", error_msg)
             self.assertNotIn("raise ", error_msg)
             self.assertTrue(len(error_msg) > 0)
+
+    def test_xlsx_with_more_than_100_sheets_is_rejected(self):
+        sheets = {f"Sheet{i}": [["A"], [i]] for i in range(1, 102)}
+        too_many_sheets = self._make_file(
+            "many_sheets.xlsx",
+            _build_excel(sheets),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = self.client.post(self.UPLOAD_URL, {"file": too_many_sheets})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json().get("message"),
+            "Excel has too many sheets (maximum 100).",
+        )
+
+    def test_xls_with_more_than_100_sheets_is_rejected(self):
+        sheets = {f"Sheet{i}": [["A"], [i]] for i in range(1, 102)}
+        too_many_sheets = self._make_file(
+            "many_sheets.xls",
+            _build_xls(sheets),
+            "application/vnd.ms-excel",
+        )
+
+        response = self.client.post(self.UPLOAD_URL, {"file": too_many_sheets})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json().get("message"),
+            "Excel has too many sheets (maximum 100).",
+        )

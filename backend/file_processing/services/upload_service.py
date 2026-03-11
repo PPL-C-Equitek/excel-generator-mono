@@ -33,7 +33,12 @@ ALLOWED_MIME_TYPES = {
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 FILE_TOO_LARGE_ERROR = "File too large. Maximum allowed size is 10MB."
 MAX_PDF_PAGES = 100
+MAX_EXCEL_SHEETS = 100
 PDF_CORRUPT_ERROR = "PDF file is corrupt or has an invalid structure."
+EXCEL_CORRUPT_ERROR = "Invalid or corrupted Excel file."
+EXCEL_TOO_MANY_SHEETS_ERROR = (
+    f"Excel has too many sheets (maximum {MAX_EXCEL_SHEETS})."
+)
 EXCEL_PASSWORD_PROTECTED_ERROR = (
     "Excel file is password-protected. Please remove the password and try again."
 )
@@ -146,6 +151,11 @@ def validate_file(uploaded_file):
     if not is_valid_mime:
         return False, mime_error
 
+    if ext in {EXT_XLS, EXT_XLSX}:
+        is_valid_excel, excel_error = validate_excel_sheet_count(uploaded_file, ext)
+        if not is_valid_excel:
+            return False, excel_error
+
     return True, None
 
 
@@ -197,6 +207,64 @@ def check_pdf_page_count(page_count):
             f"PDF exceeds the maximum allowed page count of {MAX_PDF_PAGES}.",
         )
     return True, None
+
+
+def validate_excel_sheet_count(uploaded_file, ext):
+    try:
+        if _should_parse_as_xls(uploaded_file, ext):
+            sheet_count = _get_xls_sheet_count(uploaded_file)
+        else:
+            sheet_count = _get_xlsx_sheet_count(uploaded_file)
+    except Exception:
+        logger.exception("Failed to validate Excel sheet count.")
+        return False, EXCEL_CORRUPT_ERROR
+
+    return check_excel_sheet_count(sheet_count)
+
+
+def check_excel_sheet_count(sheet_count):
+    if sheet_count > MAX_EXCEL_SHEETS:
+        return False, EXCEL_TOO_MANY_SHEETS_ERROR
+    return True, None
+
+
+def _should_parse_as_xls(uploaded_file, ext):
+    if ext == EXT_XLS:
+        return True
+
+    if ext == EXT_XLSX and _is_ole_container(uploaded_file):
+        return _is_legacy_xls_content(uploaded_file)
+
+    return False
+
+
+def _get_xlsx_sheet_count(uploaded_file):
+    from openpyxl import load_workbook
+
+    uploaded_file.seek(0)
+    workbook = load_workbook(uploaded_file, read_only=True, data_only=True)
+    try:
+        return len(workbook.sheetnames)
+    finally:
+        workbook.close()
+        uploaded_file.seek(0)
+
+
+def _get_xls_sheet_count(uploaded_file):
+    import xlrd
+
+    uploaded_file.seek(0)
+    workbook_bytes = uploaded_file.read()
+    uploaded_file.seek(0)
+
+    workbook = xlrd.open_workbook(file_contents=workbook_bytes, on_demand=True)
+    try:
+        return workbook.nsheets
+    finally:
+        release_resources = getattr(workbook, "release_resources", None)
+        if callable(release_resources):
+            release_resources()
+        uploaded_file.seek(0)
 
 
 def validate_mime_type(uploaded_file, ext):
