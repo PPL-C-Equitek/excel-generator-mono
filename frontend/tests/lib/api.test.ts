@@ -108,6 +108,92 @@ describe("uploadFile", () => {
         await expect(uploadFile(file)).rejects.toThrow("Invalid file");
     });
 
+    it("maps max file size upload error to user-friendly FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "File too large. Maximum allowed size is 10MB." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "big.pdf", { type: "application/pdf" });
+
+        await expect(uploadFile(file)).rejects.toThrow("File size too big.");
+    });
+
+    it("maps max PDF page count error to user-friendly FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({
+                message: "PDF exceeds the maximum allowed page count of 100.",
+            }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "long.pdf", { type: "application/pdf" });
+
+        await expect(uploadFile(file)).rejects.toThrow("PDF has too many pages (maximum 100).");
+    });
+
+    it("maps password-protected PDF error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "The PDF file is password-protected." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "protected.pdf", { type: "application/pdf" });
+
+        await expect(uploadFile(file)).rejects.toThrow(
+            "PDF is password-protected. Please remove the password and try again."
+        );
+    });
+
+    it("maps corrupted PDF error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "The PDF file is corrupt or has an invalid structure." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "corrupt.pdf", { type: "application/pdf" });
+
+        await expect(uploadFile(file)).rejects.toThrow("PDF file is corrupted or invalid.");
+    });
+
+    it("maps generic corrupted Excel error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Invalid or corrupted Excel file." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "corrupt.xlsx", {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupted or invalid.");
+    });
+
+    it("maps parser-level corrupted Excel error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "File Excel corrupted atau cannot read: broken stream" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "corrupt.xls", {
+            type: "application/vnd.ms-excel",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupted or invalid.");
+    });
+
     it("throws default error when upload fails without message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
