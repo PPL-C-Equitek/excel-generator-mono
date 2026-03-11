@@ -39,7 +39,15 @@ function mapUploadErrorMessage(message: string): string {
     (normalized.includes("excel") && normalized.includes("corrupt")) ||
     (normalized.includes("excel") && normalized.includes("cannot read"))
   ) {
-    return "Excel file is corrupted or invalid.";
+    return "The Excel file is corrupt or has an invalid structure.";
+  }
+
+  if (
+    normalized.includes("rate limit") ||
+    normalized.includes("too many request") ||
+    normalized.includes("too many upload")
+  ) {
+    return "Rate limit exceeded. Please try again later.";
   }
 
   return message;
@@ -82,7 +90,11 @@ export async function uploadFile(file: File, options?: RequestInit) {
   if (!res.ok) {
     const data = await res.json();
     const rawMessage =
-      typeof data?.message === "string" ? data.message : "Upload failed";
+      typeof data?.message === "string"
+        ? data.message
+        : typeof data?.detail === "string"
+          ? data.detail
+          : "Upload failed";
     throw new Error(mapUploadErrorMessage(rawMessage));
   }
 

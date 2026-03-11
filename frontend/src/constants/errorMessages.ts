@@ -8,8 +8,8 @@
  *   ERROR_MESSAGES[401] // "API Key tidak valid"
  */
 export const ERROR_MESSAGES: Record<number, string> = {
-    401: "API Key tidak valid",
-    429: "Quota LLM habis, coba lagi nanti",
-    503: "Server sedang tidak tersedia, coba lagi nanti",
-    504: "Request timeout, coba lagi",
+    401: "Invalid API key.",
+    429: "Rate limit exceeded. Please try again later.",
+    503: "Service is currently unavailable. Please try again later.",
+    504: "Request timed out. Please try again.",
 } as const;
