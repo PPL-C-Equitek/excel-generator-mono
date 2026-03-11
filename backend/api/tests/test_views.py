@@ -1,3 +1,5 @@
+import builtins
+
 from PyPDF2 import PdfReader, PdfWriter
 from PyPDF2.errors import PdfReadError
 from django.test import TestCase
@@ -8,17 +10,19 @@ from io import BytesIO
 from reportlab.pdfgen import canvas
 from openpyxl import Workbook
 
-from rest_framework.test import APIClient, APISimpleTestCase
+from rest_framework.test import APIClient, APIRequestFactory, APISimpleTestCase
 
 from api.models import GroupMember
-from api.views import _resolve_download_filename, _sanitize_download_filename
+from api.views import _resolve_download_filename, _sanitize_download_filename, upload
 from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
     OutputLLMValidationError,
 )
 from file_processing.services.upload_service import (
+    MAX_FILE_SIZE,
     _get_empty_page_numbers,
+    _has_zip_signature,
     _is_legacy_xls_content,
     _is_ole_container,
     validate_pdf,
@@ -28,6 +32,7 @@ from file_processing.services.upload_service import (
 class BaseApiViewTest(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.factory = APIRequestFactory()
 
 
 class HealthCheckViewTest(BaseApiViewTest):
@@ -171,6 +176,60 @@ class UploadEndpointTest(TestCase):
         )
 
         self.assertFalse(_is_legacy_xls_content(file_obj))
+
+    def test_is_legacy_xls_content_returns_false_when_xlrd_unavailable(self):
+        file_obj = SimpleUploadedFile(
+            "legacy.xls",
+            self.generate_valid_xls_bytes(),
+            content_type="application/vnd.ms-excel",
+        )
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "xlrd":
+                raise ImportError("xlrd unavailable")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            self.assertFalse(_is_legacy_xls_content(file_obj))
+
+    def test_has_zip_signature_returns_false_on_seek_error(self):
+        class BrokenFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("seek failed")
+
+        self.assertFalse(_has_zip_signature(BrokenFile()))
+
+    def test_upload_with_invalid_content_length_header_returns_no_file_error(self):
+        request = self.factory.post("/upload/", data={}, format="multipart")
+        request.META["CONTENT_LENGTH"] = "not-a-number"
+
+        response = upload(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "No file provided")
+
+    def test_upload_without_content_length_header_returns_no_file_error(self):
+        request = self.factory.post("/upload/", data={}, format="multipart")
+        request.META.pop("CONTENT_LENGTH", None)
+
+        response = upload(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "No file provided")
+
+    def test_upload_non_multipart_content_type_uses_raw_max_size_guard(self):
+        request = self.factory.post(
+            "/upload/",
+            data="{}",
+            content_type="application/json",
+        )
+        request.META["CONTENT_LENGTH"] = str(MAX_FILE_SIZE + 1)
+
+        response = upload(request)
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.data["status"], "error")
 
     def test_upload_pdf_success(self):
         pdf_doc = self.generate_valid_pdf_bytes()
