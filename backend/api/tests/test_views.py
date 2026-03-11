@@ -310,6 +310,7 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
+        self.assertIn("corrupt", resp.data["message"].lower())
 
     def test_upload_file_too_large(self):
         big_content = b"a" * (11 * 1024 * 1024)
@@ -343,6 +344,8 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
+        self.assertIn("password-protected", resp.data["message"].lower())
+        self.assertNotIn("corrupt", resp.data["message"].lower())
 
     def test_xls_extension_but_invalid_mime(self):
         resp = self._post_file(
