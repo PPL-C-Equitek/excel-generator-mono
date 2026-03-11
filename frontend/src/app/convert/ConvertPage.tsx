@@ -13,14 +13,6 @@ function getDownloadFilename(baseFilename: string): string {
     return baseFilename.replace(/\.[^/.]+$/, '') + '.csv'
 }
 
-function getMimeType(format: string): string {
-    const normalized = format.toLowerCase()
-    if (normalized === 'pdf') return 'application/pdf'
-    if (normalized === 'xls') return 'application/vnd.ms-excel'
-    if (normalized === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    return 'application/octet-stream'
-}
-
 export default function ConvertPage({ llmService: injectedService }: ConvertPageProps) {
     const { isConverting, error, outputFile, csvMetadata, handleFileSelect, llmService } = useConvertFlow(injectedService)
 
@@ -64,25 +56,6 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                             <p className="text-sm text-gray-500" data-testid="file-size">
                                 Size: {Math.round(outputFile.size / 1024)} KB
                             </p>
-                            <button
-                                data-testid="download-btn"
-                                onClick={() => {
-                                    const dummyData = new Uint8Array(outputFile.size);
-                                    const blob = new Blob([dummyData], { type: getMimeType(outputFile.format) });
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement("a");
-                                    a.href = url;
-                                    a.download = outputFile.filename;
-                                    document.body.appendChild(a);
-                                    a.click();
-                                    a.remove();
-                                    URL.revokeObjectURL(url);
-                                }}
-                                disabled={!outputFile}
-                                className="mt-4 bg-red-700 text-white font-bold px-6 py-2 rounded-xl hover:bg-red-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Download Input
-                            </button>
 
                             {llmService.getDownloadUrl && (
                                 <button
