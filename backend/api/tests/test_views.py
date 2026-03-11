@@ -90,6 +90,7 @@ class MembersViewTest(BaseApiViewTest):
 class UploadEndpointTest(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.factory = APIRequestFactory()
 
     def _post_file(self, name, content, content_type):
         f = SimpleUploadedFile(name, content, content_type=content_type)
