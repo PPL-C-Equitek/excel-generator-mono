@@ -17,7 +17,12 @@ from file_processing.services.export_service import (
     OutputCSVGenerationError,
     OutputLLMValidationError,
 )
-from file_processing.services.upload_service import validate_pdf, _get_empty_page_numbers
+from file_processing.services.upload_service import (
+    _get_empty_page_numbers,
+    _is_legacy_xls_content,
+    _is_ole_container,
+    validate_pdf,
+)
 
 
 class BaseApiViewTest(TestCase):
@@ -130,6 +135,42 @@ class UploadEndpointTest(TestCase):
         wb.save(buffer)
         buffer.seek(0)
         return buffer.read()
+
+    def test_is_ole_container_returns_true_for_ole_signature(self):
+        xls_content = self.generate_valid_xls_bytes()
+        file_obj = SimpleUploadedFile(
+            "legacy.xls",
+            xls_content,
+            content_type="application/vnd.ms-excel",
+        )
+
+        self.assertTrue(_is_ole_container(file_obj))
+
+    def test_is_ole_container_returns_false_on_seek_error(self):
+        class BrokenFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("seek failed")
+
+        self.assertFalse(_is_ole_container(BrokenFile()))
+
+    def test_is_legacy_xls_content_returns_true_for_valid_xls(self):
+        xls_content = self.generate_valid_xls_bytes()
+        file_obj = SimpleUploadedFile(
+            "legacy.xls",
+            xls_content,
+            content_type="application/vnd.ms-excel",
+        )
+
+        self.assertTrue(_is_legacy_xls_content(file_obj))
+
+    def test_is_legacy_xls_content_returns_false_for_non_xls_payload(self):
+        file_obj = SimpleUploadedFile(
+            "fake.xlsx",
+            b"not an xls payload",
+            content_type="application/octet-stream",
+        )
+
+        self.assertFalse(_is_legacy_xls_content(file_obj))
 
     def test_upload_pdf_success(self):
         pdf_doc = self.generate_valid_pdf_bytes()
