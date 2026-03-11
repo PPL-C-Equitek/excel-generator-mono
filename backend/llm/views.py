@@ -24,7 +24,6 @@ INVALID_INPUT_JSON_DETAIL = "Invalid input_json payload."
 
 
 @api_view(["POST"])
-@rate_limit(max_requests=5, per="minute")
 @require_http_methods(["POST"])
 def llm_generate(request):
     content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
