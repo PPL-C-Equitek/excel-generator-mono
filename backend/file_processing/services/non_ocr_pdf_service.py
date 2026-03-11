@@ -47,7 +47,7 @@ class NonOCRPDFService:
         individual lines.
 
         Args:
-            file_path: Absolute path to the PDF file.
+            file_path: Absolute path to PDF file.
 
         Returns:
             dict with structure:

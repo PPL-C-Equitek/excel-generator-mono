@@ -33,9 +33,9 @@ ALLOWED_MIME_TYPES = {
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 FILE_TOO_LARGE_ERROR = "File too large. Maximum allowed size is 10MB."
 MAX_PDF_PAGES = 100
-PDF_CORRUPT_ERROR = "The PDF file is corrupt or has an invalid structure."
+PDF_CORRUPT_ERROR = "PDF file is corrupt or has an invalid structure."
 EXCEL_PASSWORD_PROTECTED_ERROR = (
-    "The Excel file is password-protected. Please remove the password and try again."
+    "Excel file is password-protected. Please remove the password and try again."
 )
 OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 ZIP_SIGNATURE_PREFIX = b"PK"
@@ -176,7 +176,7 @@ def validate_pdf(uploaded_file):
 
 def check_pdf_encrypted(reader):
     if reader.is_encrypted:
-        return False, "The PDF file is password-protected."
+        return False, "PDF file is password-protected."
     return True, None
 
 

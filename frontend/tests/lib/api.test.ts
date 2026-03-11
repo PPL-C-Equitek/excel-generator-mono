@@ -140,7 +140,7 @@ describe("uploadFile", () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
             status: 400,
-            json: async () => ({ message: "The PDF file is password-protected." }),
+            json: async () => ({ message: "PDF file is password-protected." }),
         });
         vi.stubGlobal("fetch", mockedFetch);
 
@@ -157,7 +157,7 @@ describe("uploadFile", () => {
             status: 400,
             json: async () => ({
                 message:
-                    "The Excel file is password-protected. Please remove the password and try again.",
+                    "Excel file is password-protected. Please remove the password and try again.",
             }),
         });
         vi.stubGlobal("fetch", mockedFetch);
@@ -175,7 +175,7 @@ describe("uploadFile", () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
             status: 400,
-            json: async () => ({ message: "The PDF file is corrupt or has an invalid structure." }),
+            json: async () => ({ message: "PDF file is corrupt or has an invalid structure." }),
         });
         vi.stubGlobal("fetch", mockedFetch);
 
@@ -196,7 +196,7 @@ describe("uploadFile", () => {
             type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         });
 
-        await expect(uploadFile(file)).rejects.toThrow("The Excel file is corrupt or has an invalid structure.");
+        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupt or has an invalid structure.");
     });
 
     it("maps parser-level corrupted Excel error to dedicated FE message", async () => {
@@ -211,7 +211,7 @@ describe("uploadFile", () => {
             type: "application/vnd.ms-excel",
         });
 
-        await expect(uploadFile(file)).rejects.toThrow("The Excel file is corrupt or has an invalid structure.");
+        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupt or has an invalid structure.");
     });
 
     it("maps rate-limit upload error from message field", async () => {

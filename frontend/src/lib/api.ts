@@ -39,7 +39,7 @@ function mapUploadErrorMessage(message: string): string {
     (normalized.includes("excel") && normalized.includes("corrupt")) ||
     (normalized.includes("excel") && normalized.includes("cannot read"))
   ) {
-    return "The Excel file is corrupt or has an invalid structure.";
+    return "Excel file is corrupt or has an invalid structure.";
   }
 
   if (

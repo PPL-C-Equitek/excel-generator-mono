@@ -21,7 +21,7 @@ class OCRService:
         Run OCR on specific pages of a PDF.
 
         Args:
-            file_path: Path to the PDF file.
+            file_path: Path to PDF file.
             page_numbers: 1-based page numbers to OCR.
 
         Returns:
