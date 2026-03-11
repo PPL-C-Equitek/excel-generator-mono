@@ -316,9 +316,31 @@ class UploadEndpointTest(TestCase):
         big_content = b"a" * (11 * 1024 * 1024)
         resp = self._post_file("big.pdf", big_content, "application/pdf")
 
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.status_code, 413)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
+        self.assertIn("10mb", resp.data["message"].lower())
+
+    @patch("api.views.process_upload")
+    def test_upload_content_length_too_large_short_circuits_processing(self, mock_process):
+        pdf_doc = self.generate_valid_pdf_bytes()
+        file_obj = SimpleUploadedFile(
+            "doc.pdf",
+            pdf_doc,
+            content_type="application/pdf",
+        )
+
+        response = self.client.post(
+            "/upload/",
+            {"file": file_obj},
+            format="multipart",
+            CONTENT_LENGTH=str(11 * 1024 * 1024),
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.data["status"], "error")
+        self.assertIn("10mb", response.data["message"].lower())
+        mock_process.assert_not_called()
 
     def test_upload_file_exact_10mb_allowed(self):
         valid_pdf = self.generate_valid_pdf_bytes()

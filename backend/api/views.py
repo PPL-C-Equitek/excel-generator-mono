@@ -12,6 +12,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
 from file_processing.services.upload_service import (
+    FILE_TOO_LARGE_ERROR,
+    MAX_FILE_SIZE,
     process_upload,
 )
 from file_processing.serializers import (
@@ -84,6 +86,19 @@ def members(request):
 @parser_classes([MultiPartParser])
 def upload(request):
     try:
+        raw_content_length = request.META.get("CONTENT_LENGTH")
+        if raw_content_length is not None:
+            try:
+                content_length = int(raw_content_length)
+            except (TypeError, ValueError):
+                content_length = None
+
+            if content_length is not None and content_length > MAX_FILE_SIZE:
+                return Response(
+                    {"status": "error", "message": FILE_TOO_LARGE_ERROR},
+                    status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                )
+
         if "file" not in request.FILES:
             return Response(
                 {"status": "error", "message": "No file provided"},

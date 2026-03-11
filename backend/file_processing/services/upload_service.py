@@ -31,6 +31,7 @@ ALLOWED_MIME_TYPES = {
     ],
 }
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+FILE_TOO_LARGE_ERROR = "File too large. Maximum allowed size is 10MB."
 MAX_PDF_PAGES = 100
 PDF_CORRUPT_ERROR = "The PDF file is corrupt or has an invalid structure."
 
@@ -133,7 +134,7 @@ def validate_file(uploaded_file):
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
-        return False, "File too large. Maximum allowed size is 10MB."
+        return False, FILE_TOO_LARGE_ERROR
 
     # Validate MIME type
     is_valid_mime, mime_error = validate_mime_type(uploaded_file, ext)
