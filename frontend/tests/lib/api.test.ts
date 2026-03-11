@@ -151,6 +151,26 @@ describe("uploadFile", () => {
         );
     });
 
+    it("maps password-protected Excel error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({
+                message:
+                    "The Excel file is password-protected. Please remove the password and try again.",
+            }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "protected.xlsx", {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow(
+            "Excel is password-protected. Please remove the password and try again."
+        );
+    });
+
     it("maps corrupted PDF error to dedicated FE message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,

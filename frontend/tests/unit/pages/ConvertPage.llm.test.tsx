@@ -116,9 +116,9 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(screen.queryByRole('alert')).not.toBeInTheDocument()
         })
 
-        it('does not show download button', () => {
+        it('does not show output download button', () => {
             render(<ConvertPage />)
-            expect(screen.queryByTestId('download-btn')).not.toBeInTheDocument()
+            expect(screen.queryByTestId('download-csv-btn')).not.toBeInTheDocument()
         })
     })
 
@@ -142,7 +142,7 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             mockHookReturn.isConverting = true
             render(<ConvertPage />)
             expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-            expect(screen.queryByTestId('download-btn')).not.toBeInTheDocument()
+            expect(screen.queryByTestId('download-csv-btn')).not.toBeInTheDocument()
         })
     })
 
@@ -171,11 +171,11 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(screen.getByText('LLM quota exceeded')).toBeInTheDocument()
         })
 
-        it('does not show download button when error is set', () => {
+        it('does not show output download button when error is set', () => {
             mockHookReturn.error = 'Upload failed'
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
-            expect(screen.queryByTestId('download-btn')).not.toBeInTheDocument()
+            expect(screen.queryByTestId('download-csv-btn')).not.toBeInTheDocument()
         })
     })
 
@@ -202,78 +202,11 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(screen.getByTestId('file-size')).toHaveTextContent('20 KB')
         })
 
-        it('shows Download Input and Download Output labels', () => {
+        it('shows Download Output label', () => {
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
-            expect(screen.getByText('Download Input')).toBeInTheDocument()
             expect(screen.getByText('Download Output')).toBeInTheDocument()
         })
-
-        it('shows Download button and handles click', async () => {
-            const user = userEvent.setup()
-            const createObjURLMock = vi.fn().mockReturnValue('blob:mock')
-            global.URL.createObjectURL = createObjURLMock
-            global.URL.revokeObjectURL = vi.fn()
-            
-            const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-
-            mockHookReturn.outputFile = sampleOutput
-            render(<ConvertPage />)
-            
-            const btn = screen.getByTestId('download-btn')
-            expect(btn).toBeInTheDocument()
-            
-            await user.click(btn)
-            expect(createObjURLMock).toHaveBeenCalled()
-            expect(clickSpy).toHaveBeenCalled()
-            
-            clickSpy.mockRestore()
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            delete (global as any).URL.createObjectURL
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            delete (global as any).URL.revokeObjectURL
-        })
-
-        it.each([
-            {
-                format: 'xls',
-                filename: 'report.xls',
-                expectedMime: 'application/vnd.ms-excel',
-            },
-            {
-                format: 'xlsx',
-                filename: 'report.xlsx',
-                expectedMime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            },
-            {
-                format: 'unknown',
-                filename: 'report.unknown',
-                expectedMime: 'application/octet-stream',
-            },
-        ])(
-            'uses correct mime type for input format $format',
-            async ({ format, filename, expectedMime }) => {
-                const user = userEvent.setup()
-                const createObjURLMock = vi.fn().mockReturnValue('blob:mock')
-                global.URL.createObjectURL = createObjURLMock
-                global.URL.revokeObjectURL = vi.fn()
-                const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-
-                mockHookReturn.outputFile = { filename, format, size: 1024 }
-                render(<ConvertPage />)
-
-                await user.click(screen.getByTestId('download-btn'))
-
-                const generatedBlob = createObjURLMock.mock.calls[0]?.[0] as Blob
-                expect(generatedBlob.type).toBe(expectedMime)
-
-                clickSpy.mockRestore()
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                delete (global as any).URL.createObjectURL
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                delete (global as any).URL.revokeObjectURL
-            }
-        )
 
         it('triggers output download using .csv filename and service URL', async () => {
             const user = userEvent.setup()

@@ -466,7 +466,7 @@ class FileValidationTests(TestCase):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         response = self.client.post(self.UPLOAD_URL, {'file': oversized_file})
-        self.assertEqual(response.status_code, 400)
+        self.assertIn(response.status_code, [400, 413])
         body = response.json()
         self.assertIn("message", body)
 

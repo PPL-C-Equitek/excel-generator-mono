@@ -31,8 +31,14 @@ ALLOWED_MIME_TYPES = {
     ],
 }
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+FILE_TOO_LARGE_ERROR = "File too large. Maximum allowed size is 10MB."
 MAX_PDF_PAGES = 100
 PDF_CORRUPT_ERROR = "The PDF file is corrupt or has an invalid structure."
+EXCEL_PASSWORD_PROTECTED_ERROR = (
+    "The Excel file is password-protected. Please remove the password and try again."
+)
+OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
+ZIP_SIGNATURE_PREFIX = b"PK"
 
 def _has_extracted_text(extracted_data):
     """Return True if any page contains extracted text."""
@@ -133,7 +139,7 @@ def validate_file(uploaded_file):
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
-        return False, "File too large. Maximum allowed size is 10MB."
+        return False, FILE_TOO_LARGE_ERROR
 
     # Validate MIME type
     is_valid_mime, mime_error = validate_mime_type(uploaded_file, ext)
@@ -201,6 +207,15 @@ def validate_mime_type(uploaded_file, ext):
 
         expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
 
+        if ext == EXT_XLSX and _is_ole_container(uploaded_file):
+            if _is_legacy_xls_content(uploaded_file):
+                # Allow legacy .xls content uploaded under .xlsx extension.
+                return True, None
+            return False, EXCEL_PASSWORD_PROTECTED_ERROR
+
+        if ext == EXT_XLSX and not _has_zip_signature(uploaded_file):
+            return False, "File content does not match its extension."
+
         if mime not in expected_mimes:
             return False, "File content does not match its extension."
 
@@ -208,6 +223,48 @@ def validate_mime_type(uploaded_file, ext):
 
     except Exception:
         return False, "Unable to determine file type."
+
+
+def _is_ole_container(uploaded_file):
+    """Return True if file starts with OLE Compound File signature."""
+    try:
+        uploaded_file.seek(0)
+        header = uploaded_file.read(len(OLE_SIGNATURE))
+        uploaded_file.seek(0)
+        return header == OLE_SIGNATURE
+    except Exception:
+        return False
+
+
+def _is_legacy_xls_content(uploaded_file):
+    """
+    Best-effort check for real legacy .xls content to avoid mislabeling it
+    as password-protected .xlsx.
+    """
+    try:
+        import xlrd
+    except Exception:
+        return False
+
+    try:
+        uploaded_file.seek(0)
+        content = uploaded_file.read()
+        uploaded_file.seek(0)
+        xlrd.open_workbook(file_contents=content, on_demand=True)
+        return True
+    except Exception:
+        return False
+
+
+def _has_zip_signature(uploaded_file):
+    """Return True if file starts with ZIP signature prefix."""
+    try:
+        uploaded_file.seek(0)
+        header = uploaded_file.read(len(ZIP_SIGNATURE_PREFIX))
+        uploaded_file.seek(0)
+        return header == ZIP_SIGNATURE_PREFIX
+    except Exception:
+        return False
 
 
 def save_temp_file(uploaded_file):

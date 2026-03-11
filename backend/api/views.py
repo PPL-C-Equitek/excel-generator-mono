@@ -12,6 +12,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
 from file_processing.services.upload_service import (
+    FILE_TOO_LARGE_ERROR,
+    MAX_FILE_SIZE,
     process_upload,
 )
 from file_processing.serializers import (
@@ -28,6 +30,7 @@ from file_processing.services.export_service import (
 )
 
 logger = logging.getLogger(__name__)
+MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
 
 
 def _sanitize_download_filename(candidate):
@@ -84,6 +87,25 @@ def members(request):
 @parser_classes([MultiPartParser])
 def upload(request):
     try:
+        raw_content_length = request.META.get("CONTENT_LENGTH")
+        if raw_content_length is not None:
+            try:
+                content_length = int(raw_content_length)
+            except (TypeError, ValueError):
+                content_length = None
+
+            content_type = (request.META.get("CONTENT_TYPE") or "").lower()
+            max_request_size = MAX_FILE_SIZE
+            if "multipart/form-data" in content_type:
+                # CONTENT_LENGTH includes multipart framing, not only file bytes.
+                max_request_size += MAX_MULTIPART_OVERHEAD_BYTES
+
+            if content_length is not None and content_length > max_request_size:
+                return Response(
+                    {"status": "error", "message": FILE_TOO_LARGE_ERROR},
+                    status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                )
+
         if "file" not in request.FILES:
             return Response(
                 {"status": "error", "message": "No file provided"},

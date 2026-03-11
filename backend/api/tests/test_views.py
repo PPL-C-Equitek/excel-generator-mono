@@ -1,3 +1,5 @@
+import builtins
+
 from PyPDF2 import PdfReader, PdfWriter
 from PyPDF2.errors import PdfReadError
 from django.test import TestCase
@@ -8,21 +10,29 @@ from io import BytesIO
 from reportlab.pdfgen import canvas
 from openpyxl import Workbook
 
-from rest_framework.test import APIClient, APISimpleTestCase
+from rest_framework.test import APIClient, APIRequestFactory, APISimpleTestCase
 
 from api.models import GroupMember
-from api.views import _resolve_download_filename, _sanitize_download_filename
+from api.views import _resolve_download_filename, _sanitize_download_filename, upload
 from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
     OutputLLMValidationError,
 )
-from file_processing.services.upload_service import validate_pdf, _get_empty_page_numbers
+from file_processing.services.upload_service import (
+    MAX_FILE_SIZE,
+    _get_empty_page_numbers,
+    _has_zip_signature,
+    _is_legacy_xls_content,
+    _is_ole_container,
+    validate_pdf,
+)
 
 
 class BaseApiViewTest(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.factory = APIRequestFactory()
 
 
 class HealthCheckViewTest(BaseApiViewTest):
@@ -80,6 +90,7 @@ class MembersViewTest(BaseApiViewTest):
 class UploadEndpointTest(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.factory = APIRequestFactory()
 
     def _post_file(self, name, content, content_type):
         f = SimpleUploadedFile(name, content, content_type=content_type)
@@ -119,6 +130,107 @@ class UploadEndpointTest(TestCase):
         wb.save(buffer)
         buffer.seek(0)
         return buffer.read()
+
+    def generate_valid_xls_bytes(self):
+        import xlwt
+
+        buffer = BytesIO()
+        wb = xlwt.Workbook()
+        ws = wb.add_sheet("Sheet1")
+        ws.write(0, 0, "Hello XLS")
+        wb.save(buffer)
+        buffer.seek(0)
+        return buffer.read()
+
+    def test_is_ole_container_returns_true_for_ole_signature(self):
+        xls_content = self.generate_valid_xls_bytes()
+        file_obj = SimpleUploadedFile(
+            "legacy.xls",
+            xls_content,
+            content_type="application/vnd.ms-excel",
+        )
+
+        self.assertTrue(_is_ole_container(file_obj))
+
+    def test_is_ole_container_returns_false_on_seek_error(self):
+        class BrokenFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("seek failed")
+
+        self.assertFalse(_is_ole_container(BrokenFile()))
+
+    def test_is_legacy_xls_content_returns_true_for_valid_xls(self):
+        xls_content = self.generate_valid_xls_bytes()
+        file_obj = SimpleUploadedFile(
+            "legacy.xls",
+            xls_content,
+            content_type="application/vnd.ms-excel",
+        )
+
+        self.assertTrue(_is_legacy_xls_content(file_obj))
+
+    def test_is_legacy_xls_content_returns_false_for_non_xls_payload(self):
+        file_obj = SimpleUploadedFile(
+            "fake.xlsx",
+            b"not an xls payload",
+            content_type="application/octet-stream",
+        )
+
+        self.assertFalse(_is_legacy_xls_content(file_obj))
+
+    def test_is_legacy_xls_content_returns_false_when_xlrd_unavailable(self):
+        file_obj = SimpleUploadedFile(
+            "legacy.xls",
+            self.generate_valid_xls_bytes(),
+            content_type="application/vnd.ms-excel",
+        )
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "xlrd":
+                raise ImportError("xlrd unavailable")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            self.assertFalse(_is_legacy_xls_content(file_obj))
+
+    def test_has_zip_signature_returns_false_on_seek_error(self):
+        class BrokenFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("seek failed")
+
+        self.assertFalse(_has_zip_signature(BrokenFile()))
+
+    def test_upload_with_invalid_content_length_header_returns_no_file_error(self):
+        request = self.factory.post("/upload/", data={}, format="multipart")
+        request.META["CONTENT_LENGTH"] = "not-a-number"
+
+        response = upload(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "No file provided")
+
+    def test_upload_without_content_length_header_returns_no_file_error(self):
+        request = self.factory.post("/upload/", data={}, format="multipart")
+        request.META.pop("CONTENT_LENGTH", None)
+
+        response = upload(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "No file provided")
+
+    def test_upload_non_multipart_content_type_uses_raw_max_size_guard(self):
+        request = self.factory.post(
+            "/upload/",
+            data="{}",
+            content_type="application/json",
+        )
+        request.META["CONTENT_LENGTH"] = str(MAX_FILE_SIZE + 1)
+
+        response = upload(request)
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.data["status"], "error")
 
     def test_upload_pdf_success(self):
         pdf_doc = self.generate_valid_pdf_bytes()
@@ -316,9 +428,31 @@ class UploadEndpointTest(TestCase):
         big_content = b"a" * (11 * 1024 * 1024)
         resp = self._post_file("big.pdf", big_content, "application/pdf")
 
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.status_code, 413)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
+        self.assertIn("10mb", resp.data["message"].lower())
+
+    @patch("api.views.process_upload")
+    def test_upload_content_length_too_large_short_circuits_processing(self, mock_process):
+        pdf_doc = self.generate_valid_pdf_bytes()
+        file_obj = SimpleUploadedFile(
+            "doc.pdf",
+            pdf_doc,
+            content_type="application/pdf",
+        )
+
+        response = self.client.post(
+            "/upload/",
+            {"file": file_obj},
+            format="multipart",
+            CONTENT_LENGTH=str(11 * 1024 * 1024),
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.data["status"], "error")
+        self.assertIn("10mb", response.data["message"].lower())
+        mock_process.assert_not_called()
 
     def test_upload_file_exact_10mb_allowed(self):
         valid_pdf = self.generate_valid_pdf_bytes()
@@ -366,7 +500,65 @@ class UploadEndpointTest(TestCase):
 
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
-        self.assertIn("message", resp.data)
+        self.assertEqual(resp.data["message"], "File content does not match its extension.")
+
+    @patch("file_processing.services.upload_service.magic.from_buffer")
+    def test_xlsx_octet_stream_without_zip_signature_returns_extension_mismatch(
+        self, mock_magic
+    ):
+        mock_magic.return_value = "application/octet-stream"
+
+        resp = self._post_file(
+            "fake.xlsx",
+            b"plain text masquerading as xlsx",
+            "application/octet-stream",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertEqual(resp.data["message"], "File content does not match its extension.")
+
+    @patch("file_processing.services.upload_service._is_legacy_xls_content")
+    @patch("file_processing.services.upload_service.magic.from_buffer")
+    def test_password_protected_xlsx_returns_specific_error(
+        self,
+        mock_magic,
+        mock_is_legacy_xls,
+    ):
+        mock_magic.return_value = "application/vnd.ms-excel"
+        mock_is_legacy_xls.return_value = False
+        ole_payload = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + b"X" * 2048
+
+        resp = self._post_file(
+            "protected.xlsx",
+            ole_payload,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+        self.assertIn("password-protected", resp.data["message"].lower())
+        self.assertIn("excel", resp.data["message"].lower())
+
+    @patch("file_processing.services.upload_service._is_legacy_xls_content")
+    @patch("file_processing.services.upload_service.magic.from_buffer")
+    def test_legacy_xls_renamed_to_xlsx_is_accepted(
+        self,
+        mock_magic,
+        mock_is_legacy_xls,
+    ):
+        mock_magic.return_value = "application/vnd.ms-excel"
+        mock_is_legacy_xls.return_value = True
+        xls_content = self.generate_valid_xls_bytes()
+
+        resp = self._post_file(
+            "renamed.xlsx",
+            xls_content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "success")
 
     def test_mime_detection_exception(self):
         with patch(
