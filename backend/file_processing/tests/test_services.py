@@ -1,7 +1,12 @@
 import os
 import tempfile
+import builtins
+
 from django.test import TestCase
-from unittest.mock import patch, MagicMock
+from django.core.files.uploadedfile import SimpleUploadedFile
+from unittest.mock import patch, MagicMock, PropertyMock
+from PyPDF2.errors import PdfReadError
+from openpyxl import Workbook
 
 from file_processing.services.ocr_service import OCRService
 from io import BytesIO
@@ -11,6 +16,14 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+
+from file_processing.services.upload_service import (
+    _get_empty_page_numbers,
+    _has_zip_signature,
+    _is_legacy_xls_content,
+    _is_ole_container,
+    validate_pdf,
+)
 
 
 class TestOCRService(TestCase):
@@ -340,3 +353,321 @@ class TestNonOCRPDFService(TestCase):
                 self.assertIn("text", entry)
         finally:
             os.unlink(path)
+
+class TestUploadService(TestCase):
+    def _post_file(self, name, content, content_type):
+        f = SimpleUploadedFile(name, content, content_type=content_type)
+        return self.client.post("/upload/", {"file": f}, format="multipart")
+    
+    def generate_valid_pdf_bytes(self):
+        buffer = BytesIO()
+        p = canvas.Canvas(buffer)
+        p.drawString(100, 750, "Hello PDF")
+        p.save()
+        buffer.seek(0)
+        return buffer.read()
+
+    def generate_valid_xlsx_bytes(self):
+        buffer = BytesIO()
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "Hello"
+        wb.save(buffer)
+        buffer.seek(0)
+        return buffer.read()
+
+    def generate_valid_xls_bytes(self):
+        import xlwt
+
+        buffer = BytesIO()
+        wb = xlwt.Workbook()
+        ws = wb.add_sheet("Sheet1")
+        ws.write(0, 0, "Hello XLS")
+        wb.save(buffer)
+        buffer.seek(0)
+        return buffer.read()
+    
+    def test_is_ole_container_returns_true_for_ole_signature(self):
+        xls_content = self.generate_valid_xls_bytes()
+        file_obj = SimpleUploadedFile(
+            "legacy.xls",
+            xls_content,
+            content_type="application/vnd.ms-excel",
+        )
+
+        self.assertTrue(_is_ole_container(file_obj))
+    
+    def test_is_ole_container_returns_false_on_seek_error(self):
+        class BrokenFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("seek failed")
+
+        self.assertFalse(_is_ole_container(BrokenFile()))
+
+    def test_is_legacy_xls_content_returns_true_for_valid_xls(self):
+        xls_content = self.generate_valid_xls_bytes()
+        file_obj = SimpleUploadedFile(
+            "legacy.xls",
+            xls_content,
+            content_type="application/vnd.ms-excel",
+        )
+
+        self.assertTrue(_is_legacy_xls_content(file_obj))
+
+    def test_is_legacy_xls_content_returns_false_for_non_xls_payload(self):
+        file_obj = SimpleUploadedFile(
+            "fake.xlsx",
+            b"not an xls payload",
+            content_type="application/octet-stream",
+        )
+
+        self.assertFalse(_is_legacy_xls_content(file_obj))
+
+    def test_is_legacy_xls_content_returns_false_when_xlrd_unavailable(self):
+        file_obj = SimpleUploadedFile(
+            "legacy.xls",
+            self.generate_valid_xls_bytes(),
+            content_type="application/vnd.ms-excel",
+        )
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "xlrd":
+                raise ImportError("xlrd unavailable")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            self.assertFalse(_is_legacy_xls_content(file_obj))
+
+    def test_has_zip_signature_returns_false_on_seek_error(self):
+        class BrokenFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("seek failed")
+
+        self.assertFalse(_has_zip_signature(BrokenFile()))
+
+    def test_validate_pdf_reader_creation_fails(self):
+        with patch("file_processing.services.upload_service.PdfReader") as mock_reader:
+            mock_reader.side_effect = Exception("parse error")
+
+            f = SimpleUploadedFile(
+                "doc.pdf",
+                b"%PDF-test",
+                content_type="application/pdf",
+            )
+            is_valid, error = validate_pdf(f)
+            self.assertFalse(is_valid)
+            self.assertIn("corrupt", error.lower())
+
+    def test_validate_pdf_structure_pdf_read_error(self):
+        with patch("file_processing.services.upload_service.PdfReader") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.is_encrypted = False
+            type(mock_instance).pages = PropertyMock(
+                side_effect=PdfReadError("bad xref")
+            )
+            mock_cls.return_value = mock_instance
+
+            f = SimpleUploadedFile(
+                "doc.pdf",
+                b"%PDF-test",
+                content_type="application/pdf",
+            )
+            is_valid, error = validate_pdf(f)
+            self.assertFalse(is_valid)
+            self.assertIn("corrupt", error.lower())
+
+    def test_validate_pdf_structure_generic_exception(self):
+        with patch("file_processing.services.upload_service.PdfReader") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.is_encrypted = False
+            type(mock_instance).pages = PropertyMock(
+                side_effect=Exception("unexpected")
+            )
+            mock_cls.return_value = mock_instance
+
+            f = SimpleUploadedFile(
+                "doc.pdf",
+                b"%PDF-test",
+                content_type="application/pdf",
+            )
+            is_valid, error = validate_pdf(f)
+            self.assertFalse(is_valid)
+            self.assertIn("corrupt", error.lower())
+
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    def test_process_upload_mime_validation_failure(self, mock_validate):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (False, "Invalid MIME")
+
+        f = SimpleUploadedFile(
+            "file.pdf",
+            b"%PDF-1.4",
+            content_type="application/pdf",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "Invalid MIME")
+
+    @patch("file_processing.services.upload_service.process_uploaded_excel")
+    def test_process_upload_excel_failure(self, mock_excel):
+        mock_excel.return_value = (False, "Excel error", None)
+
+        xlsx_content = self.generate_valid_xlsx_bytes()
+
+        resp = self._post_file(
+            "sheet.xlsx",
+            xlsx_content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["status"], "error")
+
+    @patch("file_processing.services.upload_service.validate_file")
+    @patch("file_processing.services.upload_service.process_uploaded_excel")
+    @patch("file_processing.services.upload_service.save_temp_file")
+    def test_process_upload_processing_exception(self, mock_save, mock_excel, mock_validate):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (True, None)
+        mock_save.return_value = "/tmp/test.xlsx"
+        mock_excel.side_effect = Exception("disk failure")
+
+        f = SimpleUploadedFile(
+            "file.xlsx",
+            b"dummy",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        with self.assertRaises(Exception):
+            process_upload(f)
+
+    @patch("file_processing.services.upload_service.OCRService.process_pdf")
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    def test_process_pdf_ocr_fallback_called(self, mock_non_ocr, mock_ocr):
+        from file_processing.services.upload_service import _process_pdf
+
+        mock_non_ocr.return_value = None
+        mock_ocr.return_value = {"text": "ocr"}
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            pdf_doc,
+            content_type="application/pdf",
+        )
+
+        success, error, data = _process_pdf("/tmp/file.pdf", f)
+
+        self.assertTrue(success)
+        mock_ocr.assert_called_once()
+
+    @patch("file_processing.services.upload_service.OCRService.process_pdf")
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    def test_process_pdf_non_ocr_exception_triggers_ocr(self, mock_non_ocr, mock_ocr):
+        from file_processing.services.upload_service import _process_pdf
+
+        mock_non_ocr.side_effect = Exception("Non-OCR crash")
+        mock_ocr.return_value = {"content": "ocr"}
+
+        pdf_doc = self.generate_valid_pdf_bytes()
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            pdf_doc,
+            content_type="application/pdf",
+        )
+
+        success, error, data = _process_pdf("/tmp/file.pdf", f)
+
+        self.assertTrue(success)
+        mock_ocr.assert_called_once()
+
+    def test_process_upload_service_unsupported_extension(self):
+        from file_processing.services.upload_service import process_upload
+
+        f = SimpleUploadedFile(
+            "file.xyz",
+            b"data",
+            content_type="application/octet-stream",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertIn("Unsupported file type", error)
+
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_validate_file_failure(self, mock_validate):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (False, "Invalid file")
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            b"%PDF-1.4",
+            content_type="application/pdf",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "Invalid file")
+
+    @patch("file_processing.services.upload_service._process_pdf")
+    @patch("file_processing.services.upload_service.save_temp_file")
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_pdf_processing_failure(
+        self, mock_validate_file, mock_mime, mock_save, mock_pdf
+    ):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate_file.return_value = (True, None)
+        mock_mime.return_value = (True, None)
+        mock_save.return_value = "/tmp/test.pdf"
+        mock_pdf.return_value = (False, "PDF error", None)
+
+        f = SimpleUploadedFile(
+            "doc.pdf",
+            b"%PDF-1.4",
+            content_type="application/pdf",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "PDF error")
+
+    @patch("file_processing.services.upload_service.validate_file")
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    @patch("file_processing.services.upload_service.save_temp_file")
+    def test_process_upload_else_branch_unsupported_extension(
+        self, mock_save, mock_mime, mock_validate
+    ):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (True, None)
+        mock_mime.return_value = (True, None)
+        mock_save.return_value = "/tmp/test.doc"
+
+        f = SimpleUploadedFile(
+            "file.doc",
+            b"dummy",
+            content_type="application/msword",
+        )
+
+        success, error, _, _ = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "Unsupported file type")
+
+    def test_get_empty_page_numbers_invalid_data(self):
+        self.assertEqual(_get_empty_page_numbers(None), [])
+        self.assertEqual(_get_empty_page_numbers({}), [])
+        self.assertEqual(_get_empty_page_numbers({"other_key": "val"}), [])
