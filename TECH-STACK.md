@@ -62,3 +62,13 @@ Aplikasi ini menggunakan arsitektur client-server dengan pemisahan yang jelas an
 | Framework | Django 6.0.3 | Web framework utama |
 | API Layer | Django REST Framework 3.16.1 | Pembuatan REST API |
 | ORM / Database | Django ORM \+ PostgreSQL | Manajemen data |
+
+## **4.2 Library Konversi File** 
+
+| Library | Format Input | Fungsi |
+| ----- | ----- | ----- |
+| pdfplumber | PDF | Ekstraksi tabel dan teks dari PDF terstruktur |
+| PyPDF2 | PDF | Validasi PDF |
+| openpyxl | XLSX, XLS | Baca & tulis file Excel modern |
+| xlrd | XLS | Baca file Excel lama (.xls) |
+| pytesseract | Gambar scan | OCR untuk file gambar / PDF scan |
