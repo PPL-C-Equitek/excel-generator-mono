@@ -52,3 +52,13 @@ Aplikasi ini menggunakan arsitektur client-server dengan pemisahan yang jelas an
 | Backend API | Django \+ DRF | REST API, validasi, logika konversi |
 | Database | PostgreSQL | Simpan metadata *file*, riwayat konversi, user |
 | File Storage | VM File System | Simpan *file* upload dan hasil konversi |
+
+# **4\. Backend \- Django**
+
+## **4.1 Spesifikasi Teknis**
+
+| Komponen | Teknologi / Versi | Keterangan |
+| ----- | ----- | ----- |
+| Framework | Django 6.0.3 | Web framework utama |
+| API Layer | Django REST Framework 3.16.1 | Pembuatan REST API |
+| ORM / Database | Django ORM \+ PostgreSQL | Manajemen data |
