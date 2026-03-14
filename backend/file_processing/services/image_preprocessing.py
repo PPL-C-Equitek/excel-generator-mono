@@ -159,7 +159,6 @@ def deskew_image(image_array: np.ndarray) -> np.ndarray:
     )
     return rotated
 
-
 def preprocess_image(pil_image: Image.Image) -> Image.Image:
     """Run the complete preprocessing pipeline on a PIL Image.
 

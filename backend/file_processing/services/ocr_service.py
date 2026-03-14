@@ -27,6 +27,7 @@ from PyPDF2 import PdfReader
 
 from file_processing.extractors.ocr.easyocr_engine import EasyOCREngine
 from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
+from file_processing.extractors.ocr.easyocr_engine import EasyOCREngine
 from file_processing.extractors.pdf_ocr_extractor import PdfOcrExtractor
 from file_processing.services.ocr_config import (
     CONFIDENCE_THRESHOLD,
