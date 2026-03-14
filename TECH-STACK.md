@@ -81,3 +81,15 @@ backend/
 ├── llm/                       \# Modul integrasi LLM: ekstraksi struktur data, validasi hasil, dan reasoning pipeline  
 ├── config/                  \# Konfigurasi inti aplikasi Django (settings, URL routing, WSGI/ASGI)  
 └── requirements.txt   \# Daftar dependensi Python yang digunakan oleh backend
+
+# **5\. Frontend \- Next.js**
+
+## **5.1 Spesifikasi Teknis**
+
+| Komponen | Teknologi / Versi | Keterangan |
+| ----- | ----- | ----- |
+| Framework | Next.js 16+ (App Router) | Framework React dengan SSR/SSG |
+| Language | TypeScript | Type safety untuk kode lebih robust |
+| Styling | Tailwind CSS | Utility-first CSS framework |
+| HTTP Client | Fetch API | Komunikasi ke Django API |
+| File Upload | React DragEvent | Drag & drop upload experience |
