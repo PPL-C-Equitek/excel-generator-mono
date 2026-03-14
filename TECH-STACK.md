@@ -93,3 +93,14 @@ backend/
 | Styling | Tailwind CSS | Utility-first CSS framework |
 | HTTP Client | Fetch API | Komunikasi ke Django API |
 | File Upload | React DragEvent | Drag & drop upload experience |
+
+# **6\. Deployment & Infrastructure**
+
+| Komponen | Teknologi | Keterangan |
+| ----- | ----- | ----- |
+| Backend Server | Gunicorn \+ Nginx | WSGI server \+ reverse proxy |
+| Frontend | Npm \+ Nginx | Deploy [Next.js](http://Next.js) \+ reverse proxy |
+| CI/CD | GitHub Actions | *Automated testing* & *deployment* |
+| File Storage (Prod) | VM File System | Object storage untuk file |
+| SSL | Let's Encrypt / Certbot | HTTPS |
+| Database | PostgreSQL |  |
