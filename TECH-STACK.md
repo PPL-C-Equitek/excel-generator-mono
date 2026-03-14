@@ -41,3 +41,14 @@ Next.js dipilih sebagai kerangka kerja *frontend* utama untuk menghadirkan antar
    Fitur *API Routes* memungkinkan eksekusi logika ringan di sisi *serverless* tanpa memerlukan infrastruktur *backend* terpisah untuk tugas-tugas sederhana, sehingga arsitektur menjadi lebih ramping.  
 5. **Keamanan Kode dengan TypeScript**  
    Dukungan bawaan untuk TypeScript memastikan deteksi kesalahan lebih dini selama proses pengembangan (*type-safety*), menghasilkan basis kode yang lebih stabil dan mudah di *debug*.
+
+# **3\. Arsitektur Sistem**
+
+Aplikasi ini menggunakan arsitektur client-server dengan pemisahan yang jelas antara frontend dan backend. File conversion yang berat ditangani secara asynchronous menggunakan task queue.
+
+| Layer | Teknologi | Peran |
+| ----- | ----- | ----- |
+| Frontend | Next.js 14+ | UI, upload *file*, tampilkan hasil konversi, menampilkan riwayat |
+| Backend API | Django \+ DRF | REST API, validasi, logika konversi |
+| Database | PostgreSQL | Simpan metadata *file*, riwayat konversi, user |
+| File Storage | VM File System | Simpan *file* upload dan hasil konversi |
