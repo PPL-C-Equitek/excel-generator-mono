@@ -72,3 +72,12 @@ Aplikasi ini menggunakan arsitektur client-server dengan pemisahan yang jelas an
 | openpyxl | XLSX, XLS | Baca & tulis file Excel modern |
 | xlrd | XLS | Baca file Excel lama (.xls) |
 | pytesseract | Gambar scan | OCR untuk file gambar / PDF scan |
+
+## **4.3 Struktur Direktori Backend**
+
+backend/  
+├── api/                        \# Modul yang menangani endpoint API publik  
+├── file\_processing/    \# Modul untuk pemrosesan file: ekstraksi teks  
+├── llm/                       \# Modul integrasi LLM: ekstraksi struktur data, validasi hasil, dan reasoning pipeline  
+├── config/                  \# Konfigurasi inti aplikasi Django (settings, URL routing, WSGI/ASGI)  
+└── requirements.txt   \# Daftar dependensi Python yang digunakan oleh backend
