@@ -42,3 +42,6 @@ bash scripts/init-db.sh
 
 Catatan:
 - Badge coverage diperbarui otomatis oleh workflow `backend.yml` dan `frontend.yml` saat ada `push` ke branch `main`.
+
+## Tech Stack
+For the tech stack details, you can read it here: [Tech Stack](./TECH-STACK.md)
