@@ -1,66 +1,164 @@
-import re
-from PyPDF2 import PdfReader
-from typing import Dict, Any
+"""
+Multi-stage OCR service.
 
+Pipeline overview (for PDFs):
+  1. Attempt direct text extraction (PyPDF2).
+  2. If text layer is sufficient ⟶ return immediately.
+  3. Convert scanned pages to images at 300 DPI.
+  4. Preprocess images (grayscale, denoise, threshold, deskew).
+  5. Run Tesseract OCR with --oem 3 / --psm 6.
+  6. If average confidence < threshold ⟶ fallback to EasyOCR.
+  7. Return structured per-page results.
+
+For standalone images:
+  - Run step 4 to 6 directly.
+"""
+
+import logging
+import re
+from typing import Any, Dict, List
+
+from PyPDF2 import PdfReader
 from pdf2image import convert_from_path
 
 from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
+from file_processing.extractors.ocr.easyocr_engine import EasyOCREngine
 from file_processing.extractors.pdf_ocr_extractor import PdfOcrExtractor
+from file_processing.services.ocr_config import (
+    CONFIDENCE_THRESHOLD,
+    PDF_TO_IMAGE_DPI,
+    TEXT_LAYER_MIN_CHARS_PER_PAGE,
+)
+
+logger = logging.getLogger(__name__)
+
 
 class OCRService:
-    THRESHOLD_TEXT_LENGTH = 50 # If the PDF has fewer characters per page on average, treat as scanned.
+    """Orchestrates the multi-stage OCR pipeline."""
+
+    THRESHOLD_TEXT_LENGTH = TEXT_LAYER_MIN_CHARS_PER_PAGE
 
     @staticmethod
-    def split_sentences(text: str):
+    def split_sentences(text: str) -> List[str]:
+        """Split *text* on sentence boundaries and newlines."""
         sentences = re.split(r'(?<=[.!?])\s+|\n+', text)
         return [s.strip() for s in sentences if s.strip()]
 
     @classmethod
-    def process_pdf_pages(cls, file_path: str, page_numbers: list[int]) -> Dict[str, Any]:
+    def _try_easyocr_fallback(cls, image) -> str:
+        """Run EasyOCR on a single image and return extracted text.
+
+        Called when Tesseract confidence is below the threshold.
         """
-        Run OCR on specific pages of a PDF.
+        try:
+            engine = EasyOCREngine()
+            text, conf = engine.extract_text_with_confidence(image)
+            logger.info(
+                "EasyOCR fallback: confidence=%.1f%%, chars=%d",
+                conf, len(text),
+            )
+            return text
+        except ImportError:
+            logger.warning(
+                "EasyOCR is not installed; skipping fallback. "
+                "Install with: pip install easyocr"
+            )
+            return ""
+        except Exception:
+            logger.exception("EasyOCR fallback failed")
+            return ""
+
+    @classmethod
+    def _ocr_single_image(cls, image, engine: TesseractEngine) -> str:
+        """Run OCR on a single image with confidence-based fallback.
+
+        1. Tesseract with preprocessing.
+        2. If confidence < threshold → try EasyOCR.
+        3. Return whichever produced more text.
+        """
+        text, confidence = engine.extract_text_with_confidence(image)
+
+        logger.info(
+            "Tesseract OCR: confidence=%.1f%%, chars=%d",
+            confidence, len(text),
+        )
+
+        if confidence < CONFIDENCE_THRESHOLD:
+            logger.info(
+                "Confidence %.1f%% < threshold %.1f%%; attempting EasyOCR fallback",
+                confidence, CONFIDENCE_THRESHOLD,
+            )
+            fallback_text = cls._try_easyocr_fallback(image)
+
+            if len(fallback_text.strip()) > len(text.strip()):
+                logger.info("Using EasyOCR result (%d chars vs Tesseract %d chars)",
+                            len(fallback_text), len(text))
+                return fallback_text
+            else:
+                logger.info("Keeping Tesseract result despite low confidence")
+
+        return text
+
+    @classmethod
+    def process_pdf_pages(cls, file_path: str, page_numbers: List[int]) -> Dict[str, Any]:
+        """Run OCR on specific pages of a PDF.
 
         Args:
-            file_path: Path to PDF file.
+            file_path: Path to the PDF file.
             page_numbers: 1-based page numbers to OCR.
 
         Returns:
-            dict matching NonOCR schema: {"content": [{"page": N, "text": [...]}, ...]}
+            ``{"content": [{"page": N, "text": [...]}, ...]}``
         """
+        logger.info(
+            "OCR processing %d specific page(s) from '%s'",
+            len(page_numbers), file_path,
+        )
         try:
             engine = TesseractEngine()
-            content = []
+            content: List[Dict[str, Any]] = []
 
             for page_num in page_numbers:
                 images = convert_from_path(
-                    file_path, first_page=page_num, last_page=page_num
+                    file_path,
+                    first_page=page_num,
+                    last_page=page_num,
+                    dpi=PDF_TO_IMAGE_DPI,
                 )
                 if images:
-                    page_text = engine.extract_text(images[0])
+                    page_text = cls._ocr_single_image(images[0], engine)
                     lines = cls.split_sentences(page_text)
                 else:
                     lines = []
 
-                content.append({
-                    "page": page_num,
-                    "text": lines,
-                })
+                content.append({"page": page_num, "text": lines})
+
+                logger.info(
+                    "Page %d: extracted %d line(s) via OCR", page_num, len(lines),
+                )
 
             return {"content": content}
 
         except Exception as e:
+            logger.exception("OCRService.process_pdf_pages failed")
             raise ValueError(f"OCRService failed to process PDF pages: {str(e)}")
 
     @classmethod
     def process_pdf(cls, file_path: str) -> Dict[str, Any]:
-        """
-        Determines if a PDF is text-based or scanned.
-        Returns extracted text using standard PyPDF2 if text-based, or uses OCR if it is scanned.
-        """
-        try:
-            reader = PdfReader(file_path)
-            content = []
+        """Process a full PDF through the multi-stage pipeline.
 
+        Stage 1 — Direct text extraction (PyPDF2).
+        Stage 2 — If text layer is insufficient → OCR with fallback.
+
+        Returns:
+            ``{"content": [{"page": N, "type": "text", "lines": [...]}, ...]}``
+        """
+        logger.info("OCR pipeline started for '%s'", file_path)
+
+        try:
+            # ---- Stage 1: direct text extraction ----
+            reader = PdfReader(file_path)
+            content: List[Dict[str, Any]] = []
             extracted_text = ""
 
             for page_number, page in enumerate(reader.pages, start=1):
@@ -74,30 +172,109 @@ class OCRService:
                     content.append({
                         "page": page_number,
                         "type": "text",
-                        "lines": lines
+                        "lines": lines,
                     })
 
             num_pages = len(reader.pages)
+            chars_per_page = len(extracted_text.strip()) / num_pages if num_pages > 0 else 0
 
-            if num_pages > 0 and len(extracted_text.strip()) / num_pages > cls.THRESHOLD_TEXT_LENGTH:
+            logger.info(
+                "Stage 1 — text extraction: %d page(s), %d total chars, "
+                "%.0f chars/page (threshold=%d)",
+                num_pages, len(extracted_text.strip()),
+                chars_per_page, cls.THRESHOLD_TEXT_LENGTH,
+            )
+
+            if num_pages > 0 and chars_per_page > cls.THRESHOLD_TEXT_LENGTH:
+                logger.info(
+                    "Text layer is sufficient — returning direct extraction "
+                    "(method=PyPDF2, chars=%d)", len(extracted_text.strip()),
+                )
                 return {"content": content}
+
+            # ---- Stage 2: OCR fallback for scanned PDF ----
+            logger.info(
+                "Text layer insufficient; switching to OCR pipeline "
+                "(method=Tesseract+EasyOCR fallback)",
+            )
 
             engine = TesseractEngine()
             extractor = PdfOcrExtractor(ocr_engine=engine)
+            ocr_pages = extractor.extract_pages(file_path)
 
-            ocr_text = extractor.extract(file_path)
+            ocr_content: List[Dict[str, Any]] = []
+            for page_data in ocr_pages:
+                page_text = page_data["text"]
+                lines = cls.split_sentences(page_text) if page_text else []
+                confidence = page_data.get("confidence", 0.0)
 
-            lines = cls.split_sentences(ocr_text)
+                logger.info(
+                    "Page %d OCR: %d line(s), confidence=%.1f%%",
+                    page_data["page"], len(lines), confidence,
+                )
 
-            return {
-                "content": [
-                    {
-                        "page": 1,
-                        "type": "text",
-                        "lines": lines
-                    }
-                ]
-            }
+                # If Tesseract confidence is low, try EasyOCR on this page.
+                if confidence < CONFIDENCE_THRESHOLD and page_text:
+                    logger.info(
+                        "Page %d: low confidence (%.1f%%); trying EasyOCR",
+                        page_data["page"], confidence,
+                    )
+                    # Re-render the page image for EasyOCR.
+                    images = convert_from_path(
+                        file_path,
+                        first_page=page_data["page"],
+                        last_page=page_data["page"],
+                        dpi=PDF_TO_IMAGE_DPI,
+                    )
+                    if images:
+                        fallback_text = cls._try_easyocr_fallback(images[0])
+                        if len(fallback_text.strip()) > len(page_text.strip()):
+                            lines = cls.split_sentences(fallback_text)
+                            logger.info(
+                                "Page %d: using EasyOCR result (%d lines)",
+                                page_data["page"], len(lines),
+                            )
+
+                ocr_content.append({
+                    "page": page_data["page"],
+                    "type": "text",
+                    "lines": lines,
+                })
+
+            logger.info(
+                "OCR pipeline completed for '%s': %d page(s) processed",
+                file_path, len(ocr_content),
+            )
+            return {"content": ocr_content}
 
         except Exception as e:
+            logger.exception("OCRService.process_pdf failed")
             raise ValueError(f"OCRService failed to process PDF: {str(e)}")
+
+    @classmethod
+    def process_image(cls, image) -> Dict[str, Any]:
+        """Run OCR on a standalone image (not from a PDF).
+
+        Applies preprocessing and confidence-based fallback.
+
+        Args:
+            image: A PIL Image.
+
+        Returns:
+            ``{"content": [{"page": 1, "type": "text", "lines": [...]}]}``
+        """
+        logger.info("Processing standalone image via OCR")
+
+        engine = TesseractEngine()
+        text = cls._ocr_single_image(image, engine)
+        lines = cls.split_sentences(text)
+
+        logger.info("Standalone image OCR: %d line(s) extracted", len(lines))
+
+        return {
+            "content": [{
+                "page": 1,
+                "type": "text",
+                "lines": lines,
+            }],
+        }
