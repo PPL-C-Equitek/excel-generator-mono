@@ -19,14 +19,12 @@ import re
 from typing import Any, Dict, List, Union
 
 from PyPDF2 import PdfReader
-from pdf2image import convert_from_path
 
 from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
 from file_processing.extractors.ocr.easyocr_engine import EasyOCREngine
 from file_processing.extractors.pdf_ocr_extractor import PdfOcrExtractor
 from file_processing.services.ocr_config import (
     CONFIDENCE_THRESHOLD,
-    PDF_TO_IMAGE_DPI,
     TEXT_LAYER_MIN_CHARS_PER_PAGE,
 )
 
@@ -116,20 +114,15 @@ class OCRService:
             len(page_numbers), file_path,
         )
         try:
+            extractor = PdfOcrExtractor()
+            page_images = extractor.convert_pages(file_path, page_numbers=page_numbers)
+
             engine = TesseractEngine()
             content: List[Dict[str, Any]] = []
 
-            for page_num in page_numbers:
-                images = convert_from_path(
-                    file_path,
-                    first_page=page_num,
-                    last_page=page_num,
-                    dpi=PDF_TO_IMAGE_DPI,
-                )
-                text_blocks = []
-                if images:
-                    page_text = cls._ocr_single_image(images[0], engine)
-                    text_blocks = cls.split_sentences(page_text)
+            for page_num, image in page_images:
+                raw_text = cls._ocr_single_image(image, engine)
+                text_blocks = cls.split_sentences(raw_text)
 
                 content.append({"page": page_num, "text": text_blocks})
 
@@ -197,45 +190,23 @@ class OCRService:
                 "(method=Tesseract+EasyOCR fallback)",
             )
 
-            engine = TesseractEngine()
-            extractor = PdfOcrExtractor(ocr_engine=engine)
-            ocr_pages = extractor.extract_pages(file_path)
+            extractor = PdfOcrExtractor()
+            page_images = extractor.convert_pages(file_path)
 
+            engine = TesseractEngine()
             ocr_content: List[Dict[str, Any]] = []
-            for page_data in ocr_pages:
-                page_text = page_data["text"]
-                text_blocks = cls.split_sentences(page_text) if page_text else []
-                confidence = page_data.get("confidence", 0.0)
+
+            for page_num, image in page_images:
+                raw_text = cls._ocr_single_image(image, engine)
+                text_blocks = cls.split_sentences(raw_text)
 
                 logger.info(
-                    "Page %d OCR: %d block(s), confidence=%.1f%%",
-                    page_data["page"], len(text_blocks), confidence,
+                    "Page %d OCR: %d block(s) extracted",
+                    page_num, len(text_blocks),
                 )
 
-                # If Tesseract confidence is low, try EasyOCR on this page.
-                if confidence < CONFIDENCE_THRESHOLD and page_text:
-                    logger.info(
-                        "Page %d: low confidence (%.1f%%); trying EasyOCR",
-                        page_data["page"], confidence,
-                    )
-                    # Re-render the page image for EasyOCR.
-                    images = convert_from_path(
-                        file_path,
-                        first_page=page_data["page"],
-                        last_page=page_data["page"],
-                        dpi=PDF_TO_IMAGE_DPI,
-                    )
-                    if images:
-                        fallback_text = cls._try_easyocr_fallback(images[0])
-                        if len(fallback_text.strip()) > len(page_text.strip()):
-                            text_blocks = cls.split_sentences(fallback_text)
-                            logger.info(
-                                "Page %d: using EasyOCR result (%d blocks)",
-                                page_data["page"], len(text_blocks),
-                            )
-
                 ocr_content.append({
-                    "page": page_data["page"],
+                    "page": page_num,
                     "text": text_blocks,
                 })
 

@@ -30,27 +30,25 @@ class TestOCRService(TestCase):
         self.assertEqual(result["content"][0]["page"], 1)
         self.assertEqual(len(result["content"][0]["text"]), 3)
 
-    @patch("file_processing.services.ocr_service.PdfOcrExtractor")
     @patch("file_processing.services.ocr_service.OCRService._ocr_single_image")
+    @patch("file_processing.services.ocr_service.PdfOcrExtractor")
     @patch("file_processing.services.ocr_service.PdfReader")
-    def test_scanned_pdf_uses_ocr(self, mock_reader, mock_ocr_single, mock_extractor):
+    def test_scanned_pdf_uses_ocr(self, mock_reader, mock_extractor_cls, mock_ocr_single):
         mock_page = MagicMock()
         mock_page.extract_text.return_value = ""
 
         mock_reader.return_value.pages = [mock_page]
 
-        extractor_instance = MagicMock()
-        extractor_instance.extract_pages.return_value = [
-            {"page": 1, "text": "Raw OCR output", "confidence": 90.0}
-        ]
-        mock_extractor.return_value = extractor_instance
-        
-        with patch("file_processing.services.ocr_service.OCRService.process_pdf_pages") as mock_pages:
-            mock_pages.return_value = {"content": [{"page": 1, "text": ["OCR sentence one.", "OCR sentence two."]}]}
-            result = OCRService.process_pdf("dummy.pdf")
+        mock_image = MagicMock()
+        mock_extractor_cls.return_value.convert_pages.return_value = [(1, mock_image)]
+
+        mock_ocr_single.return_value = "OCR sentence one. OCR sentence two."
+
+        result = OCRService.process_pdf("dummy.pdf")
 
         self.assertEqual(result["content"][0]["page"], 1)
         self.assertGreater(len(result["content"][0]["text"]), 0)
+        mock_ocr_single.assert_called_once()
 
     @patch("file_processing.services.ocr_service.PdfReader")
     def test_exception_wrapping(self, mock_reader):
@@ -72,12 +70,12 @@ class TestOCRService(TestCase):
             ["Hello world.", "How are you?", "Fine."]
         )
 
-    @patch("file_processing.services.ocr_service.convert_from_path")
     @patch("file_processing.services.ocr_service.OCRService._ocr_single_image")
-    def test_process_pdf_pages_success(self, mock_ocr_single, mock_convert):
+    @patch("file_processing.services.ocr_service.PdfOcrExtractor")
+    def test_process_pdf_pages_success(self, mock_extractor_cls, mock_ocr_single):
 
         mock_image = MagicMock()
-        mock_convert.return_value = [mock_image]
+        mock_extractor_cls.return_value.convert_pages.return_value = [(1, mock_image)]
 
         mock_ocr_single.return_value = "Hello OCR from single image"
 
@@ -86,14 +84,14 @@ class TestOCRService(TestCase):
         self.assertEqual(result["content"][0]["page"], 1)
         self.assertEqual(result["content"][0]["text"], ["Hello OCR from single image"])
 
-    @patch("file_processing.services.ocr_service.convert_from_path")
-    def test_process_pdf_pages_no_images(self, mock_convert):
+    @patch("file_processing.services.ocr_service.PdfOcrExtractor")
+    def test_process_pdf_pages_no_images(self, mock_extractor_cls):
 
-        mock_convert.return_value = []
+        mock_extractor_cls.return_value.convert_pages.return_value = []
 
         result = OCRService.process_pdf_pages("/tmp/file.pdf", [1])
 
-        self.assertEqual(result["content"][0]["text"], [])
+        self.assertEqual(result["content"], [])
 
     @patch("file_processing.services.ocr_service.EasyOCREngine")
     def test_try_easyocr_fallback_success(self, mock_easyocr):
@@ -137,10 +135,10 @@ class TestOCRService(TestCase):
         self.assertEqual(result["content"][0]["page"], 1)
         self.assertEqual(result["content"][0]["text"], ["Standalone image OCR"])
 
-    @patch("file_processing.services.ocr_service.convert_from_path")
-    def test_process_pdf_pages_exception(self, mock_convert):
+    @patch("file_processing.services.ocr_service.PdfOcrExtractor")
+    def test_process_pdf_pages_exception(self, mock_extractor_cls):
 
-        mock_convert.side_effect = Exception("fail")
+        mock_extractor_cls.return_value.convert_pages.side_effect = Exception("fail")
 
         with self.assertRaises(ValueError):
             OCRService.process_pdf_pages("/tmp/file.pdf", [1])
@@ -157,20 +155,20 @@ class TestOCRService(TestCase):
 
         self.assertEqual(result["content"][0]["page"], 1)
 
+    @patch("file_processing.services.ocr_service.OCRService._ocr_single_image")
     @patch("file_processing.services.ocr_service.PdfOcrExtractor")
     @patch("file_processing.services.ocr_service.PdfReader")
-    def test_process_pdf_ocr_branch(self, mock_reader, mock_extractor):
+    def test_process_pdf_ocr_branch(self, mock_reader, mock_extractor_cls, mock_ocr_single):
 
         mock_page = MagicMock()
         mock_page.extract_text.return_value = ""
 
         mock_reader.return_value.pages = [mock_page]
 
-        extractor_instance = MagicMock()
-        extractor_instance.extract_pages.return_value = [
-            {"page": 1, "text": "OCR TEXT", "confidence": 90.0}
-        ]
-        mock_extractor.return_value = extractor_instance
+        mock_image = MagicMock()
+        mock_extractor_cls.return_value.convert_pages.return_value = [(1, mock_image)]
+
+        mock_ocr_single.return_value = "OCR TEXT"
 
         result = OCRService.process_pdf("/tmp/file.pdf")
 

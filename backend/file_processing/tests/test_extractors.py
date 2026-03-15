@@ -18,10 +18,12 @@ class TestPdfOcrExtractor(TestCase):
     def test_ocr_extracts_text_from_scanned_pdf(self, mock_convert):
         mock_convert.return_value = [MagicMock()]
         
-        engine = DummyOCREngine(text_to_return="Sample Scanned Text")
-        extractor = PdfOcrExtractor(ocr_engine=engine)
-        
-        extracted_text = extractor.extract("dummy_scanned_path.pdf")
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            engine = DummyOCREngine(text_to_return="Sample Scanned Text")
+            extractor = PdfOcrExtractor(ocr_engine=engine)
+            extracted_text = extractor.extract("dummy_scanned_path.pdf")
         
         self.assertIn("Sample Scanned Text", extracted_text)
         mock_convert.assert_called_once_with("dummy_scanned_path.pdf", dpi=300)
@@ -38,10 +40,12 @@ class TestPdfOcrExtractor(TestCase):
                 self.page_count += 1
                 return f"Text from page {self.page_count}"
 
-        engine = MultiPageDummyEngine()
-        extractor = PdfOcrExtractor(ocr_engine=engine)
-        
-        extracted_text = extractor.extract("dummy_multi_page.pdf")
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            engine = MultiPageDummyEngine()
+            extractor = PdfOcrExtractor(ocr_engine=engine)
+            extracted_text = extractor.extract("dummy_multi_page.pdf")
         
         self.assertIn("Text from page 1", extracted_text)
         self.assertIn("Text from page 2", extracted_text)
@@ -55,10 +59,12 @@ class TestPdfOcrExtractor(TestCase):
         class MockEngine(BaseOCREngine):
             def extract_text(self, image): return "test"
             def extract_text_with_confidence(self, image): return "Text", 99.0
-            
-        extractor = PdfOcrExtractor(ocr_engine=MockEngine())
-        
-        results = extractor.extract_pages("dummy.pdf", page_numbers=[2])
+
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            extractor = PdfOcrExtractor(ocr_engine=MockEngine())
+            results = extractor.extract_pages("dummy.pdf", page_numbers=[2])
         
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["page"], 2)
@@ -73,10 +79,12 @@ class TestPdfOcrExtractor(TestCase):
         class MockEngine(BaseOCREngine):
             def extract_text(self, image): return "test"
             def extract_text_with_confidence(self, image): return "Text", 85.0
-            
-        extractor = PdfOcrExtractor(ocr_engine=MockEngine())
-        
-        results = extractor.extract_pages("dummy.pdf")
+
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            extractor = PdfOcrExtractor(ocr_engine=MockEngine())
+            results = extractor.extract_pages("dummy.pdf")
         
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]["page"], 1)
@@ -84,11 +92,49 @@ class TestPdfOcrExtractor(TestCase):
         mock_convert.assert_called_once_with("dummy.pdf", dpi=300)
 
     def test_ocr_engine_abstraction(self):
-        mock_engine = MagicMock(spec=BaseOCREngine)
-        mock_engine.extract_text.return_value = "Mocked Text"
-        
-        extractor = PdfOcrExtractor(ocr_engine=mock_engine)
-        self.assertIs(extractor.ocr_engine, mock_engine)
+        """PdfOcrExtractor can be created without an engine (new API)."""
+        extractor = PdfOcrExtractor()
+        self.assertIsNone(extractor.ocr_engine)
+
+    @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
+    def test_convert_pages_all(self, mock_convert):
+        """convert_pages() returns (page_num, image) tuples for all pages."""
+        mock_images = [MagicMock(), MagicMock()]
+        mock_convert.return_value = mock_images
+
+        extractor = PdfOcrExtractor()
+        result = extractor.convert_pages("dummy.pdf")
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0], 1)  # page number
+        self.assertEqual(result[1][0], 2)
+        self.assertIs(result[0][1], mock_images[0])  # image
+        self.assertIs(result[1][1], mock_images[1])
+        mock_convert.assert_called_once_with("dummy.pdf", dpi=300)
+
+    @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
+    def test_convert_pages_specific(self, mock_convert):
+        """convert_pages() returns only requested page numbers."""
+        mock_image = MagicMock()
+        mock_convert.return_value = [mock_image]
+
+        extractor = PdfOcrExtractor()
+        result = extractor.convert_pages("dummy.pdf", page_numbers=[3])
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][0], 3)
+        self.assertIs(result[0][1], mock_image)
+        mock_convert.assert_called_once_with("dummy.pdf", first_page=3, last_page=3, dpi=300)
+
+    @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
+    def test_convert_pages_empty(self, mock_convert):
+        """convert_pages() returns empty list when no images."""
+        mock_convert.return_value = []
+
+        extractor = PdfOcrExtractor()
+        result = extractor.convert_pages("dummy.pdf")
+
+        self.assertEqual(result, [])
         
     def test_accuracy_threshold(self):
         from file_processing.utils.metrics import calculate_accuracy
