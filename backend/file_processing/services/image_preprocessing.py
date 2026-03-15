@@ -132,7 +132,7 @@ def deskew_image(image_array: np.ndarray) -> np.ndarray:
     estimate skew angle.  Only corrects angles within ±15° to avoid
     rotating correctly-oriented images.
     """
-    coords = np.column_stack(np.where(image_array > 0))
+    coords = np.column_stack(np.nonzero(image_array > 0))
     if coords.shape[0] < 10:
         # Not enough foreground pixels to estimate skew.
         return image_array
