@@ -16,7 +16,7 @@ For standalone images:
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 from PyPDF2 import PdfReader
 from pdf2image import convert_from_path
@@ -31,6 +31,7 @@ from file_processing.services.ocr_config import (
 )
 
 logger = logging.getLogger(__name__)
+TextBlock = Union[str, List[List[str]]]
 
 
 class OCRService:
@@ -125,16 +126,15 @@ class OCRService:
                     last_page=page_num,
                     dpi=PDF_TO_IMAGE_DPI,
                 )
+                text_blocks = []
                 if images:
                     page_text = cls._ocr_single_image(images[0], engine)
-                    lines = cls.split_sentences(page_text)
-                else:
-                    lines = []
+                    text_blocks = cls.split_sentences(page_text)
 
-                content.append({"page": page_num, "text": lines})
+                content.append({"page": page_num, "text": text_blocks})
 
                 logger.info(
-                    "Page %d: extracted %d line(s) via OCR", page_num, len(lines),
+                    "Page %d: extracted %d block(s) via OCR", page_num, len(text_blocks),
                 )
 
             return {"content": content}
@@ -151,7 +151,7 @@ class OCRService:
         Stage 2 — If text layer is insufficient → OCR with fallback.
 
         Returns:
-            ``{"content": [{"page": N, "type": "text", "lines": [...]}, ...]}``
+            ``{"content": [{"page": N, "text": [...]}, ...]}``
         """
         logger.info("OCR pipeline started for '%s'", file_path)
 
@@ -166,13 +166,12 @@ class OCRService:
                 text = page.extract_text() or ""
                 extracted_text += text
 
-                lines = cls.split_sentences(text)
+                sentences = cls.split_sentences(text)
 
-                if lines:
+                if sentences:
                     content.append({
                         "page": page_number,
-                        "type": "text",
-                        "lines": lines,
+                        "text": sentences,
                     })
 
             num_pages = len(reader.pages)
@@ -205,12 +204,12 @@ class OCRService:
             ocr_content: List[Dict[str, Any]] = []
             for page_data in ocr_pages:
                 page_text = page_data["text"]
-                lines = cls.split_sentences(page_text) if page_text else []
+                text_blocks = cls.split_sentences(page_text) if page_text else []
                 confidence = page_data.get("confidence", 0.0)
 
                 logger.info(
-                    "Page %d OCR: %d line(s), confidence=%.1f%%",
-                    page_data["page"], len(lines), confidence,
+                    "Page %d OCR: %d block(s), confidence=%.1f%%",
+                    page_data["page"], len(text_blocks), confidence,
                 )
 
                 # If Tesseract confidence is low, try EasyOCR on this page.
@@ -229,16 +228,15 @@ class OCRService:
                     if images:
                         fallback_text = cls._try_easyocr_fallback(images[0])
                         if len(fallback_text.strip()) > len(page_text.strip()):
-                            lines = cls.split_sentences(fallback_text)
+                            text_blocks = cls.split_sentences(fallback_text)
                             logger.info(
-                                "Page %d: using EasyOCR result (%d lines)",
-                                page_data["page"], len(lines),
+                                "Page %d: using EasyOCR result (%d blocks)",
+                                page_data["page"], len(text_blocks),
                             )
 
                 ocr_content.append({
                     "page": page_data["page"],
-                    "type": "text",
-                    "lines": lines,
+                    "text": text_blocks,
                 })
 
             logger.info(
@@ -261,20 +259,19 @@ class OCRService:
             image: A PIL Image.
 
         Returns:
-            ``{"content": [{"page": 1, "type": "text", "lines": [...]}]}``
+            ``{"content": [{"page": 1, "text": [...]}]}``
         """
         logger.info("Processing standalone image via OCR")
 
         engine = TesseractEngine()
-        text = cls._ocr_single_image(image, engine)
-        lines = cls.split_sentences(text)
+        raw_text = cls._ocr_single_image(image, engine)
+        text_blocks = cls.split_sentences(raw_text)
 
-        logger.info("Standalone image OCR: %d line(s) extracted", len(lines))
+        logger.info("Standalone image OCR: %d block(s) extracted", len(text_blocks))
 
         return {
             "content": [{
                 "page": 1,
-                "type": "text",
-                "lines": lines,
+                "text": text_blocks,
             }],
         }
