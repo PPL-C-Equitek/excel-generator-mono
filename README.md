@@ -20,25 +20,34 @@ sudo apt update
 sudo apt install -y poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-ind libmagic1
 ```
 
+### Environment files
+Create the backend environment file in the repository root:
+
+```bash
+cp .env.example .env
+```
+
+Create the frontend environment file:
+
+```bash
+printf "NEXT_PUBLIC_API_URL=http://localhost:8000\n" > frontend/.env.local
+```
+
 ### Backend
 1. Navigate to the backend directory:
    ```bash
    cd backend
    ```
-2. Copy the environment file:
-   ```bash
-   cp .env.example .env
-   ```
-3. Update `.env` with the required local values.
-4. Install dependencies:
+2. Update the root `.env` with the required local values.
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-5. Apply migrations:
+4. Apply migrations:
    ```bash
    python manage.py migrate
    ```
-6. Start the backend server:
+5. Start the backend server:
    ```bash
    python manage.py runserver
    ```
@@ -48,11 +57,12 @@ sudo apt install -y poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-
    ```bash
    cd frontend
    ```
-2. Install dependencies:
+2. Update `frontend/.env.local` if the backend runs on a different URL.
+3. Install dependencies:
    ```bash
    npm install
    ```
-3. Start the frontend server:
+4. Start the frontend server:
    ```bash
    npm run dev
    ```
