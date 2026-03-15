@@ -4,16 +4,12 @@ import numpy as np
 from PIL import Image
 
 from file_processing.services.image_preprocessing import (
-    apply_adaptive_thresholding,
     apply_thresholding,
     convert_to_grayscale,
     deskew_image,
-    morphological_cleanup,
     normalize_contrast,
     preprocess_image,
     remove_noise,
-    upscale_image,
-    add_border_padding,
 )
 
 class TestImagePreprocessing(unittest.TestCase):
