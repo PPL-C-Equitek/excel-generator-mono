@@ -30,7 +30,7 @@ cp .env.example .env
 Create the frontend environment file:
 
 ```bash
-printf "NEXT_PUBLIC_API_URL=http://localhost:8000\n" > frontend/.env.local
+cp .env.example frontend/.env
 ```
 
 ### Backend
@@ -57,7 +57,7 @@ printf "NEXT_PUBLIC_API_URL=http://localhost:8000\n" > frontend/.env.local
    ```bash
    cd frontend
    ```
-2. Update `frontend/.env.local` if the backend runs on a different URL.
+2. Update `frontend/.env` if the backend runs on a different URL.
 3. Install dependencies:
    ```bash
    npm install
