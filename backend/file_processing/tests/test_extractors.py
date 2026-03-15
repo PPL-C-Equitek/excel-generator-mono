@@ -26,7 +26,7 @@ class TestPdfOcrExtractor(TestCase):
             extracted_text = extractor.extract("dummy_scanned_path.pdf")
         
         self.assertIn("Sample Scanned Text", extracted_text)
-        mock_convert.assert_called_once_with("dummy_scanned_path.pdf", dpi=300)
+        mock_convert.assert_called_once_with("dummy_scanned_path.pdf", dpi=400)
 
     @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
     def test_multiple_pages_ocr(self, mock_convert):
@@ -50,7 +50,7 @@ class TestPdfOcrExtractor(TestCase):
         self.assertIn("Text from page 1", extracted_text)
         self.assertIn("Text from page 2", extracted_text)
         self.assertIn("Text from page 3", extracted_text)
-        mock_convert.assert_called_once_with("dummy_multi_page.pdf", dpi=300)
+        mock_convert.assert_called_once_with("dummy_multi_page.pdf", dpi=400)
 
     @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
     def test_extract_pages_specific(self, mock_convert):
@@ -70,7 +70,7 @@ class TestPdfOcrExtractor(TestCase):
         self.assertEqual(results[0]["page"], 2)
         self.assertEqual(results[0]["text"], "Text")
         self.assertEqual(results[0]["confidence"], 99.0)
-        mock_convert.assert_called_once_with("dummy.pdf", first_page=2, last_page=2, dpi=300)
+        mock_convert.assert_called_once_with("dummy.pdf", first_page=2, last_page=2, dpi=400)
 
     @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
     def test_extract_pages_all(self, mock_convert):
@@ -89,7 +89,7 @@ class TestPdfOcrExtractor(TestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]["page"], 1)
         self.assertEqual(results[1]["page"], 2)
-        mock_convert.assert_called_once_with("dummy.pdf", dpi=300)
+        mock_convert.assert_called_once_with("dummy.pdf", dpi=400)
 
     def test_ocr_engine_abstraction(self):
         """PdfOcrExtractor can be created without an engine (new API)."""
@@ -110,7 +110,7 @@ class TestPdfOcrExtractor(TestCase):
         self.assertEqual(result[1][0], 2)
         self.assertIs(result[0][1], mock_images[0])  # image
         self.assertIs(result[1][1], mock_images[1])
-        mock_convert.assert_called_once_with("dummy.pdf", dpi=300)
+        mock_convert.assert_called_once_with("dummy.pdf", dpi=400)
 
     @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
     def test_convert_pages_specific(self, mock_convert):
@@ -124,7 +124,7 @@ class TestPdfOcrExtractor(TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0][0], 3)
         self.assertIs(result[0][1], mock_image)
-        mock_convert.assert_called_once_with("dummy.pdf", first_page=3, last_page=3, dpi=300)
+        mock_convert.assert_called_once_with("dummy.pdf", first_page=3, last_page=3, dpi=400)
 
     @patch('file_processing.extractors.pdf_ocr_extractor.convert_from_path')
     def test_convert_pages_empty(self, mock_convert):
@@ -236,7 +236,8 @@ class TestTesseractEngine(TestCase):
         result = engine.extract_text("image")
 
         self.assertEqual(result, "hello")
-        mock_pytesseract.image_to_string.assert_called_once_with("image", lang="eng+ind", config="--oem 3 --psm 6")
+        # Multi-PSM strategy calls image_to_string for each PSM mode [3, 6, 4]
+        self.assertEqual(mock_pytesseract.image_to_string.call_count, 3)
 
     @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract", None)
     def test_tesseract_not_installed(self):
@@ -252,7 +253,10 @@ class TestTesseractEngine(TestCase):
         mock_pytesseract.Output.DICT = "dict"
         mock_pytesseract.image_to_data.return_value = {
             "text": ["", "Hello", "world", ""],
-            "conf": [-1, 90.0, 80.0, -1]
+            "conf": [-1, 90.0, 80.0, -1],
+            "block_num": [1, 1, 1, 1],
+            "par_num": [1, 1, 1, 1],
+            "line_num": [1, 1, 1, 1],
         }
         
         engine = TesseractEngine(apply_preprocessing=True)
@@ -261,9 +265,8 @@ class TestTesseractEngine(TestCase):
         self.assertEqual(text, "Hello world")
         self.assertEqual(conf, 85.0)  # (90 + 80) / 2
         mock_preprocess.assert_called_once_with("raw_image")
-        mock_pytesseract.image_to_data.assert_called_once_with(
-            "processed_image", lang="eng+ind", config="--oem 3 --psm 6", output_type="dict"
-        )
+        # Multi-PSM strategy calls image_to_data for each PSM mode [3, 6, 4]
+        self.assertEqual(mock_pytesseract.image_to_data.call_count, 3)
 
     @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
     @patch("file_processing.extractors.ocr.tesseract_engine.preprocess_image")
@@ -275,9 +278,8 @@ class TestTesseractEngine(TestCase):
         result = engine.extract_text("raw_image")
         
         self.assertEqual(result, "hello")
-        mock_pytesseract.image_to_string.assert_called_once_with(
-            "raw_image", lang="eng+ind", config="--oem 3 --psm 6"
-        )
+        # Preprocessing failed → original image used; multi-PSM calls for each mode
+        self.assertEqual(mock_pytesseract.image_to_string.call_count, 3)
 
 class TestEasyOCREngine(TestCase):
 
@@ -285,13 +287,13 @@ class TestEasyOCREngine(TestCase):
     def test_easyocr_extract(self, mock_easyocr):
         mock_reader = MagicMock()
         mock_reader.readtext.return_value = [
-            ([0,0,1,1], "Line 1", 0.95),
-            ([0,0,1,1], "Line 2", 0.85)
+            ([[0, 0], [100, 0], [100, 20], [0, 20]], "Line 1", 0.95),
+            ([[0, 30], [100, 30], [100, 50], [0, 50]], "Line 2", 0.85),
         ]
         mock_easyocr.Reader.return_value = mock_reader
         
         from file_processing.extractors.ocr.easyocr_engine import EasyOCREngine
-        engine = EasyOCREngine(languages=["en"], gpu=False)
+        engine = EasyOCREngine(languages=["en"], gpu=False, apply_preprocessing=False)
         result = engine.extract_text("image")
         
         self.assertEqual(result, "Line 1\nLine 2")
@@ -301,15 +303,15 @@ class TestEasyOCREngine(TestCase):
     def test_easyocr_extract_with_confidence(self, mock_easyocr):
         mock_reader = MagicMock()
         mock_reader.readtext.return_value = [
-            ([0,0,1,1], "Line 1", 0.95),
-            ([0,0,1,1], "Line 2", 0.85)
+            ([[0, 0], [100, 0], [100, 20], [0, 20]], "Line 1", 0.95),
+            ([[0, 30], [100, 30], [100, 50], [0, 50]], "Line 2", 0.85),
         ]
         mock_easyocr.Reader.return_value = mock_reader
         
         import file_processing.extractors.ocr.easyocr_engine as easyocr_module
         easyocr_module._reader_cache = None
         
-        engine = easyocr_module.EasyOCREngine()
+        engine = easyocr_module.EasyOCREngine(apply_preprocessing=False)
         text, conf = engine.extract_text_with_confidence("image")
         
         self.assertEqual(text, "Line 1\nLine 2")

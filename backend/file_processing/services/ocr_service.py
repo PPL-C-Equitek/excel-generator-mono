@@ -1,27 +1,32 @@
-"""
-Multi-stage OCR service.
+"""Multi-stage OCR service — EasyOCR primary, line-by-line output.
 
 Pipeline overview (for PDFs):
   1. Attempt direct text extraction (PyPDF2).
-  2. If text layer is sufficient ⟶ return immediately.
-  3. Convert scanned pages to images at 300 DPI.
-  4. Preprocess images (grayscale, denoise, threshold, deskew).
-  5. Run Tesseract OCR with --oem 3 / --psm 6.
-  6. If average confidence < threshold ⟶ fallback to EasyOCR.
-  7. Return structured per-page results.
+  2. If text layer is sufficient ⟶ return immediately (split by newlines).
+  3. Convert scanned pages to images at 400 DPI.
+  4. Run EasyOCR with spatial line grouping (bounding-box Y-clustering).
+  5. If confidence < threshold ⟶ fallback to Tesseract.
+  6. Return structured per-page results with line-by-line text.
+
+Output format aligns with NonOCRPDFService: each page's ``"text"`` is a
+list of strings — one string per visual line.  No sentence splitting is
+performed, which preserves financial data like:
+  • Monetary amounts:  Rp 1.000.000 / $1,234.56
+  • Abbreviations:     No. 001, Ltd., Inc.
+  • Table rows:        Item   Qty   Price   Total
+  • Dates:             01.03.2026
 
 For standalone images:
-  - Run step 4 to 6 directly.
+  - Run step 4–5 directly.
 """
 
 import logging
-import re
 from typing import Any, Dict, List, Union
 
 from PyPDF2 import PdfReader
 
-from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
 from file_processing.extractors.ocr.easyocr_engine import EasyOCREngine
+from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
 from file_processing.extractors.pdf_ocr_extractor import PdfOcrExtractor
 from file_processing.services.ocr_config import (
     CONFIDENCE_THRESHOLD,
@@ -33,68 +38,71 @@ TextBlock = Union[str, List[List[str]]]
 
 
 class OCRService:
-    """Orchestrates the multi-stage OCR pipeline."""
+    """Orchestrates the EasyOCR-primary OCR pipeline."""
 
     THRESHOLD_TEXT_LENGTH = TEXT_LAYER_MIN_CHARS_PER_PAGE
 
     @staticmethod
-    def split_sentences(text: str) -> List[str]:
-        """Split *text* on sentence boundaries and newlines."""
-        sentences = re.split(r'(?<=[.!?])\s+|\n+', text)
-        return [s.strip() for s in sentences if s.strip()]
+    def split_lines(text: str) -> List[str]:
+        """Split *text* on newline boundaries.\n\n        Unlike sentence-based splitting, this preserves financial data\n        (amounts with dots/commas, abbreviations, etc.) and keeps each\n        visual line as a single string.\n        """
+        return [line.strip() for line in text.splitlines() if line.strip()]
 
     @classmethod
-    def _try_easyocr_fallback(cls, image) -> str:
-        """Run EasyOCR on a single image and return extracted text.
+    def _try_tesseract_fallback(cls, image) -> str:
+        """Run Tesseract (with full preprocessing) on a single image.
 
-        Called when Tesseract confidence is below the threshold.
+        Called when EasyOCR confidence is below the threshold.
+        Tesseract uses the heavy pipeline (adaptive thresholding,
+        morphological cleanup, deskew, border padding) which can
+        sometimes rescue very noisy or low-contrast scans.
         """
         try:
-            engine = EasyOCREngine()
+            engine = TesseractEngine(apply_preprocessing=True)
             text, conf = engine.extract_text_with_confidence(image)
             logger.info(
-                "EasyOCR fallback: confidence=%.1f%%, chars=%d",
+                "Tesseract fallback: confidence=%.1f%%, chars=%d",
                 conf, len(text),
             )
             return text
         except ImportError:
             logger.warning(
-                "EasyOCR is not installed; skipping fallback. "
-                "Install with: pip install easyocr"
+                "pytesseract is not installed; skipping fallback."
             )
             return ""
         except Exception:
-            logger.exception("EasyOCR fallback failed")
+            logger.exception("Tesseract fallback failed")
             return ""
 
     @classmethod
-    def _ocr_single_image(cls, image, engine: TesseractEngine) -> str:
+    def _ocr_single_image(cls, image, engine: EasyOCREngine) -> str:
         """Run OCR on a single image with confidence-based fallback.
 
-        1. Tesseract with preprocessing.
-        2. If confidence < threshold → try EasyOCR.
+        1. EasyOCR with light preprocessing (primary).
+        2. If confidence < threshold → try Tesseract with full preprocessing.
         3. Return whichever produced more text.
         """
         text, confidence = engine.extract_text_with_confidence(image)
 
         logger.info(
-            "Tesseract OCR: confidence=%.1f%%, chars=%d",
+            "EasyOCR primary: confidence=%.1f%%, chars=%d",
             confidence, len(text),
         )
 
         if confidence < CONFIDENCE_THRESHOLD:
             logger.info(
-                "Confidence %.1f%% < threshold %.1f%%; attempting EasyOCR fallback",
+                "Confidence %.1f%% < threshold %.1f%%; attempting Tesseract fallback",
                 confidence, CONFIDENCE_THRESHOLD,
             )
-            fallback_text = cls._try_easyocr_fallback(image)
+            fallback_text = cls._try_tesseract_fallback(image)
 
             if len(fallback_text.strip()) > len(text.strip()):
-                logger.info("Using EasyOCR result (%d chars vs Tesseract %d chars)",
-                            len(fallback_text), len(text))
+                logger.info(
+                    "Using Tesseract result (%d chars vs EasyOCR %d chars)",
+                    len(fallback_text), len(text),
+                )
                 return fallback_text
             else:
-                logger.info("Keeping Tesseract result despite low confidence")
+                logger.info("Keeping EasyOCR result despite low confidence")
 
         return text
 
@@ -117,17 +125,17 @@ class OCRService:
             extractor = PdfOcrExtractor()
             page_images = extractor.convert_pages(file_path, page_numbers=page_numbers)
 
-            engine = TesseractEngine()
+            engine = EasyOCREngine()
             content: List[Dict[str, Any]] = []
 
             for page_num, image in page_images:
                 raw_text = cls._ocr_single_image(image, engine)
-                text_blocks = cls.split_sentences(raw_text)
+                text_blocks = cls.split_lines(raw_text)
 
                 content.append({"page": page_num, "text": text_blocks})
 
                 logger.info(
-                    "Page %d: extracted %d block(s) via OCR", page_num, len(text_blocks),
+                    "Page %d: extracted %d line(s) via OCR", page_num, len(text_blocks),
                 )
 
             return {"content": content}
@@ -159,12 +167,12 @@ class OCRService:
                 text = page.extract_text() or ""
                 extracted_text += text
 
-                sentences = cls.split_sentences(text)
+                lines = cls.split_lines(text)
 
-                if sentences:
+                if lines:
                     content.append({
                         "page": page_number,
-                        "text": sentences,
+                        "text": lines,
                     })
 
             num_pages = len(reader.pages)
@@ -187,21 +195,21 @@ class OCRService:
             # ---- Stage 2: OCR fallback for scanned PDF ----
             logger.info(
                 "Text layer insufficient; switching to OCR pipeline "
-                "(method=Tesseract+EasyOCR fallback)",
+                "(method=EasyOCR+Tesseract fallback)",
             )
 
             extractor = PdfOcrExtractor()
             page_images = extractor.convert_pages(file_path)
 
-            engine = TesseractEngine()
+            engine = EasyOCREngine()
             ocr_content: List[Dict[str, Any]] = []
 
             for page_num, image in page_images:
                 raw_text = cls._ocr_single_image(image, engine)
-                text_blocks = cls.split_sentences(raw_text)
+                text_blocks = cls.split_lines(raw_text)
 
                 logger.info(
-                    "Page %d OCR: %d block(s) extracted",
+                    "Page %d OCR: %d line(s) extracted",
                     page_num, len(text_blocks),
                 )
 
@@ -234,11 +242,11 @@ class OCRService:
         """
         logger.info("Processing standalone image via OCR")
 
-        engine = TesseractEngine()
+        engine = EasyOCREngine()
         raw_text = cls._ocr_single_image(image, engine)
-        text_blocks = cls.split_sentences(raw_text)
+        text_blocks = cls.split_lines(raw_text)
 
-        logger.info("Standalone image OCR: %d block(s) extracted", len(text_blocks))
+        logger.info("Standalone image OCR: %d line(s) extracted", len(text_blocks))
 
         return {
             "content": [{

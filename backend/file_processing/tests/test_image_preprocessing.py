@@ -4,12 +4,16 @@ import numpy as np
 from PIL import Image
 
 from file_processing.services.image_preprocessing import (
+    apply_adaptive_thresholding,
     apply_thresholding,
     convert_to_grayscale,
     deskew_image,
+    morphological_cleanup,
     normalize_contrast,
     preprocess_image,
     remove_noise,
+    upscale_image,
+    add_border_padding,
 )
 
 class TestImagePreprocessing(unittest.TestCase):
@@ -119,32 +123,42 @@ class TestImagePreprocessing(unittest.TestCase):
         )
         self.assertEqual(result, "rotated_img")
 
+    @patch("file_processing.services.image_preprocessing.add_border_padding")
     @patch("file_processing.services.image_preprocessing.deskew_image")
-    @patch("file_processing.services.image_preprocessing.apply_thresholding")
+    @patch("file_processing.services.image_preprocessing.morphological_cleanup")
+    @patch("file_processing.services.image_preprocessing.apply_adaptive_thresholding")
     @patch("file_processing.services.image_preprocessing.remove_noise")
     @patch("file_processing.services.image_preprocessing.normalize_contrast")
     @patch("file_processing.services.image_preprocessing.convert_to_grayscale")
+    @patch("file_processing.services.image_preprocessing.upscale_image")
     @patch("file_processing.services.image_preprocessing.cv2")
     def test_preprocess_image_pipeline(
-        self, mock_cv2, mock_gray, mock_clahe, mock_noise, mock_thresh, mock_deskew
+        self, mock_cv2, mock_upscale, mock_gray, mock_clahe, mock_noise,
+        mock_adaptive_thresh, mock_morph, mock_deskew, mock_border
     ):
+        mock_upscale.return_value = self.dummy_color_img
         mock_gray.return_value = self.dummy_color_img
         mock_clahe.return_value = self.dummy_color_img
         mock_noise.return_value = self.dummy_color_img
-        mock_thresh.return_value = self.dummy_color_img
+        mock_adaptive_thresh.return_value = self.dummy_color_img
+        mock_morph.return_value = self.dummy_color_img
         
         final_array = np.zeros((10, 10), dtype=np.uint8)
         mock_deskew.return_value = final_array
+        mock_border.return_value = final_array
         
         pil_img = Image.fromarray(self.dummy_color_img)
         
         result = preprocess_image(pil_img)
         
+        mock_upscale.assert_called_once()
         mock_gray.assert_called_once()
         mock_clahe.assert_called_once()
         mock_noise.assert_called_once()
-        mock_thresh.assert_called_once()
+        mock_adaptive_thresh.assert_called_once()
+        mock_morph.assert_called_once()
         mock_deskew.assert_called_once()
+        mock_border.assert_called_once()
         
         self.assertIsInstance(result, Image.Image)
         self.assertTrue(np.array_equal(np.array(result), final_array))

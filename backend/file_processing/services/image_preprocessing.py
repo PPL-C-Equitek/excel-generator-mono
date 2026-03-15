@@ -22,6 +22,10 @@ from file_processing.services.ocr_config import (
     CLAHE_CLIP_LIMIT,
     CLAHE_TILE_GRID_SIZE,
     NOISE_REMOVAL_KERNEL_SIZE,
+    UPSCALE_MIN_HEIGHT,
+    UPSCALE_FACTOR,
+    BORDER_PADDING_PX,
+    MORPH_KERNEL_SIZE,
 )
 
 def convert_to_grayscale(image_array: np.ndarray) -> np.ndarray:
@@ -64,6 +68,63 @@ def normalize_contrast(image_array: np.ndarray) -> np.ndarray:
     return clahe.apply(image_array)
 
 
+def upscale_image(image_array: np.ndarray) -> np.ndarray:
+    """Upscale small images so OCR engines have enough pixel data.
+
+    Images shorter than ``UPSCALE_MIN_HEIGHT`` are scaled up by
+    ``UPSCALE_FACTOR`` using bicubic interpolation.  This dramatically
+    improves recognition of small or low-resolution text.
+    """
+    h, w = image_array.shape[:2]
+    if h < UPSCALE_MIN_HEIGHT:
+        new_w = int(w * UPSCALE_FACTOR)
+        new_h = int(h * UPSCALE_FACTOR)
+        return cv2.resize(image_array, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+    return image_array
+
+
+def add_border_padding(image_array: np.ndarray) -> np.ndarray:
+    """Add white border padding around the image.
+
+    Tesseract performs poorly when text touches the image edges.
+    A small border gives the engine room to detect character boundaries.
+    """
+    pad = BORDER_PADDING_PX
+    return cv2.copyMakeBorder(
+        image_array, pad, pad, pad, pad,
+        cv2.BORDER_CONSTANT, value=255,
+    )
+
+
+def apply_adaptive_thresholding(image_array: np.ndarray) -> np.ndarray:
+    """Binarize using adaptive Gaussian thresholding.
+
+    Unlike global Otsu, adaptive thresholding calculates a separate
+    threshold for each local region, handling uneven lighting, shadows,
+    and creases much better — common issues in scanned documents.
+    """
+    return cv2.adaptiveThreshold(
+        image_array, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        blockSize=31,
+        C=10,
+    )
+
+
+def morphological_cleanup(image_array: np.ndarray) -> np.ndarray:
+    """Apply morphological closing to reconnect broken character strokes.
+
+    Scanning artefacts and aggressive thresholding can break thin strokes
+    (e.g. the crossbar on 'e', serifs on 'i').  A small closing operation
+    bridges tiny gaps without merging adjacent characters.
+    """
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (MORPH_KERNEL_SIZE, MORPH_KERNEL_SIZE),
+    )
+    return cv2.morphologyEx(image_array, cv2.MORPH_CLOSE, kernel)
+
+
 def deskew_image(image_array: np.ndarray) -> np.ndarray:
     """Detect and correct small rotation (skew) in the image.
 
@@ -98,24 +159,31 @@ def deskew_image(image_array: np.ndarray) -> np.ndarray:
     )
     return rotated
 
+
 def preprocess_image(pil_image: Image.Image) -> Image.Image:
     """Run the complete preprocessing pipeline on a PIL Image.
 
     Steps:
-    1. Convert to grayscale
-    2. Normalize contrast (CLAHE)
-    3. Remove noise (median blur)
-    4. Apply Otsu thresholding
-    5. Deskew
+    1. Upscale small images for better character resolution
+    2. Convert to grayscale
+    3. Normalize contrast (CLAHE)
+    4. Remove noise (median blur)
+    5. Apply adaptive thresholding (handles uneven lighting)
+    6. Morphological closing (reconnect broken strokes)
+    7. Deskew
+    8. Add border padding
 
     Returns a preprocessed PIL Image suitable for OCR.
     """
     image_array = np.array(pil_image)
 
+    image_array = upscale_image(image_array)
     image_array = convert_to_grayscale(image_array)
     image_array = normalize_contrast(image_array)
     image_array = remove_noise(image_array)
-    image_array = apply_thresholding(image_array)
+    image_array = apply_adaptive_thresholding(image_array)
+    image_array = morphological_cleanup(image_array)
     image_array = deskew_image(image_array)
+    image_array = add_border_padding(image_array)
 
     return Image.fromarray(image_array)
