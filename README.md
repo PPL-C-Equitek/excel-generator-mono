@@ -7,6 +7,13 @@
 
 Monorepo for `Excel Generator` project (`backend` Django + `frontend` Next.js).
 
+## System Prerequisites
+- Python 3.11+
+- Node.js 20+
+- npm
+- PostgreSQL 16+
+- Linux packages: `poppler-utils`, `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-ind`, `libmagic1`
+
 ## Tech Stack
 Tech stack details are documented in [TECH-STACK.md](./TECH-STACK.md).
 
@@ -38,7 +45,7 @@ cp .env.example frontend/.env
    ```bash
    cd backend
    ```
-2. Update the root `backend/.env` with the required local values.
+2. Update the root `.env` with the required local values.
 3. Install dependencies:
    ```bash
    pip install -r requirements.txt
