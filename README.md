@@ -7,71 +7,86 @@
 
 Monorepo for `Excel Generator` project (`backend` Django + `frontend` Next.js).
 
-## Checklist Tugas
+## Tech Stack
+Tech stack details are documented in [TECH-STACK.md](./TECH-STACK.md).
 
-- [x] Menyiapkan script run testing (minimal run-unit test & code coverage)
-- [x] Menyiapkan library untuk menghitung unit test code-coverage
-- [x] Menampilkan badge hasil unit test & code-coverage pada berkas `README.md` dalam repository
-- [x] Menyiapkan script provisioning server, deployment, siap install dan run on staging server
-- [x] Sediakan data seeding
+## How to Run
 
-## Test dan Coverage
-
-Backend (Django):
+### Linux system dependencies
+Install the required native packages first:
 
 ```bash
-cd backend
-coverage run --rcfile=.coveragerc manage.py test api
-coverage report
-coverage xml
+sudo apt update
+sudo apt install -y poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-ind libmagic1
 ```
 
-Frontend (Next.js):
+### Backend
+1. Navigate to the backend directory:
+   ```bash
+   cd backend
+   ```
+2. Copy the environment file:
+   ```bash
+   cp .env.example .env
+   ```
+3. Update `.env` with the required local values.
+4. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+5. Apply migrations:
+   ```bash
+   python manage.py migrate
+   ```
+6. Start the backend server:
+   ```bash
+   python manage.py runserver
+   ```
 
-```bash
-cd frontend
-npm run test
-npm run test:coverage
-```
+### Frontend
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Start the frontend server:
+   ```bash
+   npm run dev
+   ```
 
-Init DB + seed data dummy anggota:
-
+### Optional: initialize database with seed data
 ```bash
 bash scripts/init-db.sh
 ```
 
-Catatan:
-- Badge coverage diperbarui otomatis oleh workflow `backend.yml` dan `frontend.yml` saat ada `push` ke branch `main`.
+## How to Run Tests and Coverage
 
-## Tech Stack
-For the tech stack details, you can read it here: [Tech Stack](./TECH-STACK.md)
+### Backend
+Run the full Django test suite with coverage:
 
-## How to Run the Project
-### 1. Backend Setup
+```bash
+cd backend
+coverage run --rcfile=.coveragerc manage.py test
+coverage report
+coverage xml
+```
 
-1. Navigate to the backend directory:
-   ```bash
-   cd backend
-2. Copy the environment file:
-    ```bash
-    cp .env.example .env
-3. Configure the `.env` file and adjust the values as needed.
-4. Install the required Python dependencies:
-    ```bash
-    pip install -r requirements.txt
-5. Start the development server:
-    ```bash
-    python manage.py runserver
-    ```
+### Frontend
+Run the full frontend test suite:
 
-### 2. Frontend Setup
-1. Navigate to the frontend directory:
-    ```bash
-    cd frontend
-2. Install the required dependencies:
-    ```bash
-    npm install
-3. Start the development server:
-    ```bash
-    npm run dev
-    ```
+```bash
+cd frontend
+npm run test
+```
+
+Run the frontend test suite with coverage:
+
+```bash
+cd frontend
+npm run test:coverage
+```
+
+Coverage badges are updated automatically by the `backend.yml` and `frontend.yml` workflows on pushes to `main`.
