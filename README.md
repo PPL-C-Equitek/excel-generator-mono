@@ -45,3 +45,33 @@ Catatan:
 
 ## Tech Stack
 For the tech stack details, you can read it here: [Tech Stack](./TECH-STACK.md)
+
+## How to Run the Project
+### 1. Backend Setup
+
+1. Navigate to the backend directory:
+   ```bash
+   cd backend
+2. Copy the environment file:
+    ```bash
+    cp .env.example .env
+3. Configure the `.env` file and adjust the values as needed.
+4. Install the required Python dependencies:
+    ```bash
+    pip install -r requirements.txt
+5. Start the development server:
+    ```bash
+    python manage.py runserver
+    ```
+
+### 2. Frontend Setup
+1. Navigate to the frontend directory:
+    ```bash
+    cd frontend
+2. Install the required dependencies:
+    ```bash
+    npm install
+3. Start the development server:
+    ```bash
+    npm run dev
+    ```
