@@ -174,6 +174,36 @@ class TestOCRService(TestCase):
 
         self.assertEqual(result["content"][0]["text"], ["OCR TEXT"])
 
+    @patch("file_processing.services.ocr_service.TesseractEngine")
+    def test_try_tesseract_fallback_import_error(self, mock_tesseract):
+        mock_tesseract.side_effect = ImportError()
+
+        result = OCRService._try_tesseract_fallback("img")
+
+        self.assertEqual(result, "")
+
+    @patch("file_processing.services.ocr_service.OCRService._try_tesseract_fallback")
+    def test_ocr_single_image_low_confidence_fallback_worse(self, mock_fallback):
+        engine = MagicMock()
+        engine.extract_text_with_confidence.return_value = ("good easyocr text", 20.0)
+
+        mock_fallback.return_value = "bad"
+
+        result = OCRService._ocr_single_image("img", engine)
+
+        self.assertEqual(result, "good easyocr text")
+
+    @patch("file_processing.services.ocr_service.TesseractEngine")
+    def test_try_tesseract_fallback_generic_exception(self, mock_tesseract):
+        mock_engine = MagicMock()
+        mock_engine.extract_text_with_confidence.side_effect = Exception("boom")
+
+        mock_tesseract.return_value = mock_engine
+
+        result = OCRService._try_tesseract_fallback("img")
+
+        self.assertEqual(result, "")
+
 
 class TestNonOCRPDFService(TestCase):
     """Tests covering extract_pdf_to_json."""

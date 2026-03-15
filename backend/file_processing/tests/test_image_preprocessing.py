@@ -12,6 +12,9 @@ from file_processing.services.image_preprocessing import (
     remove_noise,
 )
 
+from file_processing.services.ocr_config import UPSCALE_MIN_HEIGHT, MORPH_KERNEL_SIZE
+from file_processing.services.image_preprocessing import upscale_image, add_border_padding, apply_adaptive_thresholding, morphological_cleanup
+
 class TestImagePreprocessing(unittest.TestCase):
 
     def setUp(self):
@@ -158,3 +161,69 @@ class TestImagePreprocessing(unittest.TestCase):
         
         self.assertIsInstance(result, Image.Image)
         self.assertTrue(np.array_equal(np.array(result), final_array))
+
+    @patch("file_processing.services.image_preprocessing.cv2")
+    def test_upscale_image_small(self, mock_cv2):
+        small_img = np.zeros((UPSCALE_MIN_HEIGHT - 10, 100), dtype=np.uint8)
+        mock_cv2.resize.return_value = "resized"
+        mock_cv2.INTER_CUBIC = 2
+
+        result = upscale_image(small_img)
+
+        self.assertEqual(result, "resized")
+        mock_cv2.resize.assert_called_once()
+
+    @patch("file_processing.services.image_preprocessing.cv2")
+    def test_add_border_padding(self, mock_cv2):
+        img = np.zeros((10, 10), dtype=np.uint8)
+        mock_cv2.copyMakeBorder.return_value = "bordered"
+        mock_cv2.BORDER_CONSTANT = 0
+
+        result = add_border_padding(img)
+
+        mock_cv2.copyMakeBorder.assert_called_once()
+        self.assertEqual(result, "bordered")
+
+    @patch("file_processing.services.image_preprocessing.cv2")
+    def test_apply_adaptive_thresholding(self, mock_cv2):
+        mock_cv2.adaptiveThreshold.return_value = "adaptive"
+        mock_cv2.ADAPTIVE_THRESH_GAUSSIAN_C = 1
+        mock_cv2.THRESH_BINARY = 2
+
+        result = apply_adaptive_thresholding(self.dummy_gray_img)
+
+        mock_cv2.adaptiveThreshold.assert_called_once()
+        self.assertEqual(result, "adaptive")
+
+    @patch("file_processing.services.image_preprocessing.cv2")
+    def test_morphological_cleanup(self, mock_cv2):
+        mock_kernel = "kernel"
+        mock_cv2.getStructuringElement.return_value = mock_kernel
+        mock_cv2.morphologyEx.return_value = "cleaned"
+        mock_cv2.MORPH_RECT = 1
+        mock_cv2.MORPH_CLOSE = 2
+
+        result = morphological_cleanup(self.dummy_gray_img)
+
+        mock_cv2.getStructuringElement.assert_called_once_with(
+            mock_cv2.MORPH_RECT, (MORPH_KERNEL_SIZE, MORPH_KERNEL_SIZE)
+        )
+        mock_cv2.morphologyEx.assert_called_once()
+        self.assertEqual(result, "cleaned")
+
+    @patch("file_processing.services.image_preprocessing.cv2")
+    def test_upscale_image_no_resize(self, mock_cv2):
+        """Image large enough should not be resized."""
+        large_img = np.zeros((UPSCALE_MIN_HEIGHT + 50, 100), dtype=np.uint8)
+
+        result = upscale_image(large_img)
+
+        mock_cv2.resize.assert_not_called()
+        self.assertTrue(np.array_equal(result, large_img))
+
+    def test_preprocess_image_real(self):
+        img = Image.fromarray(self.dummy_color_img)
+
+        result = preprocess_image(img)
+
+        self.assertIsInstance(result, Image.Image)
