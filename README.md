@@ -38,7 +38,7 @@ cp .env.example frontend/.env
    ```bash
    cd backend
    ```
-2. Update the root `.env` with the required local values.
+2. Update the root `backend/.env` with the required local values.
 3. Install dependencies:
    ```bash
    pip install -r requirements.txt
