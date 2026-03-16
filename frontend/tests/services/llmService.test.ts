@@ -73,6 +73,18 @@ describe("generateJson negative (HTTP errors)", () => {
     );
     await expect(generateJson({ key: "value" })).rejects.toThrow("Request failed. Please try again.");
   });
+
+  it("supports legacy message-based API errors without a status property", async () => {
+    const fetchSpy = vi
+      .spyOn(api, "fetchAPI")
+      .mockRejectedValue(new Error("API error: 429"));
+
+    await expect(generateJson({ key: "value" })).rejects.toThrow(
+      "Rate limit exceeded. Please try again later."
+    );
+
+    fetchSpy.mockRestore();
+  });
 });
 
 describe("generateJson edge cases", () => {
@@ -172,6 +184,14 @@ describe("exportToCsv", () => {
       )
     );
     await expect(exportToCsv(mockJson)).rejects.toThrow("Request failed. Please try again.");
+  });
+
+  it("supports legacy message-based API errors without a status property", async () => {
+    vi.spyOn(api, "fetchAPI").mockRejectedValue(new Error("API error: 504"));
+
+    await expect(exportToCsv(mockJson)).rejects.toThrow(
+      "Request timed out. Please try again."
+    );
   });
 
   it("passes through unknown errors from fetchAPI", async () => {
