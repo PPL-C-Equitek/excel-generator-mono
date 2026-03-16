@@ -71,7 +71,7 @@ describe("generateJson negative (HTTP errors)", () => {
         HttpResponse.json({ detail: "Teapot" }, { status: 418 })
       )
     );
-    await expect(generateJson({ key: "value" })).rejects.toThrow("API error: 418");
+    await expect(generateJson({ key: "value" })).rejects.toThrow("Request failed. Please try again.");
   });
 });
 
@@ -82,16 +82,16 @@ describe("generateJson edge cases", () => {
   });
 
   it("throws validation error for empty input", async () => {
-    await expect(generateJson({})).rejects.toThrow("Input tidak boleh kosong");
+    await expect(generateJson({})).rejects.toThrow("Input cannot be empty.");
   });
 
   it("throws validation error for empty array input", async () => {
-    await expect(generateJson([])).rejects.toThrow("Input tidak boleh kosong");
+    await expect(generateJson([])).rejects.toThrow("Input cannot be empty.");
   });
 
   it("throws schema error when output_json is missing", async () => {
     server.use(handlerInvalidSchema);
-    await expect(generateJson({ key: "value" })).rejects.toThrow("Respons tidak sesuai skema");
+    await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
   });
 
   it("rethrows non-API Error as-is", async () => {
@@ -112,12 +112,12 @@ describe("generateJson array input & schema type validation", () => {
 
   it("throws schema error when output_json is an array", async () => {
     server.use(handlerArrayOutput);
-    await expect(generateJson({ key: "value" })).rejects.toThrow("Respons tidak sesuai skema");
+    await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
   });
 
   it("throws schema error when output_json is a primitive string", async () => {
     server.use(handlerPrimitiveOutput);
-    await expect(generateJson({ key: "value" })).rejects.toThrow("Respons tidak sesuai skema");
+    await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
   });
 
   it("throws schema error when output_json is a primitive number", async () => {
@@ -126,7 +126,7 @@ describe("generateJson array input & schema type validation", () => {
         HttpResponse.json({ output_json: 42 }, { status: 200 })
       )
     );
-    await expect(generateJson({ key: "value" })).rejects.toThrow("Respons tidak sesuai skema");
+    await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
   });
 });
 
@@ -146,12 +146,12 @@ describe("exportToCsv", () => {
 
   it("throws error if response does not contain file_id", async () => {
     server.use(exportCsvInvalidSchemaHandler);
-    await expect(exportToCsv(mockJson)).rejects.toThrow("Respons ekspor CSV tidak valid");
+    await expect(exportToCsv(mockJson)).rejects.toThrow("The CSV export response is invalid.");
   });
 
   it("throws error if file_id does not have 'csv_' prefix", async () => {
     server.use(exportCsvInvalidPrefixHandler);
-    await expect(exportToCsv(mockJson)).rejects.toThrow("Respons ekspor CSV tidak valid");
+    await expect(exportToCsv(mockJson)).rejects.toThrow("The CSV export response is invalid.");
   });
 
   it("maps HTTP errors properly using existing ERROR_MESSAGES", async () => {
@@ -171,7 +171,7 @@ describe("exportToCsv", () => {
         HttpResponse.json({ detail: "Teapot" }, { status: 418 })
       )
     );
-    await expect(exportToCsv(mockJson)).rejects.toThrow("API error: 418");
+    await expect(exportToCsv(mockJson)).rejects.toThrow("Request failed. Please try again.");
   });
 
   it("passes through unknown errors from fetchAPI", async () => {

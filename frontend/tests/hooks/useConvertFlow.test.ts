@@ -256,7 +256,7 @@ describe('useConvertFlow', () => {
                 await result.current.handleFileSelect(testFile)
             })
 
-            expect(result.current.error).toBe('Respons upload tidak valid')
+            expect(result.current.error).toBe('The server returned an invalid upload response.')
             expect(service.generate).not.toHaveBeenCalled()
         })
 
@@ -269,7 +269,7 @@ describe('useConvertFlow', () => {
                 await result.current.handleFileSelect(testFile)
             })
 
-            expect(result.current.error).toBe('Respons upload tidak valid')
+            expect(result.current.error).toBe('The server returned an invalid upload response.')
             expect(service.generate).not.toHaveBeenCalled()
         })
     })
@@ -353,7 +353,7 @@ describe('useConvertFlow', () => {
                 await result.current.handleFileSelect(testFile)
             })
 
-            expect(result.current.error).toBe('Respons upload tidak valid')
+            expect(result.current.error).toBe('The server returned an invalid upload response.')
             expect(service.generate).not.toHaveBeenCalled()
         })
 
@@ -665,7 +665,7 @@ describe('useConvertFlow', () => {
                 expect(service.exportToCsv).not.toHaveBeenCalled()
                 expect(result.current.csvMetadata).toBeNull()
                 // Assuming we want to set a specific error message for empty payload edge cases
-                expect(result.current.error).toBe('Data tidak valid atau kosong, tidak dapat mengekspor CSV')
+                expect(result.current.error).toBe("The converted data is empty or invalid, so it can't be exported.")
             }
             
             vi.unstubAllEnvs()
@@ -707,7 +707,7 @@ describe('useConvertFlow', () => {
             })
 
             expect(result.current.csvMetadata).toBeNull()
-            expect(result.current.error).toBe('ID File CSV tidak valid')
+            expect(result.current.error).toBe('The export result is invalid. Please try again.')
             
             vi.unstubAllEnvs()
         })

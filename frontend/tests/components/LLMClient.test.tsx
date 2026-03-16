@@ -53,13 +53,13 @@ describe("LLMClient", () => {
   });
 
   it("shows known error message from service", async () => {
-    vi.mocked(mockService.generate).mockRejectedValue(new Error("API Key tidak valid"));
+    vi.mocked(mockService.generate).mockRejectedValue(new Error("Invalid API key."));
 
     render(<LLMClient service={mockService} />);
     fillTextarea(VALID_INPUT);
     await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
-    expect(await screen.findByText("API Key tidak valid")).toBeInTheDocument();
+    expect(await screen.findByText("Invalid API key.")).toBeInTheDocument();
   });
 
   it("validates empty input and does not call service", async () => {
@@ -68,7 +68,7 @@ describe("LLMClient", () => {
     await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("Input tidak boleh kosong")).toBeInTheDocument();
+      expect(screen.getByText("Input cannot be empty.")).toBeInTheDocument();
     });
     expect(mockService.generate).not.toHaveBeenCalled();
   });
@@ -79,7 +79,7 @@ describe("LLMClient", () => {
     await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("Input harus berupa JSON yang valid")).toBeInTheDocument();
+      expect(screen.getByText("Input must be valid JSON.")).toBeInTheDocument();
     });
     expect(mockService.generate).not.toHaveBeenCalled();
   });
@@ -91,6 +91,6 @@ describe("LLMClient", () => {
     fillTextarea(VALID_INPUT);
     await userEvent.click(screen.getByRole("button", { name: /generate/i }));
 
-    expect(await screen.findByText("Terjadi kesalahan tidak diketahui")).toBeInTheDocument();
+    expect(await screen.findByText("An unknown error occurred.")).toBeInTheDocument();
   });
 });

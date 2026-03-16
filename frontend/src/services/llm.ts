@@ -15,6 +15,20 @@ export interface LLMResponse {
     output_json: JsonValue;
 }
 
+function getErrorStatus(err: Error): number | null {
+    const errorWithStatus = err as Error & { status?: number };
+    if (typeof errorWithStatus.status === "number") {
+        return errorWithStatus.status;
+    }
+
+    const statusMatch = /API error: (\d+)/.exec(err.message);
+    if (statusMatch) {
+        return Number.parseInt(statusMatch[1], 10);
+    }
+
+    return null;
+}
+
 export async function generateJson(
     inputJson: JsonValue
 ): Promise<LLMResponse> {
@@ -23,7 +37,7 @@ export async function generateJson(
         : Object.keys(inputJson).length === 0;
 
     if (isEmpty) {
-        throw new Error("Input tidak boleh kosong");
+        throw new Error("Input cannot be empty.");
     }
 
     let data: unknown;
@@ -35,9 +49,8 @@ export async function generateJson(
         });
     } catch (err: unknown) {
         if (err instanceof Error) {
-            const statusMatch = /API error: (\d+)/.exec(err.message);
-            if (statusMatch) {
-                const status = Number.parseInt(statusMatch[1], 10);
+            const status = getErrorStatus(err);
+            if (status !== null) {
                 const userMessage = ERROR_MESSAGES[status];
                 if (userMessage) {
                     throw new Error(userMessage);
@@ -53,7 +66,7 @@ export async function generateJson(
         !("output_json" in data) ||
         !isJsonObject((data as Record<string, unknown>)["output_json"])
     ) {
-        throw new Error("Respons tidak sesuai skema");
+        throw new Error("The server returned an invalid response.");
     }
 
     return data as LLMResponse;
@@ -79,9 +92,8 @@ export async function exportToCsv(
         });
     } catch (err: unknown) {
         if (err instanceof Error) {
-            const statusMatch = /API error: (\d+)/.exec(err.message);
-            if (statusMatch) {
-                const status = Number.parseInt(statusMatch[1], 10);
+            const status = getErrorStatus(err);
+            if (status !== null) {
                 const userMessage = ERROR_MESSAGES[status];
                 if (userMessage) {
                     throw new Error(userMessage);
@@ -98,7 +110,7 @@ export async function exportToCsv(
         typeof (data as Record<string, unknown>).file_id !== "string" ||
         !(data as Record<string, string>).file_id.startsWith("csv_")
     ) {
-        throw new Error("Respons ekspor CSV tidak valid");
+        throw new Error("The CSV export response is invalid.");
     }
 
     return { file_id: (data as Record<string, string>).file_id };

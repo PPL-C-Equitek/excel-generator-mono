@@ -92,7 +92,7 @@ export function useConvertFlow(
             const raw: unknown = await uploadFile(file, { signal })
             if (signal.aborted) return null
             if (!isJsonObject(raw)) {
-                setError('Respons upload tidak valid')
+                setError('The server returned an invalid upload response.')
                 setIsConverting(false)
                 return null
             }
@@ -113,7 +113,7 @@ export function useConvertFlow(
                 (typeof out === 'object' && out !== null && Object.keys(out).length === 0)
                 
             if (isEmpty) {
-                throw new Error('Data tidak valid atau kosong, tidak dapat mengekspor CSV')
+                throw new Error("The converted data is empty or invalid, so it can't be exported.")
             }
 
             const sanitizedJSON = sanitizeCSVCell(out) as JsonValue
@@ -123,7 +123,7 @@ export function useConvertFlow(
                 if (csvResult.file_id?.startsWith('csv_')) {
                     setCsvMetadata({ file_id: csvResult.file_id })
                 } else {
-                    throw new Error('ID File CSV tidak valid')
+                    throw new Error('The export result is invalid. Please try again.')
                 }
             }
         } catch (csvErr: unknown) {
