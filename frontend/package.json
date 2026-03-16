@@ -30,7 +30,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "jsdom": "^28.1.0",
-    "msw": "^2.12.10",
+    "msw": "^2.12.11",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^6.4.1",
