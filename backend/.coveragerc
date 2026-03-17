@@ -14,6 +14,8 @@ omit =
     */urls.py
     */wsgi.py
     */asgi.py
+    */_remote_module_non_scriptable*
+    */site-packages/*
 
 [report]
 show_missing = True

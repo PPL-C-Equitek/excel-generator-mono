@@ -530,7 +530,7 @@ class UploadEndpointTest(TestCase):
             True,
             None,
             "/tmp/file.pdf",
-            {"content": [{"page": 1, "type": "text", "lines": ["hello"]}]},
+            {"content": [{"page": 1, "text": ["hello"]}]},
         )
 
         resp = self.client.post(
