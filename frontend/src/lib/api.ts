@@ -71,7 +71,9 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
   });
 
   if (!res.ok) {
-    throw new Error(`API error: ${res.status}`);
+    const error = new Error("Request failed. Please try again.") as HTTPError;
+    error.status = res.status;
+    throw error;
   }
 
   return res.json();
@@ -108,3 +110,6 @@ export async function uploadFile(file: File, options?: RequestInit) {
 
   return res.json();
 }
+type HTTPError = Error & {
+  status?: number;
+};

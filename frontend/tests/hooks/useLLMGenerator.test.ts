@@ -42,7 +42,7 @@ describe("useLLMGenerator — input validation (no service call)", () => {
             await result.current.handleSubmit();
         });
 
-        expect(result.current.error).toBe("Input tidak boleh kosong");
+        expect(result.current.error).toBe("Input cannot be empty.");
         expect(service.generate).not.toHaveBeenCalled();
     });
 
@@ -52,7 +52,7 @@ describe("useLLMGenerator — input validation (no service call)", () => {
         act(() => { result.current.setInput("   "); });
         await act(async () => { await result.current.handleSubmit(); });
 
-        expect(result.current.error).toBe("Input tidak boleh kosong");
+        expect(result.current.error).toBe("Input cannot be empty.");
         expect(service.generate).not.toHaveBeenCalled();
     });
 
@@ -62,7 +62,7 @@ describe("useLLMGenerator — input validation (no service call)", () => {
         act(() => { result.current.setInput("not { json }"); });
         await act(async () => { await result.current.handleSubmit(); });
 
-        expect(result.current.error).toBe("Input harus berupa JSON yang valid");
+        expect(result.current.error).toBe("Input must be valid JSON.");
         expect(service.generate).not.toHaveBeenCalled();
     });
 
@@ -72,7 +72,7 @@ describe("useLLMGenerator — input validation (no service call)", () => {
         act(() => { result.current.setInput("42"); });
         await act(async () => { await result.current.handleSubmit(); });
 
-        expect(result.current.error).toBe("Input harus berupa JSON object");
+        expect(result.current.error).toBe("Input must be a JSON object.");
         expect(service.generate).not.toHaveBeenCalled();
     });
 });
@@ -106,19 +106,19 @@ describe("useLLMGenerator — service call & state transitions", () => {
         await act(async () => { await result.current.handleSubmit(); });
 
         expect(service.generate).not.toHaveBeenCalled();
-        expect(result.current.error).toBe("Input harus berupa JSON object");
+        expect(result.current.error).toBe("Input must be a JSON object.");
     });
 
     it("sets error message when service throws an Error", async () => {
         service = makeService({
-            generate: vi.fn().mockRejectedValue(new Error("API Key tidak valid")),
+            generate: vi.fn().mockRejectedValue(new Error("Invalid API key.")),
         });
 
         const { result } = renderHook(() => useLLMGenerator(service));
         act(() => { result.current.setInput(VALID_JSON_INPUT); });
         await act(async () => { await result.current.handleSubmit(); });
 
-        expect(result.current.error).toBe("API Key tidak valid");
+        expect(result.current.error).toBe("Invalid API key.");
         expect(result.current.result).toBeNull();
         expect(result.current.loading).toBe(false);
     });
@@ -130,7 +130,7 @@ describe("useLLMGenerator — service call & state transitions", () => {
         act(() => { result.current.setInput(VALID_JSON_INPUT); });
         await act(async () => { await result.current.handleSubmit(); });
 
-        expect(result.current.error).toBe("Terjadi kesalahan tidak diketahui");
+        expect(result.current.error).toBe("An unknown error occurred.");
         expect(result.current.loading).toBe(false);
     });
 

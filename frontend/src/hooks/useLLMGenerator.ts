@@ -28,7 +28,7 @@ export function useLLMGenerator(service: ILLMService): UseLLMGeneratorReturn {
         setResult(null);
 
         if (!input.trim()) {
-            setError("Input tidak boleh kosong");
+            setError("Input cannot be empty.");
             return;
         }
 
@@ -36,12 +36,12 @@ export function useLLMGenerator(service: ILLMService): UseLLMGeneratorReturn {
         try {
             const raw: unknown = JSON.parse(input);
             if (!isJsonObject(raw)) {
-                setError("Input harus berupa JSON object");
+                setError("Input must be a JSON object.");
                 return;
             }
             parsedInput = raw;
         } catch {
-            setError("Input harus berupa JSON yang valid");
+            setError("Input must be valid JSON.");
             return;
         }
         requestIdRef.current += 1;
@@ -57,7 +57,7 @@ export function useLLMGenerator(service: ILLMService): UseLLMGeneratorReturn {
             setError(
                 err instanceof Error
                     ? err.message
-                    : "Terjadi kesalahan tidak diketahui"
+                    : "An unknown error occurred."
             );
         } finally {
             if (currentRequestId === requestIdRef.current) {

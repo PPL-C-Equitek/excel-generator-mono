@@ -36,7 +36,7 @@ describe("fetchAPI", () => {
         });
         vi.stubGlobal("fetch", mockedFetch);
 
-        await expect(fetchAPI("health/")).rejects.toThrow("API error: 500");
+        await expect(fetchAPI("health/")).rejects.toThrow("Request failed. Please try again.");
     });
 
     it("strips trailing slash from NEXT_PUBLIC_API_URL before building request URL", async () => {
