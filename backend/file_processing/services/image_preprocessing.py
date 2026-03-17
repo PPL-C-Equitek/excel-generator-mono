@@ -149,11 +149,11 @@ def morphological_cleanup(image_array: np.ndarray) -> np.ndarray:
 def deskew_image(image_array: np.ndarray) -> np.ndarray:
     """Detect and correct small rotation (skew) in the image.
 
-    Uses the minimum-area bounding rectangle of non-zero pixels to
+    Uses the minimum-area bounding rectangle of foreground pixels to
     estimate skew angle.  Only corrects angles within ±15° to avoid
     rotating correctly-oriented images.
     """
-    coords = np.column_stack(np.nonzero(image_array > 0))
+    coords = np.column_stack(np.nonzero(image_array < 255))
     if coords.shape[0] < 10:
         # Not enough foreground pixels to estimate skew.
         return image_array

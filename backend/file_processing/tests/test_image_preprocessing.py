@@ -80,7 +80,7 @@ class TestImagePreprocessing(unittest.TestCase):
 
     @patch("file_processing.services.image_preprocessing.cv2")
     def test_deskew_image_not_enough_pixels(self, mock_cv2):
-        blank_img = np.zeros((100, 100), dtype=np.uint8)
+        blank_img = np.full((100, 100), 255, dtype=np.uint8)
         
         result = deskew_image(blank_img)
         
