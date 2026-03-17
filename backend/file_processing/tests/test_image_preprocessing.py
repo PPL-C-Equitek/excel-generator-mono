@@ -227,3 +227,19 @@ class TestImagePreprocessing(unittest.TestCase):
         result = preprocess_image(img)
 
         self.assertIsInstance(result, Image.Image)
+
+    @patch("file_processing.services.image_preprocessing.cv2")
+    def test_convert_to_grayscale_rgb(self, mock_cv2):
+        mock_cv2.cvtColor.return_value = self.dummy_gray_img
+
+        result = convert_to_grayscale(self.dummy_color_img, "rgb")
+
+        mock_cv2.cvtColor.assert_called_once_with(
+            self.dummy_color_img,
+            mock_cv2.COLOR_RGB2GRAY
+        )
+        self.assertTrue(np.array_equal(result, self.dummy_gray_img))
+
+    def test_convert_to_grayscale_invalid_color_order(self):
+        with self.assertRaises(ValueError):
+            convert_to_grayscale(self.dummy_color_img, "xyz")

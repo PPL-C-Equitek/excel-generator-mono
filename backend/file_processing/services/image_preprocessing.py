@@ -28,14 +28,35 @@ from file_processing.services.ocr_config import (
     MORPH_KERNEL_SIZE,
 )
 
-def convert_to_grayscale(image_array: np.ndarray) -> np.ndarray:
-    """Convert a BGR or RGB image to single-channel grayscale.
+def convert_to_grayscale(image_array: np.ndarray, color_order: str = "bgr") -> np.ndarray:
+    """
+    Convert an image to single-channel grayscale.
 
-    If the image is already single-channel it is returned unchanged.
+    Parameters
+    ----------
+    image_array : np.ndarray
+        Input image array in either BGR or RGB format, or already grayscale.
+    color_order : str, optional
+        Color channel order of the input image: "bgr" (default) or "rgb".
+
+    Returns
+    -------
+    np.ndarray
+        Grayscale image array.
     """
     if len(image_array.shape) == 2:
         return image_array
-    return cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
+
+    order = color_order.lower()
+
+    if order == "rgb":
+        conversion_code = cv2.COLOR_RGB2GRAY
+    elif order == "bgr":
+        conversion_code = cv2.COLOR_BGR2GRAY
+    else:
+        raise ValueError("color_order must be either 'rgb' or 'bgr'")
+
+    return cv2.cvtColor(image_array, conversion_code)
 
 
 def remove_noise(image_array: np.ndarray) -> np.ndarray:
