@@ -35,8 +35,6 @@ from file_processing.services.ocr_config import (
 )
 
 logger = logging.getLogger(__name__)
-TextBlock = Union[str, List[List[str]]]
-
 
 class OCRService:
     """Orchestrates the EasyOCR-primary OCR pipeline."""
