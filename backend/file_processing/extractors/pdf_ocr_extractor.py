@@ -27,7 +27,7 @@ class PdfOcrExtractor:
             ocr_engine: **Deprecated** — ignored. Kept for backward
                         compatibility; will be removed in a future version.
             dpi: Resolution for PDF→image conversion.
-                 Defaults to ``PDF_TO_IMAGE_DPI`` from config (300).
+                 Defaults to ``PDF_TO_IMAGE_DPI`` from config.
         """
         if ocr_engine is not None:
             warnings.warn(
