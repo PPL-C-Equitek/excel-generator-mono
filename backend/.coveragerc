@@ -9,6 +9,7 @@ omit =
     */tests.py
     manage.py
     config/*
+    config-*.py
     */apps.py
     */admin.py
     */urls.py

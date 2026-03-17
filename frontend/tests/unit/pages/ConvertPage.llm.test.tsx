@@ -158,10 +158,10 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
         })
 
         it('shows role="alert" for schema validation error', () => {
-            mockHookReturn.error = 'Respons upload tidak valid'
+            mockHookReturn.error = 'The server returned an invalid upload response.'
             render(<ConvertPage />)
             expect(screen.getByRole('alert')).toBeInTheDocument()
-            expect(screen.getByText('Respons upload tidak valid')).toBeInTheDocument()
+            expect(screen.getByText('The server returned an invalid upload response.')).toBeInTheDocument()
         })
 
         it('shows role="alert" for LLM conversion error', () => {
