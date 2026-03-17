@@ -18,15 +18,31 @@ EXT_PDF = ".pdf"
 
 ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX]
 ALLOWED_MIME_TYPES = {
-    EXT_PDF: ["application/pdf"],
+    EXT_PDF: [
+        "application/pdf",
+        "application/x-pdf",
+        "application/vnd.pdf",
+    ],
+
     EXT_XLS: [
         "application/vnd.ms-excel",
+        "application/msexcel",
+        "application/x-msexcel",
+        "application/x-ms-excel",
+        "application/x-excel",
+        "application/xls",
+        "application/x-xls",
         "application/octet-stream",
+        "application/x-ole-storage",
+        "application/CDFV2",
+        "application/vnd.ms-office",
     ],
+
     EXT_XLSX: [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/zip",
         "application/x-zip",
+        "application/x-zip-compressed",
         "application/octet-stream",
     ],
 }
