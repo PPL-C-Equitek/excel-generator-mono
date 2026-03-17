@@ -24,15 +24,18 @@ class PdfOcrExtractor:
     def __init__(self, ocr_engine=None, dpi: int | None = None):
         """
         Args:
-            ocr_engine: **Deprecated** — ignored. Kept for backward
-                        compatibility; will be removed in a future version.
+            ocr_engine: **Deprecated** – retained only for backward compatibility
+                 with deprecated ``extract()`` and ``extract_pages()`` methods and
+                 will be removed in a future version. New code should not rely on
+                 this parameter; OCR logic now lives in ``OCRService``.
             dpi: Resolution for PDF→image conversion.
                  Defaults to ``PDF_TO_IMAGE_DPI`` from config.
         """
         if ocr_engine is not None:
             warnings.warn(
-                "ocr_engine parameter is deprecated and ignored. "
-                "OCR logic now lives in OCRService.",
+                "ocr_engine parameter is deprecated and only used by "
+                "deprecated extract() / extract_pages() methods for "
+                "backward compatibility. OCR logic now lives in OCRService.",
                 DeprecationWarning,
                 stacklevel=2,
             )
