@@ -21,10 +21,17 @@ ALLOWED_MIME_TYPES = {
     EXT_PDF: [
         "application/pdf",
         "application/x-pdf",
+        "application/vnd.pdf",
     ],
 
     EXT_XLS: [
         "application/vnd.ms-excel",
+        "application/msexcel",
+        "application/x-msexcel",
+        "application/x-ms-excel",
+        "application/x-excel",
+        "application/xls",
+        "application/x-xls",
         "application/octet-stream",
         "application/x-ole-storage",
         "application/CDFV2",
