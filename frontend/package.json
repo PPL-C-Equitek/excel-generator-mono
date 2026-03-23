@@ -28,7 +28,7 @@
     "@vitest/coverage-v8": "^4.0.7",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "16.2.1",
     "jsdom": "^28.1.0",
     "msw": "^2.12.10",
     "tailwindcss": "^4",
