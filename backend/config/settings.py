@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "api",
     "llm",
     "file_processing",
+    "authentication"
 ]
 
 MIDDLEWARE = [
