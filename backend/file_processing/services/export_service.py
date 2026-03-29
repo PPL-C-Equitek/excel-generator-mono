@@ -566,22 +566,42 @@ def _build_excel_workbook(sheets, sanitization_policy):
 
     sheet_names = set()
     for sheet_index, sheet in enumerate(sheets):
-        sheet_name, headers, rows = _validate_excel_sheet(
+        _append_excel_worksheet(
+            workbook=workbook,
             sheet=sheet,
             sheet_index=sheet_index,
             sanitization_policy=sanitization_policy,
+            sheet_names=sheet_names,
         )
-        worksheet = workbook.create_sheet(
-            title=_normalize_excel_sheet_name(sheet_name, sheet_names)
-        )
-        worksheet.append(headers)
-        for row in rows:
-            worksheet.append(row)
 
     if not workbook.worksheets:
         workbook.create_sheet(title=_EXCEL_DEFAULT_EMPTY_SHEET_NAME)
 
     return workbook
+
+
+def _append_excel_worksheet(
+    workbook,
+    sheet,
+    sheet_index,
+    sanitization_policy,
+    sheet_names,
+):
+    sheet_name, headers, rows = _validate_excel_sheet(
+        sheet=sheet,
+        sheet_index=sheet_index,
+        sanitization_policy=sanitization_policy,
+    )
+    worksheet = workbook.create_sheet(
+        title=_normalize_excel_sheet_name(sheet_name, sheet_names)
+    )
+    _write_excel_worksheet_rows(worksheet=worksheet, headers=headers, rows=rows)
+
+
+def _write_excel_worksheet_rows(worksheet, headers, rows):
+    worksheet.append(headers)
+    for row in rows:
+        worksheet.append(row)
 
 
 def _validate_excel_sheet(sheet, sheet_index, sanitization_policy):
@@ -599,7 +619,9 @@ def _validate_excel_sheet(sheet, sheet_index, sanitization_policy):
         sanitization_policy=sanitization_policy,
     )
 
-    normalized_headers = [sanitization_policy.sanitize_header(header) for header in headers]
+    normalized_headers = [
+        sanitization_policy.sanitize_header(header) for header in headers
+    ]
     return sheet_name, normalized_headers, normalized_rows
 
 
