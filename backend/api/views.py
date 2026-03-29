@@ -89,6 +89,46 @@ def _build_export_success_response(
     return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
 
 
+def _build_export_error_response(
+    error,
+    validation_error_types,
+    generation_error_types,
+    invalid_request_message,
+    internal_error_message,
+    validation_log_message,
+    generation_log_message,
+    unexpected_log_message,
+):
+    if isinstance(error, validation_error_types):
+        logger.warning(validation_log_message, exc_info=True)
+        return Response(
+            {
+                "status": "error",
+                "message": invalid_request_message,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if isinstance(error, generation_error_types):
+        logger.exception(generation_log_message)
+        return Response(
+            {
+                "status": "error",
+                "message": internal_error_message,
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    logger.exception(unexpected_log_message)
+    return Response(
+        {
+            "status": "error",
+            "message": internal_error_message,
+        },
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
+
 @api_view(["GET"])
 def health(request):
     return Response({"status": "ok", "message": "Backend is running!"})
@@ -181,32 +221,16 @@ def export_csv(request):
             output_json=serializer.validated_data["output_json"],
             storage_dir=settings.CSV_EXPORT_DIR,
         )
-    except (OutputLLMValidationError, OutputCSVMappingError):
-        logger.warning("Validation or mapping error during CSV export.", exc_info=True)
-        return Response(
-            {
-                "status": "error",
-                "message": "Invalid CSV export request.",
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    except OutputCSVGenerationError:
-        logger.exception("CSV generation error during CSV export.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to generate CSV due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-    except Exception:
-        logger.exception("Unexpected error during CSV export.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to generate CSV due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    except Exception as exc:
+        return _build_export_error_response(
+            error=exc,
+            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
+            generation_error_types=(OutputCSVGenerationError,),
+            invalid_request_message="Invalid CSV export request.",
+            internal_error_message="Failed to generate CSV due to internal error.",
+            validation_log_message="Validation or mapping error during CSV export.",
+            generation_log_message="CSV generation error during CSV export.",
+            unexpected_log_message="Unexpected error during CSV export.",
         )
 
     return _build_export_success_response(
@@ -230,32 +254,16 @@ def export_excel(request):
             output_json=serializer.validated_data["output_json"],
             storage_dir=settings.EXCEL_EXPORT_DIR,
         )
-    except (OutputLLMValidationError, OutputCSVMappingError):
-        logger.warning("Validation or mapping error during Excel export.", exc_info=True)
-        return Response(
-            {
-                "status": "error",
-                "message": "Invalid Excel export request.",
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    except OutputExcelGenerationError:
-        logger.exception("Excel generation error during Excel export.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to generate Excel due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-    except Exception:
-        logger.exception("Unexpected error during Excel export.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to generate Excel due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    except Exception as exc:
+        return _build_export_error_response(
+            error=exc,
+            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
+            generation_error_types=(OutputExcelGenerationError,),
+            invalid_request_message="Invalid Excel export request.",
+            internal_error_message="Failed to generate Excel due to internal error.",
+            validation_log_message="Validation or mapping error during Excel export.",
+            generation_log_message="Excel generation error during Excel export.",
+            unexpected_log_message="Unexpected error during Excel export.",
         )
 
     return _build_export_success_response(
