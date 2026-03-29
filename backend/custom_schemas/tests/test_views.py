@@ -7,17 +7,10 @@ from custom_schemas.views import CustomSchemaDetailView, CustomSchemaListCreateV
 
 def make_definition(column_name="customer_name"):
     return {
-        "tables": [
+        "columns": [
             {
-                "table_name": "result",
-                "columns": [
-                    {
-                        "name": column_name,
-                        "type": "string",
-                        "required": True,
-                        "description": "Mapped customer field",
-                    }
-                ],
+                "name": column_name,
+                "description": "Mapped customer field",
             }
         ]
     }

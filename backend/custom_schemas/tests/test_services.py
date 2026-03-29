@@ -9,24 +9,15 @@ from custom_schemas.services import (
 
 def make_definition():
     return {
-        "tables": [
+        "columns": [
             {
-                "table_name": "result",
-                "columns": [
-                    {
-                        "name": "customer_name",
-                        "type": "string",
-                        "required": True,
-                        "description": "Customer full name",
-                    },
-                    {
-                        "name": "total_amount",
-                        "type": "number",
-                        "required": True,
-                        "description": "Invoice total amount",
-                    },
-                ],
-            }
+                "name": "customer_name",
+                "description": "Customer full name",
+            },
+            {
+                "name": "total_amount",
+                "description": "Invoice total amount",
+            },
         ]
     }
 
@@ -41,11 +32,9 @@ class CustomSchemaServiceTest(SimpleTestCase):
 
     def test_validate_schema_definition_rejects_duplicate_columns(self):
         definition = make_definition()
-        definition["tables"][0]["columns"].append(
+        definition["columns"].append(
             {
                 "name": "customer_name",
-                "type": "string",
-                "required": False,
                 "description": "",
             }
         )
@@ -53,11 +42,19 @@ class CustomSchemaServiceTest(SimpleTestCase):
         with self.assertRaises(ValidationError) as context:
             validate_schema_definition(definition)
 
-        self.assertIn("duplicate column names", str(context.exception))
+        self.assertIn("duplicate names", str(context.exception))
 
     def test_build_schema_prompt_fragment_lists_tables_and_columns(self):
         prompt_fragment = build_schema_prompt_fragment(make_definition())
 
-        self.assertIn('table "result"', prompt_fragment)
-        self.assertIn("customer_name (string, required)", prompt_fragment)
-        self.assertIn("total_amount (number, required)", prompt_fragment)
+        self.assertIn('single content_data table named "result"', prompt_fragment)
+        self.assertIn("customer_name: Customer full name", prompt_fragment)
+        self.assertIn("total_amount: Invoice total amount", prompt_fragment)
+
+    def test_validate_schema_definition_rejects_missing_description(self):
+        definition = {"columns": [{"name": "customer_name"}]}
+
+        with self.assertRaises(ValidationError) as context:
+            validate_schema_definition(definition)
+
+        self.assertIn("description is required", str(context.exception))
