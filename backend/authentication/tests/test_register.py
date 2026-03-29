@@ -1,8 +1,11 @@
 import uuid
 from unittest.mock import patch, MagicMock
 
+from django.db import IntegrityError
 from rest_framework.test import APISimpleTestCase
 from rest_framework import status
+
+from authentication.models import User
 
 
 class RegisterViewTest(APISimpleTestCase):
@@ -130,3 +133,72 @@ class RegisterViewTest(APISimpleTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertEqual(response.data["message"], "Terjadi kesalahan pada server")
+
+
+class UserManagerTest(APISimpleTestCase):
+    @patch.object(User, "save")
+    def test_create_user_hashes_password_and_sets_defaults(self, mock_save):
+        user = User.objects.create_user(
+            email="test@example.com",
+            name="Test User",
+            password="securePass1",
+        )
+
+        self.assertEqual(user.email, "test@example.com")
+        self.assertEqual(user.name, "Test User")
+        self.assertTrue(user.check_password("securePass1"))
+        mock_save.assert_called_once()
+
+    def test_create_user_raises_error_when_email_is_empty(self):
+        with self.assertRaises(ValueError) as ctx:
+            User.objects.create_user(email="", name="No Email")
+
+        self.assertIn("Email harus diisi", str(ctx.exception))
+
+    @patch.object(User, "save")
+    def test_create_user_normalizes_email(self, mock_save):
+        user = User.objects.create_user(
+            email="Test@Example.COM",
+            name="Normalize Test",
+            password="securePass1",
+        )
+
+        self.assertEqual(user.email, "Test@example.com")
+
+    @patch.object(User, "save")
+    def test_create_user_without_password(self, mock_save):
+        user = User.objects.create_user(
+            email="nopwd@example.com",
+            name="No Password",
+        )
+
+        self.assertFalse(user.check_password("anything"))
+        mock_save.assert_called_once()
+
+
+class UserStrTest(APISimpleTestCase):
+    def test_str_returns_email(self):
+        user = User(email="repr@example.com", name="Repr User")
+        self.assertEqual(str(user), "repr@example.com")
+
+
+class RegisterIntegrationTest(APISimpleTestCase):
+    @patch("authentication.views.User")
+    @patch("authentication.views.bcrypt")
+    def test_unique_email_constraint_prevents_duplicate(
+        self, mock_bcrypt, mock_user_model
+    ):
+        mock_user_model.objects.filter.return_value.exists.return_value = False
+        mock_bcrypt.hashpw.return_value = b"$2b$12$hashedpassword"
+        mock_bcrypt.gensalt.return_value = b"$2b$12$salt"
+        mock_user_model.objects.create.side_effect = IntegrityError(
+            "duplicate key value violates unique constraint"
+        )
+
+        response = self.client.post(
+            "/auth/register/",
+            {"name": "Dup User", "email": "dup@example.com", "password": "securePass1"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
