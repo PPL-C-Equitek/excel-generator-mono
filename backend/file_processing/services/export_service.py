@@ -19,6 +19,10 @@ class OutputCSVGenerationError(Exception):
     """Raised when mapped output cannot be generated into CSV content."""
 
 
+class OutputExcelGenerationError(Exception):
+    """Raised when mapped output cannot be generated into Excel content."""
+
+
 class OutputCSVDownloadLookupError(Exception):
     """Raised when generated CSV artifact cannot be resolved for download."""
 
@@ -44,6 +48,7 @@ _SCALAR_TYPES = (str, int, float, bool, type(None))
 _ALLOWED_SOURCE_TYPES = {"Excel", "PDF"}
 _REQUIRED_TOP_LEVEL_KEYS = {"document_info", "summary", "content_data"}
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+_EXCEL_SHEET_INVALID_CHARS = re.compile(r"[\\/*?:\[\]]")
 _DEFAULT_CSV_SANITIZATION_POLICY = CSVSanitizationPolicy()
 _DEFAULT_CSV_FILENAME_POLICY = CSVFileNamePolicy()
 
@@ -439,6 +444,155 @@ def export_csv_to_filesystem(
         "size_bytes": len(artifact["content"]),
         "created_at": _resolve_created_at(now_provider),
     }
+
+
+def export_excel_to_filesystem(
+    output_json,
+    storage_dir,
+    token_generator=None,
+    now_provider=None,
+    sanitization_policy=None,
+):
+    validated = validate_output_llm(output_json)
+    mapped = map_output_csv(validated)
+    artifact = _generate_excel_download_artifact(
+        mapped,
+        sanitization_policy=sanitization_policy,
+    )
+
+    try:
+        base_dir = _resolve_storage_dir(storage_dir)
+        token = _resolve_export_token(token_generator)
+        file_name = f"export_{token}.xlsx"
+        file_path = _build_safe_file_path(base_dir, file_name)
+        created_at = _resolve_created_at(now_provider)
+    except OutputCSVGenerationError as exc:
+        raise OutputExcelGenerationError(str(exc)) from exc
+
+    try:
+        with open(file_path, "wb") as destination:
+            destination.write(artifact["content"])
+    except OSError as exc:
+        raise OutputExcelGenerationError(
+            "Failed to save generated Excel artifact."
+        ) from exc
+
+    return {
+        "file_id": f"xlsx_{token}",
+        "file_name": file_name,
+        "artifact_type": "xlsx",
+        "size_bytes": len(artifact["content"]),
+        "created_at": created_at,
+    }
+
+
+def _generate_excel_download_artifact(mapped_output, sanitization_policy=None):
+    sheets = _validate_excel_mapped_output(mapped_output)
+    sanitization_policy = _resolve_excel_sanitization_policy(sanitization_policy)
+    workbook = _build_excel_workbook(
+        sheets=sheets,
+        sanitization_policy=sanitization_policy,
+    )
+
+    try:
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        content = buffer.getvalue()
+    except Exception as exc:
+        raise OutputExcelGenerationError("Failed to generate Excel artifact.") from exc
+    finally:
+        workbook.close()
+
+    return {
+        "type": "xlsx",
+        "name": "excel_export.xlsx",
+        "content": content,
+    }
+
+
+def _validate_excel_mapped_output(mapped_output):
+    if not isinstance(mapped_output, dict):
+        raise OutputExcelGenerationError("mapped_output must be an object.")
+
+    sheets = mapped_output.get("sheets")
+    if not isinstance(sheets, list):
+        raise OutputExcelGenerationError("mapped_output.sheets must be a list.")
+
+    return sheets
+
+
+def _resolve_excel_sanitization_policy(sanitization_policy):
+    try:
+        return _resolve_sanitization_policy(sanitization_policy)
+    except OutputCSVGenerationError as exc:
+        raise OutputExcelGenerationError(str(exc)) from exc
+
+
+def _build_excel_workbook(sheets, sanitization_policy):
+    try:
+        from openpyxl import Workbook
+    except ImportError as exc:
+        raise OutputExcelGenerationError(
+            "openpyxl is required to generate Excel artifacts."
+        ) from exc
+
+    workbook = Workbook()
+    if workbook.worksheets:
+        workbook.remove(workbook.active)
+
+    sheet_names = set()
+    for sheet_index, sheet in enumerate(sheets):
+        sheet_name, headers, rows = _validate_excel_sheet(
+            sheet=sheet,
+            sheet_index=sheet_index,
+            sanitization_policy=sanitization_policy,
+        )
+        worksheet = workbook.create_sheet(
+            title=_normalize_excel_sheet_name(sheet_name, sheet_names)
+        )
+        worksheet.append(headers)
+        for row in rows:
+            worksheet.append(row)
+
+    if not workbook.worksheets:
+        workbook.create_sheet(title="Sheet1")
+
+    return workbook
+
+
+def _validate_excel_sheet(sheet, sheet_index, sanitization_policy):
+    try:
+        sheet_name, headers, rows = _validate_generate_csv_sheet(sheet, sheet_index)
+        _validate_csv_headers(headers, sheet_index)
+        normalized_rows = _validate_csv_rows(
+            rows=rows,
+            headers=headers,
+            sheet_index=sheet_index,
+            sanitization_policy=sanitization_policy,
+        )
+    except OutputCSVGenerationError as exc:
+        raise OutputExcelGenerationError(str(exc)) from exc
+
+    normalized_headers = [sanitization_policy.sanitize_header(header) for header in headers]
+    return sheet_name, normalized_headers, normalized_rows
+
+
+def _normalize_excel_sheet_name(sheet_name, seen_names):
+    normalized = _EXCEL_SHEET_INVALID_CHARS.sub("_", sheet_name).strip()
+    if not normalized:
+        normalized = "Sheet"
+
+    normalized = normalized[:31]
+    candidate = normalized
+    duplicate_index = 1
+
+    while candidate.lower() in seen_names:
+        suffix = f"_{duplicate_index}"
+        candidate = f"{normalized[: max(0, 31 - len(suffix))]}{suffix}"
+        duplicate_index += 1
+
+    seen_names.add(candidate.lower())
+    return candidate
 
 
 def resolve_csv_download_artifact(file_id, storage_dir):
