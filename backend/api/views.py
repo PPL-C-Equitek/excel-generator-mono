@@ -71,6 +71,24 @@ def _resolve_download_filename(requested_name, default_name, artifact_type):
     return safe_name
 
 
+def _build_export_success_response(
+    metadata,
+    response_serializer_class,
+    invalid_metadata_message,
+):
+    response_serializer = response_serializer_class(data=metadata)
+    if not response_serializer.is_valid():
+        return Response(
+            {
+                "status": "error",
+                "message": invalid_metadata_message,
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+
+
 @api_view(["GET"])
 def health(request):
     return Response({"status": "ok", "message": "Backend is running!"})
@@ -191,17 +209,13 @@ def export_csv(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-    response_serializer = CsvExportResponseSerializer(data=metadata)
-    if not response_serializer.is_valid():
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to generate CSV due to invalid response metadata.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-
-    return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+    return _build_export_success_response(
+        metadata=metadata,
+        response_serializer_class=CsvExportResponseSerializer,
+        invalid_metadata_message=(
+            "Failed to generate CSV due to invalid response metadata."
+        ),
+    )
 
 
 @require_POST
@@ -244,17 +258,13 @@ def export_excel(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-    response_serializer = ExcelExportResponseSerializer(data=metadata)
-    if not response_serializer.is_valid():
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to generate Excel due to invalid response metadata.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-
-    return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+    return _build_export_success_response(
+        metadata=metadata,
+        response_serializer_class=ExcelExportResponseSerializer,
+        invalid_metadata_message=(
+            "Failed to generate Excel due to invalid response metadata."
+        ),
+    )
 
 
 @require_GET
