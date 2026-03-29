@@ -3,11 +3,11 @@ import io
 import os
 import re
 import tempfile
+import types
 import unittest
 import zipfile
 from copy import deepcopy
 from unittest.mock import patch
-
 from openpyxl import load_workbook
 
 import file_processing.services.export_service as export_service
@@ -1198,6 +1198,133 @@ class ExportExcelToFilesystemTest(unittest.TestCase):
                     storage_dir=temp_dir,
                     now_provider=lambda: "",
                 )
+
+
+class ExcelExportInternalHelperCoverageTest(unittest.TestCase):
+    class NoOpSanitizationPolicy:
+        def sanitize_header(self, header):
+            return header
+
+        def sanitize_value(self, value):
+            return value
+
+    class BrokenWorkbook:
+        def __init__(self):
+            self.closed = False
+
+        def save(self, _buffer):
+            raise RuntimeError("save failure")
+
+        def close(self):
+            self.closed = True
+
+    class _FakeWorksheet:
+        def __init__(self, title):
+            self.title = title
+            self.rows = []
+
+        def append(self, row):
+            self.rows.append(row)
+
+    class _FakeWorkbookWithoutDefaultSheet:
+        def __init__(self):
+            self.worksheets = []
+            self.active = None
+            self.removed_called = False
+
+        def remove(self, _worksheet):
+            self.removed_called = True
+
+        def create_sheet(self, title):
+            worksheet = ExcelExportInternalHelperCoverageTest._FakeWorksheet(title)
+            self.worksheets.append(worksheet)
+            return worksheet
+
+        def close(self):
+            return None
+
+    def test_validate_excel_mapped_output_rejects_non_object_root(self):
+        with self.assertRaises(export_service.OutputExcelGenerationError):
+            export_service._validate_excel_mapped_output("invalid")
+
+    def test_validate_excel_mapped_output_rejects_non_list_sheets(self):
+        with self.assertRaises(export_service.OutputExcelGenerationError):
+            export_service._validate_excel_mapped_output({"sheets": "invalid"})
+
+    def test_serialize_excel_workbook_wraps_unexpected_error_and_closes_workbook(self):
+        workbook = self.BrokenWorkbook()
+
+        with self.assertRaises(export_service.OutputExcelGenerationError):
+            export_service._serialize_excel_workbook(workbook)
+
+        self.assertTrue(workbook.closed)
+
+    def test_build_excel_workbook_raises_clear_error_when_openpyxl_missing(self):
+        original_import = __import__
+
+        def _import_stub(name, *args, **kwargs):
+            if name == "openpyxl":
+                raise ImportError("openpyxl not installed")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=_import_stub):
+            with self.assertRaises(export_service.OutputExcelGenerationError):
+                export_service._build_excel_workbook(
+                    sheets=[],
+                    sanitization_policy=self.NoOpSanitizationPolicy(),
+                )
+
+    def test_build_excel_workbook_creates_default_sheet_when_sheet_input_is_empty(self):
+        workbook = export_service._build_excel_workbook(
+            sheets=[],
+            sanitization_policy=self.NoOpSanitizationPolicy(),
+        )
+        try:
+            self.assertEqual(workbook.sheetnames, ["Sheet1"])
+        finally:
+            workbook.close()
+
+    def test_build_excel_workbook_skips_default_sheet_removal_when_workbook_starts_empty(self):
+        original_import = __import__
+
+        def _import_stub(name, *args, **kwargs):
+            if name == "openpyxl":
+                return types.SimpleNamespace(
+                    Workbook=self._FakeWorkbookWithoutDefaultSheet
+                )
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=_import_stub):
+            workbook = export_service._build_excel_workbook(
+                sheets=[
+                    {
+                        "name": "SheetA",
+                        "headers": ["col1"],
+                        "rows": [["value1"]],
+                    }
+                ],
+                sanitization_policy=self.NoOpSanitizationPolicy(),
+            )
+
+        self.assertEqual(len(workbook.worksheets), 1)
+        self.assertEqual(workbook.worksheets[0].title, "SheetA")
+        self.assertFalse(workbook.removed_called)
+
+    def test_normalize_excel_sheet_name_uses_default_when_normalized_is_blank(self):
+        seen_names = set()
+
+        result = export_service._normalize_excel_sheet_name("   ", seen_names)
+
+        self.assertEqual(result, "Sheet1")
+        self.assertIn("sheet1", seen_names)
+
+    def test_normalize_excel_sheet_name_increments_suffix_until_unique(self):
+        seen_names = {"sheet", "sheet_1"}
+
+        result = export_service._normalize_excel_sheet_name("Sheet", seen_names)
+
+        self.assertEqual(result, "Sheet_2")
+        self.assertIn("sheet_2", seen_names)
 
 
 class ResolveCSVDownloadArtifactTest(unittest.TestCase):
