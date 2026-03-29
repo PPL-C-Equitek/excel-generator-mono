@@ -517,22 +517,26 @@ def _validate_excel_mapped_output(mapped_output):
     return sheets
 
 
-def _resolve_excel_sanitization_policy(sanitization_policy):
+def _convert_csv_generation_error(func, *args, **kwargs):
     try:
-        return _resolve_sanitization_policy(sanitization_policy)
+        return func(*args, **kwargs)
     except OutputCSVGenerationError as exc:
         raise OutputExcelGenerationError(str(exc)) from exc
+
+
+def _resolve_excel_sanitization_policy(sanitization_policy):
+    return _convert_csv_generation_error(
+        _resolve_sanitization_policy,
+        sanitization_policy,
+    )
 
 
 def _resolve_excel_export_context(storage_dir, token_generator, now_provider):
-    try:
-        base_dir = _resolve_storage_dir(storage_dir)
-        token = _resolve_export_token(token_generator)
-        file_name = f"{_EXCEL_FILE_NAME_PREFIX}{token}.{_EXCEL_FILE_EXTENSION}"
-        file_path = _build_safe_file_path(base_dir, file_name)
-        created_at = _resolve_created_at(now_provider)
-    except OutputCSVGenerationError as exc:
-        raise OutputExcelGenerationError(str(exc)) from exc
+    base_dir = _convert_csv_generation_error(_resolve_storage_dir, storage_dir)
+    token = _convert_csv_generation_error(_resolve_export_token, token_generator)
+    file_name = f"{_EXCEL_FILE_NAME_PREFIX}{token}.{_EXCEL_FILE_EXTENSION}"
+    file_path = _convert_csv_generation_error(_build_safe_file_path, base_dir, file_name)
+    created_at = _convert_csv_generation_error(_resolve_created_at, now_provider)
 
     return token, file_name, file_path, created_at
 
@@ -581,17 +585,19 @@ def _build_excel_workbook(sheets, sanitization_policy):
 
 
 def _validate_excel_sheet(sheet, sheet_index, sanitization_policy):
-    try:
-        sheet_name, headers, rows = _validate_generate_csv_sheet(sheet, sheet_index)
-        _validate_csv_headers(headers, sheet_index)
-        normalized_rows = _validate_csv_rows(
-            rows=rows,
-            headers=headers,
-            sheet_index=sheet_index,
-            sanitization_policy=sanitization_policy,
-        )
-    except OutputCSVGenerationError as exc:
-        raise OutputExcelGenerationError(str(exc)) from exc
+    sheet_name, headers, rows = _convert_csv_generation_error(
+        _validate_generate_csv_sheet,
+        sheet,
+        sheet_index,
+    )
+    _convert_csv_generation_error(_validate_csv_headers, headers, sheet_index)
+    normalized_rows = _convert_csv_generation_error(
+        _validate_csv_rows,
+        rows=rows,
+        headers=headers,
+        sheet_index=sheet_index,
+        sanitization_policy=sanitization_policy,
+    )
 
     normalized_headers = [sanitization_policy.sanitize_header(header) for header in headers]
     return sheet_name, normalized_headers, normalized_rows
