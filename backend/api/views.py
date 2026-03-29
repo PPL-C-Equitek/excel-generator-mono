@@ -19,13 +19,17 @@ from file_processing.services.upload_service import (
 from file_processing.serializers import (
     CsvExportRequestSerializer,
     CsvExportResponseSerializer,
+    ExcelExportRequestSerializer,
+    ExcelExportResponseSerializer,
 )
 from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
     OutputCSVMappingError,
+    OutputExcelGenerationError,
     OutputLLMValidationError,
     export_csv_to_filesystem,
+    export_excel_to_filesystem,
     resolve_csv_download_artifact,
 )
 
@@ -193,6 +197,59 @@ def export_csv(request):
             {
                 "status": "error",
                 "message": "Failed to generate CSV due to invalid response metadata.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+
+
+@require_POST
+@api_view(["POST"])
+def export_excel(request):
+    serializer = ExcelExportRequestSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        metadata = export_excel_to_filesystem(
+            output_json=serializer.validated_data["output_json"],
+            storage_dir=settings.EXCEL_EXPORT_DIR,
+        )
+    except (OutputLLMValidationError, OutputCSVMappingError):
+        logger.warning("Validation or mapping error during Excel export.", exc_info=True)
+        return Response(
+            {
+                "status": "error",
+                "message": "Invalid Excel export request.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except OutputExcelGenerationError:
+        logger.exception("Excel generation error during Excel export.")
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed to generate Excel due to internal error.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    except Exception:
+        logger.exception("Unexpected error during Excel export.")
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed to generate Excel due to internal error.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    response_serializer = ExcelExportResponseSerializer(data=metadata)
+    if not response_serializer.is_valid():
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed to generate Excel due to invalid response metadata.",
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )

@@ -145,6 +145,10 @@ CSV_EXPORT_DIR = os.environ.get(
     'CSV_EXPORT_DIR',
     os.path.join(MEDIA_ROOT, 'exports', 'csv')
 )
+EXCEL_EXPORT_DIR = os.environ.get(
+    'EXCEL_EXPORT_DIR',
+    os.path.join(MEDIA_ROOT, 'exports', 'excel')
+)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
