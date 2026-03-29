@@ -49,6 +49,12 @@ _ALLOWED_SOURCE_TYPES = {"Excel", "PDF"}
 _REQUIRED_TOP_LEVEL_KEYS = {"document_info", "summary", "content_data"}
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 _EXCEL_SHEET_INVALID_CHARS = re.compile(r"[\\/*?:\[\]]")
+_EXCEL_ARTIFACT_TYPE = "xlsx"
+_EXCEL_FILE_ID_PREFIX = "xlsx_"
+_EXCEL_FILE_NAME_PREFIX = "export_"
+_EXCEL_FILE_EXTENSION = "xlsx"
+_EXCEL_MAX_SHEET_NAME_LENGTH = 31
+_EXCEL_DEFAULT_EMPTY_SHEET_NAME = "Sheet1"
 _DEFAULT_CSV_SANITIZATION_POLICY = CSVSanitizationPolicy()
 _DEFAULT_CSV_FILENAME_POLICY = CSVFileNamePolicy()
 
@@ -460,14 +466,11 @@ def export_excel_to_filesystem(
         sanitization_policy=sanitization_policy,
     )
 
-    try:
-        base_dir = _resolve_storage_dir(storage_dir)
-        token = _resolve_export_token(token_generator)
-        file_name = f"export_{token}.xlsx"
-        file_path = _build_safe_file_path(base_dir, file_name)
-        created_at = _resolve_created_at(now_provider)
-    except OutputCSVGenerationError as exc:
-        raise OutputExcelGenerationError(str(exc)) from exc
+    token, file_name, file_path, created_at = _resolve_excel_export_context(
+        storage_dir=storage_dir,
+        token_generator=token_generator,
+        now_provider=now_provider,
+    )
 
     try:
         with open(file_path, "wb") as destination:
@@ -478,9 +481,9 @@ def export_excel_to_filesystem(
         ) from exc
 
     return {
-        "file_id": f"xlsx_{token}",
+        "file_id": f"{_EXCEL_FILE_ID_PREFIX}{token}",
         "file_name": file_name,
-        "artifact_type": "xlsx",
+        "artifact_type": _EXCEL_ARTIFACT_TYPE,
         "size_bytes": len(artifact["content"]),
         "created_at": created_at,
     }
@@ -494,17 +497,10 @@ def _generate_excel_download_artifact(mapped_output, sanitization_policy=None):
         sanitization_policy=sanitization_policy,
     )
 
-    try:
-        buffer = io.BytesIO()
-        workbook.save(buffer)
-        content = buffer.getvalue()
-    except Exception as exc:
-        raise OutputExcelGenerationError("Failed to generate Excel artifact.") from exc
-    finally:
-        workbook.close()
+    content = _serialize_excel_workbook(workbook)
 
     return {
-        "type": "xlsx",
+        "type": _EXCEL_ARTIFACT_TYPE,
         "name": "excel_export.xlsx",
         "content": content,
     }
@@ -526,6 +522,30 @@ def _resolve_excel_sanitization_policy(sanitization_policy):
         return _resolve_sanitization_policy(sanitization_policy)
     except OutputCSVGenerationError as exc:
         raise OutputExcelGenerationError(str(exc)) from exc
+
+
+def _resolve_excel_export_context(storage_dir, token_generator, now_provider):
+    try:
+        base_dir = _resolve_storage_dir(storage_dir)
+        token = _resolve_export_token(token_generator)
+        file_name = f"{_EXCEL_FILE_NAME_PREFIX}{token}.{_EXCEL_FILE_EXTENSION}"
+        file_path = _build_safe_file_path(base_dir, file_name)
+        created_at = _resolve_created_at(now_provider)
+    except OutputCSVGenerationError as exc:
+        raise OutputExcelGenerationError(str(exc)) from exc
+
+    return token, file_name, file_path, created_at
+
+
+def _serialize_excel_workbook(workbook):
+    try:
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        return buffer.getvalue()
+    except Exception as exc:
+        raise OutputExcelGenerationError("Failed to generate Excel artifact.") from exc
+    finally:
+        workbook.close()
 
 
 def _build_excel_workbook(sheets, sanitization_policy):
@@ -555,7 +575,7 @@ def _build_excel_workbook(sheets, sanitization_policy):
             worksheet.append(row)
 
     if not workbook.worksheets:
-        workbook.create_sheet(title="Sheet1")
+        workbook.create_sheet(title=_EXCEL_DEFAULT_EMPTY_SHEET_NAME)
 
     return workbook
 
@@ -580,15 +600,17 @@ def _validate_excel_sheet(sheet, sheet_index, sanitization_policy):
 def _normalize_excel_sheet_name(sheet_name, seen_names):
     normalized = _EXCEL_SHEET_INVALID_CHARS.sub("_", sheet_name).strip()
     if not normalized:
-        normalized = "Sheet"
+        normalized = _EXCEL_DEFAULT_EMPTY_SHEET_NAME
 
-    normalized = normalized[:31]
+    normalized = normalized[:_EXCEL_MAX_SHEET_NAME_LENGTH]
     candidate = normalized
     duplicate_index = 1
 
     while candidate.lower() in seen_names:
         suffix = f"_{duplicate_index}"
-        candidate = f"{normalized[: max(0, 31 - len(suffix))]}{suffix}"
+        candidate = (
+            f"{normalized[: max(0, _EXCEL_MAX_SHEET_NAME_LENGTH - len(suffix))]}{suffix}"
+        )
         duplicate_index += 1
 
     seen_names.add(candidate.lower())
