@@ -1,8 +1,7 @@
-import uuid
 from unittest.mock import patch, MagicMock
 
 from django.core.cache import cache
-from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
+from django.core.signing import SignatureExpired, BadSignature
 from rest_framework.test import APISimpleTestCase
 from rest_framework import status
 

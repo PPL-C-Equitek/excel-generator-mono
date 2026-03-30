@@ -52,13 +52,14 @@ class SendVerificationEmailTest(SimpleTestCase):
         self.assertIn("verify-email?token=", call_kwargs["html"])
 
     @override_settings(RESEND_API_KEY="re_test_key", FRONTEND_URL="https://app.example.com")
-    def test_logs_exception_when_resend_fails(self):
+    def test_logs_and_reraises_exception_when_resend_fails(self):
         mock_resend = MagicMock()
         mock_resend.Emails.send.side_effect = Exception("API down")
 
         with patch.dict(sys.modules, {"resend": mock_resend}):
             with self.assertLogs("authentication.services", level="ERROR") as log:
-                send_verification_email("user@example.com")
+                with self.assertRaises(Exception, msg="API down"):
+                    send_verification_email("user@example.com")
 
         self.assertTrue(any("Failed to send" in msg for msg in log.output))
 

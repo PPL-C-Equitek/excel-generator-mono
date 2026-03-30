@@ -1,8 +1,8 @@
 import logging
 from datetime import timedelta
 
-import bcrypt
 from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
+from django.db import IntegrityError
 from rest_framework import status
 from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
@@ -17,13 +17,12 @@ logger = logging.getLogger(__name__)
 
 class ResendVerificationThrottle(SimpleRateThrottle):
     scope = "resend_verification"
+    rate = "3/15min"
 
     def get_cache_key(self, request, view):
-        ident = request.data.get("email", self.get_ident(request))
+        email = request.data.get("email", "")
+        ident = email.lower().strip() if email else self.get_ident(request)
         return self.cache_format % {"scope": self.scope, "ident": ident}
-
-    def get_rate(self):
-        return "3/15min"
 
     def parse_rate(self, rate):
         return (3, 900)
@@ -40,7 +39,7 @@ def register(request):
 
     validated = serializer.validated_data
     name = validated["name"]
-    email = validated["email"]
+    email = validated["email"].lower().strip()
     password = validated["password"]
 
     if User.objects.filter(email=email).exists():
@@ -50,13 +49,10 @@ def register(request):
         )
 
     try:
-        salt = bcrypt.gensalt()
-        hashed_password = bcrypt.hashpw(password.encode("utf-8"), salt)
-
-        user = User.objects.create(
+        user = User.objects.create_user(
             name=name,
             email=email,
-            password=hashed_password.decode("utf-8"),
+            password=password,
             status="unverified",
         )
 
@@ -68,6 +64,11 @@ def register(request):
                 "message": "Cek email Anda",
             },
             status=status.HTTP_201_CREATED,
+        )
+    except IntegrityError:
+        return Response(
+            {"message": "Email sudah terdaftar"},
+            status=status.HTTP_409_CONFLICT,
         )
     except Exception:
         logger.exception("Unexpected error during user registration.")

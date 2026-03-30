@@ -31,3 +31,4 @@ def send_verification_email(email):
             print(f"\n--- VERIFICATION LINK ---\n{verification_url}\n-------------------------\n")
     except Exception:
         logger.exception("Failed to send verification email to %s", email)
+        raise
