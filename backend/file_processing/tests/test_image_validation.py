@@ -7,6 +7,8 @@ from PIL import Image
 from file_processing.utils.image_validators import (
     validate_image_extension,
     validate_image_size,
+    validate_image_magic_number,
+    validate_image_integrity,
 )
 
 
@@ -71,3 +73,70 @@ class TestValidateImageSize(SimpleTestCase):
         is_valid, err = validate_image_size(f)
         self.assertFalse(is_valid)
         self.assertIn("10MB", err)
+
+
+class TestValidateImageMagicNumber(SimpleTestCase):
+    """validate_image_magic_number()"""
+
+    def test_png_magic_valid(self):
+        content = _make_image_bytes("PNG")
+        f = _make_uploaded("img.png", content)
+        is_valid, err = validate_image_magic_number(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    def test_jpg_magic_valid(self):
+        content = _make_image_bytes("JPEG")
+        f = _make_uploaded("img.jpg", content)
+        is_valid, err = validate_image_magic_number(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    def test_fake_image_rejected(self):
+        """A .txt file renamed to .png should fail magic number check."""
+        f = _make_uploaded("fake.png", b"This is plain text, not an image")
+        is_valid, err = validate_image_magic_number(f)
+        self.assertFalse(is_valid)
+        self.assertIn("does not match", err)
+
+
+class TestValidateImageIntegrity(SimpleTestCase):
+    """validate_image_integrity() — uses Pillow to detect corruption."""
+
+    def test_valid_png(self):
+        content = _make_image_bytes("PNG")
+        f = _make_uploaded("good.png", content)
+        is_valid, err = validate_image_integrity(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    def test_valid_jpeg(self):
+        content = _make_image_bytes("JPEG")
+        f = _make_uploaded("good.jpg", content)
+        is_valid, err = validate_image_integrity(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    def test_corrupted_image_rejected(self):
+        """Truncated PNG header + garbage should be detected as corrupt."""
+        corrupted = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+        f = _make_uploaded("corrupt.png", corrupted)
+        is_valid, err = validate_image_integrity(f)
+        self.assertFalse(is_valid)
+        self.assertIn("corrupted", err.lower())
+
+    def test_grayscale_image_passes(self):
+        """Edge: grayscale images must be accepted."""
+        content = _make_image_bytes("PNG", mode="L")
+        f = _make_uploaded("gray.png", content)
+        is_valid, err = validate_image_integrity(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    def test_small_resolution_image_passes(self):
+        """Edge: very small images (1×1) must be accepted."""
+        content = _make_image_bytes("PNG", size=(1, 1))
+        f = _make_uploaded("tiny.png", content)
+        is_valid, err = validate_image_integrity(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
