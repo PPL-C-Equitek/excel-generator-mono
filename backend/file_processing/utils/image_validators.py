@@ -7,6 +7,7 @@ Each function accepts a Django ``UploadedFile`` and returns
 
 import os
 import logging
+import warnings
 
 from PIL import Image
 from file_processing.utils.upload_constants import (
@@ -17,6 +18,7 @@ from file_processing.utils.upload_constants import (
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+MAX_IMAGE_DIMENSION = 10000  # Maximum width or height in pixels to prevent decompression bombs
 
 # Magic-number signatures
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -63,11 +65,18 @@ def validate_image_magic_number(uploaded_file):
 
 
 def validate_image_integrity(uploaded_file):
-    """Use Pillow to verify the image data is not corrupted."""
+    """Use Pillow to verify the image data is not corrupted and check for decompression bombs."""
     try:
         uploaded_file.seek(0)
-        with Image.open(uploaded_file) as img:
-            img.verify()  # raises if data is corrupt
+        # Treat PIL's DecompressionBombWarning as an error
+        with warnings.catch_warnings():
+            warnings.filterwarnings('error', category=Image.DecompressionBombWarning)
+            with Image.open(uploaded_file) as img:
+                # Check dimensions to prevent decompression bombs (small file, huge pixel dimensions)
+                width, height = img.size
+                if width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
+                    return False, f"Image dimensions exceed maximum allowed ({MAX_IMAGE_DIMENSION}x{MAX_IMAGE_DIMENSION})."
+                img.verify()  # raises if data is corrupt
         return True, None
     except Exception:
         logger.exception("Error validating image integrity.")

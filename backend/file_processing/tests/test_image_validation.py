@@ -1,4 +1,5 @@
 import io
+import warnings
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -175,6 +176,7 @@ class TestValidateImageIntegrity(SimpleTestCase):
             def __init__(self):
                 self.verify_called = False
                 self.exited = False
+                self.size = (100, 100)  # width, height in pixels
 
             def __enter__(self):
                 return self
@@ -234,6 +236,9 @@ class TestValidateImageIntegrity(SimpleTestCase):
                 return None
 
         class _ImageCtx:
+            def __init__(self):
+                self.size = (100, 100)  # width, height in pixels
+
             def __enter__(self):
                 return self
 
@@ -310,3 +315,64 @@ class TestValidateImageIntegrity(SimpleTestCase):
         is_valid, err = validate_image_integrity(f)
         self.assertTrue(is_valid)
         self.assertIsNone(err)
+
+    def test_image_exceeding_max_dimension_rejected(self):
+        """Image with dimensions exceeding MAX_IMAGE_DIMENSION should be rejected."""
+        from file_processing.utils.image_validators import MAX_IMAGE_DIMENSION
+
+        class _HugeDimensionImage:
+            def __init__(self):
+                self.size = (MAX_IMAGE_DIMENSION + 1, 100)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def verify(self):
+                pass
+
+        class _FakeFile:
+            def seek(self, *_args):
+                pass
+
+        f = _FakeFile()
+
+        with patch("file_processing.utils.image_validators.Image.open", return_value=_HugeDimensionImage()):
+            is_valid, err = validate_image_integrity(f)
+
+        self.assertFalse(is_valid)
+        self.assertIn("dimensions exceed", err.lower())
+
+    def test_decompression_bomb_warning_treated_as_error(self):
+        """PIL's DecompressionBombWarning should cause validation to fail."""
+
+        class _BombWarningImage:
+            def __init__(self):
+                self.size = (100, 100)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def verify(self):
+                # Simulate PIL raising DecompressionBombWarning
+                warnings.warn(
+                    "Decompression bomb detected",
+                    Image.DecompressionBombWarning,
+                )
+
+        class _FakeFile:
+            def seek(self, *_args):
+                pass
+
+        f = _FakeFile()
+
+        with patch("file_processing.utils.image_validators.Image.open", return_value=_BombWarningImage()):
+            is_valid, err = validate_image_integrity(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(err, "Image file is corrupted or unreadable.")
