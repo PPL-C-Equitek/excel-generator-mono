@@ -66,6 +66,9 @@ class RegisterViewTest(APISimpleTestCase):
         }
         response = self.client.post(self.url, payload, format="json")
 
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(response.data["message"], "Email sudah terdaftar")
+
         mock_user_model.objects.filter.assert_called_once_with(
             email="john@example.com"
         )
@@ -100,6 +103,7 @@ class RegisterViewTest(APISimpleTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertIn("userId", response.data)
+        mock_send_email.assert_called_once()
 
     def test_register_invalid_email_returns_400(self):
         payload = {
