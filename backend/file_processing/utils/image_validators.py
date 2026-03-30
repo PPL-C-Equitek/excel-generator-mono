@@ -9,7 +9,7 @@ import os
 import logging
 
 from PIL import Image
-from file_processing.services.upload_service import (
+from file_processing.utils.upload_constants import (
     MAX_FILE_SIZE,
     FILE_TOO_LARGE_ERROR,
 )

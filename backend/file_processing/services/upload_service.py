@@ -9,6 +9,7 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,6 @@ ALLOWED_MIME_TYPES = {
         "application/octet-stream",
     ],
 }
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-FILE_TOO_LARGE_ERROR = "File too large. Maximum allowed size is 10MB."
 MAX_PDF_PAGES = 100
 MAX_EXCEL_SHEETS = 100
 PDF_CORRUPT_ERROR = "PDF file is corrupt or has an invalid structure."
