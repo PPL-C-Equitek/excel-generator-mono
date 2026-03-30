@@ -162,6 +162,100 @@ class TestValidateImageMagicNumber(SimpleTestCase):
 class TestValidateImageIntegrity(SimpleTestCase):
     """validate_image_integrity() — uses Pillow to detect corruption."""
 
+    def test_uses_context_manager_and_resets_pointer(self):
+        class _TrackableFile:
+            def __init__(self):
+                self.seek_calls = []
+
+            def seek(self, *_args, **_kwargs):
+                self.seek_calls.append((_args, _kwargs))
+                return None
+
+        class _ImageCtx:
+            def __init__(self):
+                self.verify_called = False
+                self.exited = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                self.exited = True
+                return False
+
+            def verify(self):
+                self.verify_called = True
+
+        f = _TrackableFile()
+        img_ctx = _ImageCtx()
+
+        with patch("file_processing.utils.image_validators.Image.open", return_value=img_ctx):
+            is_valid, err = validate_image_integrity(f)
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+        self.assertTrue(img_ctx.verify_called)
+        self.assertTrue(img_ctx.exited)
+        self.assertGreaterEqual(len(f.seek_calls), 2)
+
+    def test_integrity_error_not_masked_when_finally_seek_fails(self):
+        class _SeekFailsOnResetFile:
+            def __init__(self):
+                self.seek_call_count = 0
+
+            def seek(self, *_args, **_kwargs):
+                self.seek_call_count += 1
+                if self.seek_call_count >= 2:
+                    raise OSError("seek reset failed")
+                return None
+
+        f = _SeekFailsOnResetFile()
+
+        with patch("file_processing.utils.image_validators.Image.open", side_effect=OSError("bad image")):
+            with patch("file_processing.utils.image_validators.logger.exception") as mock_exception:
+                is_valid, err = validate_image_integrity(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(err, "Image file is corrupted or unreadable.")
+        self.assertEqual(f.seek_call_count, 2)
+        mock_exception.assert_called_once_with(
+            "Error resetting file pointer after image integrity check."
+        )
+
+    def test_integrity_valid_result_when_finally_seek_fails_and_logs(self):
+        class _SeekFailsOnResetFile:
+            def __init__(self):
+                self.seek_call_count = 0
+
+            def seek(self, *_args, **_kwargs):
+                self.seek_call_count += 1
+                if self.seek_call_count >= 2:
+                    raise OSError("seek reset failed")
+                return None
+
+        class _ImageCtx:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def verify(self):
+                return None
+
+        f = _SeekFailsOnResetFile()
+
+        with patch("file_processing.utils.image_validators.Image.open", return_value=_ImageCtx()):
+            with patch("file_processing.utils.image_validators.logger.exception") as mock_exception:
+                is_valid, err = validate_image_integrity(f)
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+        self.assertEqual(f.seek_call_count, 2)
+        mock_exception.assert_called_once_with(
+            "Error resetting file pointer after image integrity check."
+        )
+
     def test_valid_png(self):
         content = _make_image_bytes("PNG")
         f = _make_uploaded("good.png", content)

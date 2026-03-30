@@ -63,10 +63,15 @@ def validate_image_integrity(uploaded_file):
     """Use Pillow to verify the image data is not corrupted."""
     try:
         uploaded_file.seek(0)
-        img = Image.open(uploaded_file)
-        img.verify()  # raises if data is corrupt
-        uploaded_file.seek(0)
+        with Image.open(uploaded_file) as img:
+            img.verify()  # raises if data is corrupt
         return True, None
     except Exception:
-        uploaded_file.seek(0)
         return False, "Image file is corrupted or unreadable."
+    finally:
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            logger.exception(
+                "Error resetting file pointer after image integrity check."
+            )
