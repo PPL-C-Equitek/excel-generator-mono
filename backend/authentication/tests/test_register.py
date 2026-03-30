@@ -17,15 +17,17 @@ class RegisterViewTest(APISimpleTestCase):
             "password": "securePass1",
         }
 
+    @patch("authentication.views.send_verification_email")
     @patch("authentication.views.User")
     @patch("authentication.views.bcrypt")
-    def test_register_valid_data_returns_201(self, mock_bcrypt, mock_user_model):
+    def test_register_valid_data_returns_201(self, mock_bcrypt, mock_user_model, mock_send_email):
         mock_user_model.objects.filter.return_value.exists.return_value = False
         mock_bcrypt.hashpw.return_value = b"$2b$12$hashedpassword"
         mock_bcrypt.gensalt.return_value = b"$2b$12$salt"
 
         saved_user = MagicMock()
         saved_user.id = uuid.uuid4()
+        saved_user.email = "john@example.com"
         mock_user_model.objects.create.return_value = saved_user
 
         response = self.client.post(self.url, self.valid_payload, format="json")
@@ -43,6 +45,24 @@ class RegisterViewTest(APISimpleTestCase):
         self.assertEqual(call_kwargs["name"], "John Doe")
         self.assertEqual(call_kwargs["email"], "john@example.com")
 
+    @patch("authentication.views.send_verification_email")
+    @patch("authentication.views.User")
+    @patch("authentication.views.bcrypt")
+    def test_register_sends_verification_email(self, mock_bcrypt, mock_user_model, mock_send_email):
+        mock_user_model.objects.filter.return_value.exists.return_value = False
+        mock_bcrypt.hashpw.return_value = b"$2b$12$hashedpassword"
+        mock_bcrypt.gensalt.return_value = b"$2b$12$salt"
+
+        saved_user = MagicMock()
+        saved_user.id = uuid.uuid4()
+        saved_user.email = "john@example.com"
+        mock_user_model.objects.create.return_value = saved_user
+
+        response = self.client.post(self.url, self.valid_payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        mock_send_email.assert_called_once_with(saved_user.email)
+
     @patch("authentication.views.User")
     def test_register_duplicate_email_returns_409(self, mock_user_model):
         mock_user_model.objects.filter.return_value.exists.return_value = True
@@ -52,10 +72,11 @@ class RegisterViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(response.data["message"], "Email sudah terdaftar")
 
+    @patch("authentication.views.send_verification_email")
     @patch("authentication.views.User")
     @patch("authentication.views.bcrypt")
     def test_register_password_min_length_returns_201(
-        self, mock_bcrypt, mock_user_model
+        self, mock_bcrypt, mock_user_model, mock_send_email
     ):
         mock_user_model.objects.filter.return_value.exists.return_value = False
         mock_bcrypt.hashpw.return_value = b"$2b$12$hashedpassword"
