@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
 
-# Magic-number prefixes
-PNG_MAGIC = b"\x89PNG"
-JPG_MAGIC = b"\xFF\xD8"
+# Magic-number signatures
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+JPG_MAGIC = b"\xFF\xD8\xFF"
 
 
 def validate_image_extension(uploaded_file):
@@ -44,9 +44,9 @@ def validate_image_magic_number(uploaded_file):
         header = uploaded_file.read(8)
         uploaded_file.seek(0)
 
-        if header[:4] == PNG_MAGIC:
+        if header.startswith(PNG_MAGIC):
             return True, None
-        if header[:2] == JPG_MAGIC:
+        if header.startswith(JPG_MAGIC):
             return True, None
 
         return False, "File header does not match a supported image format."

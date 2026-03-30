@@ -100,6 +100,18 @@ class TestValidateImageMagicNumber(SimpleTestCase):
         self.assertFalse(is_valid)
         self.assertIn("does not match", err)
 
+    def test_png_with_only_4_byte_prefix_rejected(self):
+        f = _make_uploaded("fake.png", b"\x89PNG" + b"not-real-png-data")
+        is_valid, err = validate_image_magic_number(f)
+        self.assertFalse(is_valid)
+        self.assertIn("does not match", err)
+
+    def test_jpg_without_following_ff_marker_rejected(self):
+        f = _make_uploaded("fake.jpg", b"\xFF\xD8\x00" + b"not-real-jpeg-data")
+        is_valid, err = validate_image_magic_number(f)
+        self.assertFalse(is_valid)
+        self.assertIn("does not match", err)
+
     def test_read_error_returns_unable_to_read_file_header(self):
         class _BrokenUploadedFile:
             def seek(self, *_args, **_kwargs):
