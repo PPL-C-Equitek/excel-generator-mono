@@ -70,6 +70,7 @@ def validate_image_integrity(uploaded_file):
             img.verify()  # raises if data is corrupt
         return True, None
     except Exception:
+        logger.exception("Error validating image integrity.")
         return False, "Image file is corrupted or unreadable."
     finally:
         try:
