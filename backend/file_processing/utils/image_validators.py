@@ -8,6 +8,8 @@ Each function accepts a Django ``UploadedFile`` and returns
 import os
 import logging
 
+from PIL import Image
+
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
@@ -34,3 +36,33 @@ def validate_image_size(uploaded_file):
         return False, "File too large. Maximum allowed size is 10MB."
     return True, None
 
+
+def validate_image_magic_number(uploaded_file):
+    """Verify the file header matches known image magic numbers."""
+    try:
+        uploaded_file.seek(0)
+        header = uploaded_file.read(8)
+        uploaded_file.seek(0)
+
+        if header[:4] == PNG_MAGIC:
+            return True, None
+        if header[:2] == JPG_MAGIC:
+            return True, None
+
+        return False, "File header does not match a supported image format."
+    except Exception:
+        logger.exception("Error reading file header for magic number check.")
+        return False, "Unable to read file header."
+
+
+def validate_image_integrity(uploaded_file):
+    """Use Pillow to verify the image data is not corrupted."""
+    try:
+        uploaded_file.seek(0)
+        img = Image.open(uploaded_file)
+        img.verify()  # raises if data is corrupt
+        uploaded_file.seek(0)
+        return True, None
+    except Exception:
+        uploaded_file.seek(0)
+        return False, "Image file is corrupted or unreadable."
