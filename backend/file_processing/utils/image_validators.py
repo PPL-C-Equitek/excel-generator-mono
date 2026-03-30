@@ -9,11 +9,14 @@ import os
 import logging
 
 from PIL import Image
+from file_processing.services.upload_service import (
+    MAX_FILE_SIZE,
+    FILE_TOO_LARGE_ERROR,
+)
 
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
-MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 # Magic-number signatures
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -32,8 +35,8 @@ def validate_image_extension(uploaded_file):
 
 def validate_image_size(uploaded_file):
     """Reject files larger than 10 MB."""
-    if uploaded_file.size > MAX_IMAGE_SIZE:
-        return False, "File too large. Maximum allowed size is 10MB."
+    if uploaded_file.size > MAX_FILE_SIZE:
+        return False, FILE_TOO_LARGE_ERROR
     return True, None
 
 
