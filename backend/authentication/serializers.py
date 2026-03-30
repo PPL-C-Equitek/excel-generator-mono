@@ -12,7 +12,7 @@ def validate_password_strength(value):
         raise serializers.ValidationError(
             "Password harus mengandung huruf"
         )
-    if not re.search(r'[0-9]', value):
+    if not re.search(r'\d', value):
         raise serializers.ValidationError(
             "Password harus mengandung angka"
         )
