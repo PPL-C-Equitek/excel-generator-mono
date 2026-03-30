@@ -42,7 +42,6 @@ def validate_image_magic_number(uploaded_file):
     try:
         uploaded_file.seek(0)
         header = uploaded_file.read(8)
-        uploaded_file.seek(0)
 
         if header.startswith(PNG_MAGIC):
             return True, None
@@ -53,6 +52,11 @@ def validate_image_magic_number(uploaded_file):
     except Exception:
         logger.exception("Error reading file header for magic number check.")
         return False, "Unable to read file header."
+    finally:
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
 
 
 def validate_image_integrity(uploaded_file):

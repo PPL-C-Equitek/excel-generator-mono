@@ -114,7 +114,11 @@ class TestValidateImageMagicNumber(SimpleTestCase):
 
     def test_read_error_returns_unable_to_read_file_header(self):
         class _BrokenUploadedFile:
+            def __init__(self):
+                self.seek_calls = []
+
             def seek(self, *_args, **_kwargs):
+                self.seek_calls.append((_args, _kwargs))
                 return None
 
             def read(self, *_args, **_kwargs):
@@ -130,6 +134,29 @@ class TestValidateImageMagicNumber(SimpleTestCase):
         mock_exception.assert_called_once_with(
             "Error reading file header for magic number check."
         )
+        self.assertGreaterEqual(len(f.seek_calls), 2)
+
+    def test_finally_seek_reset_failure_is_ignored(self):
+        class _SeekFailsOnResetFile:
+            def __init__(self):
+                self.seek_call_count = 0
+
+            def seek(self, *_args, **_kwargs):
+                self.seek_call_count += 1
+                if self.seek_call_count >= 2:
+                    raise OSError("seek reset failed")
+                return None
+
+            def read(self, *_args, **_kwargs):
+                return b"\x89PNG\r\n\x1a\n"
+
+        f = _SeekFailsOnResetFile()
+
+        is_valid, err = validate_image_magic_number(f)
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+        self.assertEqual(f.seek_call_count, 2)
 
 
 class TestValidateImageIntegrity(SimpleTestCase):
