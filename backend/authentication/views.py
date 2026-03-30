@@ -1,14 +1,32 @@
 import logging
+from datetime import timedelta
 
 import bcrypt
+from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
 
 from authentication.models import User
 from authentication.serializers import RegisterSerializer
+from authentication.services import send_verification_email
 
 logger = logging.getLogger(__name__)
+
+
+class ResendVerificationThrottle(SimpleRateThrottle):
+    scope = "resend_verification"
+
+    def get_cache_key(self, request, view):
+        ident = request.data.get("email", self.get_ident(request))
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+    def get_rate(self):
+        return "3/15min"
+
+    def parse_rate(self, rate):
+        return (3, 900)
 
 
 @api_view(["POST"])
@@ -42,6 +60,8 @@ def register(request):
             status="unverified",
         )
 
+        send_verification_email(user.email)
+
         return Response(
             {
                 "userId": str(user.id),
@@ -55,3 +75,75 @@ def register(request):
             {"message": "Terjadi kesalahan pada server"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(["GET"])
+def verify_email(request):
+    token = request.query_params.get("token")
+    if not token:
+        return Response(
+            {"message": "Token tidak ditemukan"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    signer = TimestampSigner()
+    try:
+        email = signer.unsign(token, max_age=timedelta(hours=24))
+    except SignatureExpired:
+        return Response(
+            {"message": "Token expired. Silakan minta verifikasi ulang."},
+            status=status.HTTP_410_GONE,
+        )
+    except BadSignature:
+        return Response(
+            {"message": "Token tidak valid"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return Response(
+            {"message": "User tidak ditemukan"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    user.status = "verified"
+    user.save()
+
+    return Response(
+        {"message": "Email berhasil diverifikasi"},
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@throttle_classes([ResendVerificationThrottle])
+def resend_verification(request):
+    email = request.data.get("email")
+    if not email:
+        return Response(
+            {"message": "Email harus diisi"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return Response(
+            {"message": "User tidak ditemukan"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if user.status == "verified":
+        return Response(
+            {"message": "Email sudah diverifikasi"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    send_verification_email(user.email)
+
+    return Response(
+        {"message": "Email verifikasi telah dikirim ulang"},
+        status=status.HTTP_200_OK,
+    )

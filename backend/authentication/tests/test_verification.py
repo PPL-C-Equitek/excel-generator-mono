@@ -1,6 +1,7 @@
 import uuid
 from unittest.mock import patch, MagicMock
 
+from django.core.cache import cache
 from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
 from rest_framework.test import APISimpleTestCase
 from rest_framework import status
@@ -64,6 +65,7 @@ class VerifyEmailViewTest(APISimpleTestCase):
         mock_signer = MagicMock()
         mock_signer_cls.return_value = mock_signer
         mock_signer.unsign.return_value = "ghost@example.com"
+        mock_user_model.DoesNotExist = type("DoesNotExist", (Exception,), {})
         mock_user_model.objects.get.side_effect = mock_user_model.DoesNotExist
 
         response = self.client.get(self.url, {"token": "valid-but-no-user"})
@@ -93,6 +95,7 @@ class VerifyEmailViewTest(APISimpleTestCase):
 # -------------------------------------------------------------------- #
 class ResendVerificationViewTest(APISimpleTestCase):
     def setUp(self):
+        cache.clear()
         self.url = "/auth/resend-verification/"
 
     @patch("authentication.views.send_verification_email")
@@ -132,6 +135,7 @@ class ResendVerificationViewTest(APISimpleTestCase):
 
     @patch("authentication.views.User")
     def test_resend_to_nonexistent_email_returns_404(self, mock_user_model):
+        mock_user_model.DoesNotExist = type("DoesNotExist", (Exception,), {})
         mock_user_model.objects.get.side_effect = mock_user_model.DoesNotExist
 
         response = self.client.post(
