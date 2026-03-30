@@ -1,4 +1,5 @@
 import io
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -98,6 +99,25 @@ class TestValidateImageMagicNumber(SimpleTestCase):
         is_valid, err = validate_image_magic_number(f)
         self.assertFalse(is_valid)
         self.assertIn("does not match", err)
+
+    def test_read_error_returns_unable_to_read_file_header(self):
+        class _BrokenUploadedFile:
+            def seek(self, *_args, **_kwargs):
+                return None
+
+            def read(self, *_args, **_kwargs):
+                raise OSError("cannot read")
+
+        f = _BrokenUploadedFile()
+
+        with patch("file_processing.utils.image_validators.logger.exception") as mock_exception:
+            is_valid, err = validate_image_magic_number(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(err, "Unable to read file header.")
+        mock_exception.assert_called_once_with(
+            "Error reading file header for magic number check."
+        )
 
 
 class TestValidateImageIntegrity(SimpleTestCase):
