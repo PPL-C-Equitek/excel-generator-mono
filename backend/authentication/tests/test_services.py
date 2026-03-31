@@ -1,11 +1,13 @@
 import sys
+import json
+from datetime import datetime, timezone
+import uuid
 from unittest.mock import patch, MagicMock
 
 from django.core.signing import TimestampSigner
 from django.test import SimpleTestCase, override_settings
 
-from authentication.services import generate_verification_token, send_verification_email
-
+from authentication.services import generate_verification_token, send_verification_email, generate_tokens
 
 class GenerateVerificationTokenTest(SimpleTestCase):
     def test_generates_signed_token_containing_email(self):
@@ -70,3 +72,53 @@ class SendVerificationEmailTest(SimpleTestCase):
 
         printed_text = mock_print.call_args[0][0]
         self.assertIn("https://myapp.com/auth/verify-email?token=", printed_text)
+
+class GenerateTokensTest(SimpleTestCase):
+    def setUp(self):
+        self.user_id = uuid.uuid4()
+        self.email = "user@example.com"
+        self.tokens = generate_tokens(self.user_id, self.email)
+
+    def test_returns_access_and_refresh_token_keys(self):
+        self.assertIn("accessToken", self.tokens)
+        self.assertIn("refreshToken", self.tokens)
+
+    def test_access_token_is_unsignable(self):
+        signer = TimestampSigner()
+        raw = signer.unsign(self.tokens["accessToken"], max_age=60)
+        payload = json.loads(raw)
+        self.assertEqual(payload["user_id"], str(self.user_id))
+        self.assertEqual(payload["email"], self.email)
+        self.assertEqual(payload["type"], "access")
+
+    def test_refresh_token_is_unsignable(self):
+        signer = TimestampSigner()
+        raw = signer.unsign(self.tokens["refreshToken"], max_age=60)
+        payload = json.loads(raw)
+        self.assertEqual(payload["user_id"], str(self.user_id))
+        self.assertEqual(payload["email"], self.email)
+        self.assertEqual(payload["type"], "refresh")
+
+    def test_access_token_expiry_is_approximately_one_hour(self):
+        signer = TimestampSigner()
+        raw = signer.unsign(self.tokens["accessToken"], max_age=60)
+        payload = json.loads(raw)
+        exp = datetime.fromisoformat(payload["exp"])
+        delta = exp - datetime.utcnow()
+        # Toleransi ±5 detik dari 1 jam
+        self.assertAlmostEqual(delta.total_seconds(), 3600, delta=5)
+
+    def test_refresh_token_expiry_is_approximately_seven_days(self):
+        signer = TimestampSigner()
+        raw = signer.unsign(self.tokens["refreshToken"], max_age=60)
+        payload = json.loads(raw)
+        exp = datetime.fromisoformat(payload["exp"])
+        delta = exp - datetime.utcnow()
+        # Toleransi ±5 detik dari 7 hari
+        self.assertAlmostEqual(delta.total_seconds(), 7 * 86400, delta=5)
+
+    def test_different_users_produce_different_tokens(self):
+        other_id = uuid.uuid4()
+        other_tokens = generate_tokens(other_id, "other@example.com")
+        self.assertNotEqual(self.tokens["accessToken"], other_tokens["accessToken"])
+        self.assertNotEqual(self.tokens["refreshToken"], other_tokens["refreshToken"])
