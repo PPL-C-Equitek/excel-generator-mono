@@ -103,7 +103,7 @@ describe('Registration Page', () => {
   });
 
   describe('3. API Integration and 4. Loading State', () => {
-    test('successful registration redirects or shows success message and clears form', async () => {
+    test('successful registration shows success message and rendering resend and login links', async () => {
       const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
       const user = userEvent.setup();
 
@@ -131,10 +131,47 @@ describe('Registration Page', () => {
         });
       });
 
-      // 3. Success Feedback -> redirects
+      // 3. Success Feedback -> shows resend CTA and login link
       await waitFor(() => {
         expect(screen.getByText(/cek email anda/i)).toBeInTheDocument();
-        expect(mockPush).toHaveBeenCalledWith(expect.stringMatching(/login|verify/i));
+        expect(screen.getByRole('button', { name: /kirim ulang email/i })).toBeInTheDocument();
+        expect(screen.getByRole('link', { name: /pergi ke halaman login/i })).toBeInTheDocument();
+      });
+    });
+
+    test('successful resend verification triggers success message toast', async () => {
+      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      // First, mock the registration
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 201,
+        data: { message: 'Cek email Anda' },
+      });
+
+      await user.type(nameInput, 'Resend User');
+      await user.type(emailInput, 'resend@example.com');
+      await user.type(passwordInput, 'SecurePass123!');
+      await user.type(confirmPasswordInput, 'SecurePass123!');
+
+      fireEvent.click(submitBtn);
+
+      // Wait for the Resend button to appear
+      const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
+
+      // Mock the resend verification endpoint
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 200,
+        data: { message: 'Email verifikasi telah dikirim ulang' },
+      });
+
+      fireEvent.click(resendBtn);
+
+      await waitFor(() => {
+        expect(mockedAxios.post).toHaveBeenCalledWith(expect.stringContaining('/auth/resend-verification/'), {
+          email: 'resend@example.com',
+        });
+        expect(screen.getByText(/email verifikasi telah dikirim ulang/i)).toBeInTheDocument();
       });
     });
 
