@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "api",
+    "custom_schemas",
     "llm",
     "file_processing",
     "authentication"
