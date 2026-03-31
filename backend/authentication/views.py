@@ -172,10 +172,15 @@ class LoginFailureTracker:
     
     @classmethod
     def record_failure(cls, email):
-        """Record a failed login attempt"""
+        """Record a failed login attempt using atomic increment."""
         cache_key = cls.get_cache_key(email)
-        failures = cache.get(cache_key, 0)
-        cache.set(cache_key, failures + 1, cls.TIME_WINDOW)
+        cache.add(cache_key, 0, cls.TIME_WINDOW)
+
+        try:
+            return cache.incr(cache_key)
+        except ValueError:
+            cache.set(cache_key, 1, cls.TIME_WINDOW)
+            return 1
     
     @classmethod
     def reset_failures(cls, email):

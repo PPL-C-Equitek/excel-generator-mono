@@ -3,8 +3,10 @@ import jwt
 from datetime import timedelta
 from django.conf import settings
 from django.core.signing import TimestampSigner
-logger = logging.getLogger(__name__)
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
+
 
 
 def generate_verification_token(email):
