@@ -2,9 +2,12 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
-import RegisterPage from '@/app/register/page';
+import RegisterPage, {
+  shouldSkipResendVerification,
+  resendVerificationFlow,
+} from '@/app/register/page';
 
-import { vi, describe, test, expect, beforeEach, Mock, Mocked } from 'vitest';
+import { vi, describe, test, expect, beforeEach, afterEach, Mock, Mocked } from 'vitest';
 
 // Mock Next.js router
 vi.mock('next/navigation', () => ({
@@ -23,6 +26,10 @@ describe('Registration Page', () => {
     (useRouter as Mock).mockReturnValue({ push: mockPush });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const setup = () => {
     render(<RegisterPage />);
     return {
@@ -33,6 +40,47 @@ describe('Registration Page', () => {
       submitBtn: screen.getByRole('button', { name: /daftar/i }),
     };
   };
+
+  describe('resend guard helper', () => {
+    test('returns true when email is empty', () => {
+      expect(shouldSkipResendVerification('', false, 0)).toBe(true);
+    });
+
+    test('returns true when request is in-flight', () => {
+      expect(shouldSkipResendVerification('user@example.com', true, 0)).toBe(true);
+    });
+
+    test('returns true when cooldown is active', () => {
+      expect(shouldSkipResendVerification('user@example.com', false, 10)).toBe(true);
+    });
+
+    test('returns false when resend should proceed', () => {
+      expect(shouldSkipResendVerification('user@example.com', false, 0)).toBe(false);
+    });
+
+    test('resend flow exits early when guard is true', async () => {
+      const setIsResending = vi.fn();
+      const setResendStatusMessage = vi.fn();
+      const setResendErrorMessage = vi.fn();
+      const setResendCooldown = vi.fn();
+
+      await resendVerificationFlow({
+        email: '',
+        isResending: false,
+        resendCooldown: 0,
+        setIsResending,
+        setResendStatusMessage,
+        setResendErrorMessage,
+        setResendCooldown,
+      });
+
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+      expect(setIsResending).not.toHaveBeenCalled();
+      expect(setResendStatusMessage).not.toHaveBeenCalled();
+      expect(setResendErrorMessage).not.toHaveBeenCalled();
+      expect(setResendCooldown).not.toHaveBeenCalled();
+    });
+  });
 
   test('1. renders all required fields and submit button', () => {
     const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
@@ -174,6 +222,159 @@ describe('Registration Page', () => {
         expect(screen.getByText(/email verifikasi telah dikirim ulang/i)).toBeInTheDocument();
       });
     });
+
+    test('resend failure shows fallback error message when API response has no message', async () => {
+      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 201,
+        data: { message: 'Cek email Anda' },
+      });
+
+      await user.type(nameInput, 'Resend Fail User');
+      await user.type(emailInput, 'resendfail@example.com');
+      await user.type(passwordInput, 'SecurePass123!');
+      await user.type(confirmPasswordInput, 'SecurePass123!');
+
+      fireEvent.click(submitBtn);
+
+      const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 500,
+          data: {},
+        },
+      });
+
+      fireEvent.click(resendBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/gagal mengirim ulang email verifikasi\./i)).toBeInTheDocument();
+      });
+    });
+
+    test('resend cooldown decreases every second after successful resend', async () => {
+      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      const setIntervalSpy = vi
+        .spyOn(global, 'setInterval')
+        .mockImplementation(((callback: TimerHandler) => {
+          if (typeof callback === 'function') {
+            for (let i = 0; i < 70; i += 1) {
+              callback();
+            }
+          }
+          return 1 as unknown as ReturnType<typeof setInterval>;
+        }) as typeof setInterval);
+      const clearIntervalSpy = vi
+        .spyOn(global, 'clearInterval')
+        .mockImplementation(() => undefined);
+
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 201,
+        data: { message: 'Cek email Anda' },
+      });
+
+      await user.type(nameInput, 'Cooldown User');
+      await user.type(emailInput, 'cooldown@example.com');
+      await user.type(passwordInput, 'SecurePass123!');
+      await user.type(confirmPasswordInput, 'SecurePass123!');
+      fireEvent.click(submitBtn);
+
+      const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
+
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 200,
+        data: { message: 'Email verifikasi telah dikirim ulang' },
+      });
+
+      fireEvent.click(resendBtn);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /kirim ulang \(/i })).toBeInTheDocument();
+      });
+
+      expect(setIntervalSpy).toHaveBeenCalled();
+      expect(clearIntervalSpy).toHaveBeenCalled();
+
+      setIntervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    });
+
+    test('resend success uses fallback message when response has no message', async () => {
+      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 201,
+        data: { message: 'Cek email Anda' },
+      });
+
+      await user.type(nameInput, 'Resend Fallback User');
+      await user.type(emailInput, 'resendfallback@example.com');
+      await user.type(passwordInput, 'SecurePass123!');
+      await user.type(confirmPasswordInput, 'SecurePass123!');
+      fireEvent.click(submitBtn);
+
+      const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
+
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 200,
+        data: {},
+      });
+
+      fireEvent.click(resendBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/email verifikasi berhasil dikirim ulang\./i)).toBeInTheDocument();
+      });
+    });
+
+    test('resend ignores second click while request is in-flight (guard branch)', async () => {
+      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 201,
+        data: { message: 'Cek email Anda' },
+      });
+
+      await user.type(nameInput, 'Resend Guard User');
+      await user.type(emailInput, 'resendguard@example.com');
+      await user.type(passwordInput, 'SecurePass123!');
+      await user.type(confirmPasswordInput, 'SecurePass123!');
+      fireEvent.click(submitBtn);
+
+      const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
+
+      let resolveResend: ((value: { status: number; data: { message: string } }) => void) | undefined;
+      mockedAxios.post.mockImplementationOnce(
+        () =>
+          new Promise<{ status: number; data: { message: string } }>((resolve) => {
+            resolveResend = resolve;
+          })
+      );
+
+      fireEvent.click(resendBtn);
+      const loadingBtn = await screen.findByRole('button', { name: /mengirim\.\.\./i });
+      loadingBtn.removeAttribute('disabled');
+      loadingBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+      expect(mockedAxios.post).toHaveBeenCalledTimes(2);
+
+      resolveResend?.({ status: 200, data: { message: 'Email verifikasi telah dikirim ulang' } });
+      await waitFor(() => {
+        expect(screen.getByText(/email verifikasi telah dikirim ulang/i)).toBeInTheDocument();
+      });
+
+      // still 2 calls: register + first resend only
+      expect(mockedAxios.post).toHaveBeenCalledTimes(2);
+    });
+
+
 
     test('shows error when email already exists (409 Conflict)', async () => {
       const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
