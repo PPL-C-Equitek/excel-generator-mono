@@ -1,12 +1,26 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
 type VerifyStatus = 'loading' | 'success' | 'error';
 
-export default function VerifyEmailPage() {
+function VerifyEmailLoadingFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-100 via-white to-slate-100 px-4 py-10">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-2xl shadow-slate-300/40">
+        <div className="flex flex-col items-center gap-5 text-center">
+          <div className="h-14 w-14 animate-spin rounded-full border-4 border-slate-200 border-t-red-600" />
+          <h1 className="text-2xl font-bold text-slate-900">Verifikasi Email</h1>
+          <p className="text-sm text-slate-600">Memverifikasi email Anda...</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VerifyEmailContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
 
@@ -106,5 +120,13 @@ export default function VerifyEmailPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={<VerifyEmailLoadingFallback />}>
+      <VerifyEmailContent />
+    </Suspense>
   );
 }

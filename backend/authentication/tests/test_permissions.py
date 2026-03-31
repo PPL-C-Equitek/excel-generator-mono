@@ -20,7 +20,7 @@ class IsVerifiedUserPermissionTest(APISimpleTestCase):
         self.factory = APIRequestFactory()
         self.url = "/dummy-protected-endpoint/"
 
-    def test_unauthenticated_user_returns_401(self):
+    def test_unauthenticated_user_returns_403(self):
         request = self.factory.get(self.url)
         
         response = dummy_protected_view(request)

@@ -10,7 +10,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: vi.fn(),
 }));
 
-const VERIFY_EMAIL_ENDPOINT = /\/auth\/verify-email\/$/;
+const VERIFY_EMAIL_ENDPOINT = /\/auth\/verify-email\/(\?.*)?$/;
 
 describe('Verify Email Page', () => {
   beforeEach(() => {
@@ -32,6 +32,19 @@ describe('Verify Email Page', () => {
     render(<VerifyEmailPage />);
 
     expect(screen.getByText(/memverifikasi email anda/i)).toBeInTheDocument();
+  });
+
+  test('Test 1b (Suspense fallback): renders fallback when search params are pending', () => {
+    (useSearchParams as Mock).mockImplementation(() => {
+      throw new Promise(() => {});
+    });
+
+    const fetchSpy = vi.spyOn(global, 'fetch');
+    render(<VerifyEmailPage />);
+
+    expect(screen.getByText(/memverifikasi email anda/i)).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   test('Test 2 (Success): displays success message and login link on 200 OK', async () => {
@@ -134,5 +147,24 @@ describe('Verify Email Page', () => {
       expect(screen.getByText(/email anda berhasil diverifikasi\./i)).toBeInTheDocument();
       expect(screen.getByText(/verifikasi berhasil/i)).toBeInTheDocument();
     });
+  });
+
+  test('Test 8 (JSON parse failure): still shows success fallback when response body cannot be parsed', async () => {
+    (useSearchParams as Mock).mockReturnValue({
+      get: vi.fn().mockReturnValue('token_parse_fail'),
+    });
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockRejectedValueOnce(new Error('Invalid JSON')),
+    } as unknown as Response);
+
+    render(<VerifyEmailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/email anda berhasil diverifikasi\./i)).toBeInTheDocument();
+    });
+
+    fetchSpy.mockRestore();
   });
 });

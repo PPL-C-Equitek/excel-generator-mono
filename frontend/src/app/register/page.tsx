@@ -84,11 +84,16 @@ export default function RegisterPage() {
     if (resendCooldown <= 0) return undefined;
 
     const timer = setInterval(() => {
-      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
-
     return () => clearInterval(timer);
-  }, [resendCooldown]);
+  }, [resendCooldown > 0]);
 
   const validateForm = () => {
     let isValid = true;
@@ -100,15 +105,15 @@ export default function RegisterPage() {
       form: '',
     };
 
+    const trimmedEmail = formData.email.trim();
     if (!formData.name.trim()) {
       newErrors.name = 'Nama wajib diisi';
       isValid = false;
     }
-
-    if (!formData.email.trim()) {
+    if (!trimmedEmail) {
       newErrors.email = 'Email wajib diisi';
       isValid = false;
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
       newErrors.email = 'Format email tidak valid';
       isValid = false;
     }
