@@ -1,8 +1,9 @@
 import sys
-import json
+import jwt
 from datetime import datetime
 import uuid
 from unittest.mock import patch, MagicMock
+from django.utils import timezone
 
 from django.core.signing import TimestampSigner
 from django.test import SimpleTestCase, override_settings
@@ -74,51 +75,64 @@ class SendVerificationEmailTest(SimpleTestCase):
         self.assertIn("https://myapp.com/auth/verify-email?token=", printed_text)
 
 class GenerateTokensTest(SimpleTestCase):
+    SECRET_KEY = "test-secret-key"
+
     def setUp(self):
         self.user_id = uuid.uuid4()
         self.email = "user@example.com"
-        self.tokens = generate_tokens(self.user_id, self.email)
+        with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
+            self.tokens = generate_tokens(self.user_id, self.email)
+
+    def _decode(self, token):
+        return jwt.decode(token, self.SECRET_KEY, algorithms=["HS256"])
 
     def test_returns_access_and_refresh_token_keys(self):
         self.assertIn("accessToken", self.tokens)
         self.assertIn("refreshToken", self.tokens)
 
-    def test_access_token_is_unsignable(self):
-        signer = TimestampSigner()
-        raw = signer.unsign(self.tokens["accessToken"], max_age=60)
-        payload = json.loads(raw)
+    def test_access_token_payload(self):
+        with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
+            payload = self._decode(self.tokens["accessToken"])
         self.assertEqual(payload["user_id"], str(self.user_id))
         self.assertEqual(payload["email"], self.email)
         self.assertEqual(payload["type"], "access")
 
-    def test_refresh_token_is_unsignable(self):
-        signer = TimestampSigner()
-        raw = signer.unsign(self.tokens["refreshToken"], max_age=60)
-        payload = json.loads(raw)
+    def test_refresh_token_payload(self):
+        with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
+            payload = self._decode(self.tokens["refreshToken"])
         self.assertEqual(payload["user_id"], str(self.user_id))
         self.assertEqual(payload["email"], self.email)
         self.assertEqual(payload["type"], "refresh")
 
     def test_access_token_expiry_is_approximately_one_hour(self):
-        signer = TimestampSigner()
-        raw = signer.unsign(self.tokens["accessToken"], max_age=60)
-        payload = json.loads(raw)
-        exp = datetime.fromisoformat(payload["exp"])
-        delta = exp - datetime.utcnow()
-        # Toleransi ±5 detik dari 1 jam
-        self.assertAlmostEqual(delta.total_seconds(), 3600, delta=5)
+        with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
+            payload = self._decode(self.tokens["accessToken"])
+        delta = payload["exp"] - payload["iat"]
+        self.assertAlmostEqual(delta, 3600, delta=5)
 
     def test_refresh_token_expiry_is_approximately_seven_days(self):
-        signer = TimestampSigner()
-        raw = signer.unsign(self.tokens["refreshToken"], max_age=60)
-        payload = json.loads(raw)
-        exp = datetime.fromisoformat(payload["exp"])
-        delta = exp - datetime.utcnow()
-        # Toleransi ±5 detik dari 7 hari
-        self.assertAlmostEqual(delta.total_seconds(), 7 * 86400, delta=5)
+        with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
+            payload = self._decode(self.tokens["refreshToken"])
+        delta = payload["exp"] - payload["iat"]
+        self.assertAlmostEqual(delta, 7 * 86400, delta=5)
 
     def test_different_users_produce_different_tokens(self):
         other_id = uuid.uuid4()
-        other_tokens = generate_tokens(other_id, "other@example.com")
+        with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
+            other_tokens = generate_tokens(other_id, "other@example.com")
         self.assertNotEqual(self.tokens["accessToken"], other_tokens["accessToken"])
         self.assertNotEqual(self.tokens["refreshToken"], other_tokens["refreshToken"])
+
+    def test_expired_access_token_raises_error(self):
+        from datetime import timedelta
+        past = int((timezone.now() - timedelta(hours=2)).timestamp())
+        expired_payload = {
+            "user_id": str(self.user_id),
+            "email": self.email,
+            "type": "access",
+            "iat": past,
+            "exp": past + 3600,
+        }
+        expired_token = jwt.encode(expired_payload, self.SECRET_KEY, algorithm="HS256")
+        with self.assertRaises(jwt.ExpiredSignatureError):
+            jwt.decode(expired_token, self.SECRET_KEY, algorithms=["HS256"])
