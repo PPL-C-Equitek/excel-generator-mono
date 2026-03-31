@@ -1,5 +1,6 @@
 import logging
-
+import json
+from datetime import datetime, timedelta
 from django.conf import settings
 from django.core.signing import TimestampSigner
 
@@ -9,6 +10,34 @@ logger = logging.getLogger(__name__)
 def generate_verification_token(email):
     signer = TimestampSigner()
     return signer.sign(email)
+
+
+def generate_tokens(user_id, email):
+    """Generate access and refresh tokens for the user"""
+    signer = TimestampSigner()
+    
+    # Create Access Token with 1 hour expiration
+    access_payload = {
+        "user_id": str(user_id),
+        "email": email,
+        "type": "access",
+        "exp": (datetime.utcnow() + timedelta(hours=1)).isoformat(),
+    }
+    access_token = signer.sign(json.dumps(access_payload))
+    
+    # Create Refresh Token with 7 days expiration
+    refresh_payload = {
+        "user_id": str(user_id),
+        "email": email,
+        "type": "refresh",
+        "exp": (datetime.utcnow() + timedelta(days=7)).isoformat(),
+    }
+    refresh_token = signer.sign(json.dumps(refresh_payload))
+    
+    return {
+        "accessToken": access_token,
+        "refreshToken": refresh_token,
+    }
 
 
 def send_verification_email(email):
