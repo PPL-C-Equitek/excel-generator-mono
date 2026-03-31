@@ -1,10 +1,10 @@
 import logging
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from django.conf import settings
 from django.core.signing import TimestampSigner
-
 logger = logging.getLogger(__name__)
+from django.utils import timezone
 
 
 def generate_verification_token(email):
@@ -21,7 +21,7 @@ def generate_tokens(user_id, email):
         "user_id": str(user_id),
         "email": email,
         "type": "access",
-        "exp": (datetime.utcnow() + timedelta(hours=1)).isoformat(),
+        "exp": timezone.now() + timedelta(hours=1),
     }
     access_token = signer.sign(json.dumps(access_payload))
     
@@ -30,7 +30,7 @@ def generate_tokens(user_id, email):
         "user_id": str(user_id),
         "email": email,
         "type": "refresh",
-        "exp": (datetime.utcnow() + timedelta(days=7)).isoformat(),
+        "exp": timezone.now() + timedelta(days=7),
     }
     refresh_token = signer.sign(json.dumps(refresh_payload))
     
