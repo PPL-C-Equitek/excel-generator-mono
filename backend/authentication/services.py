@@ -1,5 +1,4 @@
 import logging
-import json
 import jwt
 from datetime import timedelta
 from django.conf import settings
@@ -14,28 +13,28 @@ def generate_verification_token(email):
 
 
 def generate_tokens(user_id, email):
-    secret_key = settings.SECRET_KEY
+    secret_key = getattr(settings, "JWT_SECRET_KEY", )
     now = timezone.now()
 
-    # Access Token — expires in 1 hour
     access_payload = {
         "user_id": str(user_id),
         "email": email,
         "type": "access",
-        "iat": now,
-        "exp": now + timedelta(hours=1),
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(hours=1)).timestamp()),
         "iss": "excel-generator",
     }
+
     access_token = jwt.encode(access_payload, secret_key, algorithm="HS256")
 
-    # Refresh Token — expires in 7 days
     refresh_payload = {
         "user_id": str(user_id),
         "email": email,
         "type": "refresh",
-        "iat": now,
-        "exp": now + timedelta(days=7),
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(days=7)).timestamp()),
     }
+
     refresh_token = jwt.encode(refresh_payload, secret_key, algorithm="HS256")
 
     return {
