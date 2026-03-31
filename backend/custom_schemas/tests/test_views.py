@@ -58,6 +58,65 @@ class CustomSchemaApiViewTest(TestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["id"], active_schema.id)
 
+    def test_list_schema_without_active_param_returns_all_items(self):
+        active_schema = CustomSchema.objects.create(
+            name="Visible Active Schema",
+            definition=make_definition("visible_active_column"),
+        )
+        inactive_schema = CustomSchema.objects.create(
+            name="Visible Inactive Schema",
+            is_active=False,
+            definition=make_definition("visible_inactive_column"),
+        )
+
+        request = self.factory.get("/schemas/")
+
+        response = CustomSchemaListCreateView.as_view()(request)
+        returned_ids = {item["id"] for item in response.data}
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(returned_ids, {active_schema.id, inactive_schema.id})
+
+    def test_list_schema_can_filter_inactive_items(self):
+        CustomSchema.objects.create(
+            name="Hidden Active Schema",
+            definition=make_definition("hidden_active_column"),
+        )
+        inactive_schema = CustomSchema.objects.create(
+            name="Hidden Inactive Schema",
+            is_active=False,
+            definition=make_definition("hidden_inactive_column"),
+        )
+
+        request = self.factory.get("/schemas/?active=false")
+
+        response = CustomSchemaListCreateView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], inactive_schema.id)
+
+    def test_list_schema_with_invalid_active_param_returns_all_items(self):
+        active_schema = CustomSchema.objects.create(
+            name="Fallback Active Schema",
+            definition=make_definition("fallback_active_column"),
+        )
+        inactive_schema = CustomSchema.objects.create(
+            name="Fallback Inactive Schema",
+            is_active=False,
+            definition=make_definition("fallback_inactive_column"),
+        )
+
+        request = self.factory.get("/schemas/?active=maybe")
+
+        response = CustomSchemaListCreateView.as_view()(request)
+        returned_ids = {item["id"] for item in response.data}
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(returned_ids, {active_schema.id, inactive_schema.id})
+
     def test_update_definition_increments_schema_version(self):
         schema = CustomSchema.objects.create(
             name="Receipt Mapping",
