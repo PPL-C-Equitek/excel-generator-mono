@@ -4,21 +4,23 @@ import axios from 'axios';
 import { useRouter } from 'next/navigation';
 import RegisterPage from '@/app/register/page';
 
+import { vi, describe, test, expect, beforeEach, Mock, Mocked } from 'vitest';
+
 // Mock Next.js router
-jest.mock('next/navigation', () => ({
-  useRouter: jest.fn(),
+vi.mock('next/navigation', () => ({
+  useRouter: vi.fn(),
 }));
 
 // Mock axios
-jest.mock('axios');
-const mockedAxios = axios as jest.Mocked<typeof axios>;
+vi.mock('axios');
+const mockedAxios = axios as Mocked<typeof axios>;
 
 describe('Registration Page', () => {
-  const mockPush = jest.fn();
+  const mockPush = vi.fn();
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    (useRouter as jest.Mock).mockReturnValue({ push: mockPush });
+    vi.clearAllMocks();
+    (useRouter as Mock).mockReturnValue({ push: mockPush });
   });
 
   const setup = () => {
@@ -85,6 +87,19 @@ describe('Registration Page', () => {
       });
       expect(mockedAxios.post).not.toHaveBeenCalled();
     });
+
+    test('shows error if password is less than 8 characters', async () => {
+      const { passwordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      await user.type(passwordInput, '1234567');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/password minimal 8 karakter/i)).toBeInTheDocument();
+      });
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+    });
   });
 
   describe('3. API Integration and 4. Loading State', () => {
@@ -146,6 +161,29 @@ describe('Registration Page', () => {
       });
     });
 
+    test('shows error when data is invalid (400 Bad Request)', async () => {
+      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 400,
+          data: { message: 'Data yang dikirimkan tidak valid' },
+        },
+      });
+
+      await user.type(nameInput, 'Invalid User');
+      await user.type(emailInput, 'invalid@example.com');
+      await user.type(passwordInput, 'SecurePass123!');
+      await user.type(confirmPasswordInput, 'SecurePass123!');
+
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/data yang dikirimkan tidak valid/i)).toBeInTheDocument();
+      });
+    });
+
     test('shows generic error on 500 Server Error', async () => {
       const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
       const user = userEvent.setup();
@@ -171,6 +209,44 @@ describe('Registration Page', () => {
       // Ensure loading state is reverted when failure occurs
       expect(submitBtn).toHaveTextContent(/daftar/i);
       expect(submitBtn).not.toBeDisabled();
+    });
+
+    describe('Fallback Messages', () => {
+      test('shows fallback message on 201 when no data.message is provided', async () => {
+        const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+        const user = userEvent.setup();
+        mockedAxios.post.mockResolvedValueOnce({ status: 201, data: {} });
+        await user.type(nameInput, 'New'); await user.type(emailInput, 'new@example.com'); await user.type(passwordInput, 'Secure123!'); await user.type(confirmPasswordInput, 'Secure123!');
+        fireEvent.click(submitBtn);
+        await waitFor(() => expect(screen.getByText(/Registrasi berhasil. Cek email Anda./i)).toBeInTheDocument());
+      });
+
+      test('shows fallback message on 409 when no data.message is provided', async () => {
+        const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+        const user = userEvent.setup();
+        mockedAxios.post.mockRejectedValueOnce({ response: { status: 409, data: {} } });
+        await user.type(nameInput, 'Existing'); await user.type(emailInput, 'exist@example.com'); await user.type(passwordInput, 'Secure123!'); await user.type(confirmPasswordInput, 'Secure123!');
+        fireEvent.click(submitBtn);
+        await waitFor(() => expect(screen.getByText(/Email sudah terdaftar/i)).toBeInTheDocument());
+      });
+
+      test('shows fallback message on 400 when no data.message is provided', async () => {
+        const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+        const user = userEvent.setup();
+        mockedAxios.post.mockRejectedValueOnce({ response: { status: 400, data: {} } });
+        await user.type(nameInput, 'Invalid'); await user.type(emailInput, 'inv@example.com'); await user.type(passwordInput, 'Secure123!'); await user.type(confirmPasswordInput, 'Secure123!');
+        fireEvent.click(submitBtn);
+        await waitFor(() => expect(screen.getByText(/Data yang dikirimkan tidak valid/i)).toBeInTheDocument());
+      });
+
+      test('shows fallback message on 500 when no data.message is provided', async () => {
+        const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+        const user = userEvent.setup();
+        mockedAxios.post.mockRejectedValueOnce({ response: { status: 500, data: {} } });
+        await user.type(nameInput, 'Server'); await user.type(emailInput, 'serv@example.com'); await user.type(passwordInput, 'Secure123!'); await user.type(confirmPasswordInput, 'Secure123!');
+        fireEvent.click(submitBtn);
+        await waitFor(() => expect(screen.getByText(/Terjadi kesalahan pada server/i)).toBeInTheDocument());
+      });
     });
   });
 });
