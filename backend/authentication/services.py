@@ -8,7 +8,6 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-
 def generate_verification_token(email):
     signer = TimestampSigner()
     return signer.sign(email)
