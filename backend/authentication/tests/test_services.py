@@ -1,6 +1,6 @@
 import sys
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 import uuid
 from unittest.mock import patch, MagicMock
 

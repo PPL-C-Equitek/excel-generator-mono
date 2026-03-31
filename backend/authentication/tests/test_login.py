@@ -1,9 +1,6 @@
 import uuid
 from unittest.mock import patch, MagicMock
-from datetime import timedelta
 
-from django.test import override_settings
-from django.utils import timezone
 from rest_framework.test import APISimpleTestCase
 from rest_framework import status
 
