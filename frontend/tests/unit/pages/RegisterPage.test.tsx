@@ -1,0 +1,176 @@
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import axios from 'axios';
+import { useRouter } from 'next/navigation';
+import RegisterPage from '@/app/register/page';
+
+// Mock Next.js router
+jest.mock('next/navigation', () => ({
+  useRouter: jest.fn(),
+}));
+
+// Mock axios
+jest.mock('axios');
+const mockedAxios = axios as jest.Mocked<typeof axios>;
+
+describe('Registration Page', () => {
+  const mockPush = jest.fn();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (useRouter as jest.Mock).mockReturnValue({ push: mockPush });
+  });
+
+  const setup = () => {
+    render(<RegisterPage />);
+    return {
+      nameInput: screen.getByLabelText(/nama lengkap/i) as HTMLInputElement,
+      emailInput: screen.getByLabelText(/email/i) as HTMLInputElement,
+      passwordInput: screen.getByLabelText(/^password/i) as HTMLInputElement,
+      confirmPasswordInput: screen.getByLabelText(/konfirmasi password/i) as HTMLInputElement,
+      submitBtn: screen.getByRole('button', { name: /daftar/i }),
+    };
+  };
+
+  test('1. renders all required fields and submit button', () => {
+    const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+
+    expect(nameInput).toBeInTheDocument();
+    expect(emailInput).toBeInTheDocument();
+    expect(passwordInput).toBeInTheDocument();
+    expect(confirmPasswordInput).toBeInTheDocument();
+    expect(submitBtn).toBeInTheDocument();
+  });
+
+  describe('2. Client-Side Validation', () => {
+    test('shows required error messages if fields are empty upon submission', async () => {
+      const { submitBtn } = setup();
+
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/nama wajib diisi/i)).toBeInTheDocument();
+        expect(screen.getByText(/email wajib diisi/i)).toBeInTheDocument();
+        expect(screen.getByText(/password wajib diisi/i)).toBeInTheDocument();
+      });
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+    });
+
+    test('shows error if email format is invalid', async () => {
+      const { emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      await user.type(emailInput, 'invalid-email');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/format email tidak valid/i)).toBeInTheDocument();
+      });
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+    });
+
+    test('shows error if password and confirm password do not match', async () => {
+      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      await user.type(nameInput, 'John Doe');
+      await user.type(emailInput, 'john@example.com');
+      await user.type(passwordInput, 'SecurePass123!');
+      await user.type(confirmPasswordInput, 'DifferentPass123!');
+      
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/password tidak cocok/i)).toBeInTheDocument();
+      });
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('3. API Integration and 4. Loading State', () => {
+    test('successful registration redirects or shows success message and clears form', async () => {
+      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 201,
+        data: { message: 'Cek email Anda' },
+      });
+
+      await user.type(nameInput, 'John Doe');
+      await user.type(emailInput, 'john@example.com');
+      await user.type(passwordInput, 'SecurePass123!');
+      await user.type(confirmPasswordInput, 'SecurePass123!');
+
+      fireEvent.click(submitBtn);
+
+      // 4. Loading State (button text changes and becomes disabled while API is in-flight)
+      expect(submitBtn).toHaveTextContent(/mendaftar\.\.\./i);
+      expect(submitBtn).toBeDisabled();
+
+      await waitFor(() => {
+        expect(mockedAxios.post).toHaveBeenCalledWith(expect.stringContaining('/auth/register/'), {
+          name: 'John Doe',
+          email: 'john@example.com',
+          password: 'SecurePass123!',
+        });
+      });
+
+      // 3. Success Feedback -> redirects
+      await waitFor(() => {
+        expect(screen.getByText(/cek email anda/i)).toBeInTheDocument();
+        expect(mockPush).toHaveBeenCalledWith(expect.stringMatching(/login|verify/i));
+      });
+    });
+
+    test('shows error when email already exists (409 Conflict)', async () => {
+      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: { message: 'Email sudah terdaftar' },
+        },
+      });
+
+      await user.type(nameInput, 'Existing User');
+      await user.type(emailInput, 'existing@example.com');
+      await user.type(passwordInput, 'SecurePass123!');
+      await user.type(confirmPasswordInput, 'SecurePass123!');
+
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/email sudah terdaftar/i)).toBeInTheDocument();
+      });
+    });
+
+    test('shows generic error on 500 Server Error', async () => {
+      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 500,
+          data: { message: 'Terjadi kesalahan pada server' },
+        },
+      });
+
+      await user.type(nameInput, 'Server Error User');
+      await user.type(emailInput, 'error@example.com');
+      await user.type(passwordInput, 'SecurePass123!');
+      await user.type(confirmPasswordInput, 'SecurePass123!');
+
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/terjadi kesalahan pada server/i)).toBeInTheDocument();
+      });
+      
+      // Ensure loading state is reverted when failure occurs
+      expect(submitBtn).toHaveTextContent(/daftar/i);
+      expect(submitBtn).not.toBeDisabled();
+    });
+  });
+});
