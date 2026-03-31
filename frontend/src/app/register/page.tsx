@@ -24,6 +24,8 @@ type RegisterFormErrors = {
   form: string;
 };
 
+type FormSubmitEvent = Parameters<NonNullable<React.ComponentProps<'form'>['onSubmit']>>[0];
+
 function getResendButtonText(isResending: boolean, resendCooldown: number): string {
   if (isResending) return 'Mengirim...';
   if (resendCooldown > 0) return `Kirim Ulang (${resendCooldown}s)`;
@@ -166,7 +168,7 @@ export default function RegisterPage() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormSubmitEvent) => {
     e.preventDefault();
     const validationResult = validateRegistrationForm(formData);
     setErrors(validationResult.errors);
