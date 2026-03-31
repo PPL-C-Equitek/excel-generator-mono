@@ -7,6 +7,72 @@ import type { AxiosError } from 'axios';
 import Navbar from '@/components/Navbar';
 import { LANDING_NAV_LINKS } from '@/constants/landing';
 
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+type RegisterFormData = {
+  name: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+};
+
+type RegisterFormErrors = {
+  name: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  form: string;
+};
+
+function getResendButtonText(isResending: boolean, resendCooldown: number): string {
+  if (isResending) return 'Mengirim...';
+  if (resendCooldown > 0) return `Kirim Ulang (${resendCooldown}s)`;
+  return 'Kirim Ulang Email';
+}
+
+export function validateRegistrationForm(formData: RegisterFormData): {
+  isValid: boolean;
+  errors: RegisterFormErrors;
+} {
+  const errors: RegisterFormErrors = {
+    name: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    form: '',
+  };
+  let isValid = true;
+
+  if (!formData.name.trim()) {
+    errors.name = 'Nama wajib diisi';
+    isValid = false;
+  }
+
+  const trimmedEmail = formData.email.trim();
+  if (!trimmedEmail) {
+    errors.email = 'Email wajib diisi';
+    isValid = false;
+  } else if (!EMAIL_REGEX.test(trimmedEmail)) {
+    errors.email = 'Format email tidak valid';
+    isValid = false;
+  }
+
+  if (!formData.password) {
+    errors.password = 'Password wajib diisi';
+    isValid = false;
+  } else if (formData.password.length < 8) {
+    errors.password = 'Password minimal 8 karakter';
+    isValid = false;
+  }
+
+  if (formData.password !== formData.confirmPassword) {
+    errors.confirmPassword = 'Password tidak cocok';
+    isValid = false;
+  }
+
+  return { isValid, errors };
+}
+
 export function shouldSkipResendVerification(
   email: string,
   isResending: boolean,
@@ -58,14 +124,14 @@ export async function resendVerificationFlow({
 }
 
 export default function RegisterPage() {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<RegisterFormData>({
     name: '',
     email: '',
     password: '',
     confirmPassword: '',
   });
 
-  const [errors, setErrors] = useState({
+  const [errors, setErrors] = useState<RegisterFormErrors>({
     name: '',
     email: '',
     password: '',
@@ -95,54 +161,16 @@ export default function RegisterPage() {
     return () => clearInterval(timer);
   }, [resendCooldown > 0]);
 
-  const validateForm = () => {
-    let isValid = true;
-    const newErrors = {
-      name: '',
-      email: '',
-      password: '',
-      confirmPassword: '',
-      form: '',
-    };
-
-    const trimmedEmail = formData.email.trim();
-    if (!formData.name.trim()) {
-      newErrors.name = 'Nama wajib diisi';
-      isValid = false;
-    }
-    if (!trimmedEmail) {
-      newErrors.email = 'Email wajib diisi';
-      isValid = false;
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      newErrors.email = 'Format email tidak valid';
-      isValid = false;
-    }
-
-    if (!formData.password) {
-      newErrors.password = 'Password wajib diisi';
-      isValid = false;
-    } else if (formData.password.length < 8) {
-      newErrors.password = 'Password minimal 8 karakter';
-      isValid = false;
-    }
-
-    if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Password tidak cocok';
-      isValid = false;
-    }
-
-    setErrors(newErrors);
-    return isValid;
-  };
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!validateForm()) return;
+    const validationResult = validateRegistrationForm(formData);
+    setErrors(validationResult.errors);
+    if (!validationResult.isValid) return;
 
     setIsLoading(true);
     setErrors((prev) => ({ ...prev, form: '' }));
@@ -242,11 +270,7 @@ export default function RegisterPage() {
                         : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
                     }`}
                   >
-                    {isResending
-                      ? 'Mengirim...'
-                      : resendCooldown > 0
-                        ? `Kirim Ulang (${resendCooldown}s)`
-                        : 'Kirim Ulang Email'}
+                    {getResendButtonText(isResending, resendCooldown)}
                   </button>
                 </div>
               </div>
