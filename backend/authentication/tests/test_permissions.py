@@ -25,7 +25,7 @@ class IsVerifiedUserPermissionTest(APISimpleTestCase):
         
         response = dummy_protected_view(request)
         
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_authenticated_unverified_user_returns_403(self):
         user = MagicMock()
