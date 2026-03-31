@@ -15,6 +15,7 @@ from authentication.serializers import RegisterSerializer, LoginSerializer
 from authentication.services import send_verification_email, generate_tokens
 
 logger = logging.getLogger(__name__)
+SERVER_ERROR_MESSAGE = "Terjadi kesalahan pada server"
 
 
 class ResendVerificationThrottle(SimpleRateThrottle):
@@ -75,7 +76,7 @@ class RegisterView(APIView):
         except Exception:
             logger.exception("Unexpected error during user registration.")
             return Response(
-                {"message": "Terjadi kesalahan pada server"},
+                {"message": SERVER_ERROR_MESSAGE},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -217,7 +218,7 @@ class LoginView(APIView):
         except Exception:
             logger.exception("Unexpected error during login lookup for email: %s", email)
             return Response(
-                {"message": "Terjadi kesalahan pada server"},
+                {"message": SERVER_ERROR_MESSAGE},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         
@@ -259,7 +260,7 @@ class LoginView(APIView):
         except Exception:
             logger.exception("Unexpected error during login for email: %s", email)
             return Response(
-                {"message": "Terjadi kesalahan pada server"},
+                {"message": SERVER_ERROR_MESSAGE},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
