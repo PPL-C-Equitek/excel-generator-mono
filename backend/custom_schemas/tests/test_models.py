@@ -59,3 +59,15 @@ class CustomSchemaModelTest(TestCase):
         schema.refresh_from_db()
 
         self.assertEqual(schema.version, 2)
+
+    def test_save_keeps_version_when_definition_does_not_change(self):
+        schema = CustomSchema.objects.create(
+            name="Stable Mapping",
+            definition=make_definition("stable_column", "Stable description"),
+        )
+
+        schema.description = "Updated metadata only"
+        schema.save()
+        schema.refresh_from_db()
+
+        self.assertEqual(schema.version, 1)
