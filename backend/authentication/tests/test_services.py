@@ -1,6 +1,5 @@
 import sys
 import jwt
-from datetime import datetime
 import uuid
 from unittest.mock import patch, MagicMock
 from django.utils import timezone
