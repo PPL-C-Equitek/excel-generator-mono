@@ -57,6 +57,7 @@ _EXCEL_ARTIFACT_TYPE = "xlsx"
 _EXCEL_FILE_ID_PREFIX = "xlsx_"
 _EXCEL_FILE_NAME_PREFIX = "export_"
 _EXCEL_FILE_EXTENSION = "xlsx"
+_EXCEL_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _EXCEL_MAX_SHEET_NAME_LENGTH = 31
 _EXCEL_DEFAULT_EMPTY_SHEET_NAME = "Sheet1"
 _DEFAULT_CSV_SANITIZATION_POLICY = CSVSanitizationPolicy()
@@ -686,9 +687,7 @@ def resolve_excel_download_artifact(export_id, storage_dir):
             "file_name": file_name,
             "file_path": file_path,
             "artifact_type": "xlsx",
-            "content_type": (
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
+            "content_type": _EXCEL_CONTENT_TYPE,
         }
 
     raise OutputExcelDownloadLookupError("Excel artifact not found for given export_id.")
