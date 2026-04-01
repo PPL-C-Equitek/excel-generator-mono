@@ -1,7 +1,7 @@
 'use client'
 
 import type { FormEvent, MouseEvent } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCustomSchemas } from '@/hooks/useCustomSchemas'
 import { getStoredAccessToken } from '@/lib/auth'
 import type {
@@ -123,11 +123,11 @@ export default function CustomSchemaManager({
     const isAtLimit = schemas.length >= MAX_CUSTOM_SCHEMAS
     const isAddDisabled = !hasAccessToken || isLoading || isSaving || isAtLimit
 
-    const resetDraft = () => {
+    const resetDraft = useCallback(() => {
         nextColumnIdRef.current = 2
         setDraft(createEmptyDraft())
         setFormError(null)
-    }
+    }, [])
 
     const openCreateModal = () => {
         if (isAddDisabled) {
@@ -138,14 +138,14 @@ export default function CustomSchemaManager({
         setIsModalOpen(true)
     }
 
-    const closeCreateModal = () => {
+    const closeCreateModal = useCallback(() => {
         if (isSaving) {
             return
         }
 
         setIsModalOpen(false)
         resetDraft()
-    }
+    }, [isSaving, resetDraft])
 
     useEffect(() => {
         if (!isModalOpen) {
@@ -163,7 +163,7 @@ export default function CustomSchemaManager({
         return () => {
             window.removeEventListener('keydown', handleKeyDown)
         }
-    }, [isModalOpen, isSaving])
+    }, [isModalOpen, closeCreateModal])
 
     const handleColumnChange = (
         columnId: number,

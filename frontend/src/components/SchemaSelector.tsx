@@ -26,34 +26,15 @@ export default function SchemaSelector({
     )
     const [selectedSchemaId, setSelectedSchemaId] = useState<string>('none')
 
-    useEffect(() => {
-        if (schemas.length === 0) {
-            setSelectedSchemaId('none')
-            onSchemaChange?.(null)
-            return
-        }
-
-        if (selectedSchemaId === 'none') {
-            onSchemaChange?.(null)
-            return
-        }
-
-        const nextSchema =
-            schemas.find((schema) => String(schema.id) === selectedSchemaId) ?? null
-
-        if (!nextSchema) {
-            setSelectedSchemaId('none')
-            onSchemaChange?.(null)
-            return
-        }
-
-        onSchemaChange?.(nextSchema)
-    }, [onSchemaChange, schemas, selectedSchemaId])
-
     const selectedSchema =
         selectedSchemaId === 'none'
             ? null
             : schemas.find((schema) => String(schema.id) === selectedSchemaId) ?? null
+    const selectValue = selectedSchema ? selectedSchemaId : 'none'
+
+    useEffect(() => {
+        onSchemaChange?.(selectedSchema)
+    }, [onSchemaChange, selectedSchema])
 
     return (
         <section className="mt-8 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -103,19 +84,9 @@ export default function SchemaSelector({
                         <select
                             id="convert-schema-select"
                             data-testid="schema-select"
-                            value={selectedSchemaId}
+                            value={selectValue}
                             onChange={(event) => {
-                                const nextValue = event.target.value
-                                setSelectedSchemaId(nextValue)
-
-                                if (nextValue === 'none') {
-                                    onSchemaChange?.(null)
-                                    return
-                                }
-
-                                const nextSchema =
-                                    schemas.find((schema) => String(schema.id) === nextValue) ?? null
-                                onSchemaChange?.(nextSchema)
+                                setSelectedSchemaId(event.target.value)
                             }}
                             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
                         >

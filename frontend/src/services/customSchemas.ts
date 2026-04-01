@@ -1,5 +1,4 @@
 import type {
-    CreateCustomSchemaInput,
     CustomSchemaRecord,
     ICustomSchemaService,
 } from '@/lib/ICustomSchemaService'
