@@ -1,6 +1,7 @@
 import os
 import tempfile
 import builtins
+import zipfile
 
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -16,6 +17,7 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+from file_processing.services import upload_service
 
 from file_processing.services.upload_service import (
     _get_empty_page_numbers,
@@ -657,6 +659,195 @@ class TestUploadService(TestCase):
         mock_check_encrypted.assert_called_once_with(f)
         mock_check_structure.assert_called_once_with(f)
         mock_check_page_count.assert_called_once_with(120)
+
+    @patch("file_processing.services.upload_service.check_word_page_count")
+    @patch("file_processing.services.upload_service.check_doc_structure")
+    @patch("file_processing.services.upload_service.check_doc_encrypted")
+    def test_validate_word_doc_happy_path(
+        self,
+        mock_check_encrypted,
+        mock_check_structure,
+        mock_check_page_count,
+    ):
+        mock_check_encrypted.return_value = (True, None)
+        mock_check_structure.return_value = (True, 5)
+        mock_check_page_count.return_value = (True, None)
+
+        f = SimpleUploadedFile(
+            "contract.doc",
+            b"dummy-doc-content",
+            content_type="application/msword",
+        )
+
+        is_valid, error = validate_word(f, ".doc")
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+        mock_check_encrypted.assert_called_once_with(f)
+        mock_check_structure.assert_called_once_with(f)
+        mock_check_page_count.assert_called_once_with(5)
+
+    @patch("file_processing.services.upload_service.check_doc_structure")
+    @patch("file_processing.services.upload_service.check_doc_encrypted")
+    def test_validate_word_doc_stops_on_encrypted(
+        self,
+        mock_check_encrypted,
+        mock_check_structure,
+    ):
+        mock_check_encrypted.return_value = (False, "Word file is password-protected.")
+
+        f = SimpleUploadedFile(
+            "contract.doc",
+            b"dummy-doc-content",
+            content_type="application/msword",
+        )
+
+        is_valid, error = validate_word(f, ".doc")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word file is password-protected.")
+        mock_check_structure.assert_not_called()
+
+    @patch("file_processing.services.upload_service.check_word_page_count")
+    @patch("file_processing.services.upload_service.check_docx_structure")
+    @patch("file_processing.services.upload_service.check_docx_encrypted")
+    def test_validate_word_docx_stops_on_structure_error(
+        self,
+        mock_check_encrypted,
+        mock_check_structure,
+        mock_check_page_count,
+    ):
+        mock_check_encrypted.return_value = (True, None)
+        mock_check_structure.return_value = (
+            False,
+            "Word file is corrupt or has an invalid structure.",
+        )
+
+        f = SimpleUploadedFile(
+            "contract.docx",
+            b"dummy-docx-content",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = validate_word(f, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word file is corrupt or has an invalid structure.")
+        mock_check_page_count.assert_not_called()
+
+    def test_validate_word_rejects_unsupported_extension(self):
+        f = SimpleUploadedFile(
+            "contract.txt",
+            b"dummy-text-content",
+            content_type="text/plain",
+        )
+
+        is_valid, error = validate_word(f, ".txt")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Unsupported file type.")
+
+    @patch("file_processing.services.upload_service._is_ole_container")
+    def test_check_docx_encrypted_rejects_ole_container(self, mock_is_ole):
+        mock_is_ole.return_value = True
+
+        f = SimpleUploadedFile(
+            "contract.docx",
+            b"dummy-docx-content",
+            content_type="application/octet-stream",
+        )
+
+        is_valid, error = upload_service.check_docx_encrypted(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word file is password-protected.")
+
+    def test_check_docx_structure_rejects_invalid_zip(self):
+        f = SimpleUploadedFile(
+            "broken.docx",
+            b"not-a-zip-file",
+            content_type="application/octet-stream",
+        )
+
+        is_valid, error = upload_service.check_docx_structure(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word file is corrupt or has an invalid structure.")
+
+    def test_check_docx_structure_accepts_minimal_valid_docx(self):
+        content = BytesIO()
+        with zipfile.ZipFile(content, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types></Types>")
+            archive.writestr("word/document.xml", "<w:document></w:document>")
+        content.seek(0)
+
+        f = SimpleUploadedFile(
+            "valid.docx",
+            content.read(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, page_count = upload_service.check_docx_structure(f)
+
+        self.assertTrue(is_valid)
+        self.assertEqual(page_count, 0)
+
+    def test_check_doc_encrypted_detects_encrypted_markers(self):
+        encrypted_doc = (
+            upload_service.OLE_SIGNATURE
+            + b"EncryptedPackage"
+            + b"padding"
+        )
+        f = SimpleUploadedFile(
+            "encrypted.doc",
+            encrypted_doc,
+            content_type="application/msword",
+        )
+
+        is_valid, error = upload_service.check_doc_encrypted(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word file is password-protected.")
+
+    def test_check_doc_encrypted_returns_corrupt_when_stream_fails(self):
+        class BrokenFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("seek failed")
+
+            def read(self, *_args, **_kwargs):
+                return b""
+
+        with patch("file_processing.services.upload_service._is_ole_container", return_value=True):
+            is_valid, error = upload_service.check_doc_encrypted(BrokenFile())
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word file is corrupt or has an invalid structure.")
+
+    def test_check_doc_structure_rejects_missing_worddocument_stream(self):
+        content_without_word_stream = upload_service.OLE_SIGNATURE + b"not-a-word-doc"
+        f = SimpleUploadedFile(
+            "broken.doc",
+            content_without_word_stream,
+            content_type="application/msword",
+        )
+
+        is_valid, error = upload_service.check_doc_structure(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word file is corrupt or has an invalid structure.")
+
+    def test_check_doc_structure_accepts_worddocument_stream(self):
+        content_with_word_stream = upload_service.OLE_SIGNATURE + b"WordDocument"
+        f = SimpleUploadedFile(
+            "valid.doc",
+            content_with_word_stream,
+            content_type="application/msword",
+        )
+
+        is_valid, page_count = upload_service.check_doc_structure(f)
+
+        self.assertTrue(is_valid)
+        self.assertEqual(page_count, 0)
 
     @patch("file_processing.services.upload_service.magic.from_buffer")
     @patch("file_processing.services.upload_service._is_ole_container")
