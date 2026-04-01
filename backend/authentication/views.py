@@ -8,19 +8,24 @@ from django.db import IntegrityError
 from api.decorators import rate_limit
 from rest_framework import status
 from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
 from authentication.models import User
 from authentication.serializers import RegisterSerializer, LoginSerializer
+from authentication.serializers import RefreshTokenSerializer
 from authentication.services import (
     send_verification_email,
     generate_tokens,
     LoginFailureTracker as BaseLoginFailureTracker,
     LoginService,
+    RefreshTokenService,
     LoginRateLimitedError,
     InvalidCredentialsError,
     EmailNotVerifiedError,
+    RefreshTokenExpiredError,
+    InvalidRefreshTokenError,
 )
 
 logger = logging.getLogger(__name__)
@@ -248,6 +253,47 @@ class LoginView(APIView):
             )
         except Exception:
             logger.exception("Unexpected error during login for email: %s", email)
+            return Response(
+                {"message": SERVER_ERROR_MESSAGE},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class RefreshTokenView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = RefreshTokenSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        refresh_token = serializer.validated_data["refreshToken"]
+        refresh_service = RefreshTokenService(token_generator=generate_tokens)
+
+        try:
+            tokens = refresh_service.refresh(refresh_token)
+            return Response(
+                {
+                    "accessToken": tokens["accessToken"],
+                    "refreshToken": tokens["refreshToken"],
+                },
+                status=status.HTTP_200_OK,
+            )
+        except RefreshTokenExpiredError:
+            return Response(
+                {"message": "Token expired. Silakan login ulang."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        except InvalidRefreshTokenError:
+            return Response(
+                {"message": "Refresh token tidak valid."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        except Exception:
+            logger.exception("Unexpected error during refresh token exchange.")
             return Response(
                 {"message": SERVER_ERROR_MESSAGE},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
