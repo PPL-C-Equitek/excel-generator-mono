@@ -31,7 +31,6 @@ export default function UploadZone({ onFileSelect, disabled }: UploadZoneProps) 
 
     const handleFile = (file: File) => {
         setSelectedFile(file)
-        onFileSelect?.(file)
     }
 
     const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
