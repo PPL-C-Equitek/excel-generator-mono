@@ -70,19 +70,19 @@ TXT_PROTECTED_ERROR = (
     "File terdeteksi sebagai format terproteksi atau terenkripsi. "
     "Pastikan file adalah teks biasa (.txt) yang tidak diproteksi."
 )
-TXT_BINARY_ERROR = "File content does not match its extension."
+FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
 OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 ZIP_SIGNATURE_PREFIX = b"PK"
 
 BINARY_SIGNATURES: list[tuple[bytes, str]] = [
-    (b"\x50\x4B\x03\x04", TXT_BINARY_ERROR),
-    (b"\x50\x4B\x05\x06", TXT_BINARY_ERROR),
+    (b"\x50\x4B\x03\x04", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\x50\x4B\x05\x06", FILE_EXTENSION_MISMATCH_ERROR),
     (b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", TXT_PROTECTED_ERROR),
-    (b"\x7fELF", TXT_BINARY_ERROR),
-    (b"MZ", TXT_BINARY_ERROR),
-    (b"%PDF", TXT_BINARY_ERROR),
-    (b"\xff\xd8\xff", TXT_BINARY_ERROR),
-    (b"\x89PNG", TXT_BINARY_ERROR),
+    (b"\x7fELF", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"MZ", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"%PDF", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\xff\xd8\xff", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\x89PNG", FILE_EXTENSION_MISMATCH_ERROR),
 ]
 
 def _has_extracted_text(extracted_data):
@@ -328,13 +328,13 @@ def validate_mime_type(uploaded_file, ext):
             return False, EXCEL_PASSWORD_PROTECTED_ERROR
 
         if ext == EXT_XLSX and not _has_zip_signature(uploaded_file):
-            return False, "File content does not match its extension."
+            return False, FILE_EXTENSION_MISMATCH_ERROR
 
         if ext == EXT_TXT:
             return _validate_txt_content(uploaded_file, mime)
 
         if mime not in expected_mimes:
-            return False, "File content does not match its extension."
+            return False, FILE_EXTENSION_MISMATCH_ERROR
 
         return True, None
 
