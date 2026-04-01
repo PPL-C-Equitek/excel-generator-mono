@@ -12,7 +12,6 @@ from file_processing.services.txt_service import (
     process_uploaded_txt,
 )
 
-
 def _make_txt_file(content: str, suffix: str = ".txt") -> str:
     fd, path = tempfile.mkstemp(suffix=suffix)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
