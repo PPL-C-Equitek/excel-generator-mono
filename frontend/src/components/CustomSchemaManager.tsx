@@ -1,6 +1,10 @@
 'use client'
 
-import type { FormEvent, KeyboardEvent, MouseEvent } from 'react'
+import type {
+    FormEvent,
+    KeyboardEvent as ReactKeyboardEvent,
+    MouseEvent,
+} from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCustomSchemas } from '@/hooks/useCustomSchemas'
 import { getStoredAccessToken } from '@/lib/auth'
@@ -152,7 +156,7 @@ export default function CustomSchemaManager({
             return
         }
 
-        const handleKeyDown = (event: KeyboardEvent) => {
+        const handleKeyDown = (event: globalThis.KeyboardEvent) => {
             if (event.key === 'Escape') {
                 closeCreateModal()
             }
@@ -223,7 +227,7 @@ export default function CustomSchemaManager({
         }
     }
 
-    const handleBackdropKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const handleBackdropKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
         if (event.target !== event.currentTarget) {
             return
         }
