@@ -101,6 +101,7 @@ describe('ConvertPage', () => {
             render(<ConvertPage />)
             expect(screen.getByTestId('sidebar')).toBeInTheDocument()
             expect(screen.getByTestId('upload-zone')).toBeInTheDocument()
+            expect(screen.getByText('Choose A Schema')).toBeInTheDocument()
         })
     })
 
