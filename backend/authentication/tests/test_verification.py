@@ -9,10 +9,15 @@ from rest_framework import status
 class VerifyEmailViewTest(APISimpleTestCase):
     def setUp(self):
         self.url = "/auth/verify-email/"
+        self.valid_payload = {
+            "token": "signed-token-string",
+            "password": "Strong#123",
+            "password_confirm": "Strong#123",
+        }
 
     @patch("authentication.views.User")
     @patch("authentication.views.TimestampSigner")
-    def test_valid_token_verifies_user_returns_200(
+    def test_valid_token_with_strong_password_sets_password_and_verifies_user(
         self, mock_signer_cls, mock_user_model
     ):
         mock_signer = MagicMock()
@@ -23,10 +28,11 @@ class VerifyEmailViewTest(APISimpleTestCase):
         mock_user.status = "unverified"
         mock_user_model.objects.get.return_value = mock_user
 
-        response = self.client.get(self.url, {"token": "signed-token-string"})
+        response = self.client.post(self.url, self.valid_payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["message"], "Email verified successfully")
+        mock_user.set_password.assert_called_once_with("Strong#123")
         self.assertEqual(mock_user.status, "verified")
         mock_user.save.assert_called_once()
 
@@ -36,7 +42,12 @@ class VerifyEmailViewTest(APISimpleTestCase):
         mock_signer_cls.return_value = mock_signer
         mock_signer.unsign.side_effect = SignatureExpired("Token expired")
 
-        response = self.client.get(self.url, {"token": "expired-token"})
+        payload = {
+            "token": "expired-token",
+            "password": "Strong#123",
+            "password_confirm": "Strong#123",
+        }
+        response = self.client.post(self.url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_410_GONE)
         self.assertIn("expired", response.data["message"].lower())
@@ -47,12 +58,21 @@ class VerifyEmailViewTest(APISimpleTestCase):
         mock_signer_cls.return_value = mock_signer
         mock_signer.unsign.side_effect = BadSignature("Bad token")
 
-        response = self.client.get(self.url, {"token": "tampered-token"})
+        payload = {
+            "token": "tampered-token",
+            "password": "Strong#123",
+            "password_confirm": "Strong#123",
+        }
+        response = self.client.post(self.url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_missing_token_param_returns_400(self):
-        response = self.client.get(self.url)
+        payload = {
+            "password": "Strong#123",
+            "password_confirm": "Strong#123",
+        }
+        response = self.client.post(self.url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
@@ -67,26 +87,89 @@ class VerifyEmailViewTest(APISimpleTestCase):
         mock_user_model.DoesNotExist = type("DoesNotExist", (Exception,), {})
         mock_user_model.objects.get.side_effect = mock_user_model.DoesNotExist
 
-        response = self.client.get(self.url, {"token": "valid-but-no-user"})
+        payload = {
+            "token": "valid-but-no-user",
+            "password": "Strong#123",
+            "password_confirm": "Strong#123",
+        }
+        response = self.client.post(self.url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
-    @patch("authentication.views.User")
     @patch("authentication.views.TimestampSigner")
-    def test_already_verified_user_returns_200_idempotent(
-        self, mock_signer_cls, mock_user_model
-    ):
+    def test_password_too_short_returns_400(self, mock_signer_cls):
         mock_signer = MagicMock()
         mock_signer_cls.return_value = mock_signer
-        mock_signer.unsign.return_value = "verified@example.com"
+        mock_signer.unsign.return_value = "user@example.com"
 
-        mock_user = MagicMock()
-        mock_user.status = "verified"
-        mock_user_model.objects.get.return_value = mock_user
+        payload = {
+            "token": "signed-token-string",
+            "password": "S#1a",
+            "password_confirm": "S#1a",
+        }
 
-        response = self.client.get(self.url, {"token": "already-verified-token"})
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+    @patch("authentication.views.TimestampSigner")
+    def test_password_without_letter_returns_400(self, mock_signer_cls):
+        mock_signer = MagicMock()
+        mock_signer_cls.return_value = mock_signer
+        mock_signer.unsign.return_value = "user@example.com"
+
+        payload = {
+            "token": "signed-token-string",
+            "password": "1234567#",
+            "password_confirm": "1234567#",
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("authentication.views.TimestampSigner")
+    def test_password_without_digit_returns_400(self, mock_signer_cls):
+        mock_signer = MagicMock()
+        mock_signer_cls.return_value = mock_signer
+        mock_signer.unsign.return_value = "user@example.com"
+
+        payload = {
+            "token": "signed-token-string",
+            "password": "Abcdefg#",
+            "password_confirm": "Abcdefg#",
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("authentication.views.TimestampSigner")
+    def test_password_without_special_character_returns_400(self, mock_signer_cls):
+        mock_signer = MagicMock()
+        mock_signer_cls.return_value = mock_signer
+        mock_signer.unsign.return_value = "user@example.com"
+
+        payload = {
+            "token": "signed-token-string",
+            "password": "Abcdefg1",
+            "password_confirm": "Abcdefg1",
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("authentication.views.TimestampSigner")
+    def test_password_confirmation_mismatch_returns_400(self, mock_signer_cls):
+        mock_signer = MagicMock()
+        mock_signer_cls.return_value = mock_signer
+        mock_signer.unsign.return_value = "user@example.com"
+
+        payload = {
+            "token": "signed-token-string",
+            "password": "Strong#123",
+            "password_confirm": "Strong#124",
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 # -------------------------------------------------------------------- #
