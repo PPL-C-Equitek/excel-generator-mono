@@ -157,7 +157,7 @@ class RegisterViewTest(APISimpleTestCase):
 
     @patch("authentication.views.send_verification_email")
     @patch("authentication.views.User")
-    def test_register_rate_limit_returns_429_on_6th_request(
+    def test_register_rate_limit_returns_429_on_61st_request(
         self, mock_user_model, mock_send_email
     ):
         mock_user_model.objects.filter.return_value.exists.return_value = False
@@ -170,7 +170,7 @@ class RegisterViewTest(APISimpleTestCase):
             "email": "ratelimit@example.com",
         }
 
-        for i in range(5):
+        for i in range(60):
             response = self.client.post(self.url, payload, format="json")
             self.assertEqual(
                 response.status_code,
@@ -180,6 +180,8 @@ class RegisterViewTest(APISimpleTestCase):
 
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertEqual(response["X-RateLimit-Limit"], "60")
+        self.assertEqual(response["X-RateLimit-Remaining"], "0")
 
 
 class UserManagerTest(APISimpleTestCase):
