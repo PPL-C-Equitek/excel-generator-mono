@@ -5,7 +5,7 @@ from rest_framework.test import APISimpleTestCase
 from rest_framework import status
 
 from authentication.models import User
-
+from authentication.views import LoginFailureTracker
 
 class LoginViewTest(APISimpleTestCase):
     """Test cases for the login endpoint using TDD approach (RED phase)"""
@@ -420,3 +420,15 @@ class LoginViewTest(APISimpleTestCase):
             content_type="application/json"
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("authentication.views.cache")
+    def test_record_failure_falls_back_to_set_when_incr_raises_value_error(self, mock_cache):
+        """Covers the ValueError fallback branch in record_failure."""
+        mock_cache.add.return_value = True
+        mock_cache.incr.side_effect = ValueError
+
+        result = LoginFailureTracker.record_failure("user@example.com")
+
+        cache_key = LoginFailureTracker.get_cache_key("user@example.com")
+        mock_cache.set.assert_called_once_with(cache_key, 1, LoginFailureTracker.TIME_WINDOW)
+        self.assertEqual(result, 1)
