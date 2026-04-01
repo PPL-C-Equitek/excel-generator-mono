@@ -1151,6 +1151,31 @@ class DownloadExcelViewTest(APISimpleTestCase):
         )
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
+    @patch("api.views.open", side_effect=RuntimeError("unexpected read failure"), create=True)
+    def test_download_excel_endpoint_returns_500_for_unexpected_error_when_opening_file(
+        self,
+        _mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.xlsx",
+            "file_path": "/safe/storage/export_abc123.xlsx",
+            "artifact_type": "xlsx",
+            "content_type": (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        }
+
+        response = self.client.get("/export/excel/xlsx_abc123/download")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download Excel due to internal error.",
+        )
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
     def test_download_excel_endpoint_returns_500_for_unexpected_service_error(
         self,
         mocked_resolver,
