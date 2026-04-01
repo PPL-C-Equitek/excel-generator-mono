@@ -403,11 +403,14 @@ def _validate_txt_content(uploaded_file, detected_mime: str):
     if is_binary:
         return False, binary_error
 
-    allowed = ALLOWED_MIME_TYPES.get(EXT_TXT, [])
-    if detected_mime not in allowed:
-        return False, TXT_CORRUPT_ERROR
+    if detected_mime and detected_mime.startswith("text/"):
+        return True, None
 
-    return True, None
+    allowed = ALLOWED_MIME_TYPES.get(EXT_TXT, [])
+    if detected_mime in allowed:
+        return True, None
+
+    return False, TXT_CORRUPT_ERROR
 
 
 def save_temp_file(uploaded_file):
