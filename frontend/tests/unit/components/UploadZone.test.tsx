@@ -1,5 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import UploadZone from '../../../src/components/UploadZone'
 
 // Test utilities
@@ -18,6 +19,11 @@ const createDragEvent = (files: File[]): Partial<DragEvent> => {
     } as DataTransfer,
     preventDefault: vi.fn(),
   }
+}
+
+async function uploadAndStageFile(file = createMockFile()) {
+  await userEvent.upload(screen.getByTestId('file-input'), file)
+  return file
 }
 
 describe('UploadZone', () => {
@@ -90,6 +96,18 @@ describe('Drag and Drop Functionality', () => {
     expect(() => fireEvent.drop(dropZone, event)).not.toThrow()
     expect(mockOnFileSelect).not.toHaveBeenCalled()
   })
+
+  it('does not stage file or update UI when dropped file list is empty', () => {
+    render(<UploadZone />)
+
+    fireEvent.drop(screen.getByTestId('drop-zone'), {
+      preventDefault: vi.fn(),
+      dataTransfer: { files: [] as unknown as FileList },
+    })
+
+    expect(screen.getByTestId('drop-zone')).toBeInTheDocument()
+    expect(screen.queryByTestId('convert-btn')).not.toBeInTheDocument()
+  })
 })
 
 describe('Disabled State', () => {
@@ -114,5 +132,51 @@ describe('Disabled State', () => {
     const dragEvent = createDragEvent([file])
     fireEvent.drop(dropZone, dragEvent)
     expect(mockOnFileSelect).not.toHaveBeenCalled()
+  })
+})
+
+describe('File Confirmation', () => {
+  it('resets back to upload zone when "Change File" is clicked', async () => {
+    render(<UploadZone />)
+
+    await uploadAndStageFile()
+    await userEvent.click(screen.getByText('Change File'))
+
+    expect(screen.getByTestId('drop-zone')).toBeInTheDocument()
+  })
+
+  it('does not call onFileSelect when Convert is clicked without a file staged', async () => {
+    const mockOnFileSelect = vi.fn()
+    render(<UploadZone onFileSelect={mockOnFileSelect} />)
+
+    await uploadAndStageFile()
+    await userEvent.click(screen.getByText('Change File'))
+
+    expect(screen.queryByTestId('convert-btn')).not.toBeInTheDocument()
+    expect(mockOnFileSelect).not.toHaveBeenCalled()
+  })
+
+  it('displays file size in B for files under 1 KB', async () => {
+    render(<UploadZone />)
+    const file = new File(['hi'], 'small.pdf', { type: 'application/pdf' }) // 2 bytes
+    await userEvent.upload(screen.getByTestId('file-input'), file)
+
+    expect(screen.getByText('2 B')).toBeInTheDocument()
+  })
+
+  it('displays file size in KB for files between 1 KB and 1 MB', async () => {
+    render(<UploadZone />)
+    const file = new File([new Uint8Array(2048)], 'medium.pdf', { type: 'application/pdf' }) // 2 KB
+    await userEvent.upload(screen.getByTestId('file-input'), file)
+
+    expect(screen.getByText('2.0 KB')).toBeInTheDocument()
+  })
+
+  it('displays file size in MB for files 1 MB and above', async () => {
+    render(<UploadZone />)
+    const file = new File([new Uint8Array(2 * 1024 * 1024)], 'large.pdf', { type: 'application/pdf' }) // 2 MB
+    await userEvent.upload(screen.getByTestId('file-input'), file)
+
+    expect(screen.getByText('2.0 MB')).toBeInTheDocument()
   })
 })
