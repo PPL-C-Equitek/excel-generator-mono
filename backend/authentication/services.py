@@ -2,7 +2,6 @@ import logging
 import jwt
 from datetime import timedelta
 from urllib.parse import quote
-
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, TypedDict
 from django.conf import settings
