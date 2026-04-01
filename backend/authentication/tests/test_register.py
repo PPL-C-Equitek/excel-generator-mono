@@ -13,7 +13,7 @@ class RegisterViewTest(APISimpleTestCase):
     def setUp(self):
         cache.clear()
         self.url = "/auth/register/"
-        self.success_message = "Jika email valid, link verifikasi telah dikirim"
+        self.success_message = "Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda."
         self.valid_payload = {
             "name": "John Doe",
             "email": "john@example.com",
@@ -92,6 +92,25 @@ class RegisterViewTest(APISimpleTestCase):
         self.assertEqual(response.data["message"], self.success_message)
         mock_user_model.objects.create_user.assert_not_called()
 
+    @patch("authentication.views.send_verification_email")
+    @patch("authentication.views.User")
+    def test_register_duplicate_verified_user_returns_generic_success_without_resend(
+        self, mock_user_model, mock_send_email
+    ):
+        existing_user = MagicMock()
+        existing_user.status = "verified"
+        existing_user.email = "john@example.com"
+
+        mock_user_model.objects.filter.return_value.exists.return_value = True
+        mock_user_model.objects.filter.return_value.first.return_value = existing_user
+
+        response = self.client.post(self.url, self.valid_payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["message"], self.success_message)
+        mock_send_email.assert_not_called()
+        mock_user_model.objects.create_user.assert_not_called()
+
     def test_register_invalid_email_returns_400(self):
         payload = {
             "name": "Bad Email",
@@ -136,7 +155,16 @@ class RegisterViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["message"], self.success_message)
 
-    def test_register_rate_limit_returns_429_on_6th_request(self):
+    @patch("authentication.views.send_verification_email")
+    @patch("authentication.views.User")
+    def test_register_rate_limit_returns_429_on_6th_request(
+        self, mock_user_model, mock_send_email
+    ):
+        mock_user_model.objects.filter.return_value.exists.return_value = False
+        saved_user = MagicMock()
+        saved_user.email = "ratelimit@example.com"
+        mock_user_model.objects.create_user.return_value = saved_user
+
         payload = {
             "name": "Rate Limited",
             "email": "ratelimit@example.com",

@@ -44,6 +44,10 @@ WINDOW_SECONDS = {
     "seconds": 1,
     "minute": 60,
     "minutes": 60,
+    "15min": 900,
+    "15mins": 900,
+    "15minute": 900,
+    "15minutes": 900,
 }
 
 

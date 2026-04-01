@@ -16,15 +16,35 @@ def validate_password_strength(value):
         raise serializers.ValidationError(
             "Password must contain at least one number"
         )
+    if not re.search(r'[^A-Za-z0-9]', value):
+        raise serializers.ValidationError(
+            "Password must contain at least one special character"
+        )
     return value
 
 
 class RegisterSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=150, required=True)
     email = serializers.EmailField(required=True)
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    token = serializers.CharField(required=True)
     password = serializers.CharField(
         max_length=128,
         required=True,
         write_only=True,
         validators=[validate_password_strength],
     )
+    password_confirm = serializers.CharField(
+        max_length=128,
+        required=True,
+        write_only=True,
+    )
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError(
+                {"password_confirm": "Password confirmation does not match"}
+            )
+        return attrs
