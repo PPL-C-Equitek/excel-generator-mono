@@ -50,7 +50,7 @@ class SendVerificationEmailTest(SimpleTestCase):
         call_kwargs = mock_resend.Emails.send.call_args[0][0]
         self.assertEqual(call_kwargs["from"], "noreply@app.example.com")
         self.assertEqual(call_kwargs["to"], "user@example.com")
-        self.assertEqual(call_kwargs["subject"], "Verifikasi Email Anda")
+        self.assertEqual(call_kwargs["subject"], "Verify Your Email")
         self.assertIn("verify-email?token=", call_kwargs["html"])
 
     @override_settings(RESEND_API_KEY="re_test_key", FRONTEND_URL="https://app.example.com")
@@ -65,7 +65,7 @@ class SendVerificationEmailTest(SimpleTestCase):
 
         self.assertTrue(any("Failed to send" in msg for msg in log.output))
 
-    @override_settings(FRONTEND_URL="https://myapp.com")
+    @override_settings(RESEND_API_KEY="", FRONTEND_URL="https://myapp.com")
     @patch("builtins.print")
     def test_uses_frontend_url_setting(self, mock_print):
         send_verification_email("user@example.com")

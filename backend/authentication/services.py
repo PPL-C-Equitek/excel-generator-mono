@@ -1,6 +1,8 @@
 import logging
 import jwt
 from datetime import timedelta
+from urllib.parse import quote
+
 from django.conf import settings
 from django.core.signing import TimestampSigner
 from django.utils import timezone
@@ -47,7 +49,7 @@ def generate_tokens(user_id, email):
 def send_verification_email(email):
     token = generate_verification_token(email)
     frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
-    verification_url = f"{frontend_url}/auth/verify-email?token={token}"
+    verification_url = f"{frontend_url}/auth/verify-email?token={quote(token, safe='')}"
 
     try:
         resend_api_key = getattr(settings, "RESEND_API_KEY", "")
@@ -55,10 +57,10 @@ def send_verification_email(email):
             import resend
             resend.api_key = resend_api_key
             resend.Emails.send({
-                "from": getattr(settings, "RESEND_FROM_EMAIL", "noreply@example.com"),
+                "from": getattr(settings, "RESEND_FROM_EMAIL", "noreply@excelprojectequitek.my.id"),
                 "to": email,
-                "subject": "Verifikasi Email Anda",
-                "html": f'<p>Klik link berikut untuk verifikasi: <a href="{verification_url}">{verification_url}</a></p>',
+                "subject": "Verify Your Email",
+                "html": f'<p>Click the link below to verify: <a href="{verification_url}">{verification_url}</a></p>',
             })
         else:
             print(f"\n--- VERIFICATION LINK ---\n{verification_url}\n-------------------------\n")
