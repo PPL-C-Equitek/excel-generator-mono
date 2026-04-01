@@ -26,11 +26,13 @@ from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
     OutputCSVMappingError,
+    OutputExcelDownloadLookupError,
     OutputExcelGenerationError,
     OutputLLMValidationError,
     export_csv_to_filesystem,
     export_excel_to_filesystem,
     resolve_csv_download_artifact,
+    resolve_excel_download_artifact,
 )
 
 logger = logging.getLogger(__name__)
@@ -334,5 +336,82 @@ def download_csv(request, file_id):
         file_handle,
         as_attachment=True,
         filename=download_name,
+        content_type=artifact["content_type"],
+    )
+
+
+@require_GET
+@api_view(["GET"])
+def download_excel(request, export_id):
+    try:
+        artifact = resolve_excel_download_artifact(
+            export_id=export_id,
+            storage_dir=settings.EXCEL_EXPORT_DIR,
+        )
+    except OutputExcelDownloadLookupError as exc:
+        error_message = str(exc).lower()
+        if "format is invalid" in error_message:
+            logger.warning("Excel download received invalid export_id.", exc_info=True)
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Invalid Excel export id.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        logger.warning("Excel download file not found.", exc_info=True)
+        return Response(
+            {
+                "status": "error",
+                "message": "Excel file not found.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    except Exception:
+        logger.exception("Unexpected error while resolving Excel download artifact.")
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed to download Excel due to internal error.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    try:
+        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+        file_handle = open(safe_file_path, "rb")
+    except (KeyError, SuspiciousFileOperation, ValueError):
+        logger.warning("Excel download resolved unsafe artifact metadata.", exc_info=True)
+        return Response(
+            {
+                "status": "error",
+                "message": "Excel file not found.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    except OSError:
+        logger.exception("Excel download failed while reading generated artifact.")
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed to download Excel due to internal error.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    except Exception:
+        logger.exception("Unexpected error while preparing Excel download.")
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed to download Excel due to internal error.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=artifact["file_name"],
         content_type=artifact["content_type"],
     )
