@@ -51,7 +51,7 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
         self.assertEqual(result, "prompt fragment")
         build_prompt_mock.assert_called_once_with(schema.definition)
 
-    def test_validate_skips_duplicate_lookup_for_unauthenticated_user(self):
+    def test_validate_name_skips_duplicate_lookup_for_unauthenticated_user(self):
         serializer = CustomSchemaSerializer(
             context={
                 "request": SimpleNamespace(
@@ -61,12 +61,12 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
         )
 
         with patch("custom_schemas.serializers.CustomSchema.objects.filter") as filter_mock:
-            result = serializer.validate({"name": "Invoice Mapping"})
+            result = serializer.validate_name("Invoice Mapping")
 
-        self.assertEqual(result, {"name": "Invoice Mapping"})
+        self.assertEqual(result, "Invoice Mapping")
         filter_mock.assert_not_called()
 
-    def test_validate_rejects_duplicate_name_for_current_owner(self):
+    def test_validate_name_rejects_duplicate_name_for_current_owner(self):
         serializer = CustomSchemaSerializer(context={"request": self.request})
         duplicate_queryset = Mock()
         duplicate_queryset.exists.return_value = True
@@ -76,16 +76,19 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
             return_value=duplicate_queryset,
         ) as filter_mock:
             with self.assertRaises(serializers.ValidationError) as context:
-                serializer.validate({"name": "Invoice Mapping"})
+                serializer.validate_name("Invoice Mapping")
 
-        self.assertIn("name", context.exception.detail)
+        self.assertIn(
+            "Anda sudah memiliki custom schema dengan nama ini.",
+            context.exception.detail,
+        )
         filter_mock.assert_called_once_with(
             owner_id=self.owner_id,
             name="Invoice Mapping",
         )
         duplicate_queryset.exists.assert_called_once_with()
 
-    def test_validate_excludes_current_instance_from_duplicate_check(self):
+    def test_validate_name_excludes_current_instance_from_duplicate_check(self):
         existing_instance = SimpleNamespace(pk=uuid.uuid4(), name="Invoice Mapping")
         serializer = CustomSchemaSerializer(
             instance=existing_instance,
@@ -99,9 +102,9 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
             "custom_schemas.serializers.CustomSchema.objects.filter",
             return_value=queryset,
         ) as filter_mock:
-            result = serializer.validate({})
+            result = serializer.validate_name("Invoice Mapping")
 
-        self.assertEqual(result, {})
+        self.assertEqual(result, "Invoice Mapping")
         filter_mock.assert_called_once_with(
             owner_id=self.owner_id,
             name="Invoice Mapping",

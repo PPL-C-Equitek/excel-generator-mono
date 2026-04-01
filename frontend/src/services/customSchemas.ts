@@ -12,48 +12,53 @@ function buildApiUrl(path: string): string {
     return `${API_URL}/${normalizedPath}`
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null
+}
+
+function readStringField(data: unknown, field: string): string | null {
+    if (!isRecord(data)) {
+        return null
+    }
+
+    const value = data[field]
+    return typeof value === 'string' ? value : null
+}
+
+function findFirstString(values: unknown[]): string | null {
+    const firstString = values.find((value) => typeof value === 'string')
+    return typeof firstString === 'string' ? firstString : null
+}
+
+function readNestedString(data: unknown): string | null {
+    if (!isRecord(data)) {
+        return null
+    }
+
+    for (const value of Object.values(data)) {
+        if (typeof value === 'string') {
+            return value
+        }
+
+        if (Array.isArray(value)) {
+            const nestedString = findFirstString(value)
+            if (nestedString) {
+                return nestedString
+            }
+        }
+    }
+
+    return null
+}
+
 function readErrorMessage(data: unknown, fallback: string): string {
-    if (
-        typeof data === 'object' &&
-        data !== null &&
-        'message' in data &&
-        typeof (data as { message: unknown }).message === 'string'
-    ) {
-        return (data as { message: string }).message
-    }
-
-    if (
-        typeof data === 'object' &&
-        data !== null &&
-        'detail' in data &&
-        typeof (data as { detail: unknown }).detail === 'string'
-    ) {
-        return (data as { detail: string }).detail
-    }
-
-    if (Array.isArray(data)) {
-        const firstString = data.find((item) => typeof item === 'string')
-        if (typeof firstString === 'string') {
-            return firstString
-        }
-    }
-
-    if (typeof data === 'object' && data !== null) {
-        for (const value of Object.values(data as Record<string, unknown>)) {
-            if (typeof value === 'string') {
-                return value
-            }
-
-            if (Array.isArray(value)) {
-                const firstString = value.find((item) => typeof item === 'string')
-                if (typeof firstString === 'string') {
-                    return firstString
-                }
-            }
-        }
-    }
-
-    return fallback
+    return (
+        readStringField(data, 'message') ??
+        readStringField(data, 'detail') ??
+        (Array.isArray(data) ? findFirstString(data) : null) ??
+        readNestedString(data) ??
+        fallback
+    )
 }
 
 async function requestCustomSchemaApi<T>(

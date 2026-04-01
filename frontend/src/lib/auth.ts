@@ -18,9 +18,12 @@ function readFromStorage(storage: Storage | undefined): string | null {
 }
 
 export function getStoredAccessToken(): string | null {
-    if (typeof window === 'undefined') {
+    if (typeof globalThis.window === 'undefined') {
         return null
     }
 
-    return readFromStorage(window.localStorage) ?? readFromStorage(window.sessionStorage)
+    return (
+        readFromStorage(globalThis.window.localStorage) ??
+        readFromStorage(globalThis.window.sessionStorage)
+    )
 }

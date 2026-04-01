@@ -285,7 +285,7 @@ describe('CustomSchemaManager', () => {
         )
 
         await user.click(screen.getByTestId('add-schema-btn'))
-        fireEvent.click(screen.getByRole('dialog', { name: /add schema/i }))
+        fireEvent.click(screen.getByTestId('schema-backdrop-btn'))
 
         await waitFor(() => {
             expect(screen.queryByRole('dialog', { name: /add schema/i })).not.toBeInTheDocument()
@@ -368,7 +368,7 @@ describe('CustomSchemaManager', () => {
         )
         await user.click(within(dialog).getByTestId('schema-save-btn'))
 
-        fireEvent.click(screen.getByRole('dialog', { name: /add schema/i }))
+        fireEvent.click(screen.getByTestId('schema-backdrop-btn'))
         fireEvent.keyDown(window, { key: 'Escape' })
 
         expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()

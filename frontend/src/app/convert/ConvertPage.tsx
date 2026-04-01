@@ -39,7 +39,6 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
 
                     {isConverting && (
                         <output
-                            role="status"
                             data-testid="loading-indicator"
                             className="mt-6 flex flex-col items-center gap-3 py-8"
                         >

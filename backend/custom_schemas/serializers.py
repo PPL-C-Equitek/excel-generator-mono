@@ -35,32 +35,29 @@ class CustomSchemaSerializer(serializers.ModelSerializer):
         validate_schema_definition(value)
         return value
 
-    def validate(self, attrs):
-        attrs = super().validate(attrs)
-
+    def validate_name(self, value):
         request = self.context.get("request")
         owner = getattr(request, "user", None)
         owner_id = getattr(owner, "id", None)
-        name = attrs.get("name", getattr(self.instance, "name", None))
 
         if (
             not owner
             or not getattr(owner, "is_authenticated", False)
             or owner_id is None
-            or not name
+            or not value
         ):
-            return attrs
+            return value
 
-        existing = CustomSchema.objects.filter(owner_id=owner_id, name=name)
+        existing = CustomSchema.objects.filter(owner_id=owner_id, name=value)
         if self.instance is not None:
             existing = existing.exclude(pk=self.instance.pk)
 
         if existing.exists():
             raise serializers.ValidationError(
-                {"name": "Anda sudah memiliki custom schema dengan nama ini."}
+                "Anda sudah memiliki custom schema dengan nama ini."
             )
 
-        return attrs
+        return value
 
     def get_prompt_fragment(self, obj):
         return build_schema_prompt_fragment(obj.definition)

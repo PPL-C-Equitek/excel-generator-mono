@@ -1,9 +1,7 @@
 'use client'
 
 import type {
-    FormEvent,
-    KeyboardEvent as ReactKeyboardEvent,
-    MouseEvent,
+    ComponentPropsWithoutRef,
 } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCustomSchemas } from '@/hooks/useCustomSchemas'
@@ -33,6 +31,9 @@ interface CustomSchemaFormDraft {
 }
 
 const MAX_CUSTOM_SCHEMAS = 5
+type FormSubmitEvent = Parameters<
+    NonNullable<ComponentPropsWithoutRef<'form'>['onSubmit']>
+>[0]
 
 function createEmptyColumn(id: number): SchemaColumnDraft {
     return {
@@ -162,10 +163,10 @@ export default function CustomSchemaManager({
             }
         }
 
-        window.addEventListener('keydown', handleKeyDown)
+        globalThis.addEventListener('keydown', handleKeyDown)
 
         return () => {
-            window.removeEventListener('keydown', handleKeyDown)
+            globalThis.removeEventListener('keydown', handleKeyDown)
         }
     }, [isModalOpen, closeCreateModal])
 
@@ -205,7 +206,7 @@ export default function CustomSchemaManager({
         })
     }
 
-    const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const handleSubmit = async (event: FormSubmitEvent) => {
         event.preventDefault()
 
         const validationError = validateCustomSchemaDraft(draft)
@@ -217,23 +218,6 @@ export default function CustomSchemaManager({
         setFormError(null)
         const wasCreated = await createSchema(buildCustomSchemaInput(draft))
         if (wasCreated) {
-            closeCreateModal()
-        }
-    }
-
-    const handleBackdropClick = (event: MouseEvent<HTMLDivElement>) => {
-        if (event.target === event.currentTarget) {
-            closeCreateModal()
-        }
-    }
-
-    const handleBackdropKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-        if (event.target !== event.currentTarget) {
-            return
-        }
-
-        if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
             closeCreateModal()
         }
     }
@@ -368,16 +352,21 @@ export default function CustomSchemaManager({
             </section>
 
             {isModalOpen && (
-                <div
-                    role="dialog"
-                    aria-modal="true"
+                <dialog
+                    open
                     aria-labelledby="add-schema-title"
-                    onClick={handleBackdropClick}
-                    onKeyDown={handleBackdropKeyDown}
-                    tabIndex={0}
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-6"
+                    className="fixed inset-0 z-50 m-0 flex h-screen w-screen max-h-none max-w-none items-center justify-center border-0 bg-transparent p-6"
                 >
-                    <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+                    <button
+                        type="button"
+                        data-testid="schema-backdrop-btn"
+                        aria-label="Dismiss schema dialog"
+                        tabIndex={-1}
+                        onClick={closeCreateModal}
+                        disabled={isSaving}
+                        className="absolute inset-0 bg-black/45 disabled:cursor-not-allowed"
+                    />
+                    <div className="relative z-10 max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
                         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-5">
                             <div>
                                 <h3
@@ -569,7 +558,7 @@ export default function CustomSchemaManager({
                             </div>
                         </form>
                     </div>
-                </div>
+                </dialog>
             )}
         </>
     )
