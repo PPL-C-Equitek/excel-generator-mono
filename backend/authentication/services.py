@@ -3,11 +3,80 @@ import jwt
 from datetime import timedelta
 from urllib.parse import quote
 
+from dataclasses import dataclass
+from typing import Any, Callable, Protocol, TypedDict
 from django.conf import settings
+from django.core.cache import cache
 from django.core.signing import TimestampSigner
 from django.utils import timezone
 
+from authentication.models import User
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TokenPair:
+    accessToken: str
+    refreshToken: str
+
+
+@dataclass(frozen=True)
+class AuthenticatedUserDTO:
+    id: str
+    email: str
+    name: str
+
+
+@dataclass(frozen=True)
+class LoginResult:
+    tokens: TokenPair
+    user: AuthenticatedUserDTO
+
+
+class AuthenticationError(Exception):
+    """Base class for authentication domain errors."""
+
+
+class LoginRateLimitedError(AuthenticationError):
+    pass
+
+
+class InvalidCredentialsError(AuthenticationError):
+    pass
+
+
+class EmailNotVerifiedError(AuthenticationError):
+    pass
+
+
+class UserLookupGateway(Protocol):
+    def get_by_email(self, email: str) -> User:
+        ...
+
+
+class DjangoUserLookupGateway:
+    def get_by_email(self, email: str) -> User:
+        return User.objects.get(email=email)
+
+
+class TokenPayload(TypedDict):
+    accessToken: str
+    refreshToken: str
+
+
+class FailureTrackerProtocol(Protocol):
+    @classmethod
+    def is_rate_limited(cls, email: str) -> bool:
+        ...
+
+    @classmethod
+    def record_failure(cls, email: str) -> int:
+        ...
+
+    @classmethod
+    def reset_failures(cls, email: str):
+        ...
 
 
 def generate_verification_token(email):
@@ -15,8 +84,11 @@ def generate_verification_token(email):
     return signer.sign(email)
 
 
-def generate_tokens(user_id, email):
-    secret_key = getattr(settings, "JWT_SECRET_KEY", )
+def generate_tokens(user_id, email) -> TokenPayload:
+    secret_key = getattr(settings, "JWT_SECRET_KEY", None)
+    if not secret_key:
+        raise ValueError("JWT_SECRET_KEY is not configured")
+
     now = timezone.now()
 
     access_payload = {
@@ -44,6 +116,98 @@ def generate_tokens(user_id, email):
         "accessToken": access_token,
         "refreshToken": refresh_token,
     }
+
+
+class LoginFailureTracker:
+    """Track failed login attempts for rate limiting (5 attempts per 15 minutes)."""
+
+    FAILURE_LIMIT = 5
+    TIME_WINDOW = 15 * 60
+
+    @staticmethod
+    def get_cache_key(email: str) -> str:
+        return f"login_failures:{email.lower().strip()}"
+
+    @classmethod
+    def get_cache_backend(cls) -> Any:
+        return cache
+
+    @classmethod
+    def is_rate_limited(cls, email: str) -> bool:
+        cache_key = cls.get_cache_key(email)
+        cache_backend = cls.get_cache_backend()
+        failures = cache_backend.get(cache_key, 0)
+        return failures >= cls.FAILURE_LIMIT
+
+    @classmethod
+    def record_failure(cls, email: str) -> int:
+        cache_key = cls.get_cache_key(email)
+        cache_backend = cls.get_cache_backend()
+        cache_backend.add(cache_key, 0, cls.TIME_WINDOW)
+
+        try:
+            return cache_backend.incr(cache_key)
+        except ValueError:
+            cache_backend.set(cache_key, 1, cls.TIME_WINDOW)
+            return 1
+
+    @classmethod
+    def reset_failures(cls, email: str) -> None:
+        cache_key = cls.get_cache_key(email)
+        cache_backend = cls.get_cache_backend()
+        cache_backend.delete(cache_key)
+
+
+class LoginService:
+    """Authenticate users with business rules isolated from the transport layer."""
+
+    def __init__(
+        self,
+        user_gateway: UserLookupGateway | None = None,
+        failure_tracker: type[FailureTrackerProtocol] = LoginFailureTracker,
+        token_generator: Callable[[object, str], TokenPayload] = generate_tokens,
+    ):
+        self.user_gateway = user_gateway or DjangoUserLookupGateway()
+        self.failure_tracker = failure_tracker
+        self.token_generator = token_generator
+
+    @staticmethod
+    def normalize_email(email: str) -> str:
+        return email.lower().strip()
+
+    def authenticate(self, email: str, password: str) -> LoginResult:
+        normalized_email = self.normalize_email(email)
+
+        if self.failure_tracker.is_rate_limited(normalized_email):
+            raise LoginRateLimitedError()
+
+        try:
+            user = self.user_gateway.get_by_email(normalized_email)
+        except User.DoesNotExist as exc:
+            self.failure_tracker.record_failure(normalized_email)
+            raise InvalidCredentialsError() from exc
+
+        if not user.check_password(password):
+            self.failure_tracker.record_failure(normalized_email)
+            raise InvalidCredentialsError()
+
+        if user.status != "verified":
+            self.failure_tracker.record_failure(normalized_email)
+            raise EmailNotVerifiedError()
+
+        token_data = self.token_generator(user.id, user.email)
+        self.failure_tracker.reset_failures(normalized_email)
+
+        tokens = TokenPair(
+            accessToken=token_data["accessToken"],
+            refreshToken=token_data["refreshToken"],
+        )
+        user_data = AuthenticatedUserDTO(
+            id=str(user.id),
+            email=user.email,
+            name=user.name,
+        )
+        return LoginResult(tokens=tokens, user=user_data)
 
 
 def send_verification_email(email):

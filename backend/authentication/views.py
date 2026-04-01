@@ -2,7 +2,6 @@ import logging
 from datetime import timedelta
 from functools import wraps
 from django.core.cache import cache
-from django.core.exceptions import ObjectDoesNotExist
 
 from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
 from django.db import IntegrityError
@@ -13,8 +12,16 @@ from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
 from authentication.models import User
-from authentication.serializers import RegisterSerializer, VerifyEmailSerializer, LoginSerializer
-from authentication.services import send_verification_email, generate_tokens
+from authentication.serializers import RegisterSerializer, LoginSerializer
+from authentication.services import (
+    send_verification_email,
+    generate_tokens,
+    LoginFailureTracker as BaseLoginFailureTracker,
+    LoginService,
+    LoginRateLimitedError,
+    InvalidCredentialsError,
+    EmailNotVerifiedError,
+)
 
 logger = logging.getLogger(__name__)
 REGISTER_SUCCESS_MESSAGE = "Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda."
@@ -180,114 +187,64 @@ class ResendVerificationView(APIView):
             status=status.HTTP_200_OK,
         )
 
-# LoginView with JWT token generation and rate limiting
-class LoginFailureTracker:
-    """Track failed login attempts for rate limiting (5 attempts per 15 minutes)"""
-    FAILURE_LIMIT = 5
-    TIME_WINDOW = 15 * 60  # 15 minutes in seconds
-    
-    @staticmethod
-    def get_cache_key(email):
-        return f"login_failures:{email.lower().strip()}"
-    
-    @classmethod
-    def is_rate_limited(cls, email):
-        """Check if user has exceeded login attempt limit"""
-        cache_key = cls.get_cache_key(email)
-        failures = cache.get(cache_key, 0)
-        return failures >= cls.FAILURE_LIMIT
-    
-    @classmethod
-    def record_failure(cls, email):
-        """Record a failed login attempt using atomic increment."""
-        cache_key = cls.get_cache_key(email)
-        cache.add(cache_key, 0, cls.TIME_WINDOW)
 
-        try:
-            return cache.incr(cache_key)
-        except ValueError:
-            cache.set(cache_key, 1, cls.TIME_WINDOW)
-            return 1
-    
+class LoginFailureTracker(BaseLoginFailureTracker):
     @classmethod
-    def reset_failures(cls, email):
-        """Reset failure count on successful login"""
-        cache_key = cls.get_cache_key(email)
-        cache.delete(cache_key)
+    def get_cache_backend(cls):
+        return cache
 
+
+class DjangoUserLookupGateway:
+    def get_by_email(self, email: str) -> User:
+        return User.objects.get(email=email)
 
 class LoginView(APIView):
     """Login endpoint with JWT token generation and rate limiting"""
-    
+
     def post(self, request):
-        # Validate input
         serializer = LoginSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(
                 {"errors": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        # Check rate limiting
-        email = serializer.validated_data["email"].lower().strip()
-        if LoginFailureTracker.is_rate_limited(email):
+        email = serializer.validated_data["email"]
+        password = serializer.validated_data["password"]
+
+        login_service = LoginService(
+            user_gateway=DjangoUserLookupGateway(),
+            failure_tracker=LoginFailureTracker,
+            token_generator=generate_tokens,
+        )
+
+        try:
+            result = login_service.authenticate(email=email, password=password)
+            return Response(
+                {
+                    "accessToken": result.tokens.accessToken,
+                    "refreshToken": result.tokens.refreshToken,
+                    "user": {
+                        "id": result.user.id,
+                        "email": result.user.email,
+                        "name": result.user.name,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+        except LoginRateLimitedError:
             return Response(
                 {"message": "Terlalu banyak percobaan gagal. Coba lagi dalam beberapa menit."},
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
-        
-        password = serializer.validated_data["password"]
-        
-        try:
-            # Find user by email
-            user = User.objects.get(email=email)
-        except ObjectDoesNotExist:
-            LoginFailureTracker.record_failure(email)
+        except InvalidCredentialsError:
             return Response(
                 {"message": "Email atau password salah"},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
-        except Exception:
-            logger.exception("Unexpected error during login lookup for email: %s", email)
-            return Response(
-                {"message": SERVER_ERROR_MESSAGE},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-        
-        # Verify password
-        if not user.check_password(password):
-            LoginFailureTracker.record_failure(email)
-            return Response(
-                {"message": "Email atau password salah"},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-        
-        # Check email verification
-        if user.status != "verified":
-            LoginFailureTracker.record_failure(email)
+        except EmailNotVerifiedError:
             return Response(
                 {"message": "Email Anda belum diverifikasi. Cek email untuk link verifikasi."},
                 status=status.HTTP_403_FORBIDDEN,
-            )
-        
-        try:
-            # Generate tokens
-            tokens = generate_tokens(user.id, user.email)
-            
-            # Reset failure count on success
-            LoginFailureTracker.reset_failures(email)
-            
-            return Response(
-                {
-                    "accessToken": tokens["accessToken"],
-                    "refreshToken": tokens["refreshToken"],
-                    "user": {
-                        "id": str(user.id),
-                        "email": user.email,
-                        "name": user.name,
-                    },
-                },
-                status=status.HTTP_200_OK,
             )
         except Exception:
             logger.exception("Unexpected error during login for email: %s", email)
