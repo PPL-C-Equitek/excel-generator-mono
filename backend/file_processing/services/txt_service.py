@@ -13,7 +13,7 @@ def _read_lines(file_or_path: str | IO[bytes] | IO[str] | Any) -> list[str]:
         if not os.path.exists(file_or_path):
             raise FileNotFoundError(f"File tidak ditemukan: {file_or_path}")
 
-        with open(file_or_path, "r", encoding=DEFAULT_ENCODING, errors="replace") as fh:
+        with open(file_or_path, "r", encoding=DEFAULT_ENCODING, errors="strict") as fh:
             raw = fh.read()
     else:
         try:
@@ -23,7 +23,7 @@ def _read_lines(file_or_path: str | IO[bytes] | IO[str] | Any) -> list[str]:
 
         content = file_or_path.read()
         if isinstance(content, bytes):
-            raw = content.decode(DEFAULT_ENCODING, errors="replace")
+            raw = content.decode(DEFAULT_ENCODING, errors="strict")
         else:
             raw = content
 
@@ -62,6 +62,8 @@ def process_uploaded_txt(
         data = parse_txt(file_or_path)
     except FileNotFoundError as exc:
         return False, str(exc), None
+    except UnicodeDecodeError:
+        return False, "File teks rusak atau format karakter tidak didukung.", None
     except Exception:
         logger.exception("TXT parsing failed")
         return False, "Invalid or unreadable TXT file.", None
