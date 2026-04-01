@@ -9,6 +9,7 @@ export type { JsonValue } from "@/utils/schemaValidator";
 
 export interface LLMRequest {
     input_json: JsonValue;
+    custom_schema_id?: string;
 }
 
 export interface LLMResponse {
@@ -30,7 +31,8 @@ function getErrorStatus(err: Error): number | null {
 }
 
 export async function generateJson(
-    inputJson: JsonValue
+    inputJson: JsonValue,
+    customSchemaId?: string | null
 ): Promise<LLMResponse> {
     const isEmpty = Array.isArray(inputJson)
         ? inputJson.length === 0
@@ -41,11 +43,15 @@ export async function generateJson(
     }
 
     let data: unknown;
+    const requestBody: LLMRequest = { input_json: inputJson }
+    if (typeof customSchemaId === 'string' && customSchemaId.trim().length > 0) {
+        requestBody.custom_schema_id = customSchemaId
+    }
 
     try {
         data = await fetchAPI("llm/generate/", {
             method: "POST",
-            body: JSON.stringify({ input_json: inputJson }),
+            body: JSON.stringify(requestBody),
         });
     } catch (err: unknown) {
         if (err instanceof Error) {

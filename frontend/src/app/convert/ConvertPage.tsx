@@ -1,10 +1,12 @@
 'use client'
 
+import { useState } from 'react'
 import SchemaSelector from '@/components/SchemaSelector'
 import Sidebar from '@/components/Sidebar'
 import UploadZone from '@/components/UploadZone'
 import { useConvertFlow } from '@/hooks/useConvertFlow'
 import type { ILLMService } from '@/lib/ILLMService'
+import type { CustomSchemaRecord } from '@/lib/ICustomSchemaService'
 
 interface ConvertPageProps {
     readonly llmService?: ILLMService
@@ -15,6 +17,7 @@ function getDownloadFilename(baseFilename: string): string {
 }
 
 export default function ConvertPage({ llmService: injectedService }: ConvertPageProps) {
+    const [selectedSchema, setSelectedSchema] = useState<CustomSchemaRecord | null>(null)
     const {
         isConverting,
         error,
@@ -35,7 +38,12 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                     Replace manual entry with AI-driven extraction and seamless Excel template mapping.
                 </p>
                 <div className="w-full max-w-3xl">
-                    <UploadZone onFileSelect={handleFileSelect} disabled={isConverting} />
+                    <UploadZone
+                        onFileSelect={(file) => {
+                            void handleFileSelect(file, selectedSchema?.id ?? null)
+                        }}
+                        disabled={isConverting}
+                    />
 
                     {isConverting && (
                         <output
@@ -90,7 +98,7 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                         </div>
                     )}
 
-                    <SchemaSelector />
+                    <SchemaSelector onSchemaChange={setSelectedSchema} />
                 </div>
             </main>
         </div>
