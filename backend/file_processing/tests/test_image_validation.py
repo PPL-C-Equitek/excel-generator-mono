@@ -12,6 +12,7 @@ from file_processing.utils.image_validators import (
     validate_image_magic_number,
     validate_image_integrity,
 )
+from file_processing.services.image_validation_service import validate_image
 
 
 def _make_image_bytes(fmt="PNG", size=(100, 100), mode="RGB"):
@@ -376,3 +377,106 @@ class TestValidateImageIntegrity(SimpleTestCase):
 
         self.assertFalse(is_valid)
         self.assertEqual(err, "Image file is corrupted or unreadable.")
+
+
+class TestValidateImageService(SimpleTestCase):
+    """validate_image() — orchestrates all image validators."""
+
+    def test_valid_png(self):
+        content = _make_image_bytes("PNG")
+        f = _make_uploaded("photo.png", content, "image/png")
+        with patch(
+            "file_processing.services.image_validation_service.validate_image_mime_type",
+            return_value=(True, None),
+        ):
+            is_valid, err = validate_image(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    def test_valid_jpg(self):
+        content = _make_image_bytes("JPEG")
+        f = _make_uploaded("photo.jpg", content, "image/jpeg")
+        with patch(
+            "file_processing.services.image_validation_service.validate_image_mime_type",
+            return_value=(True, None),
+        ):
+            is_valid, err = validate_image(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    def test_valid_jpeg(self):
+        content = _make_image_bytes("JPEG")
+        f = _make_uploaded("photo.jpeg", content, "image/jpeg")
+        with patch(
+            "file_processing.services.image_validation_service.validate_image_mime_type",
+            return_value=(True, None),
+        ):
+            is_valid, err = validate_image(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    def test_wrong_extension_rejected(self):
+        content = _make_image_bytes("PNG")
+        f = _make_uploaded("photo.bmp", content, "image/png")
+        is_valid, err = validate_image(f)
+        self.assertFalse(is_valid)
+
+    def test_mime_mismatch_rejected(self):
+        content = _make_image_bytes("PNG")
+        f = _make_uploaded("photo.png", content, "image/png")
+        with patch(
+            "file_processing.services.image_validation_service.validate_image_mime_type",
+            return_value=(False, "File content does not match its extension."),
+        ):
+            is_valid, err = validate_image(f)
+        self.assertFalse(is_valid)
+        self.assertIn("does not match", err)
+
+    def test_fake_image_rejected(self):
+        """A text file renamed to .png should fail."""
+        f = _make_uploaded("fake.png", b"Hello world, not an image", "image/png")
+        with patch(
+            "file_processing.services.image_validation_service.validate_image_mime_type",
+            return_value=(True, None),
+        ):
+            is_valid, err = validate_image(f)
+        self.assertFalse(is_valid)
+
+    def test_corrupted_image_rejected(self):
+        corrupted = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+        f = _make_uploaded("corrupt.png", corrupted, "image/png")
+        with patch(
+            "file_processing.services.image_validation_service.validate_image_mime_type",
+            return_value=(True, None),
+        ):
+            is_valid, err = validate_image(f)
+        self.assertFalse(is_valid)
+
+    def test_oversized_image_rejected(self):
+        big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (10 * 1024 * 1024 + 1)
+        f = _make_uploaded("huge.png", big, "image/png")
+        is_valid, err = validate_image(f)
+        self.assertFalse(is_valid)
+        self.assertIn("10MB", err)
+
+    def test_grayscale_edge_case_passes(self):
+        content = _make_image_bytes("PNG", mode="L")
+        f = _make_uploaded("gray.png", content, "image/png")
+        with patch(
+            "file_processing.services.image_validation_service.validate_image_mime_type",
+            return_value=(True, None),
+        ):
+            is_valid, err = validate_image(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    def test_small_image_edge_case_passes(self):
+        content = _make_image_bytes("PNG", size=(1, 1))
+        f = _make_uploaded("tiny.png", content, "image/png")
+        with patch(
+            "file_processing.services.image_validation_service.validate_image_mime_type",
+            return_value=(True, None),
+        ):
+            is_valid, err = validate_image(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
