@@ -28,3 +28,12 @@ class RegisterSerializer(serializers.Serializer):
         write_only=True,
         validators=[validate_password_strength],
     )
+
+
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(
+        max_length=128,
+        required=True,
+        write_only=True,
+    )
