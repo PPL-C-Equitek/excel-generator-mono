@@ -4,14 +4,27 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from llm.services.generation_service import CustomSchemaNotFoundError
+from llm.services.openai_client import OpenAITextGenerationProvider
 from llm.services.openai_client import (
     OpenAIConfigurationError,
     OpenAIServiceError,
     OpenAIUpstreamError,
 )
+from llm.views import build_llm_generation_service
 
 
 class LlmGenerateEndpointTest(SimpleTestCase):
+    def test_build_llm_generation_service_returns_default_dependencies(self):
+        service = build_llm_generation_service()
+
+        self.assertEqual(service.__class__.__name__, "LlmGenerationService")
+        self.assertEqual(service.json_generator.__class__.__name__, "JsonGenerationService")
+        self.assertIsInstance(service.json_generator.text_provider, OpenAITextGenerationProvider)
+        self.assertEqual(
+            service.schema_prompt_source.__class__.__name__,
+            "DjangoCustomSchemaPromptSource",
+        )
+
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):
         mock_service = mock_build_service.return_value

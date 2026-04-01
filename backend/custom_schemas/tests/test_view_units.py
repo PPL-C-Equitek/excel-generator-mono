@@ -18,6 +18,18 @@ class CustomSchemaViewUnitTest(SimpleTestCase):
         self.owner_id = uuid.uuid4()
         self.user = SimpleNamespace(id=self.owner_id, is_authenticated=True)
 
+    def test_get_current_user_id_delegates_to_policy_service(self):
+        view = CustomSchemaListCreateView()
+        policy_service = Mock()
+        policy_service.get_owner_id.return_value = self.owner_id
+        view.request = SimpleNamespace(user=self.user)
+        view.policy_service_class = Mock(return_value=policy_service)
+
+        result = view.get_current_user_id()
+
+        self.assertEqual(result, self.owner_id)
+        policy_service.get_owner_id.assert_called_once_with(self.user)
+
     def test_get_base_queryset_returns_none_for_unauthenticated_user(self):
         view = CustomSchemaListCreateView()
         view.request = SimpleNamespace(

@@ -328,6 +328,22 @@ class OpenAIClientServiceTest(SimpleTestCase):
 
 
 class LlmGenerationServiceTest(SimpleTestCase):
+    @override_settings(OPENAI_SYSTEM_PROMPT="  Base instructions  ")
+    def test_get_base_system_prompt_strips_setting_value(self):
+        from llm.services.generation_service import get_base_system_prompt
+
+        result = get_base_system_prompt()
+
+        self.assertEqual(result, "Base instructions")
+
+    @override_settings(OPENAI_SYSTEM_PROMPT=None)
+    def test_get_base_system_prompt_returns_empty_string_for_non_string_setting(self):
+        from llm.services.generation_service import get_base_system_prompt
+
+        result = get_base_system_prompt()
+
+        self.assertEqual(result, "")
+
     def test_compose_system_prompt_combines_base_and_schema_fragment(self):
         result = compose_system_prompt(
             "Base prompt.",

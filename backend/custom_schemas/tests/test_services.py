@@ -1,12 +1,16 @@
+import uuid
+
 from django.core.exceptions import ValidationError
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from custom_schemas.services import (
     CustomSchemaLimitExceededError,
     CustomSchemaPolicyService,
+    DjangoCustomSchemaQueryRepository,
     build_schema_prompt_fragment,
     validate_schema_definition,
 )
+from custom_schemas.models import CustomSchema
 
 
 def make_definition():
@@ -168,6 +172,25 @@ class CustomSchemaPolicyServiceTest(SimpleTestCase):
             [("owner-1", "Invoice Mapping", "schema-1")],
         )
 
+    def test_has_name_conflict_returns_false_for_blank_name(self):
+        repository = SimpleRepository(name_exists=True)
+        service = CustomSchemaPolicyService(repository=repository)
+
+        result = service.has_name_conflict(self.user, "", exclude_pk="schema-1")
+
+        self.assertFalse(result)
+        self.assertEqual(repository.name_exists_calls, [])
+
+    def test_has_name_conflict_returns_false_when_user_has_no_owner_id(self):
+        repository = SimpleRepository(name_exists=True)
+        service = CustomSchemaPolicyService(repository=repository)
+        unauthenticated_user = type("User", (), {"id": None, "is_authenticated": False})()
+
+        result = service.has_name_conflict(unauthenticated_user, "Invoice Mapping")
+
+        self.assertFalse(result)
+        self.assertEqual(repository.name_exists_calls, [])
+
     def test_ensure_can_create_for_user_raises_when_limit_reached(self):
         repository = SimpleRepository(count=5)
         service = CustomSchemaPolicyService(repository=repository, max_custom_schemas_per_user=5)
@@ -182,6 +205,41 @@ class CustomSchemaPolicyServiceTest(SimpleTestCase):
         result = service.ensure_can_create_for_user(self.user)
 
         self.assertEqual(result, "owner-1")
+
+    def test_ensure_can_create_for_user_returns_none_for_missing_owner(self):
+        repository = SimpleRepository(count=4)
+        service = CustomSchemaPolicyService(repository=repository, max_custom_schemas_per_user=5)
+        unauthenticated_user = type("User", (), {"id": None, "is_authenticated": False})()
+
+        result = service.ensure_can_create_for_user(unauthenticated_user)
+
+        self.assertIsNone(result)
+
+
+class DjangoCustomSchemaQueryRepositoryTest(TestCase):
+    def setUp(self):
+        self.repository = DjangoCustomSchemaQueryRepository()
+        self.owner_id = uuid.uuid4()
+
+    def test_none_returns_empty_queryset(self):
+        result = self.repository.none()
+
+        self.assertEqual(result.count(), 0)
+
+    def test_name_exists_for_owner_excludes_current_schema_when_requested(self):
+        schema = CustomSchema.objects.create(
+            owner_id=self.owner_id,
+            name="Invoice Mapping",
+            definition=make_definition(),
+        )
+
+        result = self.repository.name_exists_for_owner(
+            owner_id=self.owner_id,
+            name="Invoice Mapping",
+            exclude_pk=schema.pk,
+        )
+
+        self.assertFalse(result)
 
 
 class DummyQueryset:
