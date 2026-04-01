@@ -73,6 +73,10 @@ def _resolve_download_filename(requested_name, default_name, artifact_type):
     return safe_name
 
 
+def _is_invalid_excel_download_id_error(error):
+    return "format is invalid" in str(error).lower()
+
+
 def _build_export_success_response(
     metadata,
     response_serializer_class,
@@ -349,8 +353,7 @@ def download_excel(request, export_id):
             storage_dir=settings.EXCEL_EXPORT_DIR,
         )
     except OutputExcelDownloadLookupError as exc:
-        error_message = str(exc).lower()
-        if "format is invalid" in error_message:
+        if _is_invalid_excel_download_id_error(exc):
             logger.warning("Excel download received invalid export_id.", exc_info=True)
             return Response(
                 {
