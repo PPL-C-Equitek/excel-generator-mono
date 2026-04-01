@@ -425,17 +425,6 @@ class FileValidationTests(TestCase):
 
         return _build_excel({"Sheet1": [["A", "B"], [1, 2]]})
 
-    def test_extension_txt_is_rejected(self):
-        fake_txt = self._make_file(
-            "data.txt",
-            b"NIM,Nama\n12345,Alice",
-            "text/plain",
-        )
-        response = self.client.post(self.UPLOAD_URL, {'file': fake_txt})
-        self.assertEqual(response.status_code, 400)
-        body = response.json()
-        self.assertIn("message", body)
-
     def test_extension_xlsx_is_accepted(self):
         valid_xlsx = self._make_file(
             "data.xlsx",

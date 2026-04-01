@@ -293,7 +293,7 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.data["extracted"]["content"][0]["text"], ["OCR image text"])
 
     def test_upload_unsupported_type(self):
-        resp = self._post_file("note.txt", b"hello", "text/plain")
+        resp = self._post_file("note.html", b"<html></html>", "text/html")
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
