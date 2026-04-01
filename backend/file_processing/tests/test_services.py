@@ -22,7 +22,10 @@ from file_processing.services.upload_service import (
     _has_zip_signature,
     _is_legacy_xls_content,
     _is_ole_container,
+    validate_file,
+    validate_mime_type,
     validate_pdf,
+    validate_word,
 )
 
 
@@ -517,6 +520,204 @@ class TestUploadService(TestCase):
                 raise OSError("seek failed")
 
         self.assertFalse(_has_zip_signature(BrokenFile()))
+
+    @patch("file_processing.services.upload_service.validate_word")
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    def test_validate_file_accepts_doc_with_valid_stub(
+        self, mock_validate_mime, mock_validate_word
+    ):
+        mock_validate_mime.return_value = (True, None)
+        mock_validate_word.return_value = (True, None)
+
+        f = SimpleUploadedFile(
+            "contract.doc",
+            b"dummy-doc-content",
+            content_type="application/msword",
+        )
+
+        is_valid, error = validate_file(f)
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+        mock_validate_mime.assert_called_once_with(f, ".doc")
+        mock_validate_word.assert_called_once_with(f, ".doc")
+
+    @patch("file_processing.services.upload_service.validate_word")
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    def test_validate_file_accepts_docx_with_valid_stub(
+        self, mock_validate_mime, mock_validate_word
+    ):
+        mock_validate_mime.return_value = (True, None)
+        mock_validate_word.return_value = (True, None)
+
+        f = SimpleUploadedFile(
+            "contract.docx",
+            b"dummy-docx-content",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = validate_file(f)
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+        mock_validate_mime.assert_called_once_with(f, ".docx")
+        mock_validate_word.assert_called_once_with(f, ".docx")
+
+    @patch("file_processing.services.upload_service.validate_word")
+    @patch("file_processing.services.upload_service.validate_mime_type")
+    def test_validate_file_returns_word_error(self, mock_validate_mime, mock_validate_word):
+        mock_validate_mime.return_value = (True, None)
+        mock_validate_word.return_value = (False, "Word file is password-protected.")
+
+        f = SimpleUploadedFile(
+            "contract.docx",
+            b"dummy-docx-content",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = validate_file(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word file is password-protected.")
+
+    @patch("file_processing.services.upload_service.check_word_page_count")
+    @patch("file_processing.services.upload_service.check_docx_structure")
+    @patch("file_processing.services.upload_service.check_docx_encrypted")
+    def test_validate_word_docx_happy_path(
+        self,
+        mock_check_encrypted,
+        mock_check_structure,
+        mock_check_page_count,
+    ):
+        mock_check_encrypted.return_value = (True, None)
+        mock_check_structure.return_value = (True, 8)
+        mock_check_page_count.return_value = (True, None)
+
+        f = SimpleUploadedFile(
+            "contract.docx",
+            b"dummy-docx-content",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = validate_word(f, ".docx")
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+        mock_check_encrypted.assert_called_once_with(f)
+        mock_check_structure.assert_called_once_with(f)
+        mock_check_page_count.assert_called_once_with(8)
+
+    @patch("file_processing.services.upload_service.check_docx_structure")
+    @patch("file_processing.services.upload_service.check_docx_encrypted")
+    def test_validate_word_docx_stops_on_encrypted(
+        self,
+        mock_check_encrypted,
+        mock_check_structure,
+    ):
+        mock_check_encrypted.return_value = (False, "Word file is password-protected.")
+
+        f = SimpleUploadedFile(
+            "contract.docx",
+            b"dummy-docx-content",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = validate_word(f, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word file is password-protected.")
+        mock_check_structure.assert_not_called()
+
+    @patch("file_processing.services.upload_service.check_word_page_count")
+    @patch("file_processing.services.upload_service.check_doc_structure")
+    @patch("file_processing.services.upload_service.check_doc_encrypted")
+    def test_validate_word_doc_stops_on_page_count_limit(
+        self,
+        mock_check_encrypted,
+        mock_check_structure,
+        mock_check_page_count,
+    ):
+        mock_check_encrypted.return_value = (True, None)
+        mock_check_structure.return_value = (True, 120)
+        mock_check_page_count.return_value = (
+            False,
+            "Word exceeds the maximum allowed page count of 100.",
+        )
+
+        f = SimpleUploadedFile(
+            "contract.doc",
+            b"dummy-doc-content",
+            content_type="application/msword",
+        )
+
+        is_valid, error = validate_word(f, ".doc")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word exceeds the maximum allowed page count of 100.")
+        mock_check_encrypted.assert_called_once_with(f)
+        mock_check_structure.assert_called_once_with(f)
+        mock_check_page_count.assert_called_once_with(120)
+
+    @patch("file_processing.services.upload_service.magic.from_buffer")
+    @patch("file_processing.services.upload_service._is_ole_container")
+    def test_validate_mime_type_doc_rejects_non_ole_signature(
+        self, mock_is_ole, mock_magic
+    ):
+        mock_magic.return_value = "application/msword"
+        mock_is_ole.return_value = False
+
+        f = SimpleUploadedFile(
+            "contract.doc",
+            b"not-ole-content",
+            content_type="application/msword",
+        )
+
+        is_valid, error = validate_mime_type(f, ".doc")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "File content does not match its extension.")
+
+    @patch("file_processing.services.upload_service.magic.from_buffer")
+    @patch("file_processing.services.upload_service._has_zip_signature")
+    def test_validate_mime_type_docx_rejects_non_zip_signature(
+        self, mock_zip_signature, mock_magic
+    ):
+        mock_magic.return_value = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        mock_zip_signature.return_value = False
+
+        f = SimpleUploadedFile(
+            "contract.docx",
+            b"not-zip-content",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = validate_mime_type(f, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "File content does not match its extension.")
+
+    @patch("file_processing.services.upload_service.magic.from_buffer")
+    @patch("file_processing.services.upload_service._has_zip_signature")
+    def test_validate_mime_type_docx_accepts_zip_signature(
+        self, mock_zip_signature, mock_magic
+    ):
+        mock_magic.return_value = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        mock_zip_signature.return_value = True
+
+        f = SimpleUploadedFile(
+            "contract.docx",
+            b"zip-like-content",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = validate_mime_type(f, ".docx")
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
 
     def test_validate_pdf_reader_creation_fails(self):
         with patch("file_processing.services.upload_service.PdfReader") as mock_reader:
