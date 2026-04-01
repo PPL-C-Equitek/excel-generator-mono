@@ -9,6 +9,7 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+from file_processing.services.image_validation_service import validate_image
 from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 
 logger = logging.getLogger(__name__)
@@ -16,8 +17,12 @@ logger = logging.getLogger(__name__)
 EXT_XLSX = ".xlsx"
 EXT_XLS = ".xls"
 EXT_PDF = ".pdf"
+EXT_PNG = ".png"
+EXT_JPG = ".jpg"
+EXT_JPEG = ".jpeg"
 
-ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX]
+IMAGE_EXTENSIONS = {EXT_PNG, EXT_JPG, EXT_JPEG}
+ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_PNG, EXT_JPG, EXT_JPEG]
 ALLOWED_MIME_TYPES = {
     EXT_PDF: [
         "application/pdf",
@@ -155,7 +160,11 @@ def validate_file(uploaded_file):
 
     # Validate extension
     if ext not in ALLOWED_EXTENSIONS:
-        return False, "Unsupported file type. Only PDF, XLS, and XLSX are allowed."
+        return False, "Unsupported file type. Only PDF, XLS, XLSX, PNG, JPG, and JPEG are allowed."
+
+    # Image files have their own dedicated validation pipeline
+    if ext in IMAGE_EXTENSIONS:
+        return validate_image(uploaded_file)
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
