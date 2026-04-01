@@ -1,6 +1,6 @@
 'use client'
 
-import type { FormEvent, MouseEvent } from 'react'
+import type { FormEvent, KeyboardEvent, MouseEvent } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCustomSchemas } from '@/hooks/useCustomSchemas'
 import { getStoredAccessToken } from '@/lib/auth'
@@ -223,6 +223,17 @@ export default function CustomSchemaManager({
         }
     }
 
+    const handleBackdropKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (event.target !== event.currentTarget) {
+            return
+        }
+
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            closeCreateModal()
+        }
+    }
+
     return (
         <>
             <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -358,6 +369,8 @@ export default function CustomSchemaManager({
                     aria-modal="true"
                     aria-labelledby="add-schema-title"
                     onClick={handleBackdropClick}
+                    onKeyDown={handleBackdropKeyDown}
+                    tabIndex={0}
                     className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-6"
                 >
                     <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
