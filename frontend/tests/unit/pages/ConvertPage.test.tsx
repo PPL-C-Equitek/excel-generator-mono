@@ -390,6 +390,7 @@ describe('ConvertPage', () => {
 
         it('does nothing if Download CSV is clicked while disabled/csvMetadata is null', async () => {
             const user = userEvent.setup()
+
             // Render a state where the button gets displayed but without metadata (forcefully via mock delay or by intercepting state)
             // Wait, we can just use the previous test where we delayed the exportToCsv.
             const resolvers: Array<(value: unknown) => void> = []
