@@ -38,6 +38,20 @@ function getErrorStatus(err: Error): number | null {
     return null;
 }
 
+function rethrowMappedApiError(err: unknown): never {
+    if (err instanceof Error) {
+        const status = getErrorStatus(err);
+        if (status !== null) {
+            const userMessage = ERROR_MESSAGES[status];
+            if (userMessage) {
+                throw new Error(userMessage);
+            }
+        }
+    }
+
+    throw err;
+}
+
 export async function generateJson(
     inputJson: JsonValue
 ): Promise<LLMResponse> {
@@ -57,16 +71,7 @@ export async function generateJson(
             body: JSON.stringify({ input_json: inputJson }),
         });
     } catch (err: unknown) {
-        if (err instanceof Error) {
-            const status = getErrorStatus(err);
-            if (status !== null) {
-                const userMessage = ERROR_MESSAGES[status];
-                if (userMessage) {
-                    throw new Error(userMessage);
-                }
-            }
-        }
-        throw err;
+        rethrowMappedApiError(err);
     }
 
     if (
@@ -123,16 +128,7 @@ export async function exportToCsv(
             body: JSON.stringify({ output_json: outputJson }),
         });
     } catch (err: unknown) {
-        if (err instanceof Error) {
-            const status = getErrorStatus(err);
-            if (status !== null) {
-                const userMessage = ERROR_MESSAGES[status];
-                if (userMessage) {
-                    throw new Error(userMessage);
-                }
-            }
-        }
-        throw err;
+        rethrowMappedApiError(err);
     }
 
     if (
@@ -159,16 +155,7 @@ export async function exportToExcel(
             body: JSON.stringify({ output_json: outputJson }),
         });
     } catch (err: unknown) {
-        if (err instanceof Error) {
-            const status = getErrorStatus(err);
-            if (status !== null) {
-                const userMessage = ERROR_MESSAGES[status];
-                if (userMessage) {
-                    throw new Error(userMessage);
-                }
-            }
-        }
-        throw err;
+        rethrowMappedApiError(err);
     }
 
     if (!isValidExcelExportResponse(data)) {
