@@ -18,6 +18,7 @@ from authentication.services import send_verification_email, generate_tokens
 
 logger = logging.getLogger(__name__)
 REGISTER_SUCCESS_MESSAGE = "Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda."
+SERVER_ERROR_MESSAGE = "An internal server error occurred. Please try again later."
 
 
 def apply_rate_limit_to_method(**rate_limit_kwargs):
