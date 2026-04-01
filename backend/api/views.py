@@ -77,6 +77,26 @@ def _is_invalid_excel_download_id_error(error):
     return "format is invalid" in str(error).lower()
 
 
+def _excel_download_not_found_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "Excel file not found.",
+        },
+        status=status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _excel_download_internal_error_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "Failed to download Excel due to internal error.",
+        },
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
+
 def _build_export_success_response(
     metadata,
     response_serializer_class,
@@ -364,53 +384,23 @@ def download_excel(request, export_id):
             )
 
         logger.warning("Excel download file not found.", exc_info=True)
-        return Response(
-            {
-                "status": "error",
-                "message": "Excel file not found.",
-            },
-            status=status.HTTP_404_NOT_FOUND,
-        )
+        return _excel_download_not_found_response()
     except Exception:
         logger.exception("Unexpected error while resolving Excel download artifact.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to download Excel due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+        return _excel_download_internal_error_response()
 
     try:
         safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
         file_handle = open(safe_file_path, "rb")
     except (KeyError, SuspiciousFileOperation, ValueError):
         logger.warning("Excel download resolved unsafe artifact metadata.", exc_info=True)
-        return Response(
-            {
-                "status": "error",
-                "message": "Excel file not found.",
-            },
-            status=status.HTTP_404_NOT_FOUND,
-        )
+        return _excel_download_not_found_response()
     except OSError:
         logger.exception("Excel download failed while reading generated artifact.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to download Excel due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+        return _excel_download_internal_error_response()
     except Exception:
         logger.exception("Unexpected error while preparing Excel download.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to download Excel due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+        return _excel_download_internal_error_response()
 
     return FileResponse(
         file_handle,
