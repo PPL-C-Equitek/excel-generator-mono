@@ -28,6 +28,7 @@ EXT_XLS = ".xls"
 EXT_PDF = ".pdf"
 EXT_DOCX = ".docx"
 EXT_DOC = ".doc"
+MIME_OCTET_STREAM = "application/octet-stream"
 
 ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_DOCX, EXT_DOC]
 ALLOWED_MIME_TYPES = {
@@ -45,7 +46,7 @@ ALLOWED_MIME_TYPES = {
         "application/x-excel",
         "application/xls",
         "application/x-xls",
-        "application/octet-stream",
+        MIME_OCTET_STREAM,
         "application/x-ole-storage",
         "application/CDFV2",
         "application/vnd.ms-office",
@@ -56,7 +57,7 @@ ALLOWED_MIME_TYPES = {
         "application/zip",
         "application/x-zip",
         "application/x-zip-compressed",
-        "application/octet-stream",
+        MIME_OCTET_STREAM,
     ],
 
     EXT_DOC: [
@@ -64,7 +65,7 @@ ALLOWED_MIME_TYPES = {
         "application/doc",
         "application/vnd.ms-word",
         "application/x-msword",
-        "application/octet-stream",
+        MIME_OCTET_STREAM,
         "application/x-ole-storage",
         "application/CDFV2",
     ],
@@ -74,7 +75,7 @@ ALLOWED_MIME_TYPES = {
         "application/zip",
         "application/x-zip",
         "application/x-zip-compressed",
-        "application/octet-stream",
+        MIME_OCTET_STREAM,
     ],
 }
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -448,7 +449,7 @@ def validate_mime_type(uploaded_file, ext):
             elif head.startswith(OLE_SIGNATURE):
                 mime = "application/x-ole-storage"
             elif ext in {EXT_XLS, EXT_DOC}:
-                mime = "application/octet-stream"
+                mime = MIME_OCTET_STREAM
             else:
                 mime = None
 
