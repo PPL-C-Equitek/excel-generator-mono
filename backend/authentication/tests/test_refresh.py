@@ -20,11 +20,11 @@ class RefreshTokenViewTest(SimpleTestCase):
 
     def _refresh_token(self):
         with override_settings(JWT_SECRET_KEY=SECRET_KEY):
-            return generate_tokens(self.user_id, self.email)["refreshToken"]
+            return generate_tokens(self.user_id, self.email)["refresh_token"]
 
     def _access_token(self):
         with override_settings(JWT_SECRET_KEY=SECRET_KEY):
-            return generate_tokens(self.user_id, self.email)["accessToken"]
+            return generate_tokens(self.user_id, self.email)["access_token"]
 
     def test_refresh_missing_token_returns_400(self):
         response = self.client.post(self.url, {}, format="json")
@@ -37,21 +37,21 @@ class RefreshTokenViewTest(SimpleTestCase):
         with override_settings(JWT_SECRET_KEY=SECRET_KEY):
             response = self.client.post(
                 self.url,
-                {"refreshToken": refresh_token},
+                {"refresh_token": refresh_token},
                 format="json",
             )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn("accessToken", response.data)
-        self.assertIn("refreshToken", response.data)
+        self.assertIn("access_token", response.data)
+        self.assertIn("refresh_token", response.data)
 
         access_payload = jwt.decode(
-            response.data["accessToken"],
+            response.data["access_token"],
             SECRET_KEY,
             algorithms=["HS256"],
         )
         refresh_payload = jwt.decode(
-            response.data["refreshToken"],
+            response.data["refresh_token"],
             SECRET_KEY,
             algorithms=["HS256"],
         )
@@ -68,7 +68,7 @@ class RefreshTokenViewTest(SimpleTestCase):
         with override_settings(JWT_SECRET_KEY=SECRET_KEY):
             response = self.client.post(
                 self.url,
-                {"refreshToken": access_token},
+                {"refresh_token": access_token},
                 format="json",
             )
 
@@ -80,7 +80,7 @@ class RefreshTokenViewTest(SimpleTestCase):
         with override_settings(JWT_SECRET_KEY=SECRET_KEY):
             response = self.client.post(
                 self.url,
-                {"refreshToken": "invalid.token.value"},
+                {"refresh_token": "invalid.token.value"},
                 format="json",
             )
 
@@ -100,9 +100,10 @@ class RefreshTokenViewTest(SimpleTestCase):
         with override_settings(JWT_SECRET_KEY=SECRET_KEY):
             response = self.client.post(
                 self.url,
-                {"refreshToken": expired_token},
+                {"refresh_token": expired_token},
                 format="json",
             )
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertIn("expired", response.data["message"].lower())
+

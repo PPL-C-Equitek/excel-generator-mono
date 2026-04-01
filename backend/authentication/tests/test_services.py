@@ -86,32 +86,32 @@ class GenerateTokensTest(SimpleTestCase):
         return jwt.decode(token, self.SECRET_KEY, algorithms=["HS256"])
 
     def test_returns_access_and_refresh_token_keys(self):
-        self.assertIn("accessToken", self.tokens)
-        self.assertIn("refreshToken", self.tokens)
+        self.assertIn("access_token", self.tokens)
+        self.assertIn("refresh_token", self.tokens)
 
     def test_access_token_payload(self):
         with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
-            payload = self._decode(self.tokens["accessToken"])
+            payload = self._decode(self.tokens["access_token"])
         self.assertEqual(payload["user_id"], str(self.user_id))
         self.assertEqual(payload["email"], self.email)
         self.assertEqual(payload["type"], "access")
 
     def test_refresh_token_payload(self):
         with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
-            payload = self._decode(self.tokens["refreshToken"])
+            payload = self._decode(self.tokens["refresh_token"])
         self.assertEqual(payload["user_id"], str(self.user_id))
         self.assertEqual(payload["email"], self.email)
         self.assertEqual(payload["type"], "refresh")
 
     def test_access_token_expiry_is_approximately_one_hour(self):
         with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
-            payload = self._decode(self.tokens["accessToken"])
+            payload = self._decode(self.tokens["access_token"])
         delta = payload["exp"] - payload["iat"]
         self.assertAlmostEqual(delta, 3600, delta=5)
 
     def test_refresh_token_expiry_is_approximately_seven_days(self):
         with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
-            payload = self._decode(self.tokens["refreshToken"])
+            payload = self._decode(self.tokens["refresh_token"])
         delta = payload["exp"] - payload["iat"]
         self.assertAlmostEqual(delta, 7 * 86400, delta=5)
 
@@ -119,8 +119,8 @@ class GenerateTokensTest(SimpleTestCase):
         other_id = uuid.uuid4()
         with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
             other_tokens = generate_tokens(other_id, "other@example.com")
-        self.assertNotEqual(self.tokens["accessToken"], other_tokens["accessToken"])
-        self.assertNotEqual(self.tokens["refreshToken"], other_tokens["refreshToken"])
+        self.assertNotEqual(self.tokens["access_token"], other_tokens["access_token"])
+        self.assertNotEqual(self.tokens["refresh_token"], other_tokens["refresh_token"])
 
     def test_expired_access_token_raises_error(self):
         from datetime import timedelta

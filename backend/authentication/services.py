@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class TokenPair:
-    accessToken: str
-    refreshToken: str
+    access_token: str
+    refresh_token: str
 
 
 @dataclass(frozen=True)
@@ -72,8 +72,8 @@ class DjangoUserLookupGateway:
 
 
 class TokenPayload(TypedDict):
-    accessToken: str
-    refreshToken: str
+    access_token: str
+    refresh_token: str
 
 
 class FailureTrackerProtocol(Protocol):
@@ -124,8 +124,8 @@ def generate_tokens(user_id, email) -> TokenPayload:
     refresh_token = jwt.encode(refresh_payload, secret_key, algorithm="HS256")
 
     return {
-        "accessToken": access_token,
-        "refreshToken": refresh_token,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
     }
 
 
@@ -210,8 +210,8 @@ class LoginService:
         self.failure_tracker.reset_failures(normalized_email)
 
         tokens = TokenPair(
-            accessToken=token_data["accessToken"],
-            refreshToken=token_data["refreshToken"],
+            access_token=token_data["access_token"],
+            refresh_token=token_data["refresh_token"],
         )
         user_data = AuthenticatedUserDTO(
             id=str(user.id),

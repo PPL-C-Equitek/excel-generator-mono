@@ -60,4 +60,4 @@ class LoginSerializer(serializers.Serializer):
 
 
 class RefreshTokenSerializer(serializers.Serializer):
-    refreshToken = serializers.CharField(required=True, write_only=True)
+    refresh_token = serializers.CharField(required=True, write_only=True)
