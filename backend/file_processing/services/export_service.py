@@ -674,7 +674,9 @@ def resolve_csv_download_artifact(file_id, storage_dir):
 
 def resolve_excel_download_artifact(export_id, storage_dir):
     token = _resolve_excel_download_token(export_id)
-    base_dir = _resolve_excel_download_storage_dir(storage_dir)
+    base_dir = _resolve_lookup_storage_dir(
+        storage_dir, OutputExcelDownloadLookupError
+    )
     discovered_artifacts = _discover_excel_download_artifacts(base_dir)
 
     file_name = f"export_{token}.xlsx"
@@ -861,15 +863,12 @@ def _resolve_storage_dir(storage_dir):
 
 
 def _resolve_download_storage_dir(storage_dir):
+    return _resolve_lookup_storage_dir(storage_dir, OutputCSVDownloadLookupError)
+
+
+def _resolve_lookup_storage_dir(storage_dir, error_class):
     if not isinstance(storage_dir, str) or not storage_dir.strip():
-        raise OutputCSVDownloadLookupError("storage_dir must be a non-empty string.")
-
-    return os.path.realpath(os.path.abspath(storage_dir))
-
-
-def _resolve_excel_download_storage_dir(storage_dir):
-    if not isinstance(storage_dir, str) or not storage_dir.strip():
-        raise OutputExcelDownloadLookupError("storage_dir must be a non-empty string.")
+        raise error_class("storage_dir must be a non-empty string.")
 
     return os.path.realpath(os.path.abspath(storage_dir))
 
