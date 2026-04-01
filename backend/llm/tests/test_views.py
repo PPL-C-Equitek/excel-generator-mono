@@ -2,6 +2,7 @@ from django.test import SimpleTestCase
 from django.core.cache import cache
 from rest_framework.test import APIClient
 from unittest.mock import patch
+from uuid import uuid4
 
 from llm.services.openai_client import (
     OpenAIConfigurationError,
@@ -20,12 +21,113 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_generate_json.return_value = {"status": "ok"}
         client = APIClient()
 
-        payload = {"input_json": {"sheet": "Sheet1"}}
-        response = client.post("/llm/generate/", payload, format="json")
+        with self.settings(OPENAI_SYSTEM_PROMPT=""):
+            payload = {"input_json": {"sheet": "Sheet1"}}
+            response = client.post("/llm/generate/", payload, format="json")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_json"], {"status": "ok"})
         mock_generate_json.assert_called_once_with(input_json={"sheet": "Sheet1"})
+
+    @patch("llm.views.CustomSchema.objects.get")
+    @patch("llm.views.generate_json")
+    def test_llm_generate_passes_selected_schema_prompt_to_generate_json(
+        self, mock_generate_json, mock_get_schema
+    ):
+        mock_generate_json.return_value = {"status": "ok"}
+        mock_get_schema.return_value = type(
+            "Schema",
+            (),
+            {"prompt_fragment": "Use only: invoice_number, total_amount"},
+        )()
+        client = APIClient()
+        schema_id = uuid4()
+
+        with self.settings(OPENAI_SYSTEM_PROMPT="Base prompt."):
+            response = client.post(
+                "/llm/generate/",
+                {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": str(schema_id)},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_get_schema.assert_called_once_with(pk=schema_id)
+        mock_generate_json.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            system_prompt="Base prompt.\n\nUse only: invoice_number, total_amount",
+        )
+
+    @patch("llm.views.CustomSchema.objects.get")
+    @patch("llm.views.generate_json")
+    def test_llm_generate_uses_schema_prompt_only_when_base_prompt_blank(
+        self, mock_generate_json, mock_get_schema
+    ):
+        mock_generate_json.return_value = {"status": "ok"}
+        mock_get_schema.return_value = type(
+            "Schema",
+            (),
+            {"prompt_fragment": "Use only: invoice_number, total_amount"},
+        )()
+        client = APIClient()
+        schema_id = uuid4()
+
+        with self.settings(OPENAI_SYSTEM_PROMPT="   "):
+            response = client.post(
+                "/llm/generate/",
+                {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": str(schema_id)},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_generate_json.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            system_prompt="Use only: invoice_number, total_amount",
+        )
+
+    @patch("llm.views.CustomSchema.objects.get")
+    @patch("llm.views.generate_json")
+    def test_llm_generate_ignores_blank_schema_prompt_fragment(
+        self, mock_generate_json, mock_get_schema
+    ):
+        mock_generate_json.return_value = {"status": "ok"}
+        mock_get_schema.return_value = type(
+            "Schema",
+            (),
+            {"prompt_fragment": "   "},
+        )()
+        client = APIClient()
+        schema_id = uuid4()
+
+        with self.settings(OPENAI_SYSTEM_PROMPT=""):
+            response = client.post(
+                "/llm/generate/",
+                {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": str(schema_id)},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_generate_json.assert_called_once_with(input_json={"sheet": "Sheet1"})
+
+    @patch("llm.views.CustomSchema.objects.get")
+    @patch("llm.views.generate_json")
+    def test_llm_generate_returns_404_when_selected_schema_missing(
+        self, mock_generate_json, mock_get_schema
+    ):
+        client = APIClient()
+        schema_id = uuid4()
+        from custom_schemas.models import CustomSchema
+
+        mock_get_schema.side_effect = CustomSchema.DoesNotExist
+
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": str(schema_id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["detail"], "Custom schema not found.")
+        mock_generate_json.assert_not_called()
 
     def test_llm_generate_rejects_missing_input_json(self):
         client = APIClient()
@@ -37,6 +139,17 @@ class LlmGenerateEndpointTest(SimpleTestCase):
     def test_llm_generate_rejects_non_object_or_array_input_json(self):
         client = APIClient()
         response = client.post("/llm/generate/", {"input_json": "not-json-object"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertIn("errors", response.data)
+
+    def test_llm_generate_rejects_invalid_custom_schema_id(self):
+        client = APIClient()
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": "not-a-uuid"},
+            format="json",
+        )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["detail"], "Invalid request payload.")
         self.assertIn("errors", response.data)
