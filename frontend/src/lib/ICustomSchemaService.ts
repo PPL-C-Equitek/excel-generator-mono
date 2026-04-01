@@ -8,7 +8,7 @@ export interface CustomSchemaDefinition {
 }
 
 export interface CustomSchemaRecord {
-    id: number;
+    id: string;
     owner_id: string;
     name: string;
     description: string;
@@ -33,5 +33,5 @@ export interface ICustomSchemaService {
         input: CreateCustomSchemaInput,
         accessToken: string
     ) => Promise<CustomSchemaRecord>;
-    remove: (schemaId: number, accessToken: string) => Promise<void>;
+    remove: (schemaId: string, accessToken: string) => Promise<void>;
 }

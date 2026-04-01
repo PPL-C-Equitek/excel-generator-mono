@@ -50,6 +50,7 @@ class CustomSchemaApiViewTest(TestCase):
         response = self.list_view(request)
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["id"], str(CustomSchema.objects.get().id))
         self.assertEqual(response.data["name"], "Invoice Mapping")
         self.assertEqual(response.data["version"], 1)
         self.assertEqual(response.data["owner_id"], str(self.user.id))
@@ -93,8 +94,8 @@ class CustomSchemaApiViewTest(TestCase):
         returned_ids = {item["id"] for item in response.data}
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(returned_ids, {owned_schema.id})
-        self.assertNotIn(other_owned_schema.id, returned_ids)
+        self.assertEqual(returned_ids, {str(owned_schema.id)})
+        self.assertNotIn(str(other_owned_schema.id), returned_ids)
 
     def test_list_schema_can_filter_active_items_for_current_user(self):
         active_schema = CustomSchema.objects.create(
@@ -121,7 +122,7 @@ class CustomSchemaApiViewTest(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["id"], active_schema.id)
+        self.assertEqual(response.data[0]["id"], str(active_schema.id))
 
     def test_list_schema_with_invalid_active_param_returns_all_current_users_items(self):
         active_schema = CustomSchema.objects.create(
@@ -148,7 +149,7 @@ class CustomSchemaApiViewTest(TestCase):
         returned_ids = {item["id"] for item in response.data}
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(returned_ids, {active_schema.id, inactive_schema.id})
+        self.assertEqual(returned_ids, {str(active_schema.id), str(inactive_schema.id)})
 
     def test_update_definition_increments_schema_version_for_owner(self):
         schema = CustomSchema.objects.create(

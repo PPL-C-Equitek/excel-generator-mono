@@ -86,7 +86,7 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
         duplicate_queryset.exists.assert_called_once_with()
 
     def test_validate_excludes_current_instance_from_duplicate_check(self):
-        existing_instance = SimpleNamespace(pk=99, name="Invoice Mapping")
+        existing_instance = SimpleNamespace(pk=uuid.uuid4(), name="Invoice Mapping")
         serializer = CustomSchemaSerializer(
             instance=existing_instance,
             context={"request": self.request},

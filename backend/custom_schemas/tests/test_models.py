@@ -31,6 +31,15 @@ class CustomSchemaModelTest(TestCase):
 
         self.assertEqual(str(schema), "Invoice Mapping (v3)")
 
+    def test_primary_key_defaults_to_uuid(self):
+        schema = CustomSchema.objects.create(
+            owner_id=self.owner_id,
+            name="UUID Mapping",
+            definition=make_definition(),
+        )
+
+        self.assertIsInstance(schema.id, uuid.UUID)
+
     def test_prompt_fragment_uses_definition(self):
         schema = CustomSchema(
             owner_id=self.owner_id,

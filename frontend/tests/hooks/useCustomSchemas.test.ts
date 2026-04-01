@@ -9,7 +9,7 @@ import type {
 
 function createSchemaRecord(overrides: Partial<CustomSchemaRecord> = {}): CustomSchemaRecord {
     return {
-        id: 1,
+        id: '00000000-0000-0000-0000-000000000001',
         owner_id: '11111111-1111-1111-1111-111111111111',
         name: 'Invoice Mapping',
         description: 'Maps invoice rows',
@@ -155,8 +155,18 @@ describe('useCustomSchemas', () => {
         const service = createService({
             list: vi
                 .fn()
-                .mockResolvedValueOnce([createSchemaRecord({ name: 'B Schema' })])
-                .mockResolvedValueOnce([createSchemaRecord({ name: 'A Schema' })]),
+                .mockResolvedValueOnce([
+                    createSchemaRecord({
+                        id: '00000000-0000-0000-0000-000000000002',
+                        name: 'B Schema',
+                    }),
+                ])
+                .mockResolvedValueOnce([
+                    createSchemaRecord({
+                        id: '00000000-0000-0000-0000-000000000003',
+                        name: 'A Schema',
+                    }),
+                ]),
         })
         const accessTokenResolver = () => 'access-token'
 
@@ -219,7 +229,12 @@ describe('useCustomSchemas', () => {
     it('createSchema appends, sorts, and announces a successful save', async () => {
         const service = createService({
             list: vi.fn().mockResolvedValue([createSchemaRecord({ name: 'Zulu Mapping' })]),
-            create: vi.fn().mockResolvedValue(createSchemaRecord({ id: 2, name: 'Alpha Mapping' })),
+            create: vi.fn().mockResolvedValue(
+                createSchemaRecord({
+                    id: '00000000-0000-0000-0000-000000000002',
+                    name: 'Alpha Mapping',
+                })
+            ),
         })
         const accessTokenResolver = () => 'access-token'
 
@@ -277,7 +292,9 @@ describe('useCustomSchemas', () => {
 
         let wasDeleted = true
         await act(async () => {
-            wasDeleted = await result.current.deleteSchema(1)
+            wasDeleted = await result.current.deleteSchema(
+                '00000000-0000-0000-0000-000000000001'
+            )
         })
 
         expect(wasDeleted).toBe(false)
@@ -287,7 +304,12 @@ describe('useCustomSchemas', () => {
 
     it('deleteSchema removes the schema and reports success when the name is known', async () => {
         const service = createService({
-            list: vi.fn().mockResolvedValue([createSchemaRecord({ id: 7, name: 'Order Mapping' })]),
+            list: vi.fn().mockResolvedValue([
+                createSchemaRecord({
+                    id: '00000000-0000-0000-0000-000000000007',
+                    name: 'Order Mapping',
+                }),
+            ]),
             remove: vi.fn().mockResolvedValue(undefined),
         })
         const accessTokenResolver = () => 'access-token'
@@ -300,11 +322,16 @@ describe('useCustomSchemas', () => {
 
         let wasDeleted = false
         await act(async () => {
-            wasDeleted = await result.current.deleteSchema(7)
+            wasDeleted = await result.current.deleteSchema(
+                '00000000-0000-0000-0000-000000000007'
+            )
         })
 
         expect(wasDeleted).toBe(true)
-        expect(service.remove).toHaveBeenCalledWith(7, 'access-token')
+        expect(service.remove).toHaveBeenCalledWith(
+            '00000000-0000-0000-0000-000000000007',
+            'access-token'
+        )
         expect(result.current.schemas).toEqual([])
         expect(result.current.message).toBe('"Order Mapping" deleted successfully.')
         expect(result.current.deletingSchemaId).toBeNull()
@@ -324,7 +351,9 @@ describe('useCustomSchemas', () => {
 
         let wasDeleted = false
         await act(async () => {
-            wasDeleted = await result.current.deleteSchema(999)
+            wasDeleted = await result.current.deleteSchema(
+                '00000000-0000-0000-0000-000000000999'
+            )
         })
 
         expect(wasDeleted).toBe(true)
@@ -346,7 +375,9 @@ describe('useCustomSchemas', () => {
 
         let wasDeleted = true
         await act(async () => {
-            wasDeleted = await result.current.deleteSchema(1)
+            wasDeleted = await result.current.deleteSchema(
+                '00000000-0000-0000-0000-000000000001'
+            )
         })
 
         expect(wasDeleted).toBe(false)

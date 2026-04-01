@@ -9,7 +9,7 @@ import type {
 
 function createSchemaRecord(overrides: Partial<CustomSchemaRecord> = {}): CustomSchemaRecord {
     return {
-        id: 1,
+        id: '00000000-0000-0000-0000-000000000001',
         owner_id: '11111111-1111-1111-1111-111111111111',
         name: 'Invoice Mapping',
         description: 'Maps invoice rows',
@@ -66,9 +66,13 @@ describe('SchemaSelector', () => {
     it('renders saved schemas and defaults to no schema', async () => {
         const service = createService({
             list: vi.fn().mockResolvedValue([
-                createSchemaRecord({ id: 1, name: 'Invoice Mapping', is_active: false }),
                 createSchemaRecord({
-                    id: 2,
+                    id: '00000000-0000-0000-0000-000000000001',
+                    name: 'Invoice Mapping',
+                    is_active: false,
+                }),
+                createSchemaRecord({
+                    id: '00000000-0000-0000-0000-000000000002',
                     name: 'Receipt Mapping',
                     is_active: true,
                     definition: {
@@ -102,7 +106,7 @@ describe('SchemaSelector', () => {
         const service = createService({
             list: vi.fn().mockResolvedValue([
                 createSchemaRecord({
-                    id: 1,
+                    id: '00000000-0000-0000-0000-000000000001',
                     name: 'Invoice Mapping',
                     definition: {
                         columns: [
@@ -111,7 +115,7 @@ describe('SchemaSelector', () => {
                     },
                 }),
                 createSchemaRecord({
-                    id: 2,
+                    id: '00000000-0000-0000-0000-000000000002',
                     name: 'Receipt Mapping',
                     definition: {
                         columns: [
@@ -131,7 +135,7 @@ describe('SchemaSelector', () => {
         )
 
         const select = await screen.findByTestId('schema-select')
-        await user.selectOptions(select, '2')
+        await user.selectOptions(select, '00000000-0000-0000-0000-000000000002')
 
         await waitFor(() => {
             expect(
@@ -143,7 +147,10 @@ describe('SchemaSelector', () => {
         expect(screen.queryByText(/^Active$/i)).not.toBeInTheDocument()
         expect(screen.queryByText(/^Inactive$/i)).not.toBeInTheDocument()
         expect(onSchemaChange).toHaveBeenLastCalledWith(
-            expect.objectContaining({ id: 2, name: 'Receipt Mapping' })
+            expect.objectContaining({
+                id: '00000000-0000-0000-0000-000000000002',
+                name: 'Receipt Mapping',
+            })
         )
     })
 
@@ -196,12 +203,18 @@ describe('SchemaSelector', () => {
         const onSchemaChange = vi.fn()
         const firstService = createService({
             list: vi.fn().mockResolvedValue([
-                createSchemaRecord({ id: 2, name: 'Receipt Mapping' }),
+                createSchemaRecord({
+                    id: '00000000-0000-0000-0000-000000000002',
+                    name: 'Receipt Mapping',
+                }),
             ]),
         })
         const secondService = createService({
             list: vi.fn().mockResolvedValue([
-                createSchemaRecord({ id: 3, name: 'Other Mapping' }),
+                createSchemaRecord({
+                    id: '00000000-0000-0000-0000-000000000003',
+                    name: 'Other Mapping',
+                }),
             ]),
         })
 
@@ -214,7 +227,7 @@ describe('SchemaSelector', () => {
         )
 
         const select = await screen.findByTestId('schema-select')
-        await user.selectOptions(select, '2')
+        await user.selectOptions(select, '00000000-0000-0000-0000-000000000002')
 
         await waitFor(() => {
             expect(

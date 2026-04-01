@@ -13,7 +13,7 @@ import type {
 
 function createSchemaRecord(overrides: Partial<CustomSchemaRecord> = {}): CustomSchemaRecord {
     return {
-        id: 1,
+        id: '00000000-0000-0000-0000-000000000001',
         owner_id: '11111111-1111-1111-1111-111111111111',
         name: 'Invoice Mapping',
         description: 'Maps invoice rows',
@@ -75,7 +75,7 @@ describe('CustomSchemaManager', () => {
             list: vi.fn().mockResolvedValue([
                 createSchemaRecord(),
                 createSchemaRecord({
-                    id: 2,
+                    id: '00000000-0000-0000-0000-000000000002',
                     name: 'Receipt Mapping',
                     definition: {
                         columns: [
@@ -108,7 +108,7 @@ describe('CustomSchemaManager', () => {
     it('creates a schema from the modal and closes it after a successful save', async () => {
         const user = userEvent.setup()
         const createdSchema = createSchemaRecord({
-            id: 7,
+            id: '00000000-0000-0000-0000-000000000007',
             name: 'Order Mapping',
             description: 'Maps order rows',
             definition: {
@@ -197,7 +197,10 @@ describe('CustomSchemaManager', () => {
         await user.click(screen.getByRole('button', { name: /delete/i }))
 
         await waitFor(() => {
-            expect(service.remove).toHaveBeenCalledWith(1, 'access-token')
+            expect(service.remove).toHaveBeenCalledWith(
+                '00000000-0000-0000-0000-000000000001',
+                'access-token'
+            )
         })
 
         expect(screen.queryByText('Invoice Mapping')).not.toBeInTheDocument()
@@ -207,11 +210,11 @@ describe('CustomSchemaManager', () => {
     it('shows the per-user limit and disables adding after five schemas', async () => {
         const service = createService({
             list: vi.fn().mockResolvedValue([
-                createSchemaRecord({ id: 1, name: 'Schema 1' }),
-                createSchemaRecord({ id: 2, name: 'Schema 2' }),
-                createSchemaRecord({ id: 3, name: 'Schema 3' }),
-                createSchemaRecord({ id: 4, name: 'Schema 4' }),
-                createSchemaRecord({ id: 5, name: 'Schema 5' }),
+                createSchemaRecord({ id: '00000000-0000-0000-0000-000000000001', name: 'Schema 1' }),
+                createSchemaRecord({ id: '00000000-0000-0000-0000-000000000002', name: 'Schema 2' }),
+                createSchemaRecord({ id: '00000000-0000-0000-0000-000000000003', name: 'Schema 3' }),
+                createSchemaRecord({ id: '00000000-0000-0000-0000-000000000004', name: 'Schema 4' }),
+                createSchemaRecord({ id: '00000000-0000-0000-0000-000000000005', name: 'Schema 5' }),
             ]),
         })
 

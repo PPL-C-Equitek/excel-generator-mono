@@ -6,7 +6,7 @@ import type {
 
 function createSchemaRecord(overrides: Partial<CustomSchemaRecord> = {}): CustomSchemaRecord {
     return {
-        id: 1,
+        id: '00000000-0000-0000-0000-000000000001',
         owner_id: '11111111-1111-1111-1111-111111111111',
         name: 'Invoice Mapping',
         description: 'Maps invoice rows',
@@ -80,7 +80,10 @@ describe('customSchemaService', () => {
     })
 
     it('strips a trailing slash from NEXT_PUBLIC_API_URL for create requests', async () => {
-        const createdSchema = createSchemaRecord({ id: 7, name: 'Receipt Mapping' })
+        const createdSchema = createSchemaRecord({
+            id: '00000000-0000-0000-0000-000000000007',
+            name: 'Receipt Mapping',
+        })
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: true,
             status: 201,
@@ -149,10 +152,15 @@ describe('customSchemaService', () => {
         vi.stubGlobal('fetch', mockedFetch)
 
         const { customSchemaService } = await importFreshService()
-        const result = await customSchemaService.remove(42, 'access-token')
+        const result = await customSchemaService.remove(
+            '00000000-0000-0000-0000-000000000042',
+            'access-token'
+        )
 
         expect(result).toBeUndefined()
-        expect(mockedFetch.mock.calls[0][0]).toBe('http://localhost:8000/schemas/42/')
+        expect(mockedFetch.mock.calls[0][0]).toBe(
+            'http://localhost:8000/schemas/00000000-0000-0000-0000-000000000042/'
+        )
 
         const options = mockedFetch.mock.calls[0][1] as RequestInit
         expect(options.method).toBe('DELETE')

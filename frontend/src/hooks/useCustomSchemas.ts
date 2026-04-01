@@ -13,13 +13,13 @@ export interface UseCustomSchemasReturn {
     hasAccessToken: boolean
     isLoading: boolean
     isSaving: boolean
-    deletingSchemaId: number | null
+    deletingSchemaId: string | null
     schemas: CustomSchemaRecord[]
     error: string | null
     message: string | null
     reloadSchemas: () => Promise<void>
     createSchema: (input: CreateCustomSchemaInput) => Promise<boolean>
-    deleteSchema: (schemaId: number) => Promise<boolean>
+    deleteSchema: (schemaId: string) => Promise<boolean>
 }
 
 export function useCustomSchemas(
@@ -34,7 +34,7 @@ export function useCustomSchemas(
         typeof initialAccessToken === 'string' && initialAccessToken.length > 0
     )
     const [isSaving, setIsSaving] = useState(false)
-    const [deletingSchemaId, setDeletingSchemaId] = useState<number | null>(null)
+    const [deletingSchemaId, setDeletingSchemaId] = useState<string | null>(null)
     const [schemas, setSchemas] = useState<CustomSchemaRecord[]>([])
     const [error, setError] = useState<string | null>(null)
     const [message, setMessage] = useState<string | null>(null)
@@ -136,7 +136,7 @@ export function useCustomSchemas(
         }
     }
 
-    const deleteSchema = async (schemaId: number): Promise<boolean> => {
+    const deleteSchema = async (schemaId: string): Promise<boolean> => {
         const accessToken = accessTokenResolver()
 
         if (!accessToken) {
