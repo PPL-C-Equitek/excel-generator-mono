@@ -1,8 +1,11 @@
 import logging
+import jwt
+from datetime import timedelta
 from urllib.parse import quote
 
 from django.conf import settings
 from django.core.signing import TimestampSigner
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +13,37 @@ logger = logging.getLogger(__name__)
 def generate_verification_token(email):
     signer = TimestampSigner()
     return signer.sign(email)
+
+
+def generate_tokens(user_id, email):
+    secret_key = getattr(settings, "JWT_SECRET_KEY", )
+    now = timezone.now()
+
+    access_payload = {
+        "user_id": str(user_id),
+        "email": email,
+        "type": "access",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(hours=1)).timestamp()),
+        "iss": "excel-generator",
+    }
+
+    access_token = jwt.encode(access_payload, secret_key, algorithm="HS256")
+
+    refresh_payload = {
+        "user_id": str(user_id),
+        "email": email,
+        "type": "refresh",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(days=7)).timestamp()),
+    }
+
+    refresh_token = jwt.encode(refresh_payload, secret_key, algorithm="HS256")
+
+    return {
+        "accessToken": access_token,
+        "refreshToken": refresh_token,
+    }
 
 
 def send_verification_email(email):
