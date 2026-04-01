@@ -147,7 +147,7 @@ export default function RegisterPage() {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [resendCooldown > 0]);
+  }, [resendCooldown]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;

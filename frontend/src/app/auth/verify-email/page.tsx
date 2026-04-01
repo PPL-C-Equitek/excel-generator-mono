@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
@@ -11,7 +12,9 @@ type VerifyFormErrors = {
   passwordConfirm: string;
 };
 
-function PageShell({ children }: { children: React.ReactNode }) {
+type FormSubmitEvent = Parameters<NonNullable<ComponentProps<'form'>['onSubmit']>>[0];
+
+function PageShell({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-100 px-4 py-8">
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
@@ -23,7 +26,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function StateTitle({ children, tone }: { children: React.ReactNode; tone: 'neutral' | 'success' | 'error' }) {
+function StateTitle({ children, tone }: Readonly<{ children: ReactNode; tone: 'neutral' | 'success' | 'error' }>) {
   const toneClass = {
     neutral: 'text-slate-900',
     success: 'text-green-700',
@@ -33,7 +36,7 @@ function StateTitle({ children, tone }: { children: React.ReactNode; tone: 'neut
   return <h1 className={`text-3xl font-extrabold tracking-tight ${toneClass}`}>{children}</h1>;
 }
 
-function PrimaryButton({ href, children }: { href: string; children: React.ReactNode }) {
+function PrimaryButton({ href, children }: Readonly<{ href: string; children: ReactNode }>) {
   return (
     <Link
       href={href}
@@ -44,7 +47,7 @@ function PrimaryButton({ href, children }: { href: string; children: React.React
   );
 }
 
-function SecondaryButton({ href, children }: { href: string; children: React.ReactNode }) {
+function SecondaryButton({ href, children }: Readonly<{ href: string; children: ReactNode }>) {
   return (
     <Link
       href={href}
@@ -91,7 +94,7 @@ function VerifyEmailContent() {
     }
   }, [token]);
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormSubmitEvent) => {
     event.preventDefault();
 
     const nextErrors: VerifyFormErrors = {
