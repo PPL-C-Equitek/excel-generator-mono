@@ -32,6 +32,29 @@ describe("generateJson positive", () => {
       rows: [{ id: 1, value: "test" }],
     });
   });
+
+  it("sends custom_schema_id when one is selected", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+    });
+
+    await generateJson(
+      { key: "value" },
+      "11111111-1111-1111-1111-111111111111"
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "llm/generate/",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          input_json: { key: "value" },
+          custom_schema_id: "11111111-1111-1111-1111-111111111111",
+        }),
+      })
+    );
+    fetchSpy.mockRestore();
+  });
 });
 
 describe("generateJson negative (HTTP errors)", () => {
