@@ -543,10 +543,42 @@ class TestValidateImageMimeType(SimpleTestCase):
     def test_magic_exception_returns_unable_to_determine_file_type(self, _mock_from_buffer):
         f = _make_uploaded("photo.png", b"x" * 64, "application/octet-stream")
 
-        is_valid, err = validate_image_mime_type(f, ".png")
+        with patch("file_processing.services.image_validation_service.logger.exception") as mock_exception:
+            is_valid, err = validate_image_mime_type(f, ".png")
 
         self.assertFalse(is_valid)
         self.assertEqual(err, "Unable to determine file type.")
+        mock_exception.assert_called_once_with("Error validating image MIME type.")
+        self.assertEqual(f.tell(), 0)
+
+    @patch(
+        "file_processing.services.image_validation_service.magic.from_buffer",
+        side_effect=Exception("magic failure"),
+    )
+    def test_seek_reset_failure_in_finally_is_logged(self, _mock_from_buffer):
+        class _SeekResetFailsFile:
+            def __init__(self):
+                self.seek_call_count = 0
+
+            def seek(self, *_args, **_kwargs):
+                self.seek_call_count += 1
+                if self.seek_call_count >= 2:
+                    raise OSError("seek reset failed")
+                return None
+
+            def read(self, *_args, **_kwargs):
+                return b"x" * 128
+
+        f = _SeekResetFailsFile()
+
+        with patch("file_processing.services.image_validation_service.logger.exception") as mock_exception:
+            is_valid, err = validate_image_mime_type(f, ".png")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(err, "Unable to determine file type.")
+        self.assertEqual(mock_exception.call_count, 2)
+        mock_exception.assert_any_call("Error validating image MIME type.")
+        mock_exception.assert_any_call("Error resetting file pointer after MIME validation.")
 
 
 class TestValidateFileImageIntegration(SimpleTestCase):

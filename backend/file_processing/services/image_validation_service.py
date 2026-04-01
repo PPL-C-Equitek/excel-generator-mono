@@ -86,7 +86,6 @@ def validate_image_mime_type(uploaded_file, ext):
     try:
         uploaded_file.seek(0)
         mime = magic.from_buffer(uploaded_file.read(2048), mime=True)
-        uploaded_file.seek(0)
 
         expected = IMAGE_MIME_TYPES.get(ext, [])
         if mime not in expected:
@@ -94,4 +93,10 @@ def validate_image_mime_type(uploaded_file, ext):
 
         return True, None
     except Exception:
+        logger.exception("Error validating image MIME type.")
         return False, "Unable to determine file type."
+    finally:
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            logger.exception("Error resetting file pointer after MIME validation.")
