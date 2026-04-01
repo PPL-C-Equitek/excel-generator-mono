@@ -2,9 +2,9 @@ from rest_framework import generics
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 
-from .models import CustomSchema
 from .serializers import CustomSchemaSerializer
 from .services import (
+    CUSTOM_SCHEMA_LIMIT_EXCEEDED_ERROR_TEMPLATE,
     MAX_CUSTOM_SCHEMAS_PER_USER,
     CustomSchemaLimitExceededError,
     CustomSchemaPolicyService,
@@ -40,7 +40,13 @@ class CustomSchemaListCreateView(UserOwnedCustomSchemaMixin, generics.ListCreate
                 self.request.user
             )
         except CustomSchemaLimitExceededError as exc:
-            raise ValidationError({"message": str(exc)}) from exc
+            raise ValidationError(
+                {
+                    "message": CUSTOM_SCHEMA_LIMIT_EXCEEDED_ERROR_TEMPLATE.format(
+                        max_count=MAX_CUSTOM_SCHEMAS_PER_USER
+                    )
+                }
+            ) from exc
 
         serializer.save(owner_id=owner_id)
 

@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import CustomSchema
 from .services import (
     CustomSchemaPolicyService,
+    CUSTOM_SCHEMA_DUPLICATE_NAME_ERROR_MESSAGE,
     build_schema_prompt_fragment,
     validate_schema_definition,
 )
@@ -56,7 +57,7 @@ class CustomSchemaSerializer(serializers.ModelSerializer):
         ):
             return value
         raise serializers.ValidationError(
-            "Anda sudah memiliki custom schema dengan nama ini."
+            CUSTOM_SCHEMA_DUPLICATE_NAME_ERROR_MESSAGE
         )
 
     def get_prompt_fragment(self, obj):

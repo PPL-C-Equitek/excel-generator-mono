@@ -1,6 +1,6 @@
 import uuid
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from django.test import SimpleTestCase
 from rest_framework.exceptions import ValidationError
@@ -114,7 +114,7 @@ class CustomSchemaViewUnitTest(SimpleTestCase):
         serializer = Mock()
         policy_service = Mock()
         policy_service.ensure_can_create_for_user.side_effect = CustomSchemaLimitExceededError(
-            f"Maksimal {MAX_CUSTOM_SCHEMAS_PER_USER} custom schemas per user."
+            f"A user can only have up to {MAX_CUSTOM_SCHEMAS_PER_USER} custom schemas."
         )
         view.request = SimpleNamespace(user=self.user, query_params={})
         view.policy_service_class = Mock(return_value=policy_service)

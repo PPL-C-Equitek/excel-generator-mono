@@ -83,7 +83,7 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
             serializer.validate_name("Invoice Mapping")
 
         self.assertIn(
-            "Anda sudah memiliki custom schema dengan nama ini.",
+            "You already have a custom schema with this name.",
             context.exception.detail,
         )
         policy_service.has_name_conflict.assert_called_once_with(
