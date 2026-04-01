@@ -52,7 +52,7 @@ class ResendVerificationThrottle(SimpleRateThrottle):
 
 
 class RegisterView(APIView):
-    @apply_rate_limit_to_method(max_requests=5, per="15 minutes")
+    @apply_rate_limit_to_method(max_requests=60, per="minute")
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if not serializer.is_valid():
