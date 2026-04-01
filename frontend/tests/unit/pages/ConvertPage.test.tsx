@@ -101,6 +101,7 @@ describe('ConvertPage', () => {
             render(<ConvertPage />)
             expect(screen.getByTestId('sidebar')).toBeInTheDocument()
             expect(screen.getByTestId('upload-zone')).toBeInTheDocument()
+            expect(screen.getByText('Choose A Schema')).toBeInTheDocument()
         })
     })
 
@@ -389,12 +390,7 @@ describe('ConvertPage', () => {
 
         it('does nothing if Download CSV is clicked while disabled/csvMetadata is null', async () => {
             const user = userEvent.setup()
-            const mockService = {
-                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
-                exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
-                getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_999/download?filename=test.csv')
-            }
-            
+
             // Render a state where the button gets displayed but without metadata (forcefully via mock delay or by intercepting state)
             // Wait, we can just use the previous test where we delayed the exportToCsv.
             const resolvers: Array<(value: unknown) => void> = []

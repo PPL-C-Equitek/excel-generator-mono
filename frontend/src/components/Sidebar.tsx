@@ -1,5 +1,5 @@
 interface SidebarProps {
-    readonly activeMenu: 'convert' | 'history'
+    readonly activeMenu: 'convert' | 'schema' | 'history'
     readonly username: string
     readonly onLogout?: () => void
 }
@@ -7,11 +7,12 @@ interface SidebarProps {
 export default function Sidebar({ activeMenu, username, onLogout }: SidebarProps) {
     const menus = [
         { key: 'convert', label: 'Convert', href: '/convert' },
+        { key: 'schema', label: 'Schema', href: '/schema' },
         { key: 'history', label: 'History', href: '/history' },
     ]
 
     return (
-        <aside className="w-56 min-h-screen bg-red-700 flex flex-col">
+        <aside className="fixed inset-y-0 left-0 w-56 overflow-y-auto bg-red-700 flex flex-col">
             <div className="px-6 py-5">
                 <h1 className="text-white font-extrabold text-xl tracking-widest">EQUITEK</h1>
             </div>

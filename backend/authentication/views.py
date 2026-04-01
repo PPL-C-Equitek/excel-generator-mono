@@ -1,21 +1,41 @@
 import logging
 from datetime import timedelta
+from functools import wraps
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
 
 from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
 from django.db import IntegrityError
+from api.decorators import rate_limit
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
 from authentication.models import User
-from authentication.serializers import RegisterSerializer, LoginSerializer
+from authentication.serializers import RegisterSerializer, VerifyEmailSerializer, LoginSerializer
 from authentication.services import send_verification_email, generate_tokens
 
 logger = logging.getLogger(__name__)
-SERVER_ERROR_MESSAGE = "Terjadi kesalahan pada server"
+REGISTER_SUCCESS_MESSAGE = "Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda."
+SERVER_ERROR_MESSAGE = "An internal server error occurred. Please try again later."
+
+
+def apply_rate_limit_to_method(**rate_limit_kwargs):
+    """Adapter to apply function-based rate_limit decorator on APIView methods."""
+
+    def decorator(method):
+        @wraps(method)
+        def wrapped(self, request, *args, **kwargs):
+            @rate_limit(**rate_limit_kwargs)
+            def method_wrapper(inner_request, *_args, **_kwargs):
+                return method(self, inner_request, *args, **kwargs)
+
+            return method_wrapper(request)
+
+        return wrapped
+
+    return decorator
 
 
 class ResendVerificationThrottle(SimpleRateThrottle):
@@ -32,6 +52,7 @@ class ResendVerificationThrottle(SimpleRateThrottle):
 
 
 class RegisterView(APIView):
+    @apply_rate_limit_to_method(max_requests=60, per="minute")
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if not serializer.is_valid():
@@ -43,64 +64,69 @@ class RegisterView(APIView):
         validated = serializer.validated_data
         name = validated["name"]
         email = validated["email"].lower().strip()
-        password = validated["password"]
-
-        if User.objects.filter(email=email).exists():
-            return Response(
-                {"message": "Email sudah terdaftar"},
-                status=status.HTTP_409_CONFLICT,
-            )
 
         try:
+            existing_user_qs = User.objects.filter(email=email)
+            if existing_user_qs.exists():
+                existing_user = existing_user_qs.first()
+                if existing_user and existing_user.status != "verified":
+                    send_verification_email(existing_user.email)
+
+                return Response(
+                    {"message": REGISTER_SUCCESS_MESSAGE},
+                    status=status.HTTP_200_OK,
+                )
+
             user = User.objects.create_user(
                 name=name,
                 email=email,
-                password=password,
                 status="unverified",
             )
+            user.set_unusable_password()
+            user.save(update_fields=["password"])
 
             send_verification_email(user.email)
 
             return Response(
-                {
-                    "userId": str(user.id),
-                    "message": "Cek email Anda",
-                },
-                status=status.HTTP_201_CREATED,
+                {"message": REGISTER_SUCCESS_MESSAGE},
+                status=status.HTTP_200_OK,
             )
         except IntegrityError:
             return Response(
-                {"message": "Email sudah terdaftar"},
-                status=status.HTTP_409_CONFLICT,
+                {"message": REGISTER_SUCCESS_MESSAGE},
+                status=status.HTTP_200_OK,
             )
         except Exception:
             logger.exception("Unexpected error during user registration.")
             return Response(
-                {"message": SERVER_ERROR_MESSAGE},
+                {"message": "An internal server error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
 class VerifyEmailView(APIView):
-    def get(self, request):
-        token = request.query_params.get("token")
-        if not token:
+    def post(self, request):
+        serializer = VerifyEmailSerializer(data=request.data)
+        if not serializer.is_valid():
             return Response(
-                {"message": "Token tidak ditemukan"},
+                {"errors": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        token = serializer.validated_data["token"]
+        password = serializer.validated_data["password"]
 
         signer = TimestampSigner()
         try:
             email = signer.unsign(token, max_age=timedelta(hours=24))
         except SignatureExpired:
             return Response(
-                {"message": "Token expired. Silakan minta verifikasi ulang."},
+                {"message": "Token expired. Please request a new verification email."},
                 status=status.HTTP_410_GONE,
             )
         except BadSignature:
             return Response(
-                {"message": "Token tidak valid"},
+                {"message": "Invalid token"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -108,15 +134,16 @@ class VerifyEmailView(APIView):
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             return Response(
-                {"message": "User tidak ditemukan"},
+                {"message": "User not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        user.set_password(password)
         user.status = "verified"
-        user.save()
+        user.save(update_fields=["password", "status"])
 
         return Response(
-            {"message": "Email berhasil diverifikasi"},
+            {"message": "Email verified successfully"},
             status=status.HTTP_200_OK,
         )
 
@@ -128,7 +155,7 @@ class ResendVerificationView(APIView):
         email = request.data.get("email")
         if not email:
             return Response(
-                {"message": "Email harus diisi"},
+                {"message": "Email is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -136,20 +163,20 @@ class ResendVerificationView(APIView):
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             return Response(
-                {"message": "User tidak ditemukan"},
+                {"message": "User not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         if user.status == "verified":
             return Response(
-                {"message": "Email sudah diverifikasi"},
+                {"message": "Email is already verified"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         send_verification_email(user.email)
 
         return Response(
-            {"message": "Email verifikasi telah dikirim ulang"},
+            {"message": "Verification email has been resent"},
             status=status.HTTP_200_OK,
         )
 
