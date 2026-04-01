@@ -13,8 +13,7 @@ from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
 from authentication.models import User
-from authentication.serializers import RegisterSerializer, LoginSerializer
-from authentication.serializers import RefreshTokenSerializer
+from authentication.serializers import RegisterSerializer, LoginSerializer, RefreshTokenSerializer, VerifyEmailSerializer
 from authentication.services import (
     send_verification_email,
     generate_tokens,
