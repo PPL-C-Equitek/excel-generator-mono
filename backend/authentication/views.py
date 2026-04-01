@@ -225,8 +225,8 @@ class LoginView(APIView):
             result = login_service.authenticate(email=email, password=password)
             return Response(
                 {
-                    "accessToken": result.tokens.accessToken,
-                    "refreshToken": result.tokens.refreshToken,
+                    "access_token": result.tokens.access_token,
+                    "refresh_token": result.tokens.refresh_token,
                     "user": {
                         "id": result.user.id,
                         "email": result.user.email,
@@ -269,15 +269,15 @@ class RefreshTokenView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        refresh_token = serializer.validated_data["refreshToken"]
+        refresh_token = serializer.validated_data["refresh_token"]
         refresh_service = RefreshTokenService(token_generator=generate_tokens)
 
         try:
             tokens = refresh_service.refresh(refresh_token)
             return Response(
                 {
-                    "accessToken": tokens["accessToken"],
-                    "refreshToken": tokens["refreshToken"],
+                    "access_token": tokens["access_token"],
+                    "refresh_token": tokens["refresh_token"],
                 },
                 status=status.HTTP_200_OK,
             )
