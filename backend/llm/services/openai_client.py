@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 from django.conf import settings
@@ -29,6 +28,41 @@ class OpenAIUpstreamError(OpenAIServiceError):
         self.status_code = status_code
 
 
+class OpenAITextGenerationProvider:
+    def generate_text(self, prompt: str, system_prompt: str | None = None) -> str:
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Prompt must be a non-empty string.")
+
+        client = _build_client()
+        request_payload = {
+            "model": settings.OPENAI_MODEL,
+            "input": prompt,
+        }
+
+        effective_system_prompt = _resolve_system_prompt(system_prompt)
+        if effective_system_prompt:
+            request_payload["instructions"] = effective_system_prompt
+
+        try:
+            response = client.responses.create(**request_payload)
+        except AuthenticationError as exc:
+            raise OpenAIUpstreamError("LLM authentication failed.", status_code=401) from exc
+        except RateLimitError as exc:
+            raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
+        except APITimeoutError as exc:
+            raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
+        except APIStatusError as exc:
+            status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
+            raise OpenAIUpstreamError("LLM provider request failed.", status_code=status_code) from exc
+        except (APIConnectionError, APIError) as exc:
+            raise OpenAIUpstreamError("LLM provider request failed.", status_code=502) from exc
+
+        output_text = getattr(response, "output_text", None)
+        if not output_text:
+            raise OpenAIServiceError("OpenAI response did not include output_text.")
+        return output_text
+
+
 def _resolve_system_prompt(system_prompt: str | None = None) -> str:
     raw_prompt = settings.OPENAI_SYSTEM_PROMPT if system_prompt is None else system_prompt
     if not isinstance(raw_prompt, str):
@@ -54,56 +88,19 @@ def _map_api_status_to_http(status_code: int | None) -> int:
 
 
 def generate_text(prompt: str, system_prompt: str | None = None) -> str:
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("Prompt must be a non-empty string.")
-
-    client = _build_client()
-    request_payload = {
-        "model": settings.OPENAI_MODEL,
-        "input": prompt,
-    }
-
-    effective_system_prompt = _resolve_system_prompt(system_prompt)
-    if effective_system_prompt:
-        request_payload["instructions"] = effective_system_prompt
-
-    try:
-        response = client.responses.create(**request_payload)
-    except AuthenticationError as exc:
-        raise OpenAIUpstreamError("LLM authentication failed.", status_code=401) from exc
-    except RateLimitError as exc:
-        raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
-    except APITimeoutError as exc:
-        raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
-    except APIStatusError as exc:
-        status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
-        raise OpenAIUpstreamError("LLM provider request failed.", status_code=status_code) from exc
-    except (APIConnectionError, APIError) as exc:
-        raise OpenAIUpstreamError("LLM provider request failed.", status_code=502) from exc
-
-    output_text = getattr(response, "output_text", None)
-    if not output_text:
-        raise OpenAIServiceError("OpenAI response did not include output_text.")
-    return output_text
+    provider = OpenAITextGenerationProvider()
+    return provider.generate_text(prompt=prompt, system_prompt=system_prompt)
 
 
 def generate_json(
     input_json: dict[str, Any] | list[Any],
     system_prompt: str | None = None,
 ) -> dict[str, Any] | list[Any]:
-    if not isinstance(input_json, (dict, list)):
-        raise ValueError("input_json must be an object or array.")
+    from .generation_service import JsonGenerationService
 
-    generate_text_kwargs = {"prompt": json.dumps(input_json)}
-    if system_prompt is not None:
-        generate_text_kwargs["system_prompt"] = system_prompt
-    output_text = generate_text(**generate_text_kwargs)
-    try:
-        parsed_output = json.loads(output_text)
-    except json.JSONDecodeError as exc:
-        raise OpenAIServiceError("OpenAI response is not valid JSON.") from exc
+    class _FunctionTextGenerationProvider:
+        def generate_text(self, prompt: str, system_prompt: str | None = None) -> str:
+            return generate_text(prompt=prompt, system_prompt=system_prompt)
 
-    if not isinstance(parsed_output, (dict, list)):
-        raise OpenAIServiceError("OpenAI response JSON must be an object or array.")
-
-    return parsed_output
+    service = JsonGenerationService(text_provider=_FunctionTextGenerationProvider())
+    return service.generate(input_json=input_json, system_prompt=system_prompt)

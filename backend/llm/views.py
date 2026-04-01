@@ -1,17 +1,21 @@
 import logging
 
-from django.conf import settings
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from custom_schemas.models import CustomSchema
 from .serializers import LlmGenerateRequestSerializer, LlmGenerateResponseSerializer
+from .services.generation_service import (
+    CustomSchemaNotFoundError,
+    DjangoCustomSchemaPromptSource,
+    JsonGenerationService,
+    LlmGenerationService,
+)
 from .services.openai_client import (
+    OpenAITextGenerationProvider,
     OpenAIConfigurationError,
     OpenAIServiceError,
     OpenAIUpstreamError,
-    generate_json,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,22 +29,13 @@ INVALID_INPUT_JSON_DETAIL = "Invalid input_json payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
 
 
-def _build_effective_system_prompt(custom_schema: CustomSchema | None) -> str | None:
-    parts: list[str] = []
-
-    base_prompt = getattr(settings, "OPENAI_SYSTEM_PROMPT", "").strip()
-    if base_prompt:
-        parts.append(base_prompt)
-
-    if custom_schema is not None:
-        schema_prompt = custom_schema.prompt_fragment.strip()
-        if schema_prompt:
-            parts.append(schema_prompt)
-
-    if not parts:
-        return None
-
-    return "\n\n".join(parts)
+def build_llm_generation_service() -> LlmGenerationService:
+    return LlmGenerationService(
+        json_generator=JsonGenerationService(
+            text_provider=OpenAITextGenerationProvider()
+        ),
+        schema_prompt_source=DjangoCustomSchemaPromptSource(),
+    )
 
 
 @api_view(["POST"])
@@ -59,21 +54,15 @@ def llm_generate(request):
 
     input_json = request_serializer.validated_data["input_json"]
     custom_schema_id = request_serializer.validated_data.get("custom_schema_id")
-
-    custom_schema = None
-    if custom_schema_id is not None:
-        try:
-            custom_schema = CustomSchema.objects.get(pk=custom_schema_id)
-        except CustomSchema.DoesNotExist:
-            return Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
-
-    generate_kwargs = {"input_json": input_json}
-    effective_system_prompt = _build_effective_system_prompt(custom_schema)
-    if effective_system_prompt is not None:
-        generate_kwargs["system_prompt"] = effective_system_prompt
+    llm_generation_service = build_llm_generation_service()
 
     try:
-        output_json = generate_json(**generate_kwargs)
+        output_json = llm_generation_service.generate(
+            input_json=input_json,
+            custom_schema_id=custom_schema_id,
+        )
+    except CustomSchemaNotFoundError:
+        return Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     except OpenAIUpstreamError as exc:

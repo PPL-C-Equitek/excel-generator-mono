@@ -1,8 +1,16 @@
 import json
+from types import SimpleNamespace
 
 from django.test import SimpleTestCase, override_settings
 from unittest.mock import Mock, patch
 
+from llm.services.generation_service import (
+    CustomSchemaNotFoundError,
+    DjangoCustomSchemaPromptSource,
+    JsonGenerationService,
+    LlmGenerationService,
+    compose_system_prompt,
+)
 from llm.services.openai_client import OpenAIServiceError, OpenAIUpstreamError, generate_json, generate_text
 
 
@@ -257,7 +265,10 @@ class OpenAIClientServiceTest(SimpleTestCase):
         result = generate_json({"source": "upload"})
 
         self.assertEqual(result, {"status": "ok", "rows": [1, 2]})
-        mock_generate_text.assert_called_once_with(prompt='{"source": "upload"}')
+        mock_generate_text.assert_called_once_with(
+            prompt='{"source": "upload"}',
+            system_prompt=None,
+        )
 
     @patch("llm.services.openai_client.generate_text")
     def test_generate_json_passes_system_prompt_override(self, mock_generate_text):
@@ -280,7 +291,10 @@ class OpenAIClientServiceTest(SimpleTestCase):
         result = generate_json([{"input": 1}])
 
         self.assertEqual(result, [{"a": 1}])
-        mock_generate_text.assert_called_once_with(prompt='[{"input": 1}]')
+        mock_generate_text.assert_called_once_with(
+            prompt='[{"input": 1}]',
+            system_prompt=None,
+        )
 
     def test_generate_json_rejects_non_json_object_or_array_input(self):
         with self.assertRaises(ValueError):
@@ -311,4 +325,134 @@ class OpenAIClientServiceTest(SimpleTestCase):
         self.assertEqual(first_result, {"status": "first"})
         self.assertEqual(second_result, {"status": "second"})
         self.assertEqual(mock_generate_text.call_count, 2)
+
+
+class LlmGenerationServiceTest(SimpleTestCase):
+    def test_compose_system_prompt_combines_base_and_schema_fragment(self):
+        result = compose_system_prompt(
+            "Base prompt.",
+            "Use only invoice_number and total_amount.",
+        )
+
+        self.assertEqual(
+            result,
+            "Base prompt.\n\nUse only invoice_number and total_amount.",
+        )
+
+    def test_compose_system_prompt_returns_none_for_blank_inputs(self):
+        result = compose_system_prompt("   ", "   ")
+
+        self.assertIsNone(result)
+
+    def test_json_generation_service_uses_injected_text_provider(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        result = service.generate({"source": "upload"})
+
+        self.assertEqual(result, {"status": "ok"})
+        text_provider.generate_text.assert_called_once_with(
+            prompt='{"source": "upload"}'
+        )
+
+    def test_json_generation_service_passes_system_prompt_to_injected_provider(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        result = service.generate(
+            {"source": "upload"},
+            system_prompt="Schema-specific prompt",
+        )
+
+        self.assertEqual(result, {"status": "ok"})
+        text_provider.generate_text.assert_called_once_with(
+            prompt='{"source": "upload"}',
+            system_prompt="Schema-specific prompt",
+        )
+
+    def test_llm_generation_service_uses_base_prompt_when_no_schema_selected(self):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "Base prompt.",
+        )
+
+        result = service.generate({"sheet": "Sheet1"})
+
+        self.assertEqual(result, {"status": "ok"})
+        schema_prompt_source.get_prompt_fragment.assert_not_called()
+        json_generator.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            system_prompt="Base prompt.",
+        )
+
+    def test_llm_generation_service_combines_base_and_schema_prompts(self):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        schema_prompt_source.get_prompt_fragment.return_value = (
+            "Use only invoice_number and total_amount."
+        )
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "Base prompt.",
+        )
+
+        result = service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-1")
+
+        self.assertEqual(result, {"status": "ok"})
+        schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
+        json_generator.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            system_prompt="Base prompt.\n\nUse only invoice_number and total_amount.",
+        )
+
+    def test_llm_generation_service_passes_none_when_no_prompt_exists(self):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        schema_prompt_source.get_prompt_fragment.return_value = "   "
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "   ",
+        )
+
+        result = service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-1")
+
+        self.assertEqual(result, {"status": "ok"})
+        json_generator.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            system_prompt=None,
+        )
+
+    @patch("llm.services.generation_service.CustomSchema.objects.get")
+    def test_django_custom_schema_prompt_source_returns_schema_prompt_fragment(
+        self, mock_get
+    ):
+        mock_get.return_value = SimpleNamespace(prompt_fragment="Schema prompt.")
+        prompt_source = DjangoCustomSchemaPromptSource()
+
+        result = prompt_source.get_prompt_fragment("schema-1")
+
+        self.assertEqual(result, "Schema prompt.")
+        mock_get.assert_called_once_with(pk="schema-1")
+
+    @patch("llm.services.generation_service.CustomSchema.objects.get")
+    def test_django_custom_schema_prompt_source_raises_custom_not_found_error(
+        self, mock_get
+    ):
+        from custom_schemas.models import CustomSchema
+
+        mock_get.side_effect = CustomSchema.DoesNotExist
+        prompt_source = DjangoCustomSchemaPromptSource()
+
+        with self.assertRaises(CustomSchemaNotFoundError):
+            prompt_source.get_prompt_fragment("missing-schema")
 

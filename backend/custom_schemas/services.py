@@ -1,7 +1,11 @@
 from django.core.exceptions import ValidationError
+from typing import Protocol
 
 
 DEFAULT_OUTPUT_TABLE_NAME = "result"
+MAX_CUSTOM_SCHEMAS_PER_USER = 5
+ACTIVE_TRUE_VALUES = frozenset({"true", "1", "yes"})
+ACTIVE_FALSE_VALUES = frozenset({"false", "0", "no"})
 
 
 def validate_schema_definition(definition):
@@ -62,3 +66,105 @@ def build_schema_prompt_fragment(definition):
         lines.append(detail)
 
     return "\n".join(lines)
+
+
+class CustomSchemaQueryRepository(Protocol):
+    def none(self): ...
+
+    def for_owner(self, owner_id): ...
+
+    def count_for_owner(self, owner_id: object) -> int: ...
+
+    def name_exists_for_owner(
+        self,
+        owner_id: object,
+        name: str,
+        exclude_pk: object | None = None,
+    ) -> bool: ...
+
+
+class DjangoCustomSchemaQueryRepository:
+    def none(self):
+        from .models import CustomSchema
+
+        return CustomSchema.objects.none()
+
+    def for_owner(self, owner_id):
+        from .models import CustomSchema
+
+        return CustomSchema.objects.filter(owner_id=owner_id)
+
+    def count_for_owner(self, owner_id: object) -> int:
+        return self.for_owner(owner_id).count()
+
+    def name_exists_for_owner(
+        self,
+        owner_id: object,
+        name: str,
+        exclude_pk: object | None = None,
+    ) -> bool:
+        queryset = self.for_owner(owner_id).filter(name=name)
+        if exclude_pk is not None:
+            queryset = queryset.exclude(pk=exclude_pk)
+        return queryset.exists()
+
+
+class CustomSchemaLimitExceededError(Exception):
+    """Raised when a user has reached the custom schema creation limit."""
+
+
+class CustomSchemaPolicyService:
+    def __init__(
+        self,
+        repository: CustomSchemaQueryRepository | None = None,
+        max_custom_schemas_per_user: int = MAX_CUSTOM_SCHEMAS_PER_USER,
+    ):
+        self.repository = repository or DjangoCustomSchemaQueryRepository()
+        self.max_custom_schemas_per_user = max_custom_schemas_per_user
+
+    def get_owner_id(self, user) -> object | None:
+        owner_id = getattr(user, "id", None)
+        if not getattr(user, "is_authenticated", False) or owner_id is None:
+            return None
+        return owner_id
+
+    def get_queryset_for_user(self, user):
+        owner_id = self.get_owner_id(user)
+        if owner_id is None:
+            return self.repository.none()
+        return self.repository.for_owner(owner_id)
+
+    def filter_queryset_by_active(self, queryset, active_value):
+        if active_value is None:
+            return queryset
+
+        normalized_value = str(active_value).strip().lower()
+        if normalized_value in ACTIVE_TRUE_VALUES:
+            return queryset.filter(is_active=True)
+        if normalized_value in ACTIVE_FALSE_VALUES:
+            return queryset.filter(is_active=False)
+        return queryset
+
+    def has_name_conflict(self, user, name: str, exclude_pk: object | None = None) -> bool:
+        owner_id = self.get_owner_id(user)
+        if owner_id is None or not name:
+            return False
+
+        return self.repository.name_exists_for_owner(
+            owner_id=owner_id,
+            name=name,
+            exclude_pk=exclude_pk,
+        )
+
+    def ensure_can_create_for_user(self, user) -> object | None:
+        owner_id = self.get_owner_id(user)
+        if owner_id is None:
+            return None
+
+        existing_count = self.repository.count_for_owner(owner_id)
+        if existing_count >= self.max_custom_schemas_per_user:
+            raise CustomSchemaLimitExceededError(
+                f"Maksimal {self.max_custom_schemas_per_user} custom schemas per user."
+            )
+
+        return owner_id

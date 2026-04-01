@@ -1,9 +1,9 @@
 from django.test import SimpleTestCase
-from django.core.cache import cache
 from rest_framework.test import APIClient
 from unittest.mock import patch
 from uuid import uuid4
 
+from llm.services.generation_service import CustomSchemaNotFoundError
 from llm.services.openai_client import (
     OpenAIConfigurationError,
     OpenAIServiceError,
@@ -12,112 +12,53 @@ from llm.services.openai_client import (
 
 
 class LlmGenerateEndpointTest(SimpleTestCase):
-    def setUp(self):
-        super().setUp()
-        cache.clear()
-
-    @patch("llm.views.generate_json")
-    def test_llm_generate_returns_200(self, mock_generate_json):
-        mock_generate_json.return_value = {"status": "ok"}
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_200(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {"status": "ok"}
         client = APIClient()
 
-        with self.settings(OPENAI_SYSTEM_PROMPT=""):
-            payload = {"input_json": {"sheet": "Sheet1"}}
-            response = client.post("/llm/generate/", payload, format="json")
+        payload = {"input_json": {"sheet": "Sheet1"}}
+        response = client.post("/llm/generate/", payload, format="json")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_json"], {"status": "ok"})
-        mock_generate_json.assert_called_once_with(input_json={"sheet": "Sheet1"})
-
-    @patch("llm.views.CustomSchema.objects.get")
-    @patch("llm.views.generate_json")
-    def test_llm_generate_passes_selected_schema_prompt_to_generate_json(
-        self, mock_generate_json, mock_get_schema
-    ):
-        mock_generate_json.return_value = {"status": "ok"}
-        mock_get_schema.return_value = type(
-            "Schema",
-            (),
-            {"prompt_fragment": "Use only: invoice_number, total_amount"},
-        )()
-        client = APIClient()
-        schema_id = uuid4()
-
-        with self.settings(OPENAI_SYSTEM_PROMPT="Base prompt."):
-            response = client.post(
-                "/llm/generate/",
-                {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": str(schema_id)},
-                format="json",
-            )
-
-        self.assertEqual(response.status_code, 200)
-        mock_get_schema.assert_called_once_with(pk=schema_id)
-        mock_generate_json.assert_called_once_with(
+        mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
-            system_prompt="Base prompt.\n\nUse only: invoice_number, total_amount",
+            custom_schema_id=None,
         )
 
-    @patch("llm.views.CustomSchema.objects.get")
-    @patch("llm.views.generate_json")
-    def test_llm_generate_uses_schema_prompt_only_when_base_prompt_blank(
-        self, mock_generate_json, mock_get_schema
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_passes_selected_schema_id_to_generation_service(
+        self, mock_build_service
     ):
-        mock_generate_json.return_value = {"status": "ok"}
-        mock_get_schema.return_value = type(
-            "Schema",
-            (),
-            {"prompt_fragment": "Use only: invoice_number, total_amount"},
-        )()
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {"status": "ok"}
         client = APIClient()
         schema_id = uuid4()
 
-        with self.settings(OPENAI_SYSTEM_PROMPT="   "):
-            response = client.post(
-                "/llm/generate/",
-                {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": str(schema_id)},
-                format="json",
-            )
-
-        self.assertEqual(response.status_code, 200)
-        mock_generate_json.assert_called_once_with(
-            input_json={"sheet": "Sheet1"},
-            system_prompt="Use only: invoice_number, total_amount",
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": str(schema_id)},
+            format="json",
         )
 
-    @patch("llm.views.CustomSchema.objects.get")
-    @patch("llm.views.generate_json")
-    def test_llm_generate_ignores_blank_schema_prompt_fragment(
-        self, mock_generate_json, mock_get_schema
-    ):
-        mock_generate_json.return_value = {"status": "ok"}
-        mock_get_schema.return_value = type(
-            "Schema",
-            (),
-            {"prompt_fragment": "   "},
-        )()
-        client = APIClient()
-        schema_id = uuid4()
-
-        with self.settings(OPENAI_SYSTEM_PROMPT=""):
-            response = client.post(
-                "/llm/generate/",
-                {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": str(schema_id)},
-                format="json",
-            )
-
         self.assertEqual(response.status_code, 200)
-        mock_generate_json.assert_called_once_with(input_json={"sheet": "Sheet1"})
+        mock_service.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=schema_id,
+        )
 
-    @patch("llm.views.CustomSchema.objects.get")
-    @patch("llm.views.generate_json")
+    @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_404_when_selected_schema_missing(
-        self, mock_generate_json, mock_get_schema
+        self, mock_build_service
     ):
         client = APIClient()
         schema_id = uuid4()
-        from custom_schemas.models import CustomSchema
-
-        mock_get_schema.side_effect = CustomSchema.DoesNotExist
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = CustomSchemaNotFoundError(
+            "Custom schema not found."
+        )
 
         response = client.post(
             "/llm/generate/",
@@ -127,7 +68,10 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data["detail"], "Custom schema not found.")
-        mock_generate_json.assert_not_called()
+        mock_service.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=schema_id,
+        )
 
     def test_llm_generate_rejects_missing_input_json(self):
         client = APIClient()
@@ -165,9 +109,12 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.data["detail"], "Invalid request payload.")
         self.assertIn("errors", response.data)
 
-    @patch("llm.views.generate_json")
-    def test_llm_generate_returns_503_for_service_error(self, mock_generate_json):
-        mock_generate_json.side_effect = OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_503_for_service_error(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = OpenAIConfigurationError(
+            "OPENAI_API_KEY is not configured."
+        )
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
@@ -175,9 +122,12 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.data["detail"], "Service unavailable. Please try again later.")
 
-    @patch("llm.views.generate_json")
-    def test_llm_generate_returns_502_for_invalid_json_response(self, mock_generate_json):
-        mock_generate_json.side_effect = OpenAIServiceError("OpenAI response is not valid JSON.")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_502_for_invalid_json_response(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = OpenAIServiceError(
+            "OpenAI response is not valid JSON."
+        )
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
@@ -186,9 +136,13 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
 
     @patch("llm.views.logger")
-    @patch("llm.views.generate_json")
-    def test_llm_generate_returns_401_for_upstream_auth_error(self, mock_generate_json, mock_logger):
-        mock_generate_json.side_effect = OpenAIUpstreamError("LLM authentication failed.", status_code=401)
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_401_for_upstream_auth_error(self, mock_build_service, mock_logger):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = OpenAIUpstreamError(
+            "LLM authentication failed.",
+            status_code=401,
+        )
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
@@ -198,9 +152,13 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_logger.exception.assert_called_once_with("Upstream LLM provider error while handling llm_generate request.")
 
     @patch("llm.views.logger")
-    @patch("llm.views.generate_json")
-    def test_llm_generate_returns_429_for_upstream_rate_limit(self, mock_generate_json, mock_logger):
-        mock_generate_json.side_effect = OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429)
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_429_for_upstream_rate_limit(self, mock_build_service, mock_logger):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = OpenAIUpstreamError(
+            "LLM rate limit exceeded.",
+            status_code=429,
+        )
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
@@ -210,9 +168,13 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_logger.exception.assert_called_once_with("Upstream LLM provider error while handling llm_generate request.")
 
     @patch("llm.views.logger")
-    @patch("llm.views.generate_json")
-    def test_llm_generate_returns_504_for_upstream_timeout(self, mock_generate_json, mock_logger):
-        mock_generate_json.side_effect = OpenAIUpstreamError("LLM request timed out.", status_code=504)
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_504_for_upstream_timeout(self, mock_build_service, mock_logger):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = OpenAIUpstreamError(
+            "LLM request timed out.",
+            status_code=504,
+        )
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
@@ -222,9 +184,13 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_logger.exception.assert_called_once_with("Upstream LLM provider error while handling llm_generate request.")
 
     @patch("llm.views.logger")
-    @patch("llm.views.generate_json")
-    def test_llm_generate_logs_upstream_error_without_exposing_exception(self, mock_generate_json, mock_logger):
-        mock_generate_json.side_effect = OpenAIUpstreamError("raw upstream details", status_code=502)
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_logs_upstream_error_without_exposing_exception(self, mock_build_service, mock_logger):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = OpenAIUpstreamError(
+            "raw upstream details",
+            status_code=502,
+        )
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
@@ -237,9 +203,10 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
 
     @patch("llm.views.logger")
-    @patch("llm.views.generate_json")
-    def test_llm_generate_returns_500_for_unexpected_error(self, mock_generate_json, mock_logger):
-        mock_generate_json.side_effect = RuntimeError("upstream error")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_500_for_unexpected_error(self, mock_build_service, mock_logger):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = RuntimeError("upstream error")
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
@@ -249,11 +216,12 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_logger.exception.assert_called_once()
 
     @patch("llm.views.LlmGenerateResponseSerializer")
-    @patch("llm.views.generate_json")
+    @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_502_when_response_serializer_invalid(
-        self, mock_generate_json, mock_response_serializer_class
+        self, mock_build_service, mock_response_serializer_class
     ):
-        mock_generate_json.return_value = {"status": "ok"}
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {"status": "ok"}
         mock_response_serializer = mock_response_serializer_class.return_value
         mock_response_serializer.is_valid.return_value = False
         client = APIClient()
@@ -265,9 +233,12 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_response_serializer_class.assert_called_once_with(data={"output_json": {"status": "ok"}})
 
     @patch("llm.views.logger")
-    @patch("llm.views.generate_json")
-    def test_llm_generate_returns_400_for_value_error(self, mock_generate_json, mock_logger):
-        mock_generate_json.side_effect = ValueError("input_json must be an object or array.")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_400_for_value_error(self, mock_build_service, mock_logger):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = ValueError(
+            "input_json must be an object or array."
+        )
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")

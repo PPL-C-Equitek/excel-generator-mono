@@ -1,7 +1,11 @@
 from rest_framework import serializers
 
 from .models import CustomSchema
-from .services import build_schema_prompt_fragment, validate_schema_definition
+from .services import (
+    CustomSchemaPolicyService,
+    build_schema_prompt_fragment,
+    validate_schema_definition,
+)
 
 
 class CustomSchemaSerializer(serializers.ModelSerializer):
@@ -35,29 +39,25 @@ class CustomSchemaSerializer(serializers.ModelSerializer):
         validate_schema_definition(value)
         return value
 
+    def get_policy_service(self) -> CustomSchemaPolicyService:
+        policy_service = self.context.get("policy_service")
+        if policy_service is not None:
+            return policy_service
+        return CustomSchemaPolicyService()
+
     def validate_name(self, value):
         request = self.context.get("request")
         owner = getattr(request, "user", None)
-        owner_id = getattr(owner, "id", None)
-
-        if (
-            not owner
-            or not getattr(owner, "is_authenticated", False)
-            or owner_id is None
-            or not value
+        exclude_pk = getattr(self.instance, "pk", None)
+        if not self.get_policy_service().has_name_conflict(
+            user=owner,
+            name=value,
+            exclude_pk=exclude_pk,
         ):
             return value
-
-        existing = CustomSchema.objects.filter(owner_id=owner_id, name=value)
-        if self.instance is not None:
-            existing = existing.exclude(pk=self.instance.pk)
-
-        if existing.exists():
-            raise serializers.ValidationError(
-                "Anda sudah memiliki custom schema dengan nama ini."
-            )
-
-        return value
+        raise serializers.ValidationError(
+            "Anda sudah memiliki custom schema dengan nama ini."
+        )
 
     def get_prompt_fragment(self, obj):
         return build_schema_prompt_fragment(obj.definition)
