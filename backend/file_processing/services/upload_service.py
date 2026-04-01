@@ -29,6 +29,8 @@ EXT_PDF = ".pdf"
 EXT_DOCX = ".docx"
 EXT_DOC = ".doc"
 MIME_OCTET_STREAM = "application/octet-stream"
+MIME_OLE_STORAGE = "application/x-ole-storage"
+MIME_ZIP = "application/zip"
 
 ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_DOCX, EXT_DOC]
 ALLOWED_MIME_TYPES = {
@@ -47,14 +49,14 @@ ALLOWED_MIME_TYPES = {
         "application/xls",
         "application/x-xls",
         MIME_OCTET_STREAM,
-        "application/x-ole-storage",
+        MIME_OLE_STORAGE,
         "application/CDFV2",
         "application/vnd.ms-office",
     ],
 
     EXT_XLSX: [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/zip",
+        MIME_ZIP,
         "application/x-zip",
         "application/x-zip-compressed",
         MIME_OCTET_STREAM,
@@ -66,16 +68,17 @@ ALLOWED_MIME_TYPES = {
         "application/vnd.ms-word",
         "application/x-msword",
         MIME_OCTET_STREAM,
-        "application/x-ole-storage",
+        MIME_OLE_STORAGE,
         "application/CDFV2",
     ],
 
     EXT_DOCX: [
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/zip",
+        MIME_ZIP,
         "application/x-zip",
         "application/x-zip-compressed",
         MIME_OCTET_STREAM,
+        MIME_OLE_STORAGE,
     ],
 }
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -94,6 +97,7 @@ MAX_WORD_PAGES = 100
 WORD_CORRUPT_ERROR = "Word file is corrupt or has an invalid structure."
 OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 ZIP_SIGNATURE_PREFIX = b"PK"
+DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
 
 def _has_extracted_text(extracted_data):
     """Return True if any page contains extracted text."""
@@ -445,9 +449,9 @@ def validate_mime_type(uploaded_file, ext):
             if head.startswith(b"%PDF"):
                 mime = "application/pdf"
             elif head.startswith(ZIP_SIGNATURE_PREFIX):
-                mime = "application/zip"
+                mime = MIME_ZIP
             elif head.startswith(OLE_SIGNATURE):
-                mime = "application/x-ole-storage"
+                mime = MIME_OLE_STORAGE
             elif ext in {EXT_XLS, EXT_DOC}:
                 mime = MIME_OCTET_STREAM
             else:
@@ -465,16 +469,16 @@ def validate_mime_type(uploaded_file, ext):
             return False, EXCEL_PASSWORD_PROTECTED_ERROR
 
         if ext == EXT_XLSX and not _has_zip_signature(uploaded_file):
-            return False, "File content does not match its extension."
+            return False, DOES_NOT_MATCH_EXTENSION_ERROR
 
         if ext == EXT_DOC and not _is_ole_container(uploaded_file):
-            return False, "File content does not match its extension."
+            return False, DOES_NOT_MATCH_EXTENSION_ERROR
 
         if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
-            return False, "File content does not match its extension."
+            return False, DOES_NOT_MATCH_EXTENSION_ERROR
 
         if mime not in expected_mimes:
-            return False, "File content does not match its extension."
+            return False, DOES_NOT_MATCH_EXTENSION_ERROR
 
         return True, None
 
