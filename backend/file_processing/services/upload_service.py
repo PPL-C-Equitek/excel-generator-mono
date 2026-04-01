@@ -1,7 +1,6 @@
 import os
 import zipfile
 import xml.etree.ElementTree as ET
-import magic
 import logging
 from uuid import uuid4
 from django.conf import settings
@@ -11,6 +10,16 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+
+try:
+    import magic
+except Exception:  # pragma: no cover - optional dependency in local envs
+    class _MagicShim:
+        @staticmethod
+        def from_buffer(_buffer, mime=True):
+            raise ImportError("python-magic unavailable")
+
+    magic = _MagicShim()
 
 logger = logging.getLogger(__name__)
 
@@ -425,8 +434,26 @@ def _get_xls_sheet_count(uploaded_file):
 def validate_mime_type(uploaded_file, ext):
     try:
         uploaded_file.seek(0)
-        mime = magic.from_buffer(uploaded_file.read(2048), mime=True)
+        head = uploaded_file.read(2048)
         uploaded_file.seek(0)
+
+        try:
+            mime = magic.from_buffer(head, mime=True)
+        except Exception:
+            # Fallback MIME sniffing for environments without libmagic.
+            if head.startswith(b"%PDF"):
+                mime = "application/pdf"
+            elif head.startswith(ZIP_SIGNATURE_PREFIX):
+                mime = "application/zip"
+            elif head.startswith(OLE_SIGNATURE):
+                mime = "application/x-ole-storage"
+            elif ext in {EXT_XLS, EXT_DOC}:
+                mime = "application/octet-stream"
+            else:
+                mime = None
+
+        if not mime:
+            return False, "Unable to determine file type."
 
         expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
 

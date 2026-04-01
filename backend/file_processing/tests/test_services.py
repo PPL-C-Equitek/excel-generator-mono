@@ -20,6 +20,7 @@ from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import upload_service
 
 from file_processing.services.upload_service import (
+    _has_extracted_text,
     _get_empty_page_numbers,
     _has_zip_signature,
     _is_legacy_xls_content,
@@ -1135,3 +1136,372 @@ class TestUploadService(TestCase):
         self.assertEqual(_get_empty_page_numbers(None), [])
         self.assertEqual(_get_empty_page_numbers({}), [])
         self.assertEqual(_get_empty_page_numbers({"other_key": "val"}), [])
+
+
+class TestUploadServiceCoverageGaps(TestCase):
+    def _pdf_file(self):
+        return SimpleUploadedFile("doc.pdf", b"%PDF-1.4\n%%EOF", content_type="application/pdf")
+
+    def _xlsx_file(self):
+        return SimpleUploadedFile(
+            "sheet.xlsx",
+            b"PK\x03\x04dummy",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def test_has_extracted_text_true_and_false(self):
+        self.assertFalse(_has_extracted_text({"content": [{"page": 1, "text": []}]}))
+        self.assertTrue(_has_extracted_text({"content": [{"page": 1, "text": ["ok"]}]}))
+
+    @patch("file_processing.services.upload_service.validate_pdf", return_value=(False, "bad"))
+    def test_process_pdf_short_circuit_on_invalid_pdf(self, _mock_validate_pdf):
+        success, error, data = upload_service._process_pdf("/tmp/f.pdf", self._pdf_file())
+        self.assertFalse(success)
+        self.assertEqual(error, "bad")
+        self.assertIsNone(data)
+
+    @patch("file_processing.services.upload_service.validate_pdf", return_value=(True, None))
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    @patch("file_processing.services.upload_service.OCRService.process_pdf_pages")
+    def test_process_pdf_merges_ocr_for_empty_pages(self, mock_pdf_pages, mock_non_ocr, _mock_validate):
+        mock_non_ocr.return_value = {
+            "content": [
+                {"page": 1, "text": ["native"]},
+                {"page": 2, "text": []},
+            ]
+        }
+        mock_pdf_pages.return_value = {"content": [{"page": 2, "text": ["ocr"]}]}
+
+        success, error, data = upload_service._process_pdf("/tmp/f.pdf", self._pdf_file())
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(data["content"][1]["text"], ["ocr"])
+
+    @patch("file_processing.services.upload_service.validate_file", return_value=(True, None))
+    @patch("file_processing.services.upload_service.save_temp_file", return_value="/tmp/f.pdf")
+    @patch("file_processing.services.upload_service._process_pdf", return_value=(True, None, {"content": []}))
+    @patch("file_processing.services.upload_service.os.path.exists", return_value=False)
+    def test_process_upload_pdf_success_when_temp_already_missing(self, _exists, _proc_pdf, _save, _validate):
+        success, error, _, extracted = upload_service.process_upload(self._pdf_file())
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(extracted, {"content": []})
+
+    @patch("file_processing.services.upload_service.validate_file", return_value=(True, None))
+    @patch("file_processing.services.upload_service.save_temp_file", return_value="/tmp/f.xlsx")
+    @patch("file_processing.services.upload_service.process_uploaded_excel", return_value=(False, "excel bad", None))
+    @patch("file_processing.services.upload_service.os.path.exists", return_value=False)
+    def test_process_upload_excel_failure_direct(self, _exists, _excel, _save, _validate):
+        success, error, _, extracted = upload_service.process_upload(self._xlsx_file())
+        self.assertFalse(success)
+        self.assertEqual(error, "excel bad")
+        self.assertIsNone(extracted)
+
+    @patch("file_processing.services.upload_service.validate_file", return_value=(True, None))
+    @patch("file_processing.services.upload_service.save_temp_file", return_value="/tmp/f.pdf")
+    @patch("file_processing.services.upload_service._process_pdf", return_value=(True, None, {"content": []}))
+    @patch("file_processing.services.upload_service.os.path.exists", return_value=True)
+    @patch("file_processing.services.upload_service.os.remove", side_effect=OSError("cannot remove"))
+    @patch("file_processing.services.upload_service.logger.exception")
+    def test_process_upload_logs_remove_error(self, mock_log, _remove, _exists, _proc_pdf, _save, _validate):
+        success, _error, _, _extracted = upload_service.process_upload(self._pdf_file())
+        self.assertTrue(success)
+        mock_log.assert_called_once()
+
+    @patch("file_processing.services.upload_service.validate_mime_type", return_value=(True, None))
+    def test_validate_file_size_limit(self, _mock_mime):
+        f = SimpleUploadedFile("large.pdf", b"x")
+        f.size = upload_service.MAX_FILE_SIZE + 1
+        is_valid, error = upload_service.validate_file(f)
+        self.assertFalse(is_valid)
+        self.assertEqual(error, upload_service.FILE_TOO_LARGE_ERROR)
+
+    @patch("file_processing.services.upload_service.validate_mime_type", return_value=(True, None))
+    @patch("file_processing.services.upload_service.validate_excel_sheet_count", return_value=(False, "too many"))
+    def test_validate_file_excel_sheet_error(self, _excel_count, _mime):
+        f = SimpleUploadedFile("sheet.xlsx", b"PK", content_type="application/zip")
+        is_valid, error = upload_service.validate_file(f)
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "too many")
+
+    @patch("file_processing.services.upload_service.check_doc_encrypted", return_value=(True, None))
+    @patch("file_processing.services.upload_service.check_doc_structure", return_value=(False, "bad doc"))
+    def test_validate_word_doc_structure_error(self, _structure, _encrypted):
+        is_valid, error = upload_service.validate_word(SimpleUploadedFile("x.doc", b"a"), ".doc")
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "bad doc")
+
+    def test_check_docx_encrypted_non_ole(self):
+        is_valid, error = upload_service.check_docx_encrypted(SimpleUploadedFile("x.docx", b"PK"))
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    def test_check_docx_structure_missing_required_entries(self):
+        content = BytesIO()
+        with zipfile.ZipFile(content, "w") as archive:
+            archive.writestr("docProps/app.xml", "<Properties></Properties>")
+        f = SimpleUploadedFile("broken.docx", content.getvalue(), content_type="application/zip")
+        is_valid, error = upload_service.check_docx_structure(f)
+        self.assertFalse(is_valid)
+        self.assertEqual(error, upload_service.WORD_CORRUPT_ERROR)
+
+    def test_extract_docx_page_count_with_pages_and_without_pages(self):
+        class ArchiveWithPages:
+            def read(self, _name):
+                return b"<Properties><Pages>7</Pages></Properties>"
+
+        class ArchiveNoPages:
+            def read(self, _name):
+                return b"<Properties><Template>Normal</Template></Properties>"
+
+        self.assertEqual(upload_service._extract_docx_page_count(ArchiveWithPages()), 7)
+        self.assertEqual(upload_service._extract_docx_page_count(ArchiveNoPages()), 0)
+
+    def test_check_doc_encrypted_rejects_non_ole(self):
+        is_valid, error = upload_service.check_doc_encrypted(SimpleUploadedFile("x.doc", b"not-ole"))
+        self.assertFalse(is_valid)
+        self.assertEqual(error, upload_service.WORD_CORRUPT_ERROR)
+
+    def test_check_doc_encrypted_valid_doc(self):
+        payload = upload_service.OLE_SIGNATURE + b"WordDocument"
+        is_valid, error = upload_service.check_doc_encrypted(SimpleUploadedFile("x.doc", payload))
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    def test_check_doc_structure_rejects_non_ole_and_handles_exception(self):
+        is_valid, error = upload_service.check_doc_structure(SimpleUploadedFile("x.doc", b"not-ole"))
+        self.assertFalse(is_valid)
+        self.assertEqual(error, upload_service.WORD_CORRUPT_ERROR)
+
+        class BrokenFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("boom")
+
+            def read(self, *_args, **_kwargs):
+                return b""
+
+        with patch("file_processing.services.upload_service._is_ole_container", return_value=True):
+            is_valid2, error2 = upload_service.check_doc_structure(BrokenFile())
+
+        self.assertFalse(is_valid2)
+        self.assertEqual(error2, upload_service.WORD_CORRUPT_ERROR)
+
+    def test_validate_pdf_encrypted_and_too_many_pages(self):
+        encrypted_reader = MagicMock()
+        encrypted_reader.is_encrypted = True
+        with patch("file_processing.services.upload_service.PdfReader", return_value=encrypted_reader):
+            is_valid, error = upload_service.validate_pdf(self._pdf_file())
+            self.assertFalse(is_valid)
+            self.assertIn("password-protected", error)
+
+        many_pages_reader = MagicMock()
+        many_pages_reader.is_encrypted = False
+        type(many_pages_reader).pages = PropertyMock(return_value=[None] * (upload_service.MAX_PDF_PAGES + 1))
+        with patch("file_processing.services.upload_service.PdfReader", return_value=many_pages_reader):
+            is_valid, error = upload_service.validate_pdf(self._pdf_file())
+            self.assertFalse(is_valid)
+            self.assertIn("maximum allowed page count", error)
+
+    def test_check_pdf_helpers(self):
+        encrypted_reader = MagicMock(is_encrypted=True)
+        self.assertEqual(upload_service.check_pdf_encrypted(encrypted_reader), (False, "PDF file is password-protected."))
+        self.assertEqual(upload_service.check_pdf_page_count(upload_service.MAX_PDF_PAGES + 1)[0], False)
+
+    @patch("file_processing.services.upload_service._should_parse_as_xls", return_value=True)
+    @patch("file_processing.services.upload_service._get_xls_sheet_count", return_value=3)
+    def test_validate_excel_sheet_count_xls_path(self, _xls_count, _should_xls):
+        is_valid, error = upload_service.validate_excel_sheet_count(self._xlsx_file(), ".xlsx")
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    @patch("file_processing.services.upload_service._should_parse_as_xls", return_value=False)
+    @patch("file_processing.services.upload_service._get_xlsx_sheet_count", return_value=upload_service.MAX_EXCEL_SHEETS + 1)
+    def test_validate_excel_sheet_count_too_many(self, _xlsx_count, _should_xls):
+        is_valid, error = upload_service.validate_excel_sheet_count(self._xlsx_file(), ".xlsx")
+        self.assertFalse(is_valid)
+        self.assertEqual(error, upload_service.EXCEL_TOO_MANY_SHEETS_ERROR)
+
+    @patch("file_processing.services.upload_service._should_parse_as_xls", side_effect=Exception("bad workbook"))
+    def test_validate_excel_sheet_count_exception(self, _should_xls):
+        is_valid, error = upload_service.validate_excel_sheet_count(self._xlsx_file(), ".xlsx")
+        self.assertFalse(is_valid)
+        self.assertEqual(error, upload_service.EXCEL_CORRUPT_ERROR)
+
+    def test_should_parse_as_xls_branches(self):
+        f = self._xlsx_file()
+        self.assertTrue(upload_service._should_parse_as_xls(f, ".xls"))
+        with patch("file_processing.services.upload_service._is_ole_container", return_value=True), patch(
+            "file_processing.services.upload_service._is_legacy_xls_content", return_value=True
+        ):
+            self.assertTrue(upload_service._should_parse_as_xls(f, ".xlsx"))
+        with patch("file_processing.services.upload_service._is_ole_container", return_value=False):
+            self.assertFalse(upload_service._should_parse_as_xls(f, ".xlsx"))
+
+    def test_get_xlsx_sheet_count(self):
+        buffer = BytesIO()
+        wb = Workbook()
+        wb.create_sheet("S2")
+        wb.save(buffer)
+        f = SimpleUploadedFile("book.xlsx", buffer.getvalue(), content_type="application/zip")
+        self.assertEqual(upload_service._get_xlsx_sheet_count(f), 2)
+
+    @patch("xlrd.open_workbook")
+    def test_get_xls_sheet_count_release_resources_callable_and_not_callable(self, mock_open_workbook):
+        workbook = MagicMock()
+        workbook.nsheets = 4
+        workbook.release_resources = MagicMock()
+        mock_open_workbook.return_value = workbook
+        self.assertEqual(upload_service._get_xls_sheet_count(SimpleUploadedFile("f.xls", b"data")), 4)
+        workbook.release_resources.assert_called_once()
+
+        workbook2 = MagicMock()
+        workbook2.nsheets = 2
+        workbook2.release_resources = None
+        mock_open_workbook.return_value = workbook2
+        self.assertEqual(upload_service._get_xls_sheet_count(SimpleUploadedFile("f.xls", b"data2")), 2)
+
+    def test_validate_mime_type_xlsx_ole_legacy_and_password_protected(self):
+        with patch("file_processing.services.upload_service.magic.from_buffer", return_value="application/zip"), patch(
+            "file_processing.services.upload_service._is_ole_container", return_value=True
+        ), patch("file_processing.services.upload_service._is_legacy_xls_content", return_value=True):
+            ok, err = upload_service.validate_mime_type(self._xlsx_file(), ".xlsx")
+            self.assertTrue(ok)
+            self.assertIsNone(err)
+
+        with patch("file_processing.services.upload_service.magic.from_buffer", return_value="application/zip"), patch(
+            "file_processing.services.upload_service._is_ole_container", return_value=True
+        ), patch("file_processing.services.upload_service._is_legacy_xls_content", return_value=False):
+            ok, err = upload_service.validate_mime_type(self._xlsx_file(), ".xlsx")
+            self.assertFalse(ok)
+            self.assertEqual(err, upload_service.EXCEL_PASSWORD_PROTECTED_ERROR)
+
+    def test_validate_mime_type_xlsx_non_zip_and_unexpected_mime_and_exception(self):
+        with patch("file_processing.services.upload_service.magic.from_buffer", return_value="application/zip"), patch(
+            "file_processing.services.upload_service._is_ole_container", return_value=False
+        ), patch("file_processing.services.upload_service._has_zip_signature", return_value=False):
+            ok, err = upload_service.validate_mime_type(self._xlsx_file(), ".xlsx")
+            self.assertFalse(ok)
+            self.assertIn("does not match", err)
+
+        with patch("file_processing.services.upload_service.magic.from_buffer", return_value="text/plain"), patch(
+            "file_processing.services.upload_service._is_ole_container", return_value=False
+        ), patch("file_processing.services.upload_service._has_zip_signature", return_value=True):
+            ok, err = upload_service.validate_mime_type(self._xlsx_file(), ".xlsx")
+            self.assertFalse(ok)
+            self.assertIn("does not match", err)
+
+        with patch("file_processing.services.upload_service.magic.from_buffer", side_effect=Exception("boom")):
+            ok, err = upload_service.validate_mime_type(
+                SimpleUploadedFile("sheet.xlsx", b"dummy content", content_type="application/octet-stream"),
+                ".xlsx",
+            )
+            self.assertFalse(ok)
+            self.assertIn("Unable to determine", err)
+
+    def test_validate_mime_type_fallback_pdf_ole_octet_none_and_outer_exception(self):
+        with patch("file_processing.services.upload_service.magic.from_buffer", side_effect=Exception("boom")):
+            ok_pdf, err_pdf = upload_service.validate_mime_type(
+                SimpleUploadedFile("doc.pdf", b"%PDF-1.4\n", content_type="application/pdf"),
+                ".pdf",
+            )
+            self.assertTrue(ok_pdf)
+            self.assertIsNone(err_pdf)
+
+            ole_payload = upload_service.OLE_SIGNATURE + b"WordDocument"
+            ok_doc, err_doc = upload_service.validate_mime_type(
+                SimpleUploadedFile("doc.doc", ole_payload, content_type="application/msword"),
+                ".doc",
+            )
+            self.assertTrue(ok_doc)
+            self.assertIsNone(err_doc)
+
+            ok_xls, err_xls = upload_service.validate_mime_type(
+                SimpleUploadedFile("sheet.xls", b"RANDOM", content_type="application/octet-stream"),
+                ".xls",
+            )
+            self.assertTrue(ok_xls)
+            self.assertIsNone(err_xls)
+
+            ok_txt, err_txt = upload_service.validate_mime_type(
+                SimpleUploadedFile("note.txt", b"plain", content_type="text/plain"),
+                ".txt",
+            )
+            self.assertFalse(ok_txt)
+            self.assertIn("Unable to determine", err_txt)
+
+        class BrokenFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("seek failed")
+
+            def read(self, *_args, **_kwargs):
+                return b""
+
+        ok_broken, err_broken = upload_service.validate_mime_type(BrokenFile(), ".pdf")
+        self.assertFalse(ok_broken)
+        self.assertIn("Unable to determine", err_broken)
+
+    def test_has_zip_signature_true(self):
+        self.assertTrue(_has_zip_signature(SimpleUploadedFile("x.zip", b"PKpayload")))
+
+    def test_save_temp_file_success_and_guard(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_dir = upload_service.settings.UPLOAD_TEMP_DIR
+            upload_service.settings.UPLOAD_TEMP_DIR = tmpdir
+            try:
+                f = SimpleUploadedFile("my file.xlsx", b"abc")
+                saved_path = upload_service.save_temp_file(f)
+                self.assertTrue(os.path.exists(saved_path))
+                with open(saved_path, "rb") as saved:
+                    self.assertEqual(saved.read(), b"abc")
+            finally:
+                upload_service.settings.UPLOAD_TEMP_DIR = original_dir
+
+        f2 = SimpleUploadedFile("name.xlsx", b"abc")
+        with patch("file_processing.services.upload_service.os.path.abspath", side_effect=["/safe", "/unsafe/file"]):
+            with self.assertRaises(ValueError):
+                upload_service.save_temp_file(f2)
+
+    @patch("file_processing.services.upload_service.validate_pdf", return_value=(True, None))
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    @patch("file_processing.services.upload_service.OCRService.process_pdf_pages")
+    def test_process_pdf_no_empty_pages_skips_partial_ocr(self, mock_pdf_pages, mock_non_ocr, _mock_validate):
+        mock_non_ocr.return_value = {
+            "content": [
+                {"page": 1, "text": ["native-a"]},
+                {"page": 2, "text": ["native-b"]},
+            ]
+        }
+
+        success, error, data = upload_service._process_pdf("/tmp/f.pdf", self._pdf_file())
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(data["content"][1]["text"], ["native-b"])
+        mock_pdf_pages.assert_not_called()
+
+    @patch("file_processing.services.upload_service.validate_file", return_value=(True, None))
+    @patch("file_processing.services.upload_service.save_temp_file", return_value="/tmp/f.xlsx")
+    @patch("file_processing.services.upload_service.process_uploaded_excel", return_value=(True, None, {"rows": 2}))
+    @patch("file_processing.services.upload_service.os.path.exists", return_value=False)
+    def test_process_upload_excel_success_sets_extracted_data(self, _exists, _excel, _save, _validate):
+        success, error, _, extracted = upload_service.process_upload(self._xlsx_file())
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(extracted, {"rows": 2})
+
+    @patch("file_processing.services.upload_service.validate_mime_type", return_value=(True, None))
+    @patch("file_processing.services.upload_service.validate_excel_sheet_count", return_value=(True, None))
+    def test_validate_file_valid_xlsx_hits_non_word_path(self, _excel_count, _mime):
+        is_valid, error = upload_service.validate_file(self._xlsx_file())
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    def test_check_word_page_count_over_limit(self):
+        is_valid, error = upload_service.check_word_page_count(upload_service.MAX_WORD_PAGES + 1)
+        self.assertFalse(is_valid)
+        self.assertIn("maximum allowed page count", error)
+
+    def test_check_word_page_count_within_limit(self):
+        is_valid, error = upload_service.check_word_page_count(upload_service.MAX_WORD_PAGES)
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
