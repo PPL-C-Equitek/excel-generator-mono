@@ -58,6 +58,7 @@ _EXCEL_FILE_ID_PREFIX = "xlsx_"
 _EXCEL_FILE_NAME_PREFIX = "export_"
 _EXCEL_FILE_EXTENSION = "xlsx"
 _EXCEL_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_EXCEL_DOWNLOAD_FILE_NAME_PATTERN = r"export_[a-z0-9]+\.xlsx"
 _EXCEL_MAX_SHEET_NAME_LENGTH = 31
 _EXCEL_DEFAULT_EMPTY_SHEET_NAME = "Sheet1"
 _DEFAULT_CSV_SANITIZATION_POLICY = CSVSanitizationPolicy()
@@ -731,7 +732,7 @@ def _discover_excel_download_artifacts(base_dir):
                     continue
 
                 entry_name = entry.name.lower()
-                if not re.fullmatch(r"export_[a-z0-9]+\.xlsx", entry_name):
+                if not re.fullmatch(_EXCEL_DOWNLOAD_FILE_NAME_PATTERN, entry_name):
                     continue
 
                 entry_path = os.path.realpath(entry.path)
