@@ -2,6 +2,8 @@ import io
 import json
 import os
 import tempfile
+from unittest.mock import patch, MagicMock
+from file_processing.services.upload_service import _has_binary_signature
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -175,6 +177,26 @@ class NegativeTxtExtractionTests(TestCase):
             self.assertEqual(result, [])
         finally:
             os.remove(path)
+
+    def test_read_lines_invalid_raw_type(self):
+        mock_file = MagicMock()
+        mock_file.read.return_value = None
+        with self.assertRaises(ValueError):
+            parse_txt(mock_file)
+
+    @patch('file_processing.services.txt_service.parse_txt')
+    def test_process_uploaded_txt_unknown_exception(self, mock_parse):
+        mock_parse.side_effect = Exception("System meltdown")
+        success, error, data = process_uploaded_txt("dummy.txt")
+        self.assertFalse(success)
+        self.assertEqual(error, "Invalid or unreadable TXT file.")
+
+    def test_read_lines_seek_attribute_error_handled(self):
+        mock_file = MagicMock()
+        mock_file.read.return_value = "content"
+        del mock_file.seek
+        result = parse_txt(mock_file)
+        self.assertEqual(result, [["content"]])
 
     def test_process_uploaded_txt_empty_file_returns_success_with_empty_list(self):
         path = _make_txt_file("")
@@ -448,6 +470,28 @@ class TxtValidationTests(TestCase):
             response.status_code, 200,
             "File .txt dengan MIME 'text/plain' seharusnya diterima.",
         )
+
+    @patch('file_processing.services.upload_service.magic.from_buffer')
+    def test_txt_mime_fallback_allowed(self, mock_magic):
+        mock_magic.return_value = "application/custom-log"
+        with patch.dict("file_processing.services.upload_service.ALLOWED_MIME_TYPES", {".txt": ["application/custom-log"]}):
+            uploaded = _txt_file("data.txt", b"plain text", "text/plain")
+            resp = self.client.post(UPLOAD_URL, {"file": uploaded})
+            self.assertEqual(resp.status_code, 200)
+
+    @patch('file_processing.services.upload_service.magic.from_buffer')
+    def test_txt_mime_not_allowed(self, mock_magic):
+        mock_magic.return_value = "application/random-illegal"
+        uploaded = _txt_file("data.txt", b"plain text", "text/plain")
+        resp = self.client.post(UPLOAD_URL, {"file": uploaded})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_has_binary_signature_exception_handled_real(self):
+        mock_file = MagicMock()
+        mock_file.read.side_effect = Exception("read crash")
+        is_binary, err = _has_binary_signature(mock_file)
+        self.assertFalse(is_binary)
+        self.assertIsNone(err)
 
     def test_wrong_mime_type_is_rejected(self):
         binary_content = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 64
