@@ -22,4 +22,5 @@ urlpatterns = [
     path('', include('api.urls')),
     path('schemas/', include('custom_schemas.urls')),
     path('llm/', include('llm.urls')),
+    path('auth/', include('authentication.urls')),
 ]
