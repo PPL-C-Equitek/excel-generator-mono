@@ -27,6 +27,10 @@ class OutputCSVDownloadLookupError(Exception):
     """Raised when generated CSV artifact cannot be resolved for download."""
 
 
+class OutputExcelDownloadLookupError(Exception):
+    """Raised when generated Excel artifact cannot be resolved for download."""
+
+
 class CSVSanitizationPolicy:
     """Strategy extension point for CSV header/value sanitization."""
 
@@ -668,6 +672,26 @@ def resolve_csv_download_artifact(file_id, storage_dir):
     raise OutputCSVDownloadLookupError("CSV artifact not found for given file_id.")
 
 
+def resolve_excel_download_artifact(export_id, storage_dir):
+    token = _resolve_excel_download_token(export_id)
+    base_dir = _resolve_excel_download_storage_dir(storage_dir)
+    discovered_artifacts = _discover_excel_download_artifacts(base_dir)
+
+    file_name = f"export_{token}.xlsx"
+    file_path = discovered_artifacts.get(file_name)
+    if file_path:
+        return {
+            "file_name": file_name,
+            "file_path": file_path,
+            "artifact_type": "xlsx",
+            "content_type": (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        }
+
+    raise OutputExcelDownloadLookupError("Excel artifact not found for given export_id.")
+
+
 def _discover_download_artifacts(base_dir):
     discovered = {}
     try:
@@ -693,6 +717,36 @@ def _discover_download_artifacts(base_dir):
                 discovered[entry_name] = entry_path
     except OSError as exc:
         raise OutputCSVDownloadLookupError("CSV artifact storage is unavailable.") from exc
+
+    return discovered
+
+
+def _discover_excel_download_artifacts(base_dir):
+    discovered = {}
+    try:
+        with os.scandir(base_dir) as entries:
+            for entry in entries:
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+
+                entry_name = entry.name.lower()
+                if not re.fullmatch(r"export_[a-z0-9]+\.xlsx", entry_name):
+                    continue
+
+                entry_path = os.path.realpath(entry.path)
+                try:
+                    common_path = os.path.commonpath([base_dir, entry_path])
+                except ValueError:
+                    continue
+
+                if common_path != base_dir:
+                    continue
+
+                discovered[entry_name] = entry_path
+    except OSError as exc:
+        raise OutputExcelDownloadLookupError(
+            "Excel artifact storage is unavailable."
+        ) from exc
 
     return discovered
 
@@ -813,6 +867,13 @@ def _resolve_download_storage_dir(storage_dir):
     return os.path.realpath(os.path.abspath(storage_dir))
 
 
+def _resolve_excel_download_storage_dir(storage_dir):
+    if not isinstance(storage_dir, str) or not storage_dir.strip():
+        raise OutputExcelDownloadLookupError("storage_dir must be a non-empty string.")
+
+    return os.path.realpath(os.path.abspath(storage_dir))
+
+
 def _resolve_export_token(token_generator):
     if token_generator is None:
         token = uuid.uuid4().hex
@@ -841,6 +902,18 @@ def _resolve_download_token(file_id):
     match = re.fullmatch(r"csv_([a-z0-9]+)", normalized_file_id)
     if not match:
         raise OutputCSVDownloadLookupError("file_id format is invalid.")
+
+    return match.group(1)
+
+
+def _resolve_excel_download_token(export_id):
+    if not isinstance(export_id, str) or not export_id.strip():
+        raise OutputExcelDownloadLookupError("export_id must be a non-empty string.")
+
+    normalized_export_id = export_id.strip().lower()
+    match = re.fullmatch(r"xlsx_([a-z0-9]+)", normalized_export_id)
+    if not match:
+        raise OutputExcelDownloadLookupError("export_id format is invalid.")
 
     return match.group(1)
 
