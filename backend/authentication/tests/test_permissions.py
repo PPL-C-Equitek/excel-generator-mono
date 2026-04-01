@@ -20,12 +20,12 @@ class IsVerifiedUserPermissionTest(APISimpleTestCase):
         self.factory = APIRequestFactory()
         self.url = "/dummy-protected-endpoint/"
 
-    def test_unauthenticated_user_returns_403(self):
+    def test_unauthenticated_user_returns_401(self):
         request = self.factory.get(self.url)
         
         response = dummy_protected_view(request)
         
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_authenticated_unverified_user_returns_403(self):
         user = MagicMock()

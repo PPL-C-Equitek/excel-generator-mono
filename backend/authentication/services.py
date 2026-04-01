@@ -22,10 +22,10 @@ def send_verification_email(email):
             import resend
             resend.api_key = resend_api_key
             resend.Emails.send({
-                "from": getattr(settings, "RESEND_FROM_EMAIL", "noreply@example.com"),
+                "from": getattr(settings, "RESEND_FROM_EMAIL", "noreply@excelprojectequitek.my.id"),
                 "to": email,
-                "subject": "Verifikasi Email Anda",
-                "html": f'<p>Klik link berikut untuk verifikasi: <a href="{verification_url}">{verification_url}</a></p>',
+                "subject": "Verify Your Email",
+                "html": f'<p>Click the link below to verify: <a href="{verification_url}">{verification_url}</a></p>',
             })
         else:
             print(f"\n--- VERIFICATION LINK ---\n{verification_url}\n-------------------------\n")

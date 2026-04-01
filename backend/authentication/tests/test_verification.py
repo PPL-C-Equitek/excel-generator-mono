@@ -26,7 +26,7 @@ class VerifyEmailViewTest(APISimpleTestCase):
         response = self.client.get(self.url, {"token": "signed-token-string"})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["message"], "Email berhasil diverifikasi")
+        self.assertEqual(response.data["message"], "Email verified successfully")
         self.assertEqual(mock_user.status, "verified")
         mock_user.save.assert_called_once()
 
@@ -130,7 +130,7 @@ class ResendVerificationViewTest(APISimpleTestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("sudah diverifikasi", response.data["message"].lower())
+        self.assertIn("already verified", response.data["message"].lower())
 
     @patch("authentication.views.User")
     def test_resend_to_nonexistent_email_returns_404(self, mock_user_model):

@@ -2,7 +2,7 @@ from rest_framework.permissions import BasePermission
 
 
 class IsVerifiedUser(BasePermission):
-    message = "Akun Anda belum diverifikasi. Silakan cek email Anda."
+    message = "Your account is not verified. Please check your email."
 
     def has_permission(self, request, view):
         return bool(

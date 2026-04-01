@@ -44,7 +44,7 @@ class RegisterView(APIView):
 
         if User.objects.filter(email=email).exists():
             return Response(
-                {"message": "Email sudah terdaftar"},
+                {"message": "Email is already registered"},
                 status=status.HTTP_409_CONFLICT,
             )
 
@@ -61,19 +61,19 @@ class RegisterView(APIView):
             return Response(
                 {
                     "userId": str(user.id),
-                    "message": "Cek email Anda",
+                    "message": "Please check your email",
                 },
                 status=status.HTTP_201_CREATED,
             )
         except IntegrityError:
             return Response(
-                {"message": "Email sudah terdaftar"},
+                {"message": "Email is already registered"},
                 status=status.HTTP_409_CONFLICT,
             )
         except Exception:
             logger.exception("Unexpected error during user registration.")
             return Response(
-                {"message": "Terjadi kesalahan pada server"},
+                {"message": "An internal server error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -83,7 +83,7 @@ class VerifyEmailView(APIView):
         token = request.query_params.get("token")
         if not token:
             return Response(
-                {"message": "Token tidak ditemukan"},
+                {"message": "Token not found"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -92,12 +92,12 @@ class VerifyEmailView(APIView):
             email = signer.unsign(token, max_age=timedelta(hours=24))
         except SignatureExpired:
             return Response(
-                {"message": "Token expired. Silakan minta verifikasi ulang."},
+                {"message": "Token expired. Please request a new verification email."},
                 status=status.HTTP_410_GONE,
             )
         except BadSignature:
             return Response(
-                {"message": "Token tidak valid"},
+                {"message": "Invalid token"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -105,7 +105,7 @@ class VerifyEmailView(APIView):
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             return Response(
-                {"message": "User tidak ditemukan"},
+                {"message": "User not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -113,7 +113,7 @@ class VerifyEmailView(APIView):
         user.save()
 
         return Response(
-            {"message": "Email berhasil diverifikasi"},
+            {"message": "Email verified successfully"},
             status=status.HTTP_200_OK,
         )
 
@@ -125,7 +125,7 @@ class ResendVerificationView(APIView):
         email = request.data.get("email")
         if not email:
             return Response(
-                {"message": "Email harus diisi"},
+                {"message": "Email is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -133,19 +133,19 @@ class ResendVerificationView(APIView):
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             return Response(
-                {"message": "User tidak ditemukan"},
+                {"message": "User not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         if user.status == "verified":
             return Response(
-                {"message": "Email sudah diverifikasi"},
+                {"message": "Email is already verified"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         send_verification_email(user.email)
 
         return Response(
-            {"message": "Email verifikasi telah dikirim ulang"},
+            {"message": "Verification email has been resent"},
             status=status.HTTP_200_OK,
         )

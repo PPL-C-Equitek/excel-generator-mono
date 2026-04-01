@@ -6,15 +6,15 @@ from rest_framework import serializers
 def validate_password_strength(value):
     if len(value) < 8:
         raise serializers.ValidationError(
-            "Password minimal 8 karakter"
+            "Password must be at least 8 characters long"
         )
     if not re.search(r'[a-zA-Z]', value):
         raise serializers.ValidationError(
-            "Password harus mengandung huruf"
+            "Password must contain at least one letter"
         )
     if not re.search(r'\d', value):
         raise serializers.ValidationError(
-            "Password harus mengandung angka"
+            "Password must contain at least one number"
         )
     return value
 

@@ -31,7 +31,7 @@ class RegisterViewTest(APISimpleTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertIn("userId", response.data)
-        self.assertEqual(response.data["message"], "Cek email Anda")
+        self.assertEqual(response.data["message"], "Please check your email")
 
         mock_user_model.objects.create_user.assert_called_once()
         call_kwargs = mock_user_model.objects.create_user.call_args[1]
@@ -67,7 +67,7 @@ class RegisterViewTest(APISimpleTestCase):
         response = self.client.post(self.url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
-        self.assertEqual(response.data["message"], "Email sudah terdaftar")
+        self.assertEqual(response.data["message"], "Email is already registered")
 
         mock_user_model.objects.filter.assert_called_once_with(
             email="john@example.com"
@@ -80,7 +80,7 @@ class RegisterViewTest(APISimpleTestCase):
         response = self.client.post(self.url, self.valid_payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
-        self.assertEqual(response.data["message"], "Email sudah terdaftar")
+        self.assertEqual(response.data["message"], "Email is already registered")
 
     @patch("authentication.views.send_verification_email")
     @patch("authentication.views.User")
@@ -157,7 +157,7 @@ class RegisterViewTest(APISimpleTestCase):
         response = self.client.post(self.url, self.valid_payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
-        self.assertEqual(response.data["message"], "Terjadi kesalahan pada server")
+        self.assertEqual(response.data["message"], "An internal server error occurred")
 
     @patch("authentication.views.User")
     def test_register_integrity_error_returns_409(self, mock_user_model):
@@ -169,7 +169,7 @@ class RegisterViewTest(APISimpleTestCase):
         response = self.client.post(self.url, self.valid_payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
-        self.assertEqual(response.data["message"], "Email sudah terdaftar")
+        self.assertEqual(response.data["message"], "Email is already registered")
 
 
 class UserManagerTest(APISimpleTestCase):
@@ -190,7 +190,7 @@ class UserManagerTest(APISimpleTestCase):
         with self.assertRaises(ValueError) as ctx:
             User.objects.create_user(email="", name="No Email")
 
-        self.assertIn("Email harus diisi", str(ctx.exception))
+        self.assertIn("Email is required", str(ctx.exception))
 
     @patch.object(User, "save")
     def test_create_user_normalizes_email(self, mock_save):
