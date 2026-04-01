@@ -48,6 +48,18 @@ class EmailNotVerifiedError(AuthenticationError):
     pass
 
 
+class RefreshTokenError(AuthenticationError):
+    pass
+
+
+class RefreshTokenExpiredError(RefreshTokenError):
+    pass
+
+
+class InvalidRefreshTokenError(RefreshTokenError):
+    pass
+
+
 class UserLookupGateway(Protocol):
     def get_by_email(self, email: str) -> User:
         ...
@@ -206,6 +218,40 @@ class LoginService:
             name=user.name,
         )
         return LoginResult(tokens=tokens, user=user_data)
+
+
+class RefreshTokenService:
+    """Issue a new JWT pair from a valid refresh token."""
+
+    algorithms = ["HS256"]
+
+    def __init__(self, token_generator: Callable[[object, str], TokenPayload] = generate_tokens):
+        self.token_generator = token_generator
+
+    def refresh(self, refresh_token: str) -> TokenPayload:
+        payload = self._decode_refresh_token(refresh_token)
+
+        if payload.get("type") != "refresh":
+            raise InvalidRefreshTokenError("Invalid token type.")
+
+        user_id = payload.get("user_id")
+        email = payload.get("email")
+        if not user_id or not email:
+            raise InvalidRefreshTokenError("Invalid token payload.")
+
+        return self.token_generator(user_id, email)
+
+    def _decode_refresh_token(self, refresh_token: str):
+        secret_key = getattr(settings, "JWT_SECRET_KEY", "")
+        if not secret_key:
+            raise InvalidRefreshTokenError("JWT secret is not configured.")
+
+        try:
+            return jwt.decode(refresh_token, secret_key, algorithms=self.algorithms)
+        except jwt.ExpiredSignatureError as exc:
+            raise RefreshTokenExpiredError("Token has expired.") from exc
+        except jwt.InvalidTokenError as exc:
+            raise InvalidRefreshTokenError("Invalid token.") from exc
 
 
 def send_verification_email(email):
