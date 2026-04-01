@@ -681,13 +681,13 @@ def resolve_excel_download_artifact(export_id, storage_dir):
     )
     discovered_artifacts = _discover_excel_download_artifacts(base_dir)
 
-    file_name = f"export_{token}.xlsx"
+    file_name = f"{_EXCEL_FILE_NAME_PREFIX}{token}.{_EXCEL_FILE_EXTENSION}"
     file_path = discovered_artifacts.get(file_name)
     if file_path:
         return {
             "file_name": file_name,
             "file_path": file_path,
-            "artifact_type": "xlsx",
+            "artifact_type": _EXCEL_ARTIFACT_TYPE,
             "content_type": _EXCEL_CONTENT_TYPE,
         }
 
