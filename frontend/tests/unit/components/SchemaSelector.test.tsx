@@ -146,4 +146,97 @@ describe('SchemaSelector', () => {
             expect.objectContaining({ id: 2, name: 'Receipt Mapping' })
         )
     })
+
+    it('shows loading first and then the empty state when no schemas are returned', async () => {
+        let resolveList: ((value: CustomSchemaRecord[]) => void) | null = null
+        const service = createService({
+            list: vi.fn().mockImplementation(
+                () =>
+                    new Promise<CustomSchemaRecord[]>((resolve) => {
+                        resolveList = resolve
+                    })
+            ),
+        })
+
+        render(
+            <SchemaSelector
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        expect(screen.getByText('Loading available schemas...')).toBeInTheDocument()
+
+        resolveList?.([])
+
+        await waitFor(() => {
+            expect(
+                screen.getByText('No saved schemas yet. Create one from the Schema page first.')
+            ).toBeInTheDocument()
+        })
+    })
+
+    it('renders the hook error state when schema loading fails', async () => {
+        const service = createService({
+            list: vi.fn().mockRejectedValue(new Error('Schema load failed.')),
+        })
+
+        render(
+            <SchemaSelector
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        expect(await screen.findByText('Schema load failed.')).toBeInTheDocument()
+    })
+
+    it('falls back to no schema when a previously selected schema disappears', async () => {
+        const user = userEvent.setup()
+        const onSchemaChange = vi.fn()
+        const firstService = createService({
+            list: vi.fn().mockResolvedValue([
+                createSchemaRecord({ id: 2, name: 'Receipt Mapping' }),
+            ]),
+        })
+        const secondService = createService({
+            list: vi.fn().mockResolvedValue([
+                createSchemaRecord({ id: 3, name: 'Other Mapping' }),
+            ]),
+        })
+
+        const { rerender } = render(
+            <SchemaSelector
+                service={firstService}
+                accessTokenResolver={() => 'access-token'}
+                onSchemaChange={onSchemaChange}
+            />
+        )
+
+        const select = await screen.findByTestId('schema-select')
+        await user.selectOptions(select, '2')
+
+        await waitFor(() => {
+            expect(
+                screen.getByRole('heading', { name: 'Receipt Mapping' })
+            ).toBeInTheDocument()
+        })
+
+        rerender(
+            <SchemaSelector
+                service={secondService}
+                accessTokenResolver={() => 'access-token'}
+                onSchemaChange={onSchemaChange}
+            />
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('schema-select')).toHaveValue('none')
+        })
+
+        expect(
+            screen.queryByRole('heading', { name: 'Receipt Mapping' })
+        ).not.toBeInTheDocument()
+        expect(onSchemaChange).toHaveBeenLastCalledWith(null)
+    })
 })
