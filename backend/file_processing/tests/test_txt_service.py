@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from file_processing.services.txt_service import (
@@ -336,3 +337,194 @@ class EdgeCaseTxtExtractionTests(TestCase):
             self.assertEqual(parsed_back[0], ["Test JSON"])
         finally:
             os.remove(path)
+
+UPLOAD_URL = "/upload/"
+
+def _txt_file(name: str, content: bytes, content_type: str = "text/plain") -> SimpleUploadedFile:
+    return SimpleUploadedFile(name, content, content_type=content_type)
+
+
+def _valid_txt_content() -> bytes:
+    return "NIM,Nama,Jurusan\n12345,Alice,Teknik Informatika\n".encode("utf-8")
+
+
+def _docx_like_content() -> bytes:
+    zip_header = b"\x50\x4B\x03\x04"
+    return zip_header + b"\x00" * 100
+
+
+class TxtValidationTests(TestCase):
+
+    def test_txt_extension_is_accepted(self):
+        uploaded = _txt_file("data.txt", _valid_txt_content(), "text/plain")
+        response = self.client.post(UPLOAD_URL, {"file": uploaded})
+        self.assertIn(
+            response.status_code, [200],
+            f"File .txt valid seharusnya diterima, status={response.status_code}",
+        )
+
+    def test_txt_extension_not_rejected_as_unsupported(self):
+        uploaded = _txt_file("laporan.txt", _valid_txt_content(), "text/plain")
+        response = self.client.post(UPLOAD_URL, {"file": uploaded})
+        if response.status_code == 400:
+            body = response.json()
+            msg = body.get("message", "").lower()
+            self.assertNotIn(
+                "unsupported",
+                msg,
+                "Ekstensi .txt seharusnya tidak ditolak sebagai unsupported.",
+            )
+
+    def test_docx_renamed_to_txt_is_rejected(self):
+        fake_txt = _txt_file(
+            "laporan.txt",
+            _docx_like_content(),
+            "text/plain",
+        )
+        response = self.client.post(UPLOAD_URL, {"file": fake_txt})
+        self.assertIn(
+            response.status_code, [400, 415],
+            "File .docx berekstensi .txt seharusnya ditolak oleh sistem.",
+        )
+
+    def test_rejection_message_mentions_content_mismatch(self):
+        fake_txt = _txt_file(
+            "dokumen.txt",
+            _docx_like_content(),
+            "text/plain",
+        )
+        response = self.client.post(UPLOAD_URL, {"file": fake_txt})
+        if response.status_code in [400, 415]:
+            body = response.json()
+            self.assertIn(
+                "message", body,
+                "Respons error harus mengandung kunci 'message'.",
+            )
+            self.assertTrue(
+                len(body["message"]) > 0,
+                "Pesan error tidak boleh kosong.",
+            )
+
+    def test_file_exceeding_10mb_is_rejected(self):
+        oversized = _txt_file(
+            "besar.txt",
+            b"A" * (10 * 1024 * 1024 + 1),
+            "text/plain",
+        )
+        response = self.client.post(UPLOAD_URL, {"file": oversized})
+        self.assertIn(
+            response.status_code, [400, 413],
+            f"File >10 MB seharusnya ditolak, status={response.status_code}",
+        )
+
+    def test_oversize_error_message_is_informative(self):
+        oversized = _txt_file(
+            "terlalu_besar.txt",
+            b"B" * (10 * 1024 * 1024 + 1),
+            "text/plain",
+        )
+        response = self.client.post(UPLOAD_URL, {"file": oversized})
+        if response.status_code in [400, 413]:
+            body = response.json()
+            self.assertIn("message", body)
+            self.assertNotIn("Traceback", body["message"])
+
+    def test_file_exactly_10mb_not_server_error(self):
+        exactly_10mb = _txt_file(
+            "pas10mb.txt",
+            b"C" * (10 * 1024 * 1024),
+            "text/plain",
+        )
+        response = self.client.post(UPLOAD_URL, {"file": exactly_10mb})
+        self.assertNotEqual(
+            response.status_code, 500,
+            "File tepat 10 MB tidak boleh menyebabkan server error.",
+        )
+
+    def test_correct_mime_text_plain_is_accepted(self):
+        uploaded = _txt_file("dokumen.txt", _valid_txt_content(), "text/plain")
+        response = self.client.post(UPLOAD_URL, {"file": uploaded})
+        self.assertEqual(
+            response.status_code, 200,
+            "File .txt dengan MIME 'text/plain' seharusnya diterima.",
+        )
+
+    def test_wrong_mime_type_is_rejected(self):
+        binary_content = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 64
+        fake_txt = _txt_file(
+            "program.txt",
+            binary_content,
+            "application/octet-stream",
+        )
+        response = self.client.post(UPLOAD_URL, {"file": fake_txt})
+        self.assertIn(
+            response.status_code, [400, 415],
+            "File .txt dengan konten binary/MIME salah seharusnya ditolak.",
+        )
+
+    def test_corrupted_txt_file_returns_error(self):
+        corrupted_content = b"\xff\xfe" + b"\x00\x01" * 50
+
+        corrupted = _txt_file(
+            "corrupt.txt",
+            corrupted_content,
+            "text/plain",
+        )
+        response = self.client.post(UPLOAD_URL, {"file": corrupted})
+        self.assertNotEqual(
+            response.status_code, 500,
+            "File corrupt tidak boleh menyebabkan server error (500).",
+        )
+        if response.status_code in [400, 415, 422]:
+            body = response.json()
+            self.assertIn("message", body)
+            self.assertTrue(len(body["message"]) > 0)
+
+    def test_corrupted_file_error_message_is_user_friendly(self):
+        corrupted_content = b"\xc0\xc1\xfe\xff" * 100
+
+        corrupted = _txt_file(
+            "broken.txt",
+            corrupted_content,
+            "text/plain",
+        )
+        response = self.client.post(UPLOAD_URL, {"file": corrupted})
+        if response.status_code not in [200]:
+            body = response.json()
+            error_msg = body.get("message", "")
+            self.assertNotIn("Traceback", error_msg)
+            self.assertNotIn("raise ", error_msg)
+
+    def test_password_protected_txt_is_rejected(self):
+        ole_header = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + b"\x00" * 500
+
+        protected_fake_txt = _txt_file(
+            "protected.txt",
+            ole_header,
+            "text/plain",
+        )
+        response = self.client.post(UPLOAD_URL, {"file": protected_fake_txt})
+        self.assertIn(
+            response.status_code, [400, 415, 422],
+            "File terproteksi/berenkripsi berekstensi .txt harus ditolak.",
+        )
+
+    def test_protected_file_error_message_is_relevant(self):
+        ole_header = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + b"\x00" * 500
+
+        protected_fake_txt = _txt_file(
+            "protected2.txt",
+            ole_header,
+            "text/plain",
+        )
+        response = self.client.post(UPLOAD_URL, {"file": protected_fake_txt})
+        if response.status_code in [400, 415, 422]:
+            body = response.json()
+            self.assertIn(
+                "message", body,
+                "Respons error harus mengandung kunci 'message'.",
+            )
+            self.assertGreater(
+                len(body.get("message", "")), 0,
+                "Pesan error tidak boleh kosong.",
+            )
