@@ -12,19 +12,24 @@ const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 type RegisterFormData = {
   name: string;
   email: string;
-  password: string;
-  confirmPassword: string;
 };
 
 type RegisterFormErrors = {
   name: string;
   email: string;
-  password: string;
-  confirmPassword: string;
   form: string;
 };
 
 type FormSubmitEvent = Parameters<NonNullable<React.ComponentProps<'form'>['onSubmit']>>[0];
+
+type RegisterErrorResponse = {
+  message?: string;
+  errors?: {
+    name?: string[];
+    email?: string[];
+    non_field_errors?: string[];
+  };
+};
 
 function getResendButtonText(isResending: boolean, resendCooldown: number): string {
   if (isResending) return 'Mengirim...';
@@ -39,8 +44,6 @@ export function validateRegistrationForm(formData: RegisterFormData): {
   const errors: RegisterFormErrors = {
     name: '',
     email: '',
-    password: '',
-    confirmPassword: '',
     form: '',
   };
   let isValid = true;
@@ -56,19 +59,6 @@ export function validateRegistrationForm(formData: RegisterFormData): {
     isValid = false;
   } else if (!EMAIL_REGEX.test(trimmedEmail)) {
     errors.email = 'Format email tidak valid';
-    isValid = false;
-  }
-
-  if (!formData.password) {
-    errors.password = 'Password wajib diisi';
-    isValid = false;
-  } else if (formData.password.length < 8) {
-    errors.password = 'Password minimal 8 karakter';
-    isValid = false;
-  }
-
-  if (formData.password !== formData.confirmPassword) {
-    errors.confirmPassword = 'Password tidak cocok';
     isValid = false;
   }
 
@@ -129,15 +119,11 @@ export default function RegisterPage() {
   const [formData, setFormData] = useState<RegisterFormData>({
     name: '',
     email: '',
-    password: '',
-    confirmPassword: '',
   });
 
   const [errors, setErrors] = useState<RegisterFormErrors>({
     name: '',
     email: '',
-    password: '',
-    confirmPassword: '',
     form: '',
   });
 
@@ -184,21 +170,41 @@ export default function RegisterPage() {
       const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL || ''}/auth/register/`, {
         name: formData.name,
         email: formData.email,
-        password: formData.password,
       });
 
       setSuccessMessage(response.data?.message || 'Registrasi berhasil. Cek email Anda.');
     } catch (error: unknown) {
-      const axiosError = error as AxiosError<{ message?: string }>;
-      const message = axiosError.response?.data?.message;
+      const axiosError = error as AxiosError<RegisterErrorResponse>;
+      const responseData = axiosError.response?.data;
+      const message = responseData?.message;
       const status = axiosError.response?.status;
+      const backendErrors = responseData?.errors;
 
-      if (status === 409) {
-        setErrors((prev) => ({ ...prev, form: message || 'Email sudah terdaftar' }));
+      if (status === 429) {
+        setErrors((prev) => ({
+          ...prev,
+          form: message || 'Terlalu banyak percobaan. Coba lagi beberapa menit lagi.',
+        }));
+        return;
+      }
+
+      if (status === 400 && backendErrors) {
+        setErrors((prev) => ({
+          ...prev,
+          name: backendErrors.name?.[0] || prev.name,
+          email: backendErrors.email?.[0] || prev.email,
+          form: backendErrors.non_field_errors?.[0] || message || '',
+        }));
       } else if (status === 400) {
-        setErrors((prev) => ({ ...prev, form: message || 'Data yang dikirimkan tidak valid' }));
+        setErrors((prev) => ({
+          ...prev,
+          form: message || 'Data yang dikirimkan tidak valid',
+        }));
       } else {
-        setErrors((prev) => ({ ...prev, form: message || 'Terjadi kesalahan pada server' }));
+        setErrors((prev) => ({
+          ...prev,
+          form: message || 'Terjadi kesalahan pada server',
+        }));
       }
     } finally {
       setIsLoading(false);
@@ -316,42 +322,6 @@ export default function RegisterPage() {
                     }`}
                   />
                   {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
-                </div>
-
-                <div>
-                  <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700">
-                    Password
-                  </label>
-                  <input
-                    id="password"
-                    name="password"
-                    type="password"
-                    value={formData.password}
-                    onChange={handleChange}
-                    className={`relative block w-full appearance-none rounded-md border px-4 py-2 text-gray-900 placeholder-gray-500 focus:border-red-500 focus:outline-none focus:ring-red-500 sm:text-sm ${
-                      errors.password ? 'border-red-300' : 'border-gray-300'
-                    }`}
-                  />
-                  {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
-                </div>
-
-                <div>
-                  <label htmlFor="confirmPassword" className="mb-1 block text-sm font-medium text-gray-700">
-                    Konfirmasi Password
-                  </label>
-                  <input
-                    id="confirmPassword"
-                    name="confirmPassword"
-                    type="password"
-                    value={formData.confirmPassword}
-                    onChange={handleChange}
-                    className={`relative block w-full appearance-none rounded-md border px-4 py-2 text-gray-900 placeholder-gray-500 focus:border-red-500 focus:outline-none focus:ring-red-500 sm:text-sm ${
-                      errors.confirmPassword ? 'border-red-300' : 'border-gray-300'
-                    }`}
-                  />
-                  {errors.confirmPassword && (
-                    <p className="mt-1 text-sm text-red-600">{errors.confirmPassword}</p>
-                  )}
                 </div>
               </div>
 

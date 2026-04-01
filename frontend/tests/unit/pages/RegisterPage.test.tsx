@@ -9,12 +9,10 @@ import RegisterPage, {
 
 import { vi, describe, test, expect, beforeEach, afterEach, Mock, Mocked } from 'vitest';
 
-// Mock Next.js router
 vi.mock('next/navigation', () => ({
   useRouter: vi.fn(),
 }));
 
-// Mock axios
 vi.mock('axios');
 const mockedAxios = axios as Mocked<typeof axios>;
 
@@ -35,9 +33,7 @@ describe('Registration Page', () => {
     return {
       nameInput: screen.getByLabelText(/nama lengkap/i) as HTMLInputElement,
       emailInput: screen.getByLabelText(/email/i) as HTMLInputElement,
-      passwordInput: screen.getByLabelText(/^password/i) as HTMLInputElement,
-      confirmPasswordInput: screen.getByLabelText(/konfirmasi password/i) as HTMLInputElement,
-      submitBtn: screen.getByRole('button', { name: /daftar/i }),
+      submitBtn: screen.getByRole('button', { name: /daftar sekarang/i }),
     };
   };
 
@@ -82,18 +78,18 @@ describe('Registration Page', () => {
     });
   });
 
-  test('1. renders all required fields and submit button', () => {
-    const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+  test('renders required fields and submit button without password inputs', () => {
+    const { nameInput, emailInput, submitBtn } = setup();
 
     expect(nameInput).toBeInTheDocument();
     expect(emailInput).toBeInTheDocument();
-    expect(passwordInput).toBeInTheDocument();
-    expect(confirmPasswordInput).toBeInTheDocument();
     expect(submitBtn).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/konfirmasi password/i)).not.toBeInTheDocument();
   });
 
-  describe('2. Client-Side Validation', () => {
-    test('shows required error messages if fields are empty upon submission', async () => {
+  describe('client-side validation', () => {
+    test('shows required error messages if fields are empty on submit', async () => {
       const { submitBtn } = setup();
 
       fireEvent.click(submitBtn);
@@ -101,8 +97,8 @@ describe('Registration Page', () => {
       await waitFor(() => {
         expect(screen.getByText(/nama wajib diisi/i)).toBeInTheDocument();
         expect(screen.getByText(/email wajib diisi/i)).toBeInTheDocument();
-        expect(screen.getByText(/password wajib diisi/i)).toBeInTheDocument();
       });
+
       expect(mockedAxios.post).not.toHaveBeenCalled();
     });
 
@@ -116,58 +112,26 @@ describe('Registration Page', () => {
       await waitFor(() => {
         expect(screen.getByText(/format email tidak valid/i)).toBeInTheDocument();
       });
-      expect(mockedAxios.post).not.toHaveBeenCalled();
-    });
 
-    test('shows error if password and confirm password do not match', async () => {
-      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
-      const user = userEvent.setup();
-
-      await user.type(nameInput, 'John Doe');
-      await user.type(emailInput, 'john@example.com');
-      await user.type(passwordInput, 'SecurePass123!');
-      await user.type(confirmPasswordInput, 'DifferentPass123!');
-      
-      fireEvent.click(submitBtn);
-
-      await waitFor(() => {
-        expect(screen.getByText(/password tidak cocok/i)).toBeInTheDocument();
-      });
-      expect(mockedAxios.post).not.toHaveBeenCalled();
-    });
-
-    test('shows error if password is less than 8 characters', async () => {
-      const { passwordInput, submitBtn } = setup();
-      const user = userEvent.setup();
-
-      await user.type(passwordInput, '1234567');
-      fireEvent.click(submitBtn);
-
-      await waitFor(() => {
-        expect(screen.getByText(/password minimal 8 karakter/i)).toBeInTheDocument();
-      });
       expect(mockedAxios.post).not.toHaveBeenCalled();
     });
   });
 
-  describe('3. API Integration and 4. Loading State', () => {
-    test('successful registration shows success message and rendering resend and login links', async () => {
-      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+  describe('API integration and loading state', () => {
+    test('successful registration posts only name/email and shows success block', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
       mockedAxios.post.mockResolvedValueOnce({
-        status: 201,
-        data: { message: 'Cek email Anda' },
+        status: 200,
+        data: { message: 'Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda.' },
       });
 
       await user.type(nameInput, 'John Doe');
       await user.type(emailInput, 'john@example.com');
-      await user.type(passwordInput, 'SecurePass123!');
-      await user.type(confirmPasswordInput, 'SecurePass123!');
 
       fireEvent.click(submitBtn);
 
-      // 4. Loading State (button text changes and becomes disabled while API is in-flight)
       expect(submitBtn).toHaveTextContent(/mendaftar\.\.\./i);
       expect(submitBtn).toBeDisabled();
 
@@ -175,39 +139,46 @@ describe('Registration Page', () => {
         expect(mockedAxios.post).toHaveBeenCalledWith(expect.stringContaining('/auth/register/'), {
           name: 'John Doe',
           email: 'john@example.com',
-          password: 'SecurePass123!',
         });
       });
 
-      // 3. Success Feedback -> shows resend CTA and login link
       await waitFor(() => {
-        expect(screen.getByText(/cek email anda/i)).toBeInTheDocument();
+        expect(screen.getByText(/jika email valid/i)).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /kirim ulang email/i })).toBeInTheDocument();
         expect(screen.getByRole('link', { name: /pergi ke halaman login/i })).toBeInTheDocument();
       });
     });
 
-    test('successful resend verification triggers success message toast', async () => {
-      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+    test('success fallback message is shown when response has no message', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
-      // First, mock the registration
+      mockedAxios.post.mockResolvedValueOnce({ status: 200, data: {} });
+
+      await user.type(nameInput, 'New User');
+      await user.type(emailInput, 'new@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/registrasi berhasil\. cek email anda\./i)).toBeInTheDocument();
+      });
+    });
+
+    test('successful resend verification shows success message', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
       mockedAxios.post.mockResolvedValueOnce({
-        status: 201,
-        data: { message: 'Cek email Anda' },
+        status: 200,
+        data: { message: 'Registrasi berhasil' },
       });
 
       await user.type(nameInput, 'Resend User');
       await user.type(emailInput, 'resend@example.com');
-      await user.type(passwordInput, 'SecurePass123!');
-      await user.type(confirmPasswordInput, 'SecurePass123!');
-
       fireEvent.click(submitBtn);
 
-      // Wait for the Resend button to appear
       const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
 
-      // Mock the resend verification endpoint
       mockedAxios.post.mockResolvedValueOnce({
         status: 200,
         data: { message: 'Email verifikasi telah dikirim ulang' },
@@ -223,20 +194,14 @@ describe('Registration Page', () => {
       });
     });
 
-    test('resend failure shows fallback error message when API response has no message', async () => {
-      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+    test('resend failure uses fallback error message when API has no message', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
-      mockedAxios.post.mockResolvedValueOnce({
-        status: 201,
-        data: { message: 'Cek email Anda' },
-      });
+      mockedAxios.post.mockResolvedValueOnce({ status: 200, data: { message: 'ok' } });
 
       await user.type(nameInput, 'Resend Fail User');
       await user.type(emailInput, 'resendfail@example.com');
-      await user.type(passwordInput, 'SecurePass123!');
-      await user.type(confirmPasswordInput, 'SecurePass123!');
-
       fireEvent.click(submitBtn);
 
       const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
@@ -256,7 +221,7 @@ describe('Registration Page', () => {
     });
 
     test('resend cooldown decreases every second after successful resend', async () => {
-      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
       const setIntervalSpy = vi
@@ -264,24 +229,19 @@ describe('Registration Page', () => {
         .mockImplementation(((callback: TimerHandler) => {
           if (typeof callback === 'function') {
             for (let i = 0; i < 70; i += 1) {
-              callback();
+              (callback as () => void)();
             }
           }
           return 1 as unknown as ReturnType<typeof setInterval>;
-        }) as typeof setInterval);
+        }) as unknown as typeof setInterval);
       const clearIntervalSpy = vi
         .spyOn(global, 'clearInterval')
         .mockImplementation(() => undefined);
 
-      mockedAxios.post.mockResolvedValueOnce({
-        status: 201,
-        data: { message: 'Cek email Anda' },
-      });
+      mockedAxios.post.mockResolvedValueOnce({ status: 200, data: { message: 'ok' } });
 
       await user.type(nameInput, 'Cooldown User');
       await user.type(emailInput, 'cooldown@example.com');
-      await user.type(passwordInput, 'SecurePass123!');
-      await user.type(confirmPasswordInput, 'SecurePass123!');
       fireEvent.click(submitBtn);
 
       const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
@@ -305,18 +265,13 @@ describe('Registration Page', () => {
     });
 
     test('resend success uses fallback message when response has no message', async () => {
-      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
-      mockedAxios.post.mockResolvedValueOnce({
-        status: 201,
-        data: { message: 'Cek email Anda' },
-      });
+      mockedAxios.post.mockResolvedValueOnce({ status: 200, data: { message: 'ok' } });
 
       await user.type(nameInput, 'Resend Fallback User');
       await user.type(emailInput, 'resendfallback@example.com');
-      await user.type(passwordInput, 'SecurePass123!');
-      await user.type(confirmPasswordInput, 'SecurePass123!');
       fireEvent.click(submitBtn);
 
       const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
@@ -334,18 +289,13 @@ describe('Registration Page', () => {
     });
 
     test('resend ignores second click while request is in-flight (guard branch)', async () => {
-      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
-      mockedAxios.post.mockResolvedValueOnce({
-        status: 201,
-        data: { message: 'Cek email Anda' },
-      });
+      mockedAxios.post.mockResolvedValueOnce({ status: 200, data: { message: 'ok' } });
 
       await user.type(nameInput, 'Resend Guard User');
       await user.type(emailInput, 'resendguard@example.com');
-      await user.type(passwordInput, 'SecurePass123!');
-      await user.type(confirmPasswordInput, 'SecurePass123!');
       fireEvent.click(submitBtn);
 
       const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
@@ -370,37 +320,11 @@ describe('Registration Page', () => {
         expect(screen.getByText(/email verifikasi telah dikirim ulang/i)).toBeInTheDocument();
       });
 
-      // still 2 calls: register + first resend only
       expect(mockedAxios.post).toHaveBeenCalledTimes(2);
     });
 
-
-
-    test('shows error when email already exists (409 Conflict)', async () => {
-      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
-      const user = userEvent.setup();
-
-      mockedAxios.post.mockRejectedValueOnce({
-        response: {
-          status: 409,
-          data: { message: 'Email sudah terdaftar' },
-        },
-      });
-
-      await user.type(nameInput, 'Existing User');
-      await user.type(emailInput, 'existing@example.com');
-      await user.type(passwordInput, 'SecurePass123!');
-      await user.type(confirmPasswordInput, 'SecurePass123!');
-
-      fireEvent.click(submitBtn);
-
-      await waitFor(() => {
-        expect(screen.getByText(/email sudah terdaftar/i)).toBeInTheDocument();
-      });
-    });
-
     test('shows error when data is invalid (400 Bad Request)', async () => {
-      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
       mockedAxios.post.mockRejectedValueOnce({
@@ -412,9 +336,6 @@ describe('Registration Page', () => {
 
       await user.type(nameInput, 'Invalid User');
       await user.type(emailInput, 'invalid@example.com');
-      await user.type(passwordInput, 'SecurePass123!');
-      await user.type(confirmPasswordInput, 'SecurePass123!');
-
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
@@ -423,7 +344,7 @@ describe('Registration Page', () => {
     });
 
     test('shows generic error on 500 Server Error', async () => {
-      const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
+      const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
       mockedAxios.post.mockRejectedValueOnce({
@@ -435,56 +356,139 @@ describe('Registration Page', () => {
 
       await user.type(nameInput, 'Server Error User');
       await user.type(emailInput, 'error@example.com');
-      await user.type(passwordInput, 'SecurePass123!');
-      await user.type(confirmPasswordInput, 'SecurePass123!');
-
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
         expect(screen.getByText(/terjadi kesalahan pada server/i)).toBeInTheDocument();
       });
-      
-      // Ensure loading state is reverted when failure occurs
-      expect(submitBtn).toHaveTextContent(/daftar/i);
+
+      expect(submitBtn).toHaveTextContent(/daftar sekarang/i);
       expect(submitBtn).not.toBeDisabled();
     });
 
-    describe('Fallback Messages', () => {
-      test('shows fallback message on 201 when no data.message is provided', async () => {
-        const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
-        const user = userEvent.setup();
-        mockedAxios.post.mockResolvedValueOnce({ status: 201, data: {} });
-        await user.type(nameInput, 'New'); await user.type(emailInput, 'new@example.com'); await user.type(passwordInput, 'Secure123!'); await user.type(confirmPasswordInput, 'Secure123!');
-        fireEvent.click(submitBtn);
-        await waitFor(() => expect(screen.getByText(/Registrasi berhasil. Cek email Anda./i)).toBeInTheDocument());
+    test('shows rate limit fallback message on 429 when no data.message is provided', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 429,
+          data: {},
+        },
       });
 
-      test('shows fallback message on 409 when no data.message is provided', async () => {
-        const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
-        const user = userEvent.setup();
-        mockedAxios.post.mockRejectedValueOnce({ response: { status: 409, data: {} } });
-        await user.type(nameInput, 'Existing'); await user.type(emailInput, 'exist@example.com'); await user.type(passwordInput, 'Secure123!'); await user.type(confirmPasswordInput, 'Secure123!');
-        fireEvent.click(submitBtn);
-        await waitFor(() => expect(screen.getByText(/Email sudah terdaftar/i)).toBeInTheDocument());
+      await user.type(nameInput, 'Rate User');
+      await user.type(emailInput, 'rate@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/terlalu banyak percobaan/i)).toBeInTheDocument();
+      });
+    });
+
+    test('maps backend serializer field errors on 400 response', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 400,
+          data: {
+            errors: {
+              email: ['Format email tidak valid dari backend'],
+              non_field_errors: ['Terjadi kesalahan validasi umum'],
+            },
+          },
+        },
       });
 
-      test('shows fallback message on 400 when no data.message is provided', async () => {
-        const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
-        const user = userEvent.setup();
-        mockedAxios.post.mockRejectedValueOnce({ response: { status: 400, data: {} } });
-        await user.type(nameInput, 'Invalid'); await user.type(emailInput, 'inv@example.com'); await user.type(passwordInput, 'Secure123!'); await user.type(confirmPasswordInput, 'Secure123!');
-        fireEvent.click(submitBtn);
-        await waitFor(() => expect(screen.getByText(/Data yang dikirimkan tidak valid/i)).toBeInTheDocument());
+      await user.type(nameInput, 'Field Error User');
+      await user.type(emailInput, 'fielderror@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/format email tidak valid dari backend/i)).toBeInTheDocument();
+        expect(screen.getByText(/terjadi kesalahan validasi umum/i)).toBeInTheDocument();
+      });
+    });
+
+    test('uses message fallback when non_field_errors is missing in 400 serializer errors', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 400,
+          data: {
+            message: 'Fallback message dari backend',
+            errors: {
+              name: ['Nama backend tidak valid'],
+            },
+          },
+        },
       });
 
-      test('shows fallback message on 500 when no data.message is provided', async () => {
-        const { nameInput, emailInput, passwordInput, confirmPasswordInput, submitBtn } = setup();
-        const user = userEvent.setup();
-        mockedAxios.post.mockRejectedValueOnce({ response: { status: 500, data: {} } });
-        await user.type(nameInput, 'Server'); await user.type(emailInput, 'serv@example.com'); await user.type(passwordInput, 'Secure123!'); await user.type(confirmPasswordInput, 'Secure123!');
-        fireEvent.click(submitBtn);
-        await waitFor(() => expect(screen.getByText(/Terjadi kesalahan pada server/i)).toBeInTheDocument());
+      await user.type(nameInput, 'Fallback User');
+      await user.type(emailInput, 'fallback@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/nama backend tidak valid/i)).toBeInTheDocument();
+        expect(screen.getByText(/fallback message dari backend/i)).toBeInTheDocument();
       });
+    });
+
+    test('keeps form message empty when 400 serializer errors have no non_field_errors and no message', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 400,
+          data: {
+            errors: {
+              name: ['Nama backend invalid kosong message'],
+            },
+          },
+        },
+      });
+
+      await user.type(nameInput, 'Empty Msg User');
+      await user.type(emailInput, 'emptymessage@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/nama backend invalid kosong message/i)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText(/fallback message dari backend/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/data yang dikirimkan tidak valid/i)).not.toBeInTheDocument();
+    });
+
+    test('shows fallback message on 400 when no data.message is provided', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({ response: { status: 400, data: {} } });
+
+      await user.type(nameInput, 'Invalid');
+      await user.type(emailInput, 'inv@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => expect(screen.getByText(/data yang dikirimkan tidak valid/i)).toBeInTheDocument());
+    });
+
+    test('shows fallback message on 500 when no data.message is provided', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({ response: { status: 500, data: {} } });
+
+      await user.type(nameInput, 'Server');
+      await user.type(emailInput, 'serv@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => expect(screen.getByText(/terjadi kesalahan pada server/i)).toBeInTheDocument());
     });
   });
 });

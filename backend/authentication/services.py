@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import quote
 
 from django.conf import settings
 from django.core.signing import TimestampSigner
@@ -14,7 +15,7 @@ def generate_verification_token(email):
 def send_verification_email(email):
     token = generate_verification_token(email)
     frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
-    verification_url = f"{frontend_url}/auth/verify-email?token={token}"
+    verification_url = f"{frontend_url}/auth/verify-email?token={quote(token, safe='')}"
 
     try:
         resend_api_key = getattr(settings, "RESEND_API_KEY", "")

@@ -63,7 +63,7 @@ class SendVerificationEmailTest(SimpleTestCase):
 
         self.assertTrue(any("Failed to send" in msg for msg in log.output))
 
-    @override_settings(FRONTEND_URL="https://myapp.com")
+    @override_settings(RESEND_API_KEY="", FRONTEND_URL="https://myapp.com")
     @patch("builtins.print")
     def test_uses_frontend_url_setting(self, mock_print):
         send_verification_email("user@example.com")
