@@ -109,6 +109,26 @@ function isValidExcelExportResponse(data: unknown): data is ExcelExportResponse 
     );
 }
 
+function assertValidExcelDownloadFileId(fileId: string): void {
+    if (typeof fileId !== "string" || !fileId.startsWith("xlsx_")) {
+        throw new Error("The Excel download request is invalid.");
+    }
+}
+
+function cleanupExcelDownloadResources(
+    downloadAnchor: HTMLAnchorElement | null,
+    objectUrl: string | null,
+    appendedToBody: boolean
+): void {
+    if (downloadAnchor && appendedToBody) {
+        document.body.removeChild(downloadAnchor);
+    }
+
+    if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+    }
+}
+
 /**
  * Mengekspor hasil generasi JSON ke format CSV.
  * Berkomunikasi dengan endpoint REST (POST /export/csv)
@@ -173,9 +193,7 @@ export async function downloadExcelFile(
     fileId: string,
     filename = "export.xlsx"
 ): Promise<void> {
-    if (typeof fileId !== "string" || !fileId.startsWith("xlsx_")) {
-        throw new Error("The Excel download request is invalid.");
-    }
+    assertValidExcelDownloadFileId(fileId);
 
     let objectUrl: string | null = null;
     let downloadAnchor: HTMLAnchorElement | null = null;
@@ -209,13 +227,7 @@ export async function downloadExcelFile(
         }
         throw new Error(EXCEL_DOWNLOAD_ERROR_MESSAGE);
     } finally {
-        if (downloadAnchor && appendedToBody) {
-            document.body.removeChild(downloadAnchor);
-        }
-
-        if (objectUrl) {
-            URL.revokeObjectURL(objectUrl);
-        }
+        cleanupExcelDownloadResources(downloadAnchor, objectUrl, appendedToBody);
     }
 }
 
