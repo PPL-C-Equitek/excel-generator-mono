@@ -12,8 +12,11 @@ from file_processing.utils.image_validators import (
     validate_image_magic_number,
     validate_image_integrity,
 )
-from file_processing.services.image_validation_service import validate_image
-
+from file_processing.services.image_validation_service import (
+    validate_image,
+    validate_image_mime_type,
+)
+from file_processing.services.upload_service import validate_file
 
 def _make_image_bytes(fmt="PNG", size=(100, 100), mode="RGB"):
     """Helper: create real image bytes in the given format."""
@@ -382,6 +385,33 @@ class TestValidateImageIntegrity(SimpleTestCase):
 class TestValidateImageService(SimpleTestCase):
     """validate_image() — orchestrates all image validators."""
 
+    @patch(
+        "file_processing.services.image_validation_service.validate_image_extension",
+        return_value=(False, "Unsupported image format."),
+    )
+    @patch("file_processing.services.image_validation_service.validate_image_size")
+    @patch("file_processing.services.image_validation_service.validate_image_mime_type")
+    @patch("file_processing.services.image_validation_service.validate_image_magic_number")
+    @patch("file_processing.services.image_validation_service.validate_image_integrity")
+    def test_pipeline_short_circuits_on_extension_failure(
+        self,
+        mock_integrity,
+        mock_magic,
+        mock_mime,
+        mock_size,
+        _mock_extension,
+    ):
+        f = _make_uploaded("bad.gif", b"x", "image/gif")
+
+        is_valid, err = validate_image(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(err, "Unsupported image format.")
+        mock_size.assert_not_called()
+        mock_mime.assert_not_called()
+        mock_magic.assert_not_called()
+        mock_integrity.assert_not_called()
+
     def test_valid_png(self):
         content = _make_image_bytes("PNG")
         f = _make_uploaded("photo.png", content, "image/png")
@@ -478,5 +508,113 @@ class TestValidateImageService(SimpleTestCase):
             return_value=(True, None),
         ):
             is_valid, err = validate_image(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+
+class TestValidateImageMimeType(SimpleTestCase):
+    """validate_image_mime_type()"""
+
+    @patch("file_processing.services.image_validation_service.magic.from_buffer")
+    def test_expected_mime_passes_and_resets_pointer(self, mock_from_buffer):
+        mock_from_buffer.return_value = "image/png"
+        f = _make_uploaded("photo.png", b"x" * 4096, "application/octet-stream")
+
+        is_valid, err = validate_image_mime_type(f, ".png")
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+        self.assertEqual(f.tell(), 0)
+
+    @patch("file_processing.services.image_validation_service.magic.from_buffer")
+    def test_mime_mismatch_rejected(self, mock_from_buffer):
+        mock_from_buffer.return_value = "image/jpeg"
+        f = _make_uploaded("photo.png", b"x" * 64, "application/octet-stream")
+
+        is_valid, err = validate_image_mime_type(f, ".png")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(err, "File content does not match its extension.")
+
+    @patch(
+        "file_processing.services.image_validation_service.magic.from_buffer",
+        side_effect=Exception("magic failure"),
+    )
+    def test_magic_exception_returns_unable_to_determine_file_type(self, _mock_from_buffer):
+        f = _make_uploaded("photo.png", b"x" * 64, "application/octet-stream")
+
+        is_valid, err = validate_image_mime_type(f, ".png")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(err, "Unable to determine file type.")
+
+
+class TestValidateFileImageIntegration(SimpleTestCase):
+    """validate_file() must route image extensions to validate_image()."""
+
+    @patch(
+        "file_processing.services.upload_service.validate_image",
+        return_value=(True, None),
+    )
+    def test_png_routed_to_image_validator(self, mock_vi):
+        content = _make_image_bytes("PNG")
+        f = _make_uploaded("test.png", content, "image/png")
+        is_valid, err = validate_file(f)
+        self.assertTrue(is_valid)
+        mock_vi.assert_called_once()
+
+    @patch(
+        "file_processing.services.upload_service.validate_image",
+        return_value=(True, None),
+    )
+    def test_jpg_routed_to_image_validator(self, mock_vi):
+        content = _make_image_bytes("JPEG")
+        f = _make_uploaded("test.jpg", content, "image/jpeg")
+        is_valid, err = validate_file(f)
+        self.assertTrue(is_valid)
+        mock_vi.assert_called_once()
+
+    @patch(
+        "file_processing.services.upload_service.validate_image",
+        return_value=(False, "Bad image"),
+    )
+    def test_image_validation_failure_propagated(self, mock_vi):
+        f = _make_uploaded("bad.png", b"x", "image/png")
+        is_valid, err = validate_file(f)
+        self.assertFalse(is_valid)
+        self.assertEqual(err, "Bad image")
+
+    def test_pdf_still_works(self):
+        """Existing PDF flow must not break."""
+        f = _make_uploaded("doc.pdf", b"%PDF-1.4", "application/pdf")
+        with patch(
+            "file_processing.services.upload_service.validate_mime_type",
+            return_value=(True, None),
+        ):
+            is_valid, err = validate_file(f)
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    def test_xlsx_still_works(self):
+        """Existing Excel flow must not break."""
+        from openpyxl import Workbook
+
+        buf = io.BytesIO()
+        Workbook().save(buf)
+        buf.seek(0)
+        f = _make_uploaded(
+            "sheet.xlsx",
+            buf.read(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        with patch(
+            "file_processing.services.upload_service.validate_mime_type",
+            return_value=(True, None),
+        ):
+            with patch(
+                "file_processing.services.upload_service.validate_excel_sheet_count",
+                return_value=(True, None),
+            ):
+                is_valid, err = validate_file(f)
         self.assertTrue(is_valid)
         self.assertIsNone(err)
