@@ -250,6 +250,14 @@ describe("exportToExcel", () => {
     );
   });
 
+  it("throws error if the excel export response is null", async () => {
+    vi.spyOn(api, "fetchAPI").mockResolvedValue(null);
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "The Excel export response is invalid."
+    );
+  });
+
   it("throws error if file_id does not have 'xlsx_' prefix", async () => {
     server.use(exportExcelInvalidPrefixHandler);
 
@@ -407,6 +415,17 @@ describe("downloadExcelFile", () => {
     await expect(
       excelService.downloadExcelFile("xlsx_12345", "report.xlsx")
     ).rejects.toThrow("Failed to export");
+  });
+
+  it("rethrows invalid download request errors without normalizing them", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValue(new Error("The Excel download request is invalid."));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      excelService.downloadExcelFile("xlsx_12345", "report.xlsx")
+    ).rejects.toThrow("The Excel download request is invalid.");
   });
 
   it("cleans up object urls if browser download setup fails unexpectedly", async () => {
