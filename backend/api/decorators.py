@@ -44,10 +44,7 @@ WINDOW_SECONDS = {
     "seconds": 1,
     "minute": 60,
     "minutes": 60,
-    "15min": 900,
-    "15mins": 900,
-    "15minute": 900,
-    "15minutes": 900,
+    "15 minutes": 900,
 }
 
 
@@ -65,7 +62,7 @@ def _default_key_func(request):
 def _validate_rate_limit_config(max_requests, per, key_func, error_status):
     window = WINDOW_SECONDS.get(str(per).lower())
     if window is None:
-        raise ValueError("per must be one of: second, seconds, minute, minutes")
+        raise ValueError("per must be one of: second, seconds, minute, minutes, 15 minutes")
     if max_requests <= 0:
         raise ValueError("max_requests must be greater than 0")
     if key_func is not None and not callable(key_func):
