@@ -7,6 +7,7 @@ EXT_DOCX = ".docx"
 EXT_DOC = ".doc"
 MAX_WORD_PAGES = 100
 WORD_CORRUPT_ERROR = "Word file is corrupt or has an invalid structure."
+WORD_PROTECTED_ERROR = "Word file is password-protected."
 OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 
 
@@ -38,7 +39,7 @@ class DocxEncryptedValidationHandler(WordValidationHandler):
     def handle(self, context: WordValidationContext) -> Tuple[bool, Optional[str]]:
         # Encrypted OOXML files are wrapped in OLE container, not regular ZIP-based DOCX.
         if is_ole_container(context.uploaded_file):
-            return False, "Word file is password-protected."
+            return False, WORD_PROTECTED_ERROR
         return self._next(context)
 
 
@@ -70,7 +71,7 @@ class DocEncryptedValidationHandler(WordValidationHandler):
             head = context.uploaded_file.read(4096)
             context.uploaded_file.seek(0)
             if b"EncryptedPackage" in head or b"EncryptionInfo" in head:
-                return False, "Word file is password-protected."
+                return False, WORD_PROTECTED_ERROR
         except Exception:
             return False, WORD_CORRUPT_ERROR
 
@@ -137,7 +138,7 @@ def validate_word(uploaded_file: Any, ext: str) -> Tuple[bool, Optional[str]]:
 def check_docx_encrypted(uploaded_file: Any) -> Tuple[bool, Optional[str]]:
     # Encrypted OOXML files are wrapped in OLE container, not regular ZIP-based DOCX.
     if is_ole_container(uploaded_file):
-        return False, "Word file is password-protected."
+        return False, WORD_CORRUPT_ERROR
     return True, None
 
 
@@ -179,7 +180,7 @@ def check_doc_encrypted(uploaded_file: Any) -> Tuple[bool, Optional[str]]:
         head = uploaded_file.read(4096)
         uploaded_file.seek(0)
         if b"EncryptedPackage" in head or b"EncryptionInfo" in head:
-            return False, "Word file is password-protected."
+            return False, WORD_PROTECTED_ERROR
     except Exception:
         return False, WORD_CORRUPT_ERROR
 
