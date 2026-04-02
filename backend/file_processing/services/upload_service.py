@@ -1,6 +1,4 @@
 import os
-import zipfile
-import xml.etree.ElementTree as ET
 import logging
 from uuid import uuid4
 from django.conf import settings
@@ -10,6 +8,7 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+from file_processing.services import word_validation_service
 
 try:
     import magic
@@ -93,8 +92,8 @@ EXCEL_TOO_MANY_SHEETS_ERROR = (
 EXCEL_PASSWORD_PROTECTED_ERROR = (
     "Excel file is password-protected. Please remove the password and try again."
 )
-MAX_WORD_PAGES = 100
-WORD_CORRUPT_ERROR = "Word file is corrupt or has an invalid structure."
+MAX_WORD_PAGES = word_validation_service.MAX_WORD_PAGES
+WORD_CORRUPT_ERROR = word_validation_service.WORD_CORRUPT_ERROR
 OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
@@ -211,122 +210,11 @@ def validate_file(uploaded_file):
             return False, excel_error
 
     if ext in {EXT_DOC, EXT_DOCX}:
-        is_valid_word, word_error = validate_word(uploaded_file, ext)
+        is_valid_word, word_error = word_validation_service.validate_word(uploaded_file, ext)
         if not is_valid_word:
             return False, word_error
 
     return True, None
-
-
-def validate_word(uploaded_file, ext):
-    """Single-parse Word validation: encryption, structure, and page count."""
-    if ext == EXT_DOCX:
-        is_valid, error = check_docx_encrypted(uploaded_file)
-        if not is_valid:
-            return False, error
-
-        is_valid, page_count_or_error = check_docx_structure(uploaded_file)
-        if not is_valid:
-            return False, page_count_or_error
-
-        page_count = page_count_or_error
-    elif ext == EXT_DOC:
-        is_valid, error = check_doc_encrypted(uploaded_file)
-        if not is_valid:
-            return False, error
-
-        is_valid, page_count_or_error = check_doc_structure(uploaded_file)
-        if not is_valid:
-            return False, page_count_or_error
-
-        page_count = page_count_or_error
-    else:
-        return False, "Unsupported file type."
-
-    is_valid, error = check_word_page_count(page_count)
-    if not is_valid:
-        return False, error
-
-    return True, None
-
-
-def check_docx_encrypted(uploaded_file):
-    # Encrypted OOXML files are wrapped in OLE container, not regular ZIP-based DOCX.
-    if _is_ole_container(uploaded_file):
-        return False, "Word file is password-protected."
-    return True, None
-
-
-def check_docx_structure(uploaded_file):
-    try:
-        uploaded_file.seek(0)
-        with zipfile.ZipFile(uploaded_file) as archive:
-            names = set(archive.namelist())
-            if "[Content_Types].xml" not in names or "word/document.xml" not in names:
-                return False, WORD_CORRUPT_ERROR
-
-            page_count = _extract_docx_page_count(archive)
-            return True, page_count
-    except Exception:
-        return False, WORD_CORRUPT_ERROR
-    finally:
-        uploaded_file.seek(0)
-
-
-def _extract_docx_page_count(archive):
-    try:
-        app_xml = archive.read("docProps/app.xml")
-        root = ET.fromstring(app_xml)
-        for element in root.iter():
-            if element.tag.endswith("Pages") and element.text:
-                return max(int(element.text), 0)
-    except Exception:
-        return 0
-
-    return 0
-
-
-def check_doc_encrypted(uploaded_file):
-    if not _is_ole_container(uploaded_file):
-        return False, WORD_CORRUPT_ERROR
-
-    try:
-        uploaded_file.seek(0)
-        head = uploaded_file.read(4096)
-        uploaded_file.seek(0)
-        if b"EncryptedPackage" in head or b"EncryptionInfo" in head:
-            return False, "Word file is password-protected."
-    except Exception:
-        return False, WORD_CORRUPT_ERROR
-
-    return True, None
-
-
-def check_doc_structure(uploaded_file):
-    if not _is_ole_container(uploaded_file):
-        return False, WORD_CORRUPT_ERROR
-
-    try:
-        uploaded_file.seek(0)
-        content = uploaded_file.read(1024 * 1024)
-        uploaded_file.seek(0)
-
-        if b"WordDocument" not in content:
-            return False, WORD_CORRUPT_ERROR
-
-        return True, 0
-    except Exception:
-        return False, WORD_CORRUPT_ERROR
-
-
-def check_word_page_count(page_count):
-    if page_count > MAX_WORD_PAGES:
-        return (
-            False,
-            f"Word exceeds the maximum allowed page count of {MAX_WORD_PAGES}.",
-        )
-    return True, None
-
 
 def validate_pdf(uploaded_file):
     """Single-parse PDF validation: encryption, structure, and page count."""

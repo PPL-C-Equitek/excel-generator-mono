@@ -2,6 +2,7 @@ import os
 import tempfile
 import builtins
 import zipfile
+import unittest
 
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -19,6 +20,10 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import upload_service
 
+
+from file_processing.services import word_validation_service
+
+
 from file_processing.services.upload_service import (
     _has_extracted_text,
     _get_empty_page_numbers,
@@ -28,7 +33,6 @@ from file_processing.services.upload_service import (
     validate_file,
     validate_mime_type,
     validate_pdf,
-    validate_word,
 )
 
 
@@ -524,7 +528,7 @@ class TestUploadService(TestCase):
 
         self.assertFalse(_has_zip_signature(BrokenFile()))
 
-    @patch("file_processing.services.upload_service.validate_word")
+    @patch("file_processing.services.upload_service.word_validation_service.validate_word")
     @patch("file_processing.services.upload_service.validate_mime_type")
     def test_validate_file_accepts_doc_with_valid_stub(
         self, mock_validate_mime, mock_validate_word
@@ -545,7 +549,7 @@ class TestUploadService(TestCase):
         mock_validate_mime.assert_called_once_with(f, ".doc")
         mock_validate_word.assert_called_once_with(f, ".doc")
 
-    @patch("file_processing.services.upload_service.validate_word")
+    @patch("file_processing.services.upload_service.word_validation_service.validate_word")
     @patch("file_processing.services.upload_service.validate_mime_type")
     def test_validate_file_accepts_docx_with_valid_stub(
         self, mock_validate_mime, mock_validate_word
@@ -566,7 +570,7 @@ class TestUploadService(TestCase):
         mock_validate_mime.assert_called_once_with(f, ".docx")
         mock_validate_word.assert_called_once_with(f, ".docx")
 
-    @patch("file_processing.services.upload_service.validate_word")
+    @patch("file_processing.services.upload_service.word_validation_service.validate_word")
     @patch("file_processing.services.upload_service.validate_mime_type")
     def test_validate_file_returns_word_error(self, mock_validate_mime, mock_validate_word):
         mock_validate_mime.return_value = (True, None)
@@ -583,158 +587,112 @@ class TestUploadService(TestCase):
         self.assertFalse(is_valid)
         self.assertEqual(error, "Word file is password-protected.")
 
-    @patch("file_processing.services.upload_service.check_word_page_count")
-    @patch("file_processing.services.upload_service.check_docx_structure")
-    @patch("file_processing.services.upload_service.check_docx_encrypted")
-    def test_validate_word_docx_happy_path(
-        self,
-        mock_check_encrypted,
-        mock_check_structure,
-        mock_check_page_count,
-    ):
-        mock_check_encrypted.return_value = (True, None)
-        mock_check_structure.return_value = (True, 8)
-        mock_check_page_count.return_value = (True, None)
+    def test_validate_word_docx_happy_path(self):
+        content = BytesIO()
+        with zipfile.ZipFile(content, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types></Types>")
+            archive.writestr("word/document.xml", "<w:document></w:document>")
+            archive.writestr("docProps/app.xml", "<Properties><Pages>8</Pages></Properties>")
 
         f = SimpleUploadedFile(
             "contract.docx",
-            b"dummy-docx-content",
+            content.getvalue(),
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
-        is_valid, error = validate_word(f, ".docx")
+        is_valid, error = upload_service.word_validation_service.validate_word(f, ".docx")
 
         self.assertTrue(is_valid)
         self.assertIsNone(error)
-        mock_check_encrypted.assert_called_once_with(f)
-        mock_check_structure.assert_called_once_with(f)
-        mock_check_page_count.assert_called_once_with(8)
 
-    @patch("file_processing.services.upload_service.check_docx_structure")
-    @patch("file_processing.services.upload_service.check_docx_encrypted")
+    @patch("file_processing.services.word_validation_service.zipfile.ZipFile")
+    @patch("file_processing.services.word_validation_service.is_ole_container", return_value=True)
     def test_validate_word_docx_stops_on_encrypted(
         self,
-        mock_check_encrypted,
-        mock_check_structure,
+        _mock_is_ole,
+        mock_zip,
     ):
-        mock_check_encrypted.return_value = (False, "Word file is password-protected.")
-
         f = SimpleUploadedFile(
             "contract.docx",
             b"dummy-docx-content",
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
-        is_valid, error = validate_word(f, ".docx")
+        is_valid, error = upload_service.word_validation_service.validate_word(f, ".docx")
 
         self.assertFalse(is_valid)
         self.assertEqual(error, "Word file is password-protected.")
-        mock_check_structure.assert_not_called()
+        mock_zip.assert_not_called()
 
-    @patch("file_processing.services.upload_service.check_word_page_count")
-    @patch("file_processing.services.upload_service.check_doc_structure")
-    @patch("file_processing.services.upload_service.check_doc_encrypted")
+    @patch(
+        "file_processing.services.word_validation_service.WordPageCountValidationHandler.handle",
+        return_value=(False, "Word exceeds the maximum allowed page count of 100."),
+    )
     def test_validate_word_doc_stops_on_page_count_limit(
         self,
-        mock_check_encrypted,
-        mock_check_structure,
-        mock_check_page_count,
+        mock_page_count,
     ):
-        mock_check_encrypted.return_value = (True, None)
-        mock_check_structure.return_value = (True, 120)
-        mock_check_page_count.return_value = (
-            False,
-            "Word exceeds the maximum allowed page count of 100.",
-        )
-
         f = SimpleUploadedFile(
             "contract.doc",
-            b"dummy-doc-content",
+            upload_service.OLE_SIGNATURE + b"WordDocument",
             content_type="application/msword",
         )
 
-        is_valid, error = validate_word(f, ".doc")
+        is_valid, error = upload_service.word_validation_service.validate_word(f, ".doc")
 
         self.assertFalse(is_valid)
         self.assertEqual(error, "Word exceeds the maximum allowed page count of 100.")
-        mock_check_encrypted.assert_called_once_with(f)
-        mock_check_structure.assert_called_once_with(f)
-        mock_check_page_count.assert_called_once_with(120)
+        mock_page_count.assert_called_once()
 
-    @patch("file_processing.services.upload_service.check_word_page_count")
-    @patch("file_processing.services.upload_service.check_doc_structure")
-    @patch("file_processing.services.upload_service.check_doc_encrypted")
-    def test_validate_word_doc_happy_path(
-        self,
-        mock_check_encrypted,
-        mock_check_structure,
-        mock_check_page_count,
-    ):
-        mock_check_encrypted.return_value = (True, None)
-        mock_check_structure.return_value = (True, 5)
-        mock_check_page_count.return_value = (True, None)
-
+    def test_validate_word_doc_happy_path(self):
         f = SimpleUploadedFile(
             "contract.doc",
-            b"dummy-doc-content",
+            upload_service.OLE_SIGNATURE + b"WordDocument",
             content_type="application/msword",
         )
 
-        is_valid, error = validate_word(f, ".doc")
+        is_valid, error = upload_service.word_validation_service.validate_word(f, ".doc")
 
         self.assertTrue(is_valid)
         self.assertIsNone(error)
-        mock_check_encrypted.assert_called_once_with(f)
-        mock_check_structure.assert_called_once_with(f)
-        mock_check_page_count.assert_called_once_with(5)
 
-    @patch("file_processing.services.upload_service.check_doc_structure")
-    @patch("file_processing.services.upload_service.check_doc_encrypted")
+    @patch("file_processing.services.word_validation_service.DocStructureValidationHandler.handle")
     def test_validate_word_doc_stops_on_encrypted(
         self,
-        mock_check_encrypted,
-        mock_check_structure,
+        mock_doc_structure,
     ):
-        mock_check_encrypted.return_value = (False, "Word file is password-protected.")
-
         f = SimpleUploadedFile(
             "contract.doc",
-            b"dummy-doc-content",
+            upload_service.OLE_SIGNATURE + b"EncryptedPackage",
             content_type="application/msword",
         )
 
-        is_valid, error = validate_word(f, ".doc")
+        is_valid, error = upload_service.word_validation_service.validate_word(f, ".doc")
 
         self.assertFalse(is_valid)
         self.assertEqual(error, "Word file is password-protected.")
-        mock_check_structure.assert_not_called()
+        mock_doc_structure.assert_not_called()
 
-    @patch("file_processing.services.upload_service.check_word_page_count")
-    @patch("file_processing.services.upload_service.check_docx_structure")
-    @patch("file_processing.services.upload_service.check_docx_encrypted")
+    @patch("file_processing.services.word_validation_service.WordPageCountValidationHandler.handle")
     def test_validate_word_docx_stops_on_structure_error(
         self,
-        mock_check_encrypted,
-        mock_check_structure,
-        mock_check_page_count,
+        mock_page_count_handler,
     ):
-        mock_check_encrypted.return_value = (True, None)
-        mock_check_structure.return_value = (
-            False,
-            "Word file is corrupt or has an invalid structure.",
-        )
+        content = BytesIO()
+        with zipfile.ZipFile(content, "w") as archive:
+            archive.writestr("docProps/app.xml", "<Properties><Pages>8</Pages></Properties>")
 
         f = SimpleUploadedFile(
             "contract.docx",
-            b"dummy-docx-content",
+            content.getvalue(),
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
-        is_valid, error = validate_word(f, ".docx")
+        is_valid, error = upload_service.word_validation_service.validate_word(f, ".docx")
 
         self.assertFalse(is_valid)
         self.assertEqual(error, "Word file is corrupt or has an invalid structure.")
-        mock_check_page_count.assert_not_called()
+        mock_page_count_handler.assert_not_called()
 
     def test_validate_word_rejects_unsupported_extension(self):
         f = SimpleUploadedFile(
@@ -743,12 +701,12 @@ class TestUploadService(TestCase):
             content_type="text/plain",
         )
 
-        is_valid, error = validate_word(f, ".txt")
+        is_valid, error = upload_service.word_validation_service.validate_word(f, ".txt")
 
         self.assertFalse(is_valid)
         self.assertEqual(error, "Unsupported file type.")
 
-    @patch("file_processing.services.upload_service._is_ole_container")
+    @patch("file_processing.services.word_validation_service.is_ole_container")
     def test_check_docx_encrypted_rejects_ole_container(self, mock_is_ole):
         mock_is_ole.return_value = True
 
@@ -758,7 +716,7 @@ class TestUploadService(TestCase):
             content_type="application/octet-stream",
         )
 
-        is_valid, error = upload_service.check_docx_encrypted(f)
+        is_valid, error = upload_service.word_validation_service.check_docx_encrypted(f)
 
         self.assertFalse(is_valid)
         self.assertEqual(error, "Word file is password-protected.")
@@ -770,7 +728,7 @@ class TestUploadService(TestCase):
             content_type="application/octet-stream",
         )
 
-        is_valid, error = upload_service.check_docx_structure(f)
+        is_valid, error = upload_service.word_validation_service.check_docx_structure(f)
 
         self.assertFalse(is_valid)
         self.assertEqual(error, "Word file is corrupt or has an invalid structure.")
@@ -788,7 +746,7 @@ class TestUploadService(TestCase):
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
-        is_valid, page_count = upload_service.check_docx_structure(f)
+        is_valid, page_count = upload_service.word_validation_service.check_docx_structure(f)
 
         self.assertTrue(is_valid)
         self.assertEqual(page_count, 0)
@@ -805,7 +763,7 @@ class TestUploadService(TestCase):
             content_type="application/msword",
         )
 
-        is_valid, error = upload_service.check_doc_encrypted(f)
+        is_valid, error = upload_service.word_validation_service.check_doc_encrypted(f)
 
         self.assertFalse(is_valid)
         self.assertEqual(error, "Word file is password-protected.")
@@ -818,8 +776,8 @@ class TestUploadService(TestCase):
             def read(self, *_args, **_kwargs):
                 return b""
 
-        with patch("file_processing.services.upload_service._is_ole_container", return_value=True):
-            is_valid, error = upload_service.check_doc_encrypted(BrokenFile())
+        with patch("file_processing.services.word_validation_service.is_ole_container", return_value=True):
+            is_valid, error = upload_service.word_validation_service.check_doc_encrypted(BrokenFile())
 
         self.assertFalse(is_valid)
         self.assertEqual(error, "Word file is corrupt or has an invalid structure.")
@@ -832,7 +790,7 @@ class TestUploadService(TestCase):
             content_type="application/msword",
         )
 
-        is_valid, error = upload_service.check_doc_structure(f)
+        is_valid, error = upload_service.word_validation_service.check_doc_structure(f)
 
         self.assertFalse(is_valid)
         self.assertEqual(error, "Word file is corrupt or has an invalid structure.")
@@ -845,7 +803,7 @@ class TestUploadService(TestCase):
             content_type="application/msword",
         )
 
-        is_valid, page_count = upload_service.check_doc_structure(f)
+        is_valid, page_count = upload_service.word_validation_service.check_doc_structure(f)
 
         self.assertTrue(is_valid)
         self.assertEqual(page_count, 0)
@@ -1224,15 +1182,15 @@ class TestUploadServiceCoverageGaps(TestCase):
         self.assertFalse(is_valid)
         self.assertEqual(error, "too many")
 
-    @patch("file_processing.services.upload_service.check_doc_encrypted", return_value=(True, None))
-    @patch("file_processing.services.upload_service.check_doc_structure", return_value=(False, "bad doc"))
-    def test_validate_word_doc_structure_error(self, _structure, _encrypted):
-        is_valid, error = upload_service.validate_word(SimpleUploadedFile("x.doc", b"a"), ".doc")
+    @patch("file_processing.services.word_validation_service.DocStructureValidationHandler.handle", return_value=(False, "bad doc"))
+    def test_validate_word_doc_structure_error(self, _structure):
+        payload = upload_service.OLE_SIGNATURE + b"WordDocument"
+        is_valid, error = upload_service.word_validation_service.validate_word(SimpleUploadedFile("x.doc", payload), ".doc")
         self.assertFalse(is_valid)
         self.assertEqual(error, "bad doc")
 
     def test_check_docx_encrypted_non_ole(self):
-        is_valid, error = upload_service.check_docx_encrypted(SimpleUploadedFile("x.docx", b"PK"))
+        is_valid, error = upload_service.word_validation_service.check_docx_encrypted(SimpleUploadedFile("x.docx", b"PK"))
         self.assertTrue(is_valid)
         self.assertIsNone(error)
 
@@ -1241,7 +1199,7 @@ class TestUploadServiceCoverageGaps(TestCase):
         with zipfile.ZipFile(content, "w") as archive:
             archive.writestr("docProps/app.xml", "<Properties></Properties>")
         f = SimpleUploadedFile("broken.docx", content.getvalue(), content_type="application/zip")
-        is_valid, error = upload_service.check_docx_structure(f)
+        is_valid, error = upload_service.word_validation_service.check_docx_structure(f)
         self.assertFalse(is_valid)
         self.assertEqual(error, upload_service.WORD_CORRUPT_ERROR)
 
@@ -1254,22 +1212,22 @@ class TestUploadServiceCoverageGaps(TestCase):
             def read(self, _name):
                 return b"<Properties><Template>Normal</Template></Properties>"
 
-        self.assertEqual(upload_service._extract_docx_page_count(ArchiveWithPages()), 7)
-        self.assertEqual(upload_service._extract_docx_page_count(ArchiveNoPages()), 0)
+        self.assertEqual(upload_service.word_validation_service.extract_docx_page_count(ArchiveWithPages()), 7)
+        self.assertEqual(upload_service.word_validation_service.extract_docx_page_count(ArchiveNoPages()), 0)
 
     def test_check_doc_encrypted_rejects_non_ole(self):
-        is_valid, error = upload_service.check_doc_encrypted(SimpleUploadedFile("x.doc", b"not-ole"))
+        is_valid, error = upload_service.word_validation_service.check_doc_encrypted(SimpleUploadedFile("x.doc", b"not-ole"))
         self.assertFalse(is_valid)
         self.assertEqual(error, upload_service.WORD_CORRUPT_ERROR)
 
     def test_check_doc_encrypted_valid_doc(self):
         payload = upload_service.OLE_SIGNATURE + b"WordDocument"
-        is_valid, error = upload_service.check_doc_encrypted(SimpleUploadedFile("x.doc", payload))
+        is_valid, error = upload_service.word_validation_service.check_doc_encrypted(SimpleUploadedFile("x.doc", payload))
         self.assertTrue(is_valid)
         self.assertIsNone(error)
 
     def test_check_doc_structure_rejects_non_ole_and_handles_exception(self):
-        is_valid, error = upload_service.check_doc_structure(SimpleUploadedFile("x.doc", b"not-ole"))
+        is_valid, error = upload_service.word_validation_service.check_doc_structure(SimpleUploadedFile("x.doc", b"not-ole"))
         self.assertFalse(is_valid)
         self.assertEqual(error, upload_service.WORD_CORRUPT_ERROR)
 
@@ -1280,8 +1238,8 @@ class TestUploadServiceCoverageGaps(TestCase):
             def read(self, *_args, **_kwargs):
                 return b""
 
-        with patch("file_processing.services.upload_service._is_ole_container", return_value=True):
-            is_valid2, error2 = upload_service.check_doc_structure(BrokenFile())
+        with patch("file_processing.services.word_validation_service.is_ole_container", return_value=True):
+            is_valid2, error2 = upload_service.word_validation_service.check_doc_structure(BrokenFile())
 
         self.assertFalse(is_valid2)
         self.assertEqual(error2, upload_service.WORD_CORRUPT_ERROR)
@@ -1497,11 +1455,84 @@ class TestUploadServiceCoverageGaps(TestCase):
         self.assertIsNone(error)
 
     def test_check_word_page_count_over_limit(self):
-        is_valid, error = upload_service.check_word_page_count(upload_service.MAX_WORD_PAGES + 1)
+        is_valid, error = upload_service.word_validation_service.check_word_page_count(upload_service.MAX_WORD_PAGES + 1)
         self.assertFalse(is_valid)
         self.assertIn("maximum allowed page count", error)
 
     def test_check_word_page_count_within_limit(self):
-        is_valid, error = upload_service.check_word_page_count(upload_service.MAX_WORD_PAGES)
+        is_valid, error = upload_service.word_validation_service.check_word_page_count(upload_service.MAX_WORD_PAGES)
         self.assertTrue(is_valid)
         self.assertIsNone(error)
+
+class TestWordValidationService(unittest.TestCase):
+    def _build_valid_docx(self, pages=1):
+        content = BytesIO()
+        with zipfile.ZipFile(content, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types></Types>")
+            archive.writestr("word/document.xml", "<w:document></w:document>")
+            archive.writestr(
+                "docProps/app.xml",
+                f"<Properties><Pages>{pages}</Pages></Properties>",
+            )
+        return content.getvalue()
+
+    def test_validate_word_docx_happy_path(self):
+        f = SimpleUploadedFile(
+            "ok.docx",
+            self._build_valid_docx(pages=8),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = word_validation_service.validate_word(f, ".docx")
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    @patch("file_processing.services.word_validation_service.zipfile.ZipFile")
+    @patch("file_processing.services.word_validation_service.is_ole_container", return_value=True)
+    def test_validate_word_docx_stops_on_encrypted(self, _mock_ole, mock_zip):
+        f = SimpleUploadedFile("enc.docx", b"dummy", content_type="application/octet-stream")
+
+        is_valid, error = word_validation_service.validate_word(f, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Word file is password-protected.")
+        mock_zip.assert_not_called()
+
+    def test_validate_word_doc_too_many_pages_from_chain(self):
+        payload = word_validation_service.OLE_SIGNATURE + b"WordDocument"
+        f = SimpleUploadedFile("x.doc", payload, content_type="application/msword")
+
+        with patch(
+            "file_processing.services.word_validation_service.DocStructureValidationHandler.handle",
+            return_value=(
+                False,
+                f"Word exceeds the maximum allowed page count of {word_validation_service.MAX_WORD_PAGES}.",
+            ),
+        ):
+            is_valid, error = word_validation_service.validate_word(f, ".doc")
+
+        self.assertFalse(is_valid)
+        self.assertIn("maximum allowed page count", error)
+
+    def test_validate_word_rejects_unsupported_extension(self):
+        f = SimpleUploadedFile("x.txt", b"abc", content_type="text/plain")
+
+        is_valid, error = word_validation_service.validate_word(f, ".txt")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Unsupported file type.")
+
+    def test_check_docx_structure_invalid_zip(self):
+        f = SimpleUploadedFile("broken.docx", b"not-zip", content_type="application/octet-stream")
+        is_valid, error = word_validation_service.check_docx_structure(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, word_validation_service.WORD_CORRUPT_ERROR)
+
+    def test_extract_docx_page_count_without_pages_returns_zero(self):
+        class ArchiveNoPages:
+            def read(self, _name):
+                return b"<Properties><Template>Normal</Template></Properties>"
+
+        self.assertEqual(word_validation_service.extract_docx_page_count(ArchiveNoPages()), 0)
