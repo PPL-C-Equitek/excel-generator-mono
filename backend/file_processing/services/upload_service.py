@@ -323,8 +323,55 @@ def _get_xls_sheet_count(uploaded_file):
             release_resources()
         uploaded_file.seek(0)
 
+def validate_mime_type(uploaded_file, ext):
+    try:
+        head = _read_head(uploaded_file)
+        mime = _detect_mime(head, ext)
 
-def fallback_mime_from_head(head, ext):
+        if not mime:
+            return False, "Unable to determine file type."
+
+        expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
+
+        # === IMPORTANT: urutan ini jangan diubah ===
+
+        if ext == EXT_XLSX and _is_ole_container(uploaded_file):
+            if _is_legacy_xls_content(uploaded_file):
+                return True, None
+            return False, EXCEL_PASSWORD_PROTECTED_ERROR
+
+        if ext == EXT_XLSX and not _has_zip_signature(uploaded_file):
+            return False, DOES_NOT_MATCH_EXTENSION_ERROR
+
+        if ext == EXT_DOC and not _is_ole_container(uploaded_file):
+            return False, DOES_NOT_MATCH_EXTENSION_ERROR
+
+        if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
+            return False, DOES_NOT_MATCH_EXTENSION_ERROR
+
+        if mime not in expected_mimes:
+            return False, DOES_NOT_MATCH_EXTENSION_ERROR
+
+        return True, None
+
+    except Exception:
+        return False, "Unable to determine file type."
+
+def _read_head(uploaded_file, size=2048):
+    uploaded_file.seek(0)
+    head = uploaded_file.read(size)
+    uploaded_file.seek(0)
+    return head
+
+
+def _detect_mime(head, ext):
+    try:
+        return magic.from_buffer(head, mime=True)
+    except Exception:
+        return _fallback_mime(head, ext)
+
+
+def _fallback_mime(head, ext):
     if head.startswith(b"%PDF"):
         return "application/pdf"
     if head.startswith(ZIP_SIGNATURE_PREFIX):
@@ -335,61 +382,54 @@ def fallback_mime_from_head(head, ext):
         return MIME_OCTET_STREAM
     return None
 
-
-def detect_mime(head, ext):
-    try:
-        return magic.from_buffer(head, mime=True)
-    except Exception:
-        # Fallback MIME sniffing for environments without libmagic.
-        return fallback_mime_from_head(head, ext)
-
-
-def _validate_extension_signature(uploaded_file, ext):
-    if ext == EXT_XLSX:
-        if _is_ole_container(uploaded_file):
-            if _is_legacy_xls_content(uploaded_file):
-                # Allow legacy .xls content uploaded under .xlsx extension.
-                return True, None
-            return False, EXCEL_PASSWORD_PROTECTED_ERROR
-
-        if not _has_zip_signature(uploaded_file):
-            return False, DOES_NOT_MATCH_EXTENSION_ERROR
-        return True, None
-
-    if ext == EXT_DOC and not _is_ole_container(uploaded_file):
-        return False, DOES_NOT_MATCH_EXTENSION_ERROR
-
-    if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
-        return False, DOES_NOT_MATCH_EXTENSION_ERROR
-
-    return True, None
-
-
-def validate_mime_type(uploaded_file, ext):
-    try:
-        uploaded_file.seek(0)
-        head = uploaded_file.read(2048)
-        uploaded_file.seek(0)
-
-        mime = detect_mime(head, ext)
-
-        if not mime:
-            return False, "Unable to determine file type."
-
-        is_valid_signature, signature_error = _validate_extension_signature(
-            uploaded_file, ext
-        )
-        if not is_valid_signature:
-            return False, signature_error
-
-        expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
-        if mime not in expected_mimes:
-            return False, DOES_NOT_MATCH_EXTENSION_ERROR
-
-        return True, None
-
-    except Exception:
-        return False, "Unable to determine file type."
+# def validate_mime_type(uploaded_file, ext):
+#     try:
+#         uploaded_file.seek(0)
+#         head = uploaded_file.read(2048)
+#         uploaded_file.seek(0)
+        
+#         try:
+#             mime = magic.from_buffer(head, mime=True) 
+#         except Exception:
+#             # Fallback MIME sniffing for environments without libmagic.
+#             if head.startswith(b"%PDF"):
+#                 mime = "application/pdf"
+#             elif head.startswith(ZIP_SIGNATURE_PREFIX):
+#                 mime = MIME_ZIP
+#             elif head.startswith(OLE_SIGNATURE):
+#                 mime = MIME_OLE_STORAGE
+#             elif ext in {EXT_XLS, EXT_DOC}:
+#                 mime = MIME_OCTET_STREAM
+#             else:
+#                 mime = None
+        
+#         if not mime:
+#             return False, "Unable to determine file type."
+        
+#         expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
+        
+#         if ext == EXT_XLSX and _is_ole_container(uploaded_file):
+#             if _is_legacy_xls_content(uploaded_file):
+#                 # Allow legacy .xls content uploaded under .xlsx extension.
+#                 return True, None
+#             return False, EXCEL_PASSWORD_PROTECTED_ERROR
+        
+#         if ext == EXT_XLSX and not _has_zip_signature(uploaded_file):
+#             return False, DOES_NOT_MATCH_EXTENSION_ERROR
+        
+#         if ext == EXT_DOC and not _is_ole_container(uploaded_file):
+#             return False, DOES_NOT_MATCH_EXTENSION_ERROR
+        
+#         if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
+#             return False, DOES_NOT_MATCH_EXTENSION_ERROR
+        
+#         if mime not in expected_mimes:
+#             return False, DOES_NOT_MATCH_EXTENSION_ERROR
+        
+#         return True, None
+    
+#     except Exception:
+#         return False, "Unable to determine file type."
 
 
 def _is_ole_container(uploaded_file):
