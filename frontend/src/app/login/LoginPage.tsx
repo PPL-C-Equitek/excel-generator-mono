@@ -14,8 +14,12 @@ export default function LoginPage() {
             localStorage.setItem('refresh_token', res.refresh_token)
 
             window.location.href = '/convert'
-        } catch (err: any) {
-            alert(err.message)
+        } catch (err: unknown) {
+            if (err instanceof Error) {
+                alert(err.message)
+            } else {
+                alert('Something went wrong')
+            }
         }
     }
 
