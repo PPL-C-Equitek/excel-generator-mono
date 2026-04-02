@@ -6,8 +6,8 @@ from django.utils import timezone
 
 from django.core.signing import TimestampSigner
 from django.test import SimpleTestCase, override_settings
-
-from authentication.services import generate_verification_token, send_verification_email, generate_tokens
+from authentication.models import User
+from authentication.services import RefreshTokenService, generate_verification_token, send_verification_email, generate_tokens, DjangoUserLookupGateway, LoginFailureTracker, InvalidRefreshTokenError
 
 class GenerateVerificationTokenTest(SimpleTestCase):
     def test_generates_signed_token_containing_email(self):
@@ -135,3 +135,60 @@ class GenerateTokensTest(SimpleTestCase):
         expired_token = jwt.encode(expired_payload, self.SECRET_KEY, algorithm="HS256")
         with self.assertRaises(jwt.ExpiredSignatureError):
             jwt.decode(expired_token, self.SECRET_KEY, algorithms=["HS256"])
+
+class DjangoUserLookupGatewayTest(SimpleTestCase):
+    def test_get_by_email_returns_user(self):
+        mock_user = MagicMock(spec=User)
+        with patch("authentication.models.User.objects.get", return_value=mock_user) as mock_get:
+            gateway = DjangoUserLookupGateway()
+            result = gateway.get_by_email("user@example.com")
+
+        mock_get.assert_called_once_with(email="user@example.com")
+        self.assertEqual(result, mock_user)
+
+class GenerateTokensMissingSecretKeyTest(SimpleTestCase):
+    def test_raises_value_error_when_jwt_secret_key_not_configured(self):
+        with self.settings(JWT_SECRET_KEY=None):
+            with self.assertRaises(ValueError, msg="JWT_SECRET_KEY is not configured"):
+                generate_tokens(uuid.uuid4(), "user@example.com")
+
+class LoginFailureTrackerCacheBackendTest(SimpleTestCase):
+    def test_get_cache_backend_returns_cache(self):
+        from django.core.cache import cache
+        result = LoginFailureTracker.get_cache_backend()
+        self.assertIs(result, cache)
+
+class RefreshTokenServiceTest(SimpleTestCase):
+    SECRET_KEY = "test-secret-key"
+
+    def _make_refresh_token(self, payload_override=None):
+        """Helper: buat refresh token valid dengan override payload opsional."""
+        now = int(timezone.now().timestamp())
+        payload = {
+            "user_id": str(uuid.uuid4()),
+            "email": "user@example.com",
+            "type": "refresh",
+            "iat": now,
+            "exp": now + 7 * 86400,
+        }
+        if payload_override:
+            payload.update(payload_override)
+        return jwt.encode(payload, self.SECRET_KEY, algorithm="HS256")
+
+    def test_raises_when_jwt_secret_key_not_configured(self):
+        token = self._make_refresh_token()
+        with self.settings(JWT_SECRET_KEY=""):
+            with self.assertRaises(InvalidRefreshTokenError, msg="JWT secret is not configured."):
+                RefreshTokenService().refresh(token)
+
+    def test_raises_when_payload_missing_user_id(self):
+        token = self._make_refresh_token({"user_id": ""})
+        with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
+            with self.assertRaises(InvalidRefreshTokenError, msg="Invalid token payload."):
+                RefreshTokenService().refresh(token)
+
+    def test_raises_when_payload_missing_email(self):
+        token = self._make_refresh_token({"email": ""})
+        with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
+            with self.assertRaises(InvalidRefreshTokenError, msg="Invalid token payload."):
+                RefreshTokenService().refresh(token)
