@@ -71,9 +71,23 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
   });
 
   if (!res.ok) {
-    const error = new Error("Request failed. Please try again.") as HTTPError;
-    error.status = res.status;
-    throw error;
+    let message = "Request failed. Please try again."
+
+    try {
+      const data = await res.json()
+      message =
+        typeof data?.message === "string"
+          ? data.message
+          : typeof data?.detail === "string"
+            ? data.detail
+            : message
+    } catch {
+      // ignore JSON parse error
+    }
+
+    const error = new Error(message) as HTTPError
+    error.status = res.status
+    throw error
   }
 
   return res.json();
@@ -113,3 +127,10 @@ export async function uploadFile(file: File, options?: RequestInit) {
 type HTTPError = Error & {
   status?: number;
 };
+
+export async function login(email: string, password: string) {
+  return fetchAPI("auth/login/", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
