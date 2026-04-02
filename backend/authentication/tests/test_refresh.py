@@ -1,5 +1,6 @@
 import uuid
 from datetime import timedelta
+from unittest.mock import patch
 
 import jwt
 from django.test import SimpleTestCase, override_settings
@@ -106,4 +107,33 @@ class RefreshTokenViewTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertIn("expired", response.data["message"].lower())
+        
+    @patch("authentication.views.RefreshTokenService")
+    def test_refresh_unexpected_error_returns_500(self, mock_service_class):
+        mock_service_class.return_value.refresh.side_effect = Exception("Unexpected error")
 
+        with override_settings(JWT_SECRET_KEY=SECRET_KEY):
+            response = self.client.post(
+                self.url,
+                {"refresh_token": "any.token.value"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertIn("message", response.data)
+
+    @patch("authentication.views.RefreshTokenService")
+    def test_refresh_unexpected_error_logs_exception(self, mock_service_class):
+        mock_service_class.return_value.refresh.side_effect = Exception("DB failure")
+
+        with override_settings(JWT_SECRET_KEY=SECRET_KEY):
+            with self.assertLogs("authentication.views", level="ERROR") as log:
+                self.client.post(
+                    self.url,
+                    {"refresh_token": "any.token.value"},
+                    format="json",
+                )
+
+        self.assertTrue(
+            any("Unexpected error during refresh token exchange" in msg for msg in log.output)
+        )
