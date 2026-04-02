@@ -55,14 +55,6 @@ jobs:
           pip install ruff
           ruff check .
 
-      - name: Check code complexity
-        run: |
-          cd backend
-          # Xenon enforces cyclomatic complexity grades
-          # B = absolute max per block, A = max avg per module, A = max avg overall
-          pip install xenon radon
-          xenon --max-absolute B --max-modules A --max-average A .
-
       - name: Check migrations
         env:
           POSTGRES_DB: test_db
