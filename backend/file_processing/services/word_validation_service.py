@@ -138,7 +138,7 @@ def validate_word(uploaded_file: Any, ext: str) -> Tuple[bool, Optional[str]]:
 def check_docx_encrypted(uploaded_file: Any) -> Tuple[bool, Optional[str]]:
     # Encrypted OOXML files are wrapped in OLE container, not regular ZIP-based DOCX.
     if is_ole_container(uploaded_file):
-        return False, WORD_CORRUPT_ERROR
+        return False, WORD_PROTECTED_ERROR
     return True, None
 
 
