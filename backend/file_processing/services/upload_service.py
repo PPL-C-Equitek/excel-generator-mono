@@ -382,56 +382,6 @@ def _fallback_mime(head, ext):
         return MIME_OCTET_STREAM
     return None
 
-# def validate_mime_type(uploaded_file, ext):
-#     try:
-#         uploaded_file.seek(0)
-#         head = uploaded_file.read(2048)
-#         uploaded_file.seek(0)
-        
-#         try:
-#             mime = magic.from_buffer(head, mime=True) 
-#         except Exception:
-#             # Fallback MIME sniffing for environments without libmagic.
-#             if head.startswith(b"%PDF"):
-#                 mime = "application/pdf"
-#             elif head.startswith(ZIP_SIGNATURE_PREFIX):
-#                 mime = MIME_ZIP
-#             elif head.startswith(OLE_SIGNATURE):
-#                 mime = MIME_OLE_STORAGE
-#             elif ext in {EXT_XLS, EXT_DOC}:
-#                 mime = MIME_OCTET_STREAM
-#             else:
-#                 mime = None
-        
-#         if not mime:
-#             return False, "Unable to determine file type."
-        
-#         expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
-        
-#         if ext == EXT_XLSX and _is_ole_container(uploaded_file):
-#             if _is_legacy_xls_content(uploaded_file):
-#                 # Allow legacy .xls content uploaded under .xlsx extension.
-#                 return True, None
-#             return False, EXCEL_PASSWORD_PROTECTED_ERROR
-        
-#         if ext == EXT_XLSX and not _has_zip_signature(uploaded_file):
-#             return False, DOES_NOT_MATCH_EXTENSION_ERROR
-        
-#         if ext == EXT_DOC and not _is_ole_container(uploaded_file):
-#             return False, DOES_NOT_MATCH_EXTENSION_ERROR
-        
-#         if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
-#             return False, DOES_NOT_MATCH_EXTENSION_ERROR
-        
-#         if mime not in expected_mimes:
-#             return False, DOES_NOT_MATCH_EXTENSION_ERROR
-        
-#         return True, None
-    
-#     except Exception:
-#         return False, "Unable to determine file type."
-
-
 def _is_ole_container(uploaded_file):
     """Return True if file starts with OLE Compound File signature."""
     try:
