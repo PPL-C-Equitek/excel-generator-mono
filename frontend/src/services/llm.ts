@@ -121,7 +121,7 @@ function cleanupExcelDownloadResources(
     appendedToBody: boolean
 ): void {
     if (downloadAnchor && appendedToBody) {
-        document.body.removeChild(downloadAnchor);
+        downloadAnchor.remove();
     }
 
     if (objectUrl) {
