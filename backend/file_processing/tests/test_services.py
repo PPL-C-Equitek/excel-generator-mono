@@ -978,7 +978,6 @@ class TestUploadService(TestCase):
         mock_ocr.return_value = {"text": "ocr"}
 
         pdf_doc = self.generate_valid_pdf_bytes()
-
         f = SimpleUploadedFile(
             "doc.pdf",
             pdf_doc,
