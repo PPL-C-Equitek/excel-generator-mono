@@ -357,7 +357,7 @@ describe("downloadExcelFile", () => {
     });
 
     const anchor = originalCreateElement("a");
-    const clickSpy = vi.spyOn(anchor, "click").mockImplementation(() => {});
+    const clickSpy = vi.spyOn(anchor, "click").mockImplementation(() => { });
     vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
       if (tagName.toLowerCase() === "a") {
         return anchor;
@@ -370,8 +370,8 @@ describe("downloadExcelFile", () => {
       .spyOn(document.body, "appendChild")
       .mockImplementation((node: Node) => node);
     const removeSpy = vi
-      .spyOn(document.body, "removeChild")
-      .mockImplementation((node: Node) => node);
+      .spyOn(anchor, "remove")
+      .mockImplementation(() => { });
 
     await excelService.downloadExcelFile("xlsx_12345", "report.xlsx");
 
@@ -384,7 +384,7 @@ describe("downloadExcelFile", () => {
     expect(anchor.href).toBe("blob:excel-file");
     expect(appendSpy).toHaveBeenCalledWith(anchor);
     expect(clickSpy).toHaveBeenCalledTimes(1);
-    expect(removeSpy).toHaveBeenCalledWith(anchor);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:excel-file");
   });
 
@@ -476,11 +476,11 @@ describe("getDownloadUrl", () => {
     // We can simulate it by setting a malformed NEXT_PUBLIC_API_URL temporarily if doing so is simple:
     const original = process.env.NEXT_PUBLIC_API_URL;
     process.env.NEXT_PUBLIC_API_URL = "htt   p://in^valid\nurl"; // triggers URL constructor error
-    
+
     // Note: getDownloadUrl initializes NEXT_PUBLIC_API_URL locally in its body each call
     const url = getDownloadUrl("csv_abc");
     expect(url).toBe("http://localhost:8000/export/csv/csv_abc/download");
-    
+
     process.env.NEXT_PUBLIC_API_URL = original;
   });
 });
