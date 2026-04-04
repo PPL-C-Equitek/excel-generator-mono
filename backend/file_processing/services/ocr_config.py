@@ -4,6 +4,8 @@ Centralized OCR configuration.
 All OCR-related settings are defined here so they can be tuned in one place.
 """
 
+import os
+
 # Tesseract settings
 # OEM 3 = Default, uses whatever is available (Legacy + LSTM).
 TESSERACT_OEM = 3
@@ -14,8 +16,13 @@ TESSERACT_OEM = 3
 TESSERACT_PSM_MODES = [3, 6, 4]
 # Legacy single PSM for backward-compatibility.
 TESSERACT_PSM = 3
-# Language model — English + Indonesian.
-TESSERACT_LANG = "eng+ind"
+# Language model (env override supported).
+TESSERACT_LANG = os.getenv("TESSERACT_LANG", "eng+ind")
+
+
+def get_tesseract_lang() -> str:
+    """Return current Tesseract language setting."""
+    return os.getenv("TESSERACT_LANG", TESSERACT_LANG)
 
 def get_tesseract_config(psm: int | None = None):
     """Return Tesseract CLI config string built from the settings above."""
@@ -69,3 +76,9 @@ CONFIDENCE_THRESHOLD = 40.0
 # Minimum average characters per page from PyPDF2 text extraction before
 # treating the PDF as "scanned" and switching to OCR.
 TEXT_LAYER_MIN_CHARS_PER_PAGE = 50
+
+# Standalone image OCR preprocessing
+IMAGE_OCR_APPLY_THRESHOLD = (
+    os.getenv("IMAGE_OCR_APPLY_THRESHOLD", "true").strip().lower() in {"1", "true", "yes"}
+)
+IMAGE_OCR_THRESHOLD = int(os.getenv("IMAGE_OCR_THRESHOLD", "180"))
