@@ -6,6 +6,7 @@ from django.test import SimpleTestCase
 from PIL import Image
 
 from file_processing.extractors.image_extractor import ImageExtractor
+from file_processing.extractors.image_preprocessors import GrayscaleThresholdPreprocessor
 from file_processing.extractors.ocr.base_ocr_engine import BaseOCREngine
 from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
 from file_processing.services.upload_service import _process_image
@@ -37,7 +38,7 @@ class TestImageExtractor(SimpleTestCase):
         try:
             extractor = ImageExtractor(
                 ocr_engine=_DummyEngine("line one\nline two", 97.5),
-                apply_thresholding=False,
+                preprocessor=GrayscaleThresholdPreprocessor(apply_thresholding=False),
             )
 
             result = extractor.extract(path)

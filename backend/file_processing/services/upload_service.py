@@ -2,7 +2,6 @@ import os
 import magic
 import logging
 from uuid import uuid4
-from PIL import UnidentifiedImageError
 from django.conf import settings
 from django.utils.text import get_valid_filename
 from .excel_service import process_uploaded_excel
@@ -126,8 +125,6 @@ def _process_image(file_path):
         extractor = ImageExtractor()
         extracted_data = extractor.extract(file_path)
         return True, None, extracted_data
-    except (UnidentifiedImageError, OSError):
-        return False, "Image file is corrupted or unreadable.", None
     except ValueError as exc:
         return False, str(exc), None
     except Exception:
