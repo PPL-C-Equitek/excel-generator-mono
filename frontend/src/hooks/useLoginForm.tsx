@@ -18,11 +18,21 @@ export default function useLoginForm(options?: UseLoginFormOptions) {
 
     const handleSubmit = () => {
         setError(null)
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+        // Batasi panjang email
+        if (!email || email.length > 254) {
+            setError('Please enter a valid email address.')
+            return
+        }
+
+        // Validasi email
+        const emailRegex = /^[^\s@]{1,64}@[^\s@]{1,63}(?:\.[^\s@]{1,63})+$/
         if (!email || !emailRegex.test(email)) {
             setError('Please enter a valid email address.')
             return
         }
+
+        // Validasi password
         if (!password) {
             setError('Password is required.')
             return

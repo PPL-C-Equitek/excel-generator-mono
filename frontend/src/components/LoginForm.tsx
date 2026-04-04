@@ -22,9 +22,15 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: LoginFormProps) 
     const handleSubmit = () => {
         setError(null)
 
+        // Batasi panjang email
+        if (!email || email.length > 254) {
+            setError('Please enter a valid email address.')
+            return
+        }
+
         // Validasi email
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-        if (!email || !emailRegex.test(email)) {
+        const emailRegex = /^[^\s@]{1,64}@[^\s@]{1,63}(?:\.[^\s@]{1,63})+$/
+        if (!emailRegex.test(email)) {
             setError('Please enter a valid email address.')
             return
         }
