@@ -75,12 +75,11 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
 
     try {
       const data = await res.json()
-      message =
-        typeof data?.message === "string"
-          ? data.message
-          : typeof data?.detail === "string"
-            ? data.detail
-            : message
+      if (typeof data?.message === "string") {
+        message = data.message
+      } else if (typeof data?.detail === "string") {
+        message = data.detail
+      }
     } catch {
       // ignore JSON parse error
     }
