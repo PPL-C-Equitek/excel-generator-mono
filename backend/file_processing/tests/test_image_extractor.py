@@ -96,6 +96,29 @@ class TestImageExtractor(SimpleTestCase):
             os.unlink(path)
 
 
+class TestImagePreprocessor(SimpleTestCase):
+    def test_base_preprocessor_is_abstract(self):
+        from file_processing.extractors.image_preprocessors import BaseImagePreprocessor
+
+        with self.assertRaises(TypeError):
+            BaseImagePreprocessor()
+
+    def test_grayscale_threshold_applied(self):
+        image = Image.new("L", (2, 2))
+        image.putdata([10, 200, 30, 255])
+
+        preprocessor = GrayscaleThresholdPreprocessor(
+            apply_thresholding=True,
+            threshold_value=100,
+        )
+
+        result = preprocessor.preprocess(image)
+
+        self.assertEqual(result.mode, "1")
+        pixels = list(result.getdata())
+        self.assertTrue(all(p in (0, 255) for p in pixels))
+
+
 class TestTesseractConfig(SimpleTestCase):
     @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
     def test_tesseract_uses_env_language_default(self, mock_pytesseract):
