@@ -9,7 +9,7 @@ import os
 import logging
 import warnings
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 from file_processing.utils.upload_constants import (
     MAX_FILE_SIZE,
     FILE_TOO_LARGE_ERROR,
@@ -79,7 +79,6 @@ def validate_image_integrity(uploaded_file):
                 img.verify()  # raises if data is corrupt
         return True, None
     except (
-        UnidentifiedImageError,
         Image.DecompressionBombWarning,
         Image.DecompressionBombError,
         OSError,
