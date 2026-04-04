@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchAPI, uploadFile } from "@/lib/api";
+import { fetchAPI, login, uploadFile } from "@/lib/api";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
@@ -308,3 +308,91 @@ describe("uploadFile", () => {
         expect(calledUrl).toBe("http://localhost:8000/upload/");
     });
 });
+
+const mockFetch = vi.spyOn(global, 'fetch')
+vi.stubGlobal('fetch', mockFetch)
+
+function mockResponse(body: unknown, status = 200) {
+    return {
+        ok: status >= 200 && status < 300,
+        status,
+        json: vi.fn().mockResolvedValue(body),
+    } as unknown as Response
+}
+
+describe('login', () => {
+    beforeEach(() => {
+        mockFetch.mockClear()
+    })
+
+    describe('positive', () => {
+        it('calls fetch with correct URL and method', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ access_token: 'abc', refresh_token: 'xyz' }))
+
+            await login('user1@gmail.com', 'user1123')
+
+            expect(mockFetch).toHaveBeenCalledWith(
+                expect.stringContaining('auth/login/'),
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                })
+            )
+        })
+
+        it('calls fetch with email and password in request body', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ access_token: 'abc', refresh_token: 'xyz' }))
+
+            await login('user1@gmail.com', 'user1123')
+
+            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            expect(body).toEqual({ email: 'user1@gmail.com', password: 'user1123' })
+        })
+
+        it('returns parsed JSON on success', async () => {
+            const payload = { access_token: 'abc', refresh_token: 'xyz' }
+            mockFetch.mockResolvedValueOnce(mockResponse(payload))
+
+            const result = await login('user1@gmail.com', 'user1123')
+
+            expect(result).toEqual(payload)
+        })
+    })
+
+    describe('negative', () => {
+        it('throws error with message from response body (message field)', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Invalid credentials' }, 401))
+
+            await expect(login('user1@gmail.com', 'wrongpassword')).rejects.toThrow('Invalid credentials')
+        })
+
+        it('throws error with message from response body (detail field)', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ detail: 'Email not verified' }, 401))
+
+            await expect(login('user1@gmail.com', 'user1123')).rejects.toThrow('Email not verified')
+        })
+
+        it('throws error with fallback message when response body has no message or detail', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({}, 500))
+
+            await expect(login('user1@gmail.com', 'user1123')).rejects.toThrow('Request failed. Please try again.')
+        })
+
+        it('throws error with fallback message when response body is not valid JSON', async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                json: vi.fn().mockRejectedValue(new SyntaxError('Invalid JSON')),
+            })
+
+            await expect(login('user1@gmail.com', 'user1123')).rejects.toThrow('Request failed. Please try again.')
+        })
+
+        it('throws HTTPError with correct status code', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ detail: 'Email not verified' }, 401))
+
+            const error = await login('user1@gmail.com', 'user1123').catch(e => e)
+            expect(error.status).toBe(401)
+        })
+    })
+})

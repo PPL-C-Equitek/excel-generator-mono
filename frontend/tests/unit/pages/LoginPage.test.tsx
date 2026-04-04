@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import LoginPage from '../../../src/app/login/LoginPage'
+import * as api from '@/lib/api'
 
 describe('LoginPage', () => {
     describe('positive', () => {
@@ -46,6 +47,84 @@ describe('LoginPage', () => {
         it('does not render upload zone', () => {
             render(<LoginPage />)
             expect(screen.queryByTestId('drop-zone')).not.toBeInTheDocument()
+        })
+    })
+})
+
+// Mock api module
+vi.mock('@/lib/api', () => ({
+    login: vi.fn(),
+}))
+
+describe('handleLogin', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        localStorage.clear()
+
+        // Spy alert & location
+        vi.spyOn(window, 'alert').mockImplementation(() => { })
+        Object.defineProperty(globalThis, 'location', {
+            value: { href: '' },
+            writable: true,
+        })
+    })
+
+    it('saves tokens to localStorage and redirects on successful login', async () => {
+        vi.mocked(api.login).mockResolvedValueOnce({
+            access_token: 'mock-access',
+            refresh_token: 'mock-refresh',
+        })
+
+        render(<LoginPage />)
+
+        fireEvent.change(screen.getByLabelText(/email/i), {
+            target: { value: 'user1@gmail.com' },
+        })
+        fireEvent.change(screen.getByLabelText(/password/i), {
+            target: { value: 'user1123' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+        await waitFor(() => {
+            expect(localStorage.getItem('access_token')).toBe('mock-access')
+            expect(localStorage.getItem('refresh_token')).toBe('mock-refresh')
+            expect(globalThis.location.href).toBe('/convert')
+        })
+    })
+
+    it('alerts error message when login throws an Error', async () => {
+        vi.mocked(api.login).mockRejectedValueOnce(new Error('Invalid credentials'))
+
+        render(<LoginPage />)
+
+        fireEvent.change(screen.getByLabelText(/email/i), {
+            target: { value: 'user1@gmail.com' },
+        })
+        fireEvent.change(screen.getByLabelText(/password/i), {
+            target: { value: 'wrongpassword' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+        await waitFor(() => {
+            expect(window.alert).toHaveBeenCalledWith('Invalid credentials')
+        })
+    })
+
+    it('alerts fallback message when login throws a non-Error', async () => {
+        vi.mocked(api.login).mockRejectedValueOnce('unexpected string error')
+
+        render(<LoginPage />)
+
+        fireEvent.change(screen.getByLabelText(/email/i), {
+            target: { value: 'user1@gmail.com' },
+        })
+        fireEvent.change(screen.getByLabelText(/password/i), {
+            target: { value: 'user1123' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+        await waitFor(() => {
+            expect(window.alert).toHaveBeenCalledWith('Something went wrong')
         })
     })
 })
