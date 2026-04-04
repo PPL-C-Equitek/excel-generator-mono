@@ -76,6 +76,25 @@ class TestImageExtractor(SimpleTestCase):
         finally:
             os.unlink(path)
 
+    def test_extract_unexpected_exception_wrapped_as_value_error(self):
+        path = self._make_temp_image()
+        try:
+            # Mock preprocessor to raise generic Exception
+            mock_preprocessor = MagicMock()
+            mock_preprocessor.preprocess.side_effect = Exception("unexpected failure")
+
+            extractor = ImageExtractor(
+                ocr_engine=MagicMock(),  # won't be reached
+                preprocessor=mock_preprocessor,
+            )
+
+            with self.assertRaises(ValueError) as context:
+                extractor.extract(path)
+
+            self.assertEqual(str(context.exception), "Image OCR extraction failed.")
+        finally:
+            os.unlink(path)
+
 
 class TestTesseractConfig(SimpleTestCase):
     @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
