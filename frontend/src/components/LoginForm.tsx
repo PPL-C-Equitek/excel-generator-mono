@@ -29,7 +29,7 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: LoginFormProps) 
         }
 
         // Validasi email
-        const emailRegex = /^[^\s@]{1,64}@[^\s@]{1,63}(?:\.[^\s@]{1,63})+$/
+        const emailRegex = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$/
         if (!emailRegex.test(email)) {
             setError('Please enter a valid email address.')
             return
