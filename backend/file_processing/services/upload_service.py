@@ -2,6 +2,7 @@ import os
 import magic
 import logging
 from uuid import uuid4
+from PIL import UnidentifiedImageError
 from django.conf import settings
 from django.utils.text import get_valid_filename
 from .excel_service import process_uploaded_excel
@@ -10,6 +11,7 @@ from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services.image_validation_service import validate_image
+from file_processing.extractors.image_extractor import ImageExtractor
 from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 
 logger = logging.getLogger(__name__)
@@ -118,17 +120,27 @@ def _process_pdf(file_path, uploaded_file):
 
     return True, None, extracted_data
 
+
+def _process_image(file_path):
+    try:
+        extractor = ImageExtractor()
+        extracted_data = extractor.extract(file_path)
+        return True, None, extracted_data
+    except (UnidentifiedImageError, OSError):
+        return False, "Image file is corrupted or unreadable.", None
+    except ValueError as exc:
+        return False, str(exc), None
+    except Exception:
+        logger.exception("Image extraction failed.")
+        return False, "Image OCR extraction failed.", None
+
+
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
     if not is_valid:
         return False, error, None, None
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
-
-    # Temporary image path: validation has passed, but extraction is not implemented yet.
-    # Return upload success without extracted payload.
-    if ext in IMAGE_EXTENSIONS:
-        return True, None, None, None
 
     file_path = save_temp_file(uploaded_file)
     extracted_data = None
@@ -142,6 +154,12 @@ def process_upload(uploaded_file):
 
         elif ext in [".xlsx", ".xls"]:
             success, error, data = process_uploaded_excel(file_path)
+            if not success:
+                return False, error, None, None
+            extracted_data = data
+
+        elif ext in IMAGE_EXTENSIONS:
+            success, error, data = _process_image(file_path)
             if not success:
                 return False, error, None, None
             extracted_data = data
