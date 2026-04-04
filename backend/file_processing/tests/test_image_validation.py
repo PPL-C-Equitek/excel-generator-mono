@@ -218,15 +218,19 @@ class TestValidateImageIntegrity(SimpleTestCase):
         f = _SeekFailsOnResetFile()
 
         with patch("file_processing.utils.image_validators.Image.open", side_effect=OSError("bad image")):
-            with patch("file_processing.utils.image_validators.logger.exception") as mock_exception:
-                is_valid, err = validate_image_integrity(f)
+            with patch("file_processing.utils.image_validators.logger.warning") as mock_warning:
+                with patch("file_processing.utils.image_validators.logger.exception") as mock_exception:
+                    is_valid, err = validate_image_integrity(f)
 
         self.assertFalse(is_valid)
         self.assertEqual(err, "Image file is corrupted or unreadable.")
         self.assertEqual(f.seek_call_count, 2)
-        self.assertEqual(mock_exception.call_count, 2)
-        mock_exception.assert_any_call("Error validating image integrity.")
-        mock_exception.assert_any_call("Error resetting file pointer after image integrity check.")
+        mock_warning.assert_called_once_with(
+            "Invalid image upload failed integrity validation."
+        )
+        mock_exception.assert_called_once_with(
+            "Error resetting file pointer after image integrity check."
+        )
 
     def test_integrity_valid_result_when_finally_seek_fails_and_logs(self):
         class _SeekFailsOnResetFile:
@@ -265,7 +269,7 @@ class TestValidateImageIntegrity(SimpleTestCase):
             "Error resetting file pointer after image integrity check."
         )
 
-    def test_integrity_error_logs_exception(self):
+    def test_integrity_error_logs_warning(self):
         class _BrokenImageFile:
             def seek(self, *_args, **_kwargs):
                 return None
@@ -273,6 +277,23 @@ class TestValidateImageIntegrity(SimpleTestCase):
         f = _BrokenImageFile()
 
         with patch("file_processing.utils.image_validators.Image.open", side_effect=OSError("image open failed")):
+            with patch("file_processing.utils.image_validators.logger.warning") as mock_warning:
+                is_valid, err = validate_image_integrity(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(err, "Image file is corrupted or unreadable.")
+        mock_warning.assert_called_once_with(
+            "Invalid image upload failed integrity validation."
+        )
+
+    def test_integrity_error_logs_exception(self):
+        class _BrokenImageFile:
+            def seek(self, *_args, **_kwargs):
+                return None
+
+        f = _BrokenImageFile()
+
+        with patch("file_processing.utils.image_validators.Image.open", side_effect=RuntimeError("unexpected")):
             with patch("file_processing.utils.image_validators.logger.exception") as mock_exception:
                 is_valid, err = validate_image_integrity(f)
 

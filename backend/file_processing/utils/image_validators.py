@@ -9,7 +9,7 @@ import os
 import logging
 import warnings
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from file_processing.utils.upload_constants import (
     MAX_FILE_SIZE,
     FILE_TOO_LARGE_ERROR,
@@ -78,6 +78,15 @@ def validate_image_integrity(uploaded_file):
                     return False, f"Image dimensions exceed maximum allowed ({MAX_IMAGE_DIMENSION}x{MAX_IMAGE_DIMENSION})."
                 img.verify()  # raises if data is corrupt
         return True, None
+    except (
+        UnidentifiedImageError,
+        Image.DecompressionBombWarning,
+        Image.DecompressionBombError,
+        OSError,
+        ValueError,
+    ):
+        logger.warning("Invalid image upload failed integrity validation.")
+        return False, "Image file is corrupted or unreadable."
     except Exception:
         logger.exception("Error validating image integrity.")
         return False, "Image file is corrupted or unreadable."
