@@ -13,7 +13,7 @@ interface LoginFormProps {
     onGoogleSignIn?: () => void
 }
 
-export default function LoginForm({ onSubmit, onGoogleSignIn }: LoginFormProps) {
+export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFormProps>) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [rememberMe, setRememberMe] = useState(false)
@@ -124,7 +124,7 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: LoginFormProps) 
                         checked={rememberMe}
                         onChange={(e) => setRememberMe(e.target.checked)}
                         className="rounded"
-                    />
+                    />{' '}
                     Remember me
                 </label>
                 <a
@@ -150,7 +150,7 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: LoginFormProps) 
                 className="w-full py-3 rounded-xl font-bold text-sm mb-6 flex items-center justify-center gap-2 transition active:scale-[0.98]"
                 style={{ backgroundColor: '#ffffff', color: '#111827' }}
             >
-                <span className="text-base">G</span>
+                <span className="text-base">G</span>{' '}
                 Sign in with Google
             </button>
 

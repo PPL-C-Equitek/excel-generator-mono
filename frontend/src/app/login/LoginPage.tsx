@@ -13,7 +13,7 @@ export default function LoginPage() {
             localStorage.setItem('access_token', res.access_token)
             localStorage.setItem('refresh_token', res.refresh_token)
 
-            window.location.href = '/convert'
+            globalThis.location.href = '/convert'
         } catch (err: unknown) {
             if (err instanceof Error) {
                 alert(err.message)
