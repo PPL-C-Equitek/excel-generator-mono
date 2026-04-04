@@ -86,10 +86,12 @@ describe('CustomSchemaManager', () => {
             ]),
         })
 
+        const accessTokenResolver = vi.fn().mockReturnValue('access-token')
+
         render(
             <CustomSchemaManager
                 service={service}
-                accessTokenResolver={() => 'access-token'}
+                accessTokenResolver={accessTokenResolver}
             />
         )
 
