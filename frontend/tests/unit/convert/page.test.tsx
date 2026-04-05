@@ -4,7 +4,7 @@ import Page from '../../../src/app/convert/page'
 
 const mockConvertPageRender = vi.fn()
 const mockReplace = vi.fn()
-const mockGetStoredAccessToken = vi.fn<() => string | null>()
+const mockGetValidAccessToken = vi.fn<() => Promise<string | null>>()
 
 vi.mock('next/navigation', () => ({
     useRouter: () => ({
@@ -13,7 +13,7 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('@/lib/auth', () => ({
-    getStoredAccessToken: () => mockGetStoredAccessToken(),
+    getValidAccessToken: () => mockGetValidAccessToken(),
 }))
 
 vi.mock('../../../src/app/convert/ConvertPage', () => ({
@@ -26,7 +26,7 @@ vi.mock('../../../src/app/convert/ConvertPage', () => ({
 describe('Convert Page Route Guard', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        mockGetStoredAccessToken.mockReturnValue('mock-token')
+        mockGetValidAccessToken.mockResolvedValue('mock-token')
     })
 
     it('renders ConvertPage when access token exists', async () => {
@@ -41,7 +41,7 @@ describe('Convert Page Route Guard', () => {
     })
 
     it('redirects to login when access token is missing', async () => {
-        mockGetStoredAccessToken.mockReturnValue(null)
+        mockGetValidAccessToken.mockResolvedValue(null)
 
         const { container } = render(<Page />)
 

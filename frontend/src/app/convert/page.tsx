@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import ConvertPage from './ConvertPage'
-import { getStoredAccessToken } from '@/lib/auth'
+import { getValidAccessToken } from '@/lib/auth'
 
 // Debug function
 // function parseJwt(token: string) {
@@ -21,8 +21,14 @@ export default function Page() {
     const [isCheckingAuth, setIsCheckingAuth] = useState(true)
 
     useEffect(() => {
-        const checkAuth = () => {
-            const accessToken = getStoredAccessToken()
+        let isCancelled = false
+
+        const checkAuth = async () => {
+            const accessToken = await getValidAccessToken()
+
+            if (isCancelled) {
+                return
+            }
 
             if (!accessToken) {
                 router.replace('/login')
@@ -32,7 +38,11 @@ export default function Page() {
             setIsCheckingAuth(false)
         }
 
-        checkAuth()
+        void checkAuth()
+
+        return () => {
+            isCancelled = true
+        }
     }, [router])
 
     if (isCheckingAuth) {
