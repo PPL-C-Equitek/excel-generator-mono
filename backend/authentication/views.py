@@ -1,8 +1,5 @@
 import logging
 from datetime import timedelta
-import jwt
-from jwt import PyJWTError
-from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
 
@@ -12,6 +9,12 @@ from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
+from authentication.logout.adapters import (
+    CallableTokenBlacklistRepository,
+    DjangoTokenBlacklistRepository,
+    build_logout_user_use_case,
+)
+from authentication.logout.http import LogoutView as CleanLogoutView
 from authentication.models import User
 from authentication.serializers import VerifyEmailSerializer, LoginSerializer
 from authentication.services import send_verification_email, generate_tokens
@@ -21,19 +24,7 @@ SERVER_ERROR_MESSAGE = "An internal server error occurred. Please try again late
 
 
 def blacklist_refresh_token(refresh_token: str) -> None:
-    if not refresh_token:
-        raise ValueError("Refresh token is required")
-
-    secret_key = getattr(settings, "JWT_SECRET_KEY", "")
-    payload = jwt.decode(refresh_token, secret_key, algorithms=["HS256"])
-    if payload.get("type") != "refresh":
-        raise ValueError("Invalid token type")
-
-    cache_key = f"blacklisted_refresh_token:{refresh_token}"
-    if cache.get(cache_key):
-        raise ValueError("Token already blacklisted")
-
-    cache.set(cache_key, True, timeout=7 * 24 * 60 * 60)
+    DjangoTokenBlacklistRepository().blacklist(refresh_token)
 
 
 class ResendVerificationThrottle(SimpleRateThrottle):
@@ -242,39 +233,9 @@ class LoginView(APIView):
             )
 
 
-class LogoutView(APIView):
-    def post(self, request):
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return Response(
-                {"message": "Unauthorized"},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        access_token = auth_header.split(" ", 1)[1].strip()
-        refresh_token = request.data.get("refresh_token")
-        if not refresh_token:
-            return Response(
-                {"message": "Unauthorized"},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        try:
-            secret_key = getattr(settings, "JWT_SECRET_KEY", "")
-            access_payload = jwt.decode(access_token, secret_key, algorithms=["HS256"])
-            if access_payload.get("type") != "access":
-                raise ValueError("Invalid token type")
-
-            user_id = access_payload.get("user_id")
-            if not user_id:
-                raise ValueError("Invalid token payload")
-            User.objects.get(id=user_id)
-
-            blacklist_refresh_token(refresh_token)
-            return Response(status=status.HTTP_200_OK)
-        except (PyJWTError, User.DoesNotExist, ValueError, Exception):
-            return Response(
-                {"message": "Unauthorized"},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
+class LogoutView(CleanLogoutView):
+    def get_logout_use_case(self):
+        return build_logout_user_use_case(
+            token_blacklist_port=CallableTokenBlacklistRepository(blacklist_refresh_token)
+        )
 
