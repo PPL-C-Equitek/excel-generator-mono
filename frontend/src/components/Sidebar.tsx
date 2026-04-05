@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { getStoredUser } from "@/lib/auth"
 interface SidebarProps {
     readonly activeMenu: 'convert' | 'schema' | 'history'
@@ -14,12 +14,9 @@ export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
         { key: 'history', label: 'History', href: '/history' },
     ]
 
-    const [username, setUsername] = useState<string>("User")
-
-    useEffect(() => {
-        const user = getStoredUser()
-        if (user) setUsername(user.name)
-    }, [])
+    const [username] = useState<string>(() => {
+        return getStoredUser()?.name ?? 'User'
+    })
 
     return (
         <aside className="fixed inset-y-0 left-0 w-56 overflow-y-auto bg-red-700 flex flex-col">
