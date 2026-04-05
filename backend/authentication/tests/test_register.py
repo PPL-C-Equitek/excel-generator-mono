@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock
 
 from django.core.cache import cache
 from django.db import IntegrityError
+from django.test import TestCase
 from rest_framework.test import APISimpleTestCase
 from rest_framework import status
 
@@ -232,3 +233,80 @@ class UserStrTest(APISimpleTestCase):
     def test_str_returns_email(self):
         user = User(email="repr@example.com", name="Repr User")
         self.assertEqual(str(user), "repr@example.com")
+
+
+class RegisterViewEnhancedRequirementsTest(TestCase):
+    def setUp(self):
+        self.url = "/auth/register/"
+
+    def test_register_sanitizes_email_and_saves_lowercased_trimmed_value(self):
+        response = self.client.post(
+            self.url,
+            data={
+                "name": "Sanitized User",
+                "email": "  User@Example.COM  ",
+                "password": "passw0rd",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(User.objects.filter(email="user@example.com").exists())
+
+        user = User.objects.get(email="user@example.com")
+        self.assertEqual(user.email, "user@example.com")
+
+    def test_register_accepts_password_with_exactly_8_characters_letters_and_numbers(self):
+        response = self.client.post(
+            self.url,
+            data={
+                "name": "Minimum Password User",
+                "email": "minimum@example.com",
+                "password": "passw0rd",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(User.objects.filter(email="minimum@example.com").exists())
+
+    def test_register_rejects_passwords_that_do_not_meet_strength_rules(self):
+        invalid_password_cases = [
+            ("pass12", "at least 8 characters"),
+            ("password", "letter and number"),
+            ("12345678", "letter and number"),
+        ]
+
+        for password, expected_message in invalid_password_cases:
+            with self.subTest(password=password):
+                response = self.client.post(
+                    self.url,
+                    data={
+                        "name": "Invalid Password User",
+                        "email": f"{password}@example.com",
+                        "password": password,
+                    },
+                    content_type="application/json",
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn(expected_message, str(response.json()).lower())
+
+    def test_register_returns_409_when_email_is_already_registered(self):
+        User.objects.create_user(
+            name="Existing User",
+            email="duplicate@example.com",
+            password="passw0rd",
+        )
+
+        response = self.client.post(
+            self.url,
+            data={
+                "name": "Duplicate User",
+                "email": "duplicate@example.com",
+                "password": "passw0rd",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
