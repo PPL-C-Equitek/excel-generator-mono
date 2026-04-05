@@ -1069,6 +1069,60 @@ class DownloadExcelViewTest(APISimpleTestCase):
         mocked_resolver.assert_called_once()
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_excel_endpoint_uses_custom_filename_from_query(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.xlsx",
+            "file_path": "/safe/storage/export_abc123.xlsx",
+            "artifact_type": "xlsx",
+            "content_type": (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        }
+        mocked_open.return_value = BytesIO(b"fake xlsx bytes")
+
+        response = self.client.get(
+            "/export/excel/xlsx_abc123/download?filename=laporan_tahunan"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="laporan_tahunan.xlsx"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_excel_endpoint_falls_back_to_default_filename_when_query_is_unsafe(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.xlsx",
+            "file_path": "/safe/storage/export_abc123.xlsx",
+            "artifact_type": "xlsx",
+            "content_type": (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        }
+        mocked_open.return_value = BytesIO(b"fake xlsx bytes")
+
+        response = self.client.get(
+            "/export/excel/xlsx_abc123/download?filename=..%2Fevil.xlsx"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="export_abc123.xlsx"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
     def test_download_excel_endpoint_returns_400_for_invalid_export_id(
         self,
         mocked_resolver,
