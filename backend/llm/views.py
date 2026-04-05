@@ -29,12 +29,20 @@ INVALID_INPUT_JSON_DETAIL = "Invalid input_json payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
 
 
-def build_llm_generation_service() -> LlmGenerationService:
+def get_authenticated_user_id(user) -> object | None:
+    if user is None or not getattr(user, "is_authenticated", False):
+        return None
+    return getattr(user, "id", None)
+
+
+def build_llm_generation_service(user=None) -> LlmGenerationService:
     return LlmGenerationService(
         json_generator=JsonGenerationService(
             text_provider=OpenAITextGenerationProvider()
         ),
-        schema_prompt_source=DjangoCustomSchemaPromptSource(),
+        schema_prompt_source=DjangoCustomSchemaPromptSource(
+            owner_id=get_authenticated_user_id(user)
+        ),
     )
 
 
@@ -54,7 +62,7 @@ def llm_generate(request):
 
     input_json = request_serializer.validated_data["input_json"]
     custom_schema_id = request_serializer.validated_data.get("custom_schema_id")
-    llm_generation_service = build_llm_generation_service()
+    llm_generation_service = build_llm_generation_service(request.user)
 
     try:
         output_json = llm_generation_service.generate(

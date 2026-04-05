@@ -452,13 +452,14 @@ class LlmGenerationServiceTest(SimpleTestCase):
     def test_django_custom_schema_prompt_source_returns_schema_prompt_fragment(
         self, mock_get
     ):
+        owner_id = "owner-1"
         mock_get.return_value = SimpleNamespace(prompt_fragment="Schema prompt.")
-        prompt_source = DjangoCustomSchemaPromptSource()
+        prompt_source = DjangoCustomSchemaPromptSource(owner_id=owner_id)
 
         result = prompt_source.get_prompt_fragment("schema-1")
 
         self.assertEqual(result, "Schema prompt.")
-        mock_get.assert_called_once_with(pk="schema-1")
+        mock_get.assert_called_once_with(pk="schema-1", owner_id=owner_id)
 
     @patch("llm.services.generation_service.CustomSchema.objects.get")
     def test_django_custom_schema_prompt_source_raises_custom_not_found_error(
@@ -467,8 +468,19 @@ class LlmGenerationServiceTest(SimpleTestCase):
         from custom_schemas.models import CustomSchema
 
         mock_get.side_effect = CustomSchema.DoesNotExist
-        prompt_source = DjangoCustomSchemaPromptSource()
+        prompt_source = DjangoCustomSchemaPromptSource(owner_id="owner-1")
 
         with self.assertRaises(CustomSchemaNotFoundError):
             prompt_source.get_prompt_fragment("missing-schema")
+
+    @patch("llm.services.generation_service.CustomSchema.objects.get")
+    def test_django_custom_schema_prompt_source_rejects_anonymous_access(
+        self, mock_get
+    ):
+        prompt_source = DjangoCustomSchemaPromptSource(owner_id=None)
+
+        with self.assertRaises(CustomSchemaNotFoundError):
+            prompt_source.get_prompt_fragment("schema-1")
+
+        mock_get.assert_not_called()
 

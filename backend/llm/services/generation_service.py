@@ -57,9 +57,15 @@ class JsonGenerationService:
 
 
 class DjangoCustomSchemaPromptSource:
+    def __init__(self, owner_id: object | None = None):
+        self.owner_id = owner_id
+
     def get_prompt_fragment(self, schema_id) -> str:
+        if self.owner_id is None:
+            raise CustomSchemaNotFoundError("Custom schema not found.")
+
         try:
-            schema = CustomSchema.objects.get(pk=schema_id)
+            schema = CustomSchema.objects.get(pk=schema_id, owner_id=self.owner_id)
         except CustomSchema.DoesNotExist as exc:
             raise CustomSchemaNotFoundError("Custom schema not found.") from exc
 

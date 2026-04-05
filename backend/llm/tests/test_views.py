@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from django.test import SimpleTestCase
 from rest_framework.test import APIClient
 from unittest.mock import patch
@@ -10,7 +12,7 @@ from llm.services.openai_client import (
     OpenAIServiceError,
     OpenAIUpstreamError,
 )
-from llm.views import build_llm_generation_service
+from llm.views import build_llm_generation_service, get_authenticated_user_id
 
 
 class LlmGenerateEndpointTest(SimpleTestCase):
@@ -24,6 +26,21 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             service.schema_prompt_source.__class__.__name__,
             "DjangoCustomSchemaPromptSource",
         )
+        self.assertIsNone(service.schema_prompt_source.owner_id)
+
+    def test_build_llm_generation_service_uses_authenticated_user_id_for_schema_source(self):
+        owner_id = uuid4()
+
+        service = build_llm_generation_service(
+            SimpleNamespace(id=owner_id, is_authenticated=True)
+        )
+
+        self.assertEqual(service.schema_prompt_source.owner_id, owner_id)
+
+    def test_get_authenticated_user_id_returns_none_for_anonymous_user(self):
+        result = get_authenticated_user_id(SimpleNamespace(is_authenticated=False))
+
+        self.assertIsNone(result)
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):
@@ -36,6 +53,8 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_json"], {"status": "ok"})
+        self.assertEqual(mock_build_service.call_count, 1)
+        self.assertFalse(mock_build_service.call_args[0][0].is_authenticated)
         mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             custom_schema_id=None,
@@ -57,6 +76,8 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(mock_build_service.call_count, 1)
+        self.assertFalse(mock_build_service.call_args[0][0].is_authenticated)
         mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             custom_schema_id=schema_id,
@@ -81,6 +102,8 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data["detail"], "Custom schema not found.")
+        self.assertEqual(mock_build_service.call_count, 1)
+        self.assertFalse(mock_build_service.call_args[0][0].is_authenticated)
         mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             custom_schema_id=schema_id,

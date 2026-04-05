@@ -1,4 +1,5 @@
 import { fetchAPI } from "@/lib/api";
+import { getStoredAccessToken } from "@/lib/auth";
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { isJsonObject } from "@/utils/schemaValidator";
 import type { JsonValue } from "@/utils/schemaValidator";
@@ -14,6 +15,23 @@ export interface LLMRequest {
 
 export interface LLMResponse {
     output_json: JsonValue;
+}
+
+function buildJsonRequestHeaders(customSchemaId?: string | null): HeadersInit {
+    const shouldAuthorize =
+        typeof customSchemaId === "string" && customSchemaId.trim().length > 0;
+    const token = shouldAuthorize ? getStoredAccessToken() : null;
+
+    if (!token) {
+        return {
+            "Content-Type": "application/json",
+        };
+    }
+
+    return {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+    };
 }
 
 function getErrorStatus(err: Error): number | null {
@@ -51,6 +69,7 @@ export async function generateJson(
     try {
         data = await fetchAPI("llm/generate/", {
             method: "POST",
+            headers: buildJsonRequestHeaders(customSchemaId),
             body: JSON.stringify(requestBody),
         });
     } catch (err: unknown) {
