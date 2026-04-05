@@ -57,11 +57,18 @@ class LogoutView(APIView):
         return build_logout_user_use_case()  # pragma: no cover
 
     def post(self, request):
+        refresh_token = request.data.get("refresh_token")
+        if not isinstance(refresh_token, str) or not refresh_token.strip():
+            return Response(
+                {"message": "refresh_token is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
-            command = LogoutCommand(refresh_token=request.data.get("refresh_token", ""))
+            command = LogoutCommand(refresh_token=refresh_token)
             self.get_logout_use_case().execute(command)
             return Response(status=status.HTTP_200_OK)
-        except (ValueError, Exception):
+        except ValueError:
             return Response(
                 {"message": "Unauthorized"},
                 status=status.HTTP_401_UNAUTHORIZED,
