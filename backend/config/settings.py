@@ -19,6 +19,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
+from pathlib import Path
+import os
+from dotenv import load_dotenv
+import environ
+
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
+load_dotenv(BASE_DIR.parent / ".env")
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "fallback-secret-key")
 
@@ -94,9 +102,9 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB", "mydb"),
+        "NAME": os.environ.get("POSTGRES_DB", "excel_generator_local"),
         "USER": os.environ.get("POSTGRES_USER", "myuser"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "mypassword123"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "Naya3101"),
         "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
     }
