@@ -30,12 +30,6 @@ describe('LoginForm', () => {
             expect(screen.getByTestId('password-input')).toHaveAttribute('type', 'password')
         })
 
-        it('renders Remember me checkbox', () => {
-            render(<LoginForm />)
-            expect(screen.getByLabelText(/remember me/i)).toBeInTheDocument()
-            expect(screen.getByLabelText(/remember me/i)).toHaveAttribute('type', 'checkbox')
-        })
-
         it('renders Forgot password link', () => {
             render(<LoginForm />)
             expect(screen.getByText(/forgot password/i)).toBeInTheDocument()
@@ -72,14 +66,6 @@ describe('LoginForm', () => {
             expect(passwordInput).toHaveValue('secret123')
         })
 
-        it('toggles remember me checkbox', async () => {
-            render(<LoginForm />)
-            const checkbox = screen.getByLabelText(/remember me/i)
-            expect(checkbox).not.toBeChecked()
-            await userEvent.click(checkbox)
-            expect(checkbox).toBeChecked()
-        })
-
         it('calls onSubmit with email and password when Sign in clicked', async () => {
             const mockOnSubmit = vi.fn()
             render(<LoginForm onSubmit={mockOnSubmit} />)
@@ -92,7 +78,6 @@ describe('LoginForm', () => {
                 expect(mockOnSubmit).toHaveBeenCalledWith({
                     email: 'test@example.com',
                     password: 'secret123',
-                    rememberMe: false,
                 })
             })
         })

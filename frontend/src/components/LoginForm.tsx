@@ -5,7 +5,6 @@ import { useState } from 'react'
 export interface LoginFormData {
     email: string
     password: string
-    rememberMe: boolean
 }
 
 interface LoginFormProps {
@@ -16,7 +15,6 @@ interface LoginFormProps {
 export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFormProps>) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
-    const [rememberMe, setRememberMe] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
     const handleSubmit = () => {
@@ -41,7 +39,7 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
             return
         }
 
-        onSubmit?.({ email, password, rememberMe })
+        onSubmit?.({ email, password })
     }
 
     return (
@@ -115,18 +113,8 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
                 />
             </div>
 
-            {/* Remember me & Forgot password */}
+            {/* Forgot password */}
             <div className="flex items-center justify-between mb-6">
-                <label className="flex items-center gap-2 text-white font-bold text-sm cursor-pointer">
-                    <input
-                        type="checkbox"
-                        aria-label="Remember me"
-                        checked={rememberMe}
-                        onChange={(e) => setRememberMe(e.target.checked)}
-                        className="rounded"
-                    />{' '}
-                    Remember me
-                </label>
                 <a
                     href="/forgot-password"
                     className="text-white font-bold text-sm hover:underline"
