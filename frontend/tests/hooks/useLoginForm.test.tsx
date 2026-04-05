@@ -74,4 +74,90 @@ describe('useLoginForm', () => {
             expect(mockOnSubmit).not.toHaveBeenCalled()
         })
     })
+
+    describe('edge case', () => {
+        it('sets error when email exceeds 254 characters', () => {
+            const { result } = renderHook(() => useLoginForm())
+            act(() => {
+                result.current.setEmail('a'.repeat(243) + '@example.com') // total 255 chars
+                result.current.setPassword('secret123')
+            })
+            act(() => result.current.handleSubmit())
+            expect(result.current.error).toBeTruthy()
+        })
+
+        it('does not set error when email is exactly 254 characters', () => {
+            const mockOnSubmit = vi.fn()
+            const { result } = renderHook(() => useLoginForm({ onSubmit: mockOnSubmit }))
+
+            const localPart = 'a'.repeat(64)
+            const domain = 'a'.repeat(63) + '.' + 'a'.repeat(63) + '.' + 'a'.repeat(61)
+            const email = `${localPart}@${domain}`
+
+            expect(email.length).toBe(254)
+
+            act(() => {
+                result.current.setEmail(email)
+                result.current.setPassword('secret123')
+            })
+            act(() => result.current.handleSubmit())
+            expect(result.current.error).toBeNull()
+            expect(mockOnSubmit).toHaveBeenCalled()
+        })
+
+        it('sets error when email local part exceeds 64 characters', () => {
+            const { result } = renderHook(() => useLoginForm())
+            act(() => {
+                result.current.setEmail('a'.repeat(65) + '@example.com')
+                result.current.setPassword('secret123')
+            })
+            act(() => result.current.handleSubmit())
+            expect(result.current.error).toBeTruthy()
+        })
+
+        it('clears previous error on subsequent valid submit', () => {
+            const mockOnSubmit = vi.fn()
+            const { result } = renderHook(() => useLoginForm({ onSubmit: mockOnSubmit }))
+
+            act(() => {
+                result.current.setEmail('invalid')
+                result.current.setPassword('secret123')
+            })
+            act(() => result.current.handleSubmit())
+            expect(result.current.error).toBeTruthy()
+
+            act(() => {
+                result.current.setEmail('test@example.com')
+            })
+            act(() => result.current.handleSubmit())
+            expect(result.current.error).toBeNull()
+            expect(mockOnSubmit).toHaveBeenCalled()
+        })
+
+        it('calls onSubmit with rememberMe true when checked', () => {
+            const mockOnSubmit = vi.fn()
+            const { result } = renderHook(() => useLoginForm({ onSubmit: mockOnSubmit }))
+            act(() => {
+                result.current.setEmail('test@example.com')
+                result.current.setPassword('secret123')
+                result.current.setRememberMe(true)
+            })
+            act(() => result.current.handleSubmit())
+            expect(mockOnSubmit).toHaveBeenCalledWith({
+                email: 'test@example.com',
+                password: 'secret123',
+                rememberMe: true,
+            })
+        })
+
+        it('sets error when password is only whitespace', () => {
+            const { result } = renderHook(() => useLoginForm())
+            act(() => {
+                result.current.setEmail('test@example.com')
+                result.current.setPassword('   ')
+            })
+            act(() => result.current.handleSubmit())
+            expect(result.current.error).toBeTruthy()
+        })
+    })
 })

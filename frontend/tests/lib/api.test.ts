@@ -309,6 +309,8 @@ describe("uploadFile", () => {
     });
 });
 
+// Login Tests
+
 const mockFetch = vi.spyOn(global, 'fetch')
 vi.stubGlobal('fetch', mockFetch)
 
@@ -383,7 +385,7 @@ describe('login', () => {
                 ok: false,
                 status: 500,
                 json: vi.fn().mockRejectedValue(new SyntaxError('Invalid JSON')),
-            })
+            } as unknown as Response)
 
             await expect(login('user1@gmail.com', 'user1123')).rejects.toThrow('Request failed. Please try again.')
         })
@@ -395,4 +397,43 @@ describe('login', () => {
             expect(error.status).toBe(401)
         })
     })
+
+    describe('edge case', () => {
+        it('sends email as-is without normalization', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ access_token: 'abc', refresh_token: 'xyz' }))
+
+            await login('  USER1@GMAIL.COM  ', 'user1123')
+
+            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            expect(body.email).toBe('  USER1@GMAIL.COM  ')
+        })
+
+        it('constructs URL with correct endpoint path', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ access_token: 'abc', refresh_token: 'xyz' }))
+
+            await login('user1@gmail.com', 'user1123')
+
+            const url = mockFetch.mock.calls[0][0] as string
+            expect(url).toMatch(/\/auth\/login\/$/)
+        })
+
+        it('uses fallback message when response body message field is not a string', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ message: 123 }, 400))
+
+            await expect(login('user1@gmail.com', 'user1123')).rejects.toThrow('Request failed. Please try again.')
+        })
+
+        it('uses fallback message when response body detail field is not a string', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ detail: ['error'] }, 400))
+
+            await expect(login('user1@gmail.com', 'user1123')).rejects.toThrow('Request failed. Please try again.')
+        })
+
+        it('throws when fetch rejects due to network error', async () => {
+            mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+            await expect(login('user1@gmail.com', 'user1123')).rejects.toThrow('Failed to fetch')
+        })
+    })
 })
+

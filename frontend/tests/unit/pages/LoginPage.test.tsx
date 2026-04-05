@@ -49,6 +49,65 @@ describe('LoginPage', () => {
             expect(screen.queryByTestId('drop-zone')).not.toBeInTheDocument()
         })
     })
+
+    describe('edge case', () => {
+        beforeEach(() => {
+            vi.clearAllMocks()
+            localStorage.clear()
+            vi.spyOn(window, 'alert').mockImplementation(() => { })
+            Object.defineProperty(globalThis, 'location', {
+                value: { href: '' },
+                writable: true,
+            })
+        })
+
+        it('does not call login API when form is submitted empty', async () => {
+            render(<LoginPage />)
+
+            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+            await waitFor(() => {
+                expect(api.login).not.toHaveBeenCalled()
+            })
+        })
+
+        it('does not save tokens to localStorage when login fails', async () => {
+            vi.mocked(api.login).mockRejectedValueOnce(new Error('Invalid credentials'))
+
+            render(<LoginPage />)
+
+            fireEvent.change(screen.getByLabelText(/email/i), {
+                target: { value: 'user1@gmail.com' },
+            })
+            fireEvent.change(screen.getByLabelText(/password/i), {
+                target: { value: 'wrongpassword' },
+            })
+            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+            await waitFor(() => {
+                expect(localStorage.getItem('access_token')).toBeNull()
+                expect(localStorage.getItem('refresh_token')).toBeNull()
+            })
+        })
+
+        it('does not redirect when login fails', async () => {
+            vi.mocked(api.login).mockRejectedValueOnce(new Error('Invalid credentials'))
+
+            render(<LoginPage />)
+
+            fireEvent.change(screen.getByLabelText(/email/i), {
+                target: { value: 'user1@gmail.com' },
+            })
+            fireEvent.change(screen.getByLabelText(/password/i), {
+                target: { value: 'wrongpassword' },
+            })
+            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+            await waitFor(() => {
+                expect(globalThis.location.href).not.toBe('/convert')
+            })
+        })
+    })
 })
 
 // Mock api module
@@ -125,6 +184,97 @@ describe('handleLogin', () => {
 
         await waitFor(() => {
             expect(window.alert).toHaveBeenCalledWith('Something went wrong')
+        })
+    })
+
+    describe('edge case', () => {
+        it('calls login API with correct email and password', async () => {
+            vi.mocked(api.login).mockResolvedValueOnce({
+                access_token: 'mock-access',
+                refresh_token: 'mock-refresh',
+            })
+
+            render(<LoginPage />)
+
+            fireEvent.change(screen.getByLabelText(/email/i), {
+                target: { value: 'user1@gmail.com' },
+            })
+            fireEvent.change(screen.getByLabelText(/password/i), {
+                target: { value: 'user1123' },
+            })
+            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+            await waitFor(() => {
+                expect(api.login).toHaveBeenCalledWith('user1@gmail.com', 'user1123')
+            })
+        })
+
+        it('does not alert when login succeeds', async () => {
+            vi.mocked(api.login).mockResolvedValueOnce({
+                access_token: 'mock-access',
+                refresh_token: 'mock-refresh',
+            })
+
+            render(<LoginPage />)
+
+            fireEvent.change(screen.getByLabelText(/email/i), {
+                target: { value: 'user1@gmail.com' },
+            })
+            fireEvent.change(screen.getByLabelText(/password/i), {
+                target: { value: 'user1123' },
+            })
+            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+            await waitFor(() => {
+                expect(globalThis.location.href).toBe('/convert')
+            })
+
+            expect(window.alert).not.toHaveBeenCalled()
+        })
+
+        it('does not redirect when login throws an Error', async () => {
+            vi.mocked(api.login).mockRejectedValueOnce(new Error('Invalid credentials'))
+
+            render(<LoginPage />)
+
+            fireEvent.change(screen.getByLabelText(/email/i), {
+                target: { value: 'user1@gmail.com' },
+            })
+            fireEvent.change(screen.getByLabelText(/password/i), {
+                target: { value: 'wrongpassword' },
+            })
+            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+            await waitFor(() => {
+                expect(window.alert).toHaveBeenCalledWith('Invalid credentials')
+            })
+
+            expect(globalThis.location.href).not.toBe('/convert')
+        })
+
+        it('overwrites existing tokens in localStorage on re-login', async () => {
+            localStorage.setItem('access_token', 'old-access')
+            localStorage.setItem('refresh_token', 'old-refresh')
+
+            vi.mocked(api.login).mockResolvedValueOnce({
+                access_token: 'new-access',
+                refresh_token: 'new-refresh',
+            })
+
+            render(<LoginPage />)
+
+            fireEvent.change(screen.getByLabelText(/email/i), {
+                target: { value: 'user1@gmail.com' },
+            })
+            fireEvent.change(screen.getByLabelText(/password/i), {
+                target: { value: 'user1123' },
+            })
+            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+            await waitFor(() => {
+                expect(localStorage.getItem('access_token')).toBe('new-access')
+                expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
+            })
         })
     })
 })
