@@ -164,6 +164,18 @@ describe('auth token refresh helpers', () => {
         expect(mockedFetch).not.toHaveBeenCalled()
     })
 
+    it('returns null when refresh request throws (network error)', async () => {
+        const expiredAccessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) - 10 })
+        storeAuthTokens(expiredAccessToken, 'refresh-token')
+
+        const mockedFetch = vi.fn().mockRejectedValue(new TypeError('Network down'))
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(refreshAccessToken()).resolves.toBeNull()
+        expect(window.localStorage.getItem('access_token')).toBeNull()
+        expect(window.localStorage.getItem('refresh_token')).toBeNull()
+    })
+
     it('returns null when refresh response is malformed', async () => {
         const expiredAccessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) - 10 })
         storeAuthTokens(expiredAccessToken, 'refresh-token')
@@ -217,5 +229,17 @@ describe('auth token refresh helpers', () => {
 
         await expect(getValidAccessToken()).resolves.toBe('still-bad')
         expect(mockedFetch).toHaveBeenCalled()
+    })
+
+    it('returns null from refreshAccessToken when window is unavailable', async () => {
+        vi.stubGlobal('window', undefined)
+
+        await expect(refreshAccessToken()).resolves.toBeNull()
+    })
+
+    it('returns null from getValidAccessToken when window is unavailable', async () => {
+        vi.stubGlobal('window', undefined)
+
+        await expect(getValidAccessToken()).resolves.toBeNull()
     })
 })

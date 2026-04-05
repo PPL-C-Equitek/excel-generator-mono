@@ -53,4 +53,21 @@ describe('Convert Page Route Guard', () => {
         expect(container.firstChild).toBeNull()
         expect(mockConvertPageRender).not.toHaveBeenCalled()
     })
+
+    it('does not redirect after unmount when async auth check resolves late', async () => {
+        let resolveToken: ((value: string | null) => void) | null = null
+        const pendingToken = new Promise<string | null>((resolve) => {
+            resolveToken = resolve
+        })
+        mockGetValidAccessToken.mockReturnValue(pendingToken)
+
+        const { unmount } = render(<Page />)
+        unmount()
+
+        resolveToken?.(null)
+        await Promise.resolve()
+
+        expect(mockReplace).not.toHaveBeenCalled()
+        expect(mockConvertPageRender).not.toHaveBeenCalled()
+    })
 })
