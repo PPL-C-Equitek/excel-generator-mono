@@ -31,6 +31,10 @@ class OutputExcelDownloadLookupError(Exception):
     """Raised when generated Excel artifact cannot be resolved for download."""
 
 
+class OutputExcelDownloadStorageError(Exception):
+    """Raised when the Excel artifact storage directory is unavailable."""
+
+
 class CSVSanitizationPolicy:
     """Strategy extension point for CSV header/value sanitization."""
 
@@ -748,7 +752,7 @@ def _discover_excel_download_artifacts(base_dir):
 
                 discovered[entry_name] = entry_path
     except OSError as exc:
-        raise OutputExcelDownloadLookupError(
+        raise OutputExcelDownloadStorageError(
             "Excel artifact storage is unavailable."
         ) from exc
 

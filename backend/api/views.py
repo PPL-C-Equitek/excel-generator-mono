@@ -27,6 +27,7 @@ from file_processing.services.export_service import (
     OutputCSVGenerationError,
     OutputCSVMappingError,
     OutputExcelDownloadLookupError,
+    OutputExcelDownloadStorageError,
     OutputExcelGenerationError,
     OutputLLMValidationError,
     export_csv_to_filesystem,
@@ -390,6 +391,9 @@ def download_excel(request, export_id):
 
         logger.warning("Excel download file not found.", exc_info=True)
         return _excel_download_not_found_response()
+    except OutputExcelDownloadStorageError:
+        logger.exception("Excel download storage is unavailable.")
+        return _excel_download_internal_error_response()
     except Exception:
         logger.exception("Unexpected error while resolving Excel download artifact.")
         return _excel_download_internal_error_response()
