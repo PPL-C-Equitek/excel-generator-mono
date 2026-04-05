@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import * as auth from '@/lib/auth'
 import Sidebar from '../../../src/components/Sidebar'
 
 describe('Sidebar', () => {
@@ -26,7 +27,13 @@ describe('Sidebar', () => {
     })
 
     it('renders username at the bottom', () => {
-        render(<Sidebar activeMenu="convert" username="JohnDoe" />)
+        vi.spyOn(auth, 'getStoredUser').mockReturnValue({
+            id: 1,
+            email: 'john@example.com',
+            name: 'JohnDoe',
+        })
+
+        render(<Sidebar activeMenu="convert" />)
         expect(screen.getByText('JohnDoe')).toBeInTheDocument()
     })
 })

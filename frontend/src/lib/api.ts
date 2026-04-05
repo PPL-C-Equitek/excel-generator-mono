@@ -127,16 +127,26 @@ type HTTPError = Error & {
   status?: number;
 };
 
-export async function login(email: string, password: string) {
+type AuthResponse = {
+  access_token: string
+  refresh_token: string
+  user: {
+    id: number
+    email: string
+    name: string
+  }
+}
+
+export async function login(email: string, password: string): Promise<AuthResponse> {
   return fetchAPI("auth/login/", {
     method: "POST",
     body: JSON.stringify({ email, password }),
-  });
+  }) as Promise<AuthResponse>
 }
 
-export async function loginWithGoogle(token: string) {
+export async function loginWithGoogle(token: string): Promise<AuthResponse> {
   return fetchAPI("auth/google-oauth/", {
     method: "POST",
     body: JSON.stringify({ token }),
-  });
+  }) as Promise<AuthResponse>
 }

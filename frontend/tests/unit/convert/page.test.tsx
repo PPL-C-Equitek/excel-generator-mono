@@ -4,7 +4,7 @@ import Page from '../../../src/app/convert/page'
 
 const mockConvertPageRender = vi.fn()
 const mockReplace = vi.fn()
-const mockGetStoredAccessToken = vi.fn<() => string | null>()
+const mockGetValidAccessToken = vi.fn<() => Promise<string | null>>()
 
 vi.mock('next/navigation', () => ({
     useRouter: () => ({
@@ -13,7 +13,7 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('@/lib/auth', () => ({
-    getStoredAccessToken: () => mockGetStoredAccessToken(),
+    getValidAccessToken: () => mockGetValidAccessToken(),
 }))
 
 vi.mock('../../../src/app/convert/ConvertPage', () => ({
@@ -26,7 +26,7 @@ vi.mock('../../../src/app/convert/ConvertPage', () => ({
 describe('Convert Page Route Guard', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        mockGetStoredAccessToken.mockReturnValue('mock-token')
+        mockGetValidAccessToken.mockResolvedValue('mock-token')
     })
 
     it('renders ConvertPage when access token exists', async () => {
@@ -41,7 +41,7 @@ describe('Convert Page Route Guard', () => {
     })
 
     it('redirects to login when access token is missing', async () => {
-        mockGetStoredAccessToken.mockReturnValue(null)
+        mockGetValidAccessToken.mockResolvedValue(null)
 
         const { container } = render(<Page />)
 
@@ -51,6 +51,23 @@ describe('Convert Page Route Guard', () => {
 
         expect(screen.queryByTestId('convert-page')).not.toBeInTheDocument()
         expect(container.firstChild).toBeNull()
+        expect(mockConvertPageRender).not.toHaveBeenCalled()
+    })
+
+    it('does not redirect after unmount when async auth check resolves late', async () => {
+        let resolveToken: ((value: string | null) => void) | null = null
+        const pendingToken = new Promise<string | null>((resolve) => {
+            resolveToken = resolve
+        })
+        mockGetValidAccessToken.mockReturnValue(pendingToken)
+
+        const { unmount } = render(<Page />)
+        unmount()
+
+        resolveToken?.(null)
+        await Promise.resolve()
+
+        expect(mockReplace).not.toHaveBeenCalled()
         expect(mockConvertPageRender).not.toHaveBeenCalled()
     })
 })

@@ -4,8 +4,11 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import axios from 'axios';
 import type { AxiosError } from 'axios';
+import { useGoogleLogin } from '@react-oauth/google';
 import Navbar from '@/components/Navbar';
 import { LANDING_NAV_LINKS } from '@/constants/landing';
+import { loginWithGoogle } from '@/lib/api';
+import { storeAuthTokens } from '@/lib/auth';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
@@ -116,6 +119,8 @@ export async function resendVerificationFlow({
 }
 
 export default function RegisterPage() {
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+
   const [formData, setFormData] = useState<RegisterFormData>({
     name: '',
     email: '',
@@ -148,6 +153,40 @@ export default function RegisterPage() {
     }, 1000);
     return () => clearInterval(timer);
   }, [resendCooldown]);
+
+  const saveTokensAndRedirect = (
+    accessToken: string,
+    refreshToken: string,
+    user?: { name: string; email: string }
+  ) => {
+    storeAuthTokens(accessToken, refreshToken);
+
+    if (user) {
+      localStorage.setItem('user_name', user.name);
+      localStorage.setItem('user_email', user.email);
+    }
+
+    globalThis.location.href = '/convert';
+  };
+
+  const triggerGoogleSignUp = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      try {
+        const res = await loginWithGoogle(tokenResponse.access_token);
+        saveTokensAndRedirect(res.access_token, res.refresh_token, res.user);
+      } catch (err: unknown) {
+        if (err instanceof Error) {
+          alert(err.message);
+        } else {
+          alert('Google sign-up gagal');
+        }
+      }
+    },
+    onError: () => {
+      alert('Google sign-up dibatalkan atau gagal');
+    },
+    scope: 'openid email profile',
+  });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -228,9 +267,9 @@ export default function RegisterPage() {
       <Navbar links={LANDING_NAV_LINKS} />
 
       <main className="mx-auto flex w-full max-w-6xl items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
-        <div className="w-full max-w-md space-y-8 rounded-2xl border border-gray-100 bg-white p-8 shadow-xl shadow-gray-200/70">
+        <div className="w-full max-w-md space-y-8 rounded-2xl border border-red-800 bg-red-700 p-8 shadow-xl shadow-red-900/30">
           <div>
-            <h2 className="mt-2 text-center text-3xl font-extrabold text-gray-900">Daftar Akun Baru</h2>
+            <h2 className="mt-2 text-center text-3xl font-extrabold text-white">Daftar Akun Baru</h2>
           </div>
 
           {successMessage ? (
@@ -264,7 +303,7 @@ export default function RegisterPage() {
                 <div className="mt-2 flex w-full flex-col gap-3 sm:flex-row">
                   <Link
                     href="/login"
-                    className="flex w-full justify-center rounded-md border border-transparent bg-red-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                    className="flex w-full justify-center rounded-md border border-transparent bg-white px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-red-700"
                   >
                     Pergi ke Halaman Login
                   </Link>
@@ -272,11 +311,10 @@ export default function RegisterPage() {
                     type="button"
                     onClick={handleResendVerificationEmail}
                     disabled={isResending || resendCooldown > 0}
-                    className={`w-full rounded-md border px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ${
-                      isResending || resendCooldown > 0
-                        ? 'cursor-not-allowed border-gray-300 bg-gray-100 text-gray-500'
-                        : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
-                    }`}
+                    className={`w-full rounded-md border px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-red-700 ${isResending || resendCooldown > 0
+                      ? 'cursor-not-allowed border-gray-300 bg-gray-100 text-gray-500'
+                      : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
+                      }`}
                   >
                     {getResendButtonText(isResending, resendCooldown)}
                   </button>
@@ -291,7 +329,7 @@ export default function RegisterPage() {
 
               <div className="space-y-6">
                 <div>
-                  <label htmlFor="name" className="mb-1 block text-sm font-medium text-gray-700">
+                  <label htmlFor="name" className="mb-1 block text-sm font-medium text-white">
                     Nama Lengkap
                   </label>
                   <input
@@ -300,15 +338,14 @@ export default function RegisterPage() {
                     type="text"
                     value={formData.name}
                     onChange={handleChange}
-                    className={`relative block w-full appearance-none rounded-md border px-4 py-2 text-gray-900 placeholder-gray-500 focus:border-red-500 focus:outline-none focus:ring-red-500 sm:text-sm ${
-                      errors.name ? 'border-red-300' : 'border-gray-300'
-                    }`}
+                    className={`relative block w-full appearance-none rounded-md border bg-white px-4 py-2 text-gray-900 placeholder-gray-400 focus:border-red-500 focus:outline-none focus:ring-red-500 sm:text-sm ${errors.name ? 'border-red-300' : 'border-gray-300'
+                      }`}
                   />
                   {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
                 </div>
 
                 <div>
-                  <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
+                  <label htmlFor="email" className="mb-1 block text-sm font-medium text-white">
                     Email
                   </label>
                   <input
@@ -317,9 +354,8 @@ export default function RegisterPage() {
                     type="email"
                     value={formData.email}
                     onChange={handleChange}
-                    className={`relative block w-full appearance-none rounded-md border px-4 py-2 text-gray-900 placeholder-gray-500 focus:border-red-500 focus:outline-none focus:ring-red-500 sm:text-sm ${
-                      errors.email ? 'border-red-300' : 'border-gray-300'
-                    }`}
+                    className={`relative block w-full appearance-none rounded-md border bg-white px-4 py-2 text-gray-900 placeholder-gray-400 focus:border-red-500 focus:outline-none focus:ring-red-500 sm:text-sm ${errors.email ? 'border-red-300' : 'border-gray-300'
+                      }`}
                   />
                   {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
                 </div>
@@ -329,13 +365,36 @@ export default function RegisterPage() {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className={`group relative flex w-full justify-center rounded-md border border-transparent bg-red-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ${
-                    isLoading ? 'cursor-not-allowed opacity-70' : ''
-                  }`}
+                  className={`group relative flex w-full justify-center rounded-md border border-transparent bg-white px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-red-700 ${isLoading ? 'cursor-not-allowed opacity-70' : ''
+                    }`}
                 >
                   {isLoading ? 'Mendaftar...' : 'Daftar Sekarang'}
                 </button>
               </div>
+
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!googleClientId) {
+                      alert('Google OAuth belum dikonfigurasi. Isi NEXT_PUBLIC_GOOGLE_CLIENT_ID lalu restart frontend.');
+                      return;
+                    }
+
+                    triggerGoogleSignUp();
+                  }}
+                  className="group relative flex w-full justify-center rounded-md border border-white bg-red-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-red-700"
+                >
+                  Sign up with Google
+                </button>
+              </div>
+
+              <p className="text-center text-sm text-red-100">
+                Already have an account?{' '}
+                <Link href="/login" className="font-semibold text-white underline hover:text-red-50">
+                  login here
+                </Link>
+              </p>
             </form>
           )}
         </div>

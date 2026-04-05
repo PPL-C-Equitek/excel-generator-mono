@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
+import { useGoogleLogin } from '@react-oauth/google';
 import RegisterPage, {
   shouldSkipResendVerification,
   resendVerificationFlow,
@@ -13,8 +14,13 @@ vi.mock('next/navigation', () => ({
   useRouter: vi.fn(),
 }));
 
+vi.mock('@react-oauth/google', () => ({
+  useGoogleLogin: vi.fn(),
+}));
+
 vi.mock('axios');
 const mockedAxios = axios as Mocked<typeof axios>;
+const mockedUseGoogleLogin = useGoogleLogin as Mock;
 
 describe('Registration Page', () => {
   const mockPush = vi.fn();
@@ -22,6 +28,7 @@ describe('Registration Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (useRouter as Mock).mockReturnValue({ push: mockPush });
+    mockedUseGoogleLogin.mockReturnValue(vi.fn());
   });
 
   afterEach(() => {
@@ -84,6 +91,8 @@ describe('Registration Page', () => {
     expect(nameInput).toBeInTheDocument();
     expect(emailInput).toBeInTheDocument();
     expect(submitBtn).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign up with google/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /login here/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/konfirmasi password/i)).not.toBeInTheDocument();
   });
