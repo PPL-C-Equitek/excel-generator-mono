@@ -1,34 +1,46 @@
 from __future__ import annotations
 
+import hashlib
 import jwt
 from jwt import PyJWTError
 
 from django.conf import settings
 from django.core.cache import cache
+from django.utils import timezone
 
 from authentication.logout.contracts import LogoutUserUseCase, TokenBlacklistPort
 from authentication.logout.use_cases import DefaultLogoutUserUseCase
 
 
+def _resolve_blacklist_timeout(payload: dict) -> int:
+    exp = payload.get("exp")
+    if not isinstance(exp, int):
+        return 7 * 24 * 60 * 60
+
+    now_ts = int(timezone.now().timestamp())
+    return max(exp - now_ts, 1)
+
+
 class DjangoTokenBlacklistRepository(TokenBlacklistPort):
     def blacklist(self, refresh_token: str) -> None:
-        if not refresh_token:  # pragma: no cover
+        if not refresh_token:
             raise ValueError("Refresh token is required")
 
         secret_key = getattr(settings, "JWT_SECRET_KEY", "")
         try:
             payload = jwt.decode(refresh_token, secret_key, algorithms=["HS256"])
-        except PyJWTError as exc:  # pragma: no cover
+        except PyJWTError as exc:
             raise ValueError("Invalid refresh token") from exc
 
-        if payload.get("type") != "refresh":  # pragma: no cover
+        if payload.get("type") != "refresh":
             raise ValueError("Invalid token type")
 
-        cache_key = f"blacklisted_refresh_token:{refresh_token}"
-        if cache.get(cache_key):  # pragma: no cover
+        token_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
+        cache_key = f"blacklisted_refresh_token:{token_hash}"
+        timeout = _resolve_blacklist_timeout(payload)
+        was_added = cache.add(cache_key, True, timeout=timeout)
+        if not was_added:
             raise ValueError("Token already blacklisted")
-
-        cache.set(cache_key, True, timeout=7 * 24 * 60 * 60)
 
 
 class CallableTokenBlacklistRepository(TokenBlacklistPort):
