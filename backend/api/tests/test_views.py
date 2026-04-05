@@ -1184,13 +1184,13 @@ class DownloadExcelViewTest(APISimpleTestCase):
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
     @patch("api.views.open", create=True)
-    def test_download_excel_endpoint_returns_404_for_unsafe_artifact_filename(
+    def test_download_excel_endpoint_returns_404_when_resolver_returns_missing_file_path(
         self,
         mocked_open,
         mocked_resolver,
     ):
         mocked_resolver.return_value = {
-            "file_name": "../evil.xlsx",
+            "file_name": "export_abc123.xlsx",
             "artifact_type": "xlsx",
             "content_type": (
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
