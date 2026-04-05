@@ -1019,7 +1019,7 @@ class ExportCSVToFilesystemTest(unittest.TestCase):
     def test_build_safe_file_path_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.assertRaises(export_service.OutputCSVGenerationError):
-                export_service._build_safe_file_path(temp_dir, "../evil.csv")
+                export_service._build_safe_file_path(temp_dir, "../evil.csv", export_service.OutputCSVGenerationError)
 
     def test_build_safe_file_path_raises_when_commonpath_fails(self):
         with patch(
@@ -1027,7 +1027,7 @@ class ExportCSVToFilesystemTest(unittest.TestCase):
             side_effect=ValueError("invalid path roots"),
         ):
             with self.assertRaises(export_service.OutputCSVGenerationError):
-                export_service._build_safe_file_path(r"C:\safe\storage", "export_abc123.csv")
+                export_service._build_safe_file_path(r"C:\safe\storage", "export_abc123.csv", export_service.OutputCSVGenerationError)
 
 
 class ExportExcelToFilesystemTest(unittest.TestCase):
