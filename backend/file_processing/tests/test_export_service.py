@@ -13,6 +13,7 @@ from openpyxl import load_workbook
 import file_processing.services.export_service as export_service
 from file_processing.services.export_service import (
     OutputCSVMappingError,
+    OutputExcelDownloadStorageError,
     OutputLLMValidationError,
     map_output_csv,
     validate_output_llm,
@@ -1735,10 +1736,10 @@ class DiscoverExcelDownloadArtifactsTest(unittest.TestCase):
 
         self.assertEqual(discovered, {})
 
-    def test_discover_excel_download_artifacts_raises_lookup_error_when_scandir_fails(self):
+    def test_discover_excel_download_artifacts_raises_storage_error_when_scandir_fails(self):
         with patch(
             "file_processing.services.export_service.os.scandir",
             side_effect=OSError("storage not readable"),
         ):
-            with self.assertRaises(export_service.OutputExcelDownloadLookupError):
+            with self.assertRaises(export_service.OutputExcelDownloadStorageError):
                 export_service._discover_excel_download_artifacts(r"C:\safe\storage")

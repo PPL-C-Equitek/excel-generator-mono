@@ -16,6 +16,7 @@ from file_processing.services.export_service import (
     OutputCSVGenerationError,
     OutputCSVMappingError,
     OutputExcelDownloadLookupError,
+    OutputExcelDownloadStorageError,
     OutputExcelGenerationError,
     OutputLLMValidationError,
 )
@@ -1269,6 +1270,25 @@ class DownloadExcelViewTest(APISimpleTestCase):
             response.data["message"],
             "Failed to download Excel due to internal error.",
         )
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
+    def test_download_excel_endpoint_returns_500_when_storage_is_unavailable(
+        self,
+        mocked_resolver,
+    ):
+        mocked_resolver.side_effect = OutputExcelDownloadStorageError(
+            "Excel artifact storage is unavailable."
+        )
+
+        response = self.client.get("/export/excel/xlsx_abc123/download")
+        response_data = self._response_data(response)
+
+        self.assertEqual(response_data.get("status"), "error")
+        self.assertEqual(
+            response_data.get("message"),
+            "Failed to download Excel due to internal error.",
+        )
+        self.assertEqual(response.status_code, 500)
 
     def test_download_excel_endpoint_rejects_post_method(self):
         response = self.client.post("/export/excel/xlsx_abc123/download")
