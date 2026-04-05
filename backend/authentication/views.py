@@ -1,11 +1,8 @@
 import logging
 from datetime import timedelta
-from functools import wraps
 from django.core.cache import cache
 
 from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
-from django.db import IntegrityError
-from api.decorators import rate_limit
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
@@ -13,7 +10,7 @@ from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
 from authentication.models import User
-from authentication.serializers import RegisterSerializer, LoginSerializer, RefreshTokenSerializer, VerifyEmailSerializer
+from authentication.serializers import LoginSerializer, RefreshTokenSerializer, VerifyEmailSerializer
 from authentication.services import (
     send_verification_email,
     generate_tokens,
@@ -28,25 +25,7 @@ from authentication.services import (
 )
 
 logger = logging.getLogger(__name__)
-REGISTER_SUCCESS_MESSAGE = "Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda."
 SERVER_ERROR_MESSAGE = "An internal server error occurred. Please try again later."
-
-
-def apply_rate_limit_to_method(**rate_limit_kwargs):
-    """Adapter to apply function-based rate_limit decorator on APIView methods."""
-
-    def decorator(method):
-        @wraps(method)
-        def wrapped(self, request, *args, **kwargs):
-            @rate_limit(**rate_limit_kwargs)
-            def method_wrapper(inner_request, *_args, **_kwargs):
-                return method(self, inner_request, *args, **kwargs)
-
-            return method_wrapper(request)
-
-        return wrapped
-
-    return decorator
 
 
 class ResendVerificationThrottle(SimpleRateThrottle):
@@ -60,59 +39,6 @@ class ResendVerificationThrottle(SimpleRateThrottle):
 
     def parse_rate(self, rate):
         return (3, 900)
-
-
-class RegisterView(APIView):
-    @apply_rate_limit_to_method(max_requests=60, per="minute")
-    def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                {"errors": serializer.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        validated = serializer.validated_data
-        name = validated["name"]
-        email = validated["email"].lower().strip()
-
-        try:
-            existing_user_qs = User.objects.filter(email=email)
-            if existing_user_qs.exists():
-                existing_user = existing_user_qs.first()
-                if existing_user and existing_user.status != "verified":
-                    send_verification_email(existing_user.email)
-
-                return Response(
-                    {"message": REGISTER_SUCCESS_MESSAGE},
-                    status=status.HTTP_200_OK,
-                )
-
-            user = User.objects.create_user(
-                name=name,
-                email=email,
-                status="unverified",
-            )
-            user.set_unusable_password()
-            user.save(update_fields=["password"])
-
-            send_verification_email(user.email)
-
-            return Response(
-                {"message": REGISTER_SUCCESS_MESSAGE},
-                status=status.HTTP_200_OK,
-            )
-        except IntegrityError:
-            return Response(
-                {"message": REGISTER_SUCCESS_MESSAGE},
-                status=status.HTTP_200_OK,
-            )
-        except Exception:
-            logger.exception("Unexpected error during user registration.")
-            return Response(
-                {"message": "An internal server error occurred"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
 
 
 class VerifyEmailView(APIView):
