@@ -12,6 +12,10 @@ from rest_framework.permissions import AllowAny
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
+from rest_framework.decorators import api_view, permission_classes
+from django.conf import settings
+from authentication.oauth_services import GoogleOAuthService
+
 from authentication.models import User
 from authentication.serializers import RegisterSerializer, LoginSerializer, RefreshTokenSerializer, VerifyEmailSerializer
 from authentication.services import (
@@ -297,11 +301,6 @@ class RefreshTokenView(APIView):
                 {"message": SERVER_ERROR_MESSAGE},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from django.conf import settings
-from authentication.oauth_services import GoogleOAuthService
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
