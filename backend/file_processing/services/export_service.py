@@ -119,6 +119,9 @@ def _validate_summary(summary):
             )
 
 def _validate_content_data(content_data):
+    if not content_data:
+        raise OutputLLMValidationError("content_data must not be empty.")
+
     table_names = set()
     for table_index, table in enumerate(content_data):
         if not isinstance(table, dict):
