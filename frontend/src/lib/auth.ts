@@ -1,4 +1,4 @@
-const ACCESS_TOKEN_KEYS = ['accessToken', 'auth.accessToken']
+const ACCESS_TOKEN_KEYS = ['access_token', 'accessToken', 'auth.accessToken']
 
 function readFromStorage(storage: Storage | undefined): string | null {
     if (!storage) return null

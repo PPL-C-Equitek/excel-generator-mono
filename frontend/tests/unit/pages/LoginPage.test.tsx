@@ -3,6 +3,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import LoginPage from '../../../src/app/login/LoginPage'
 import * as api from '@/lib/api'
 
+vi.mock('@react-oauth/google', () => ({
+    useGoogleLogin: vi.fn(() => vi.fn()),
+}))
+
 describe('LoginPage', () => {
     describe('positive', () => {
         it('renders Navbar', () => {
@@ -113,6 +117,7 @@ describe('LoginPage', () => {
 // Mock api module
 vi.mock('@/lib/api', () => ({
     login: vi.fn(),
+    loginWithGoogle: vi.fn(),
 }))
 
 describe('handleLogin', () => {

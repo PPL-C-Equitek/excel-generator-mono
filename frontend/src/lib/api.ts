@@ -133,3 +133,10 @@ export async function login(email: string, password: string) {
     body: JSON.stringify({ email, password }),
   });
 }
+
+export async function loginWithGoogle(token: string) {
+  return fetchAPI("auth/google-oauth/", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}

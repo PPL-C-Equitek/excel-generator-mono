@@ -146,7 +146,8 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
 
             {/* Sign in with Google */}
             <button
-                onClick={onGoogleSignIn}
+                type="button"
+                onClick={() => onGoogleSignIn?.()}
                 className="w-full py-3 rounded-xl font-bold text-sm mb-6 flex items-center justify-center gap-2 transition active:scale-[0.98]"
                 style={{ backgroundColor: '#ffffff', color: '#111827' }}
             >
