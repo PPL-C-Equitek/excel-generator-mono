@@ -3,10 +3,12 @@ import io
 import os
 import re
 import tempfile
+import types
 import unittest
 import zipfile
 from copy import deepcopy
 from unittest.mock import patch
+from openpyxl import load_workbook
 
 import file_processing.services.export_service as export_service
 from file_processing.services.export_service import (
@@ -127,6 +129,12 @@ class ValidateOutputLLMTest(unittest.TestCase):
 
         payload = self._build_valid_payload()
         payload["summary"] = {"grand_total": {1}}
+        with self.assertRaises(OutputLLMValidationError):
+            validate_output_llm(payload)
+
+    def test_validate_output_llm_rejects_empty_content_data_list(self):
+        payload = self._build_valid_payload()
+        payload["content_data"] = []
         with self.assertRaises(OutputLLMValidationError):
             validate_output_llm(payload)
 
@@ -1026,6 +1034,303 @@ class ExportCSVToFilesystemTest(unittest.TestCase):
         ):
             with self.assertRaises(export_service.OutputCSVGenerationError):
                 export_service._build_safe_file_path(r"C:\safe\storage", "export_abc123.csv")
+
+
+class ExportExcelToFilesystemTest(unittest.TestCase):
+    def _build_valid_output_json(self):
+        return {
+            "document_info": {
+                "source_type": "Excel",
+                "filename": "laporan_tahunan.xlsx",
+            },
+            "summary": {
+                "grand_total": 1500000,
+                "period": "2026",
+            },
+            "content_data": [
+                {
+                    "table_name": "Sheet1_Januari",
+                    "headers": ["item_name", "quantity", "price"],
+                    "rows": [
+                        {"item_name": "Kertas", "quantity": 10, "price": 50000},
+                    ],
+                },
+                {
+                    "table_name": "Sheet2_Februari",
+                    "headers": ["item_name", "quantity", "price"],
+                    "rows": [
+                        {"item_name": "Tinta", "quantity": 1, "price": 400000},
+                    ],
+                },
+            ],
+        }
+
+    def _read_xlsx_sheet_names(self, file_path):
+        workbook = load_workbook(file_path, read_only=True, data_only=True)
+        try:
+            return workbook.sheetnames
+        finally:
+            workbook.close()
+
+    def _count_xlsx_worksheet_files(self, file_path):
+        workbook = load_workbook(file_path, read_only=True, data_only=True)
+        try:
+            return len(workbook.worksheets)
+        finally:
+            workbook.close()
+
+    def _read_xlsx_sheet_rows(self, file_path, target_sheet_name):
+        workbook = load_workbook(file_path, read_only=True, data_only=True)
+        try:
+            worksheet = workbook[target_sheet_name]
+            return [list(row) for row in worksheet.iter_rows(values_only=True)]
+        finally:
+            workbook.close()
+
+    def test_export_excel_to_filesystem_exposes_expected_api(self):
+        self.assertTrue(
+            hasattr(export_service, "export_excel_to_filesystem"),
+            "export_excel_to_filesystem must be implemented in export_service.",
+        )
+        self.assertTrue(
+            hasattr(export_service, "OutputExcelGenerationError"),
+            "OutputExcelGenerationError must be implemented in export_service.",
+        )
+
+    def test_export_excel_to_filesystem_saves_multi_sheet_as_single_xlsx(self):
+        output_json = self._build_valid_output_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = export_service.export_excel_to_filesystem(
+                output_json=output_json,
+                storage_dir=temp_dir,
+                token_generator=lambda: "abc123",
+                now_provider=lambda: "2026-03-08T10:00:00Z",
+            )
+
+            self.assertEqual(result["file_id"], "xlsx_abc123")
+            self.assertEqual(result["file_name"], "export_abc123.xlsx")
+            self.assertEqual(result["artifact_type"], "xlsx")
+            self.assertEqual(result["created_at"], "2026-03-08T10:00:00Z")
+            self.assertGreater(result["size_bytes"], 0)
+
+            file_path = os.path.join(temp_dir, result["file_name"])
+            self.assertTrue(os.path.exists(file_path))
+            self.assertEqual(self._count_xlsx_worksheet_files(file_path), 2)
+            self.assertEqual(
+                self._read_xlsx_sheet_names(file_path),
+                ["Sheet1_Januari", "Sheet2_Februari"],
+            )
+
+    def test_export_excel_to_filesystem_sanitizes_formula_like_headers_and_values(self):
+        output_json = self._build_valid_output_json()
+        output_json["content_data"] = [
+            {
+                "table_name": "FormulaSheet",
+                "headers": ["=header", "note"],
+                "rows": [
+                    {"=header": "=SUM(A1:A2)", "note": "@danger"},
+                ],
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = export_service.export_excel_to_filesystem(
+                output_json=output_json,
+                storage_dir=temp_dir,
+                token_generator=lambda: "safe01",
+            )
+
+            file_path = os.path.join(temp_dir, result["file_name"])
+            rows = self._read_xlsx_sheet_rows(file_path, "FormulaSheet")
+
+            self.assertEqual(rows[0], ["'=header", "note"])
+            self.assertEqual(rows[1], ["'=SUM(A1:A2)", "'@danger"])
+
+    def test_export_excel_to_filesystem_rejects_invalid_output_json(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(OutputLLMValidationError):
+                export_service.export_excel_to_filesystem(
+                    output_json={},
+                    storage_dir=temp_dir,
+                )
+
+    def test_export_excel_to_filesystem_rejects_invalid_storage_dir(self):
+        output_json = self._build_valid_output_json()
+
+        with self.assertRaises(export_service.OutputExcelGenerationError):
+            export_service.export_excel_to_filesystem(
+                output_json=output_json,
+                storage_dir="",
+            )
+
+    @patch("file_processing.services.export_service.open")
+    def test_export_excel_to_filesystem_raises_when_writing_file_fails(self, mocked_open):
+        output_json = self._build_valid_output_json()
+        mocked_open.side_effect = OSError("disk write failed")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(export_service.OutputExcelGenerationError):
+                export_service.export_excel_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                )
+
+    def test_export_excel_to_filesystem_rejects_empty_token_from_generator(self):
+        output_json = self._build_valid_output_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(export_service.OutputExcelGenerationError):
+                export_service.export_excel_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                    token_generator=lambda: "   ",
+                )
+
+    def test_export_excel_to_filesystem_rejects_unsafe_token_from_generator(self):
+        output_json = self._build_valid_output_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(export_service.OutputExcelGenerationError):
+                export_service.export_excel_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                    token_generator=lambda: "bad-token",
+                )
+
+    def test_export_excel_to_filesystem_rejects_invalid_now_provider_value(self):
+        output_json = self._build_valid_output_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(export_service.OutputExcelGenerationError):
+                export_service.export_excel_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                    now_provider=lambda: "",
+                )
+
+
+class ExcelExportInternalHelperCoverageTest(unittest.TestCase):
+    class NoOpSanitizationPolicy:
+        def sanitize_header(self, header):
+            return header
+
+        def sanitize_value(self, value):
+            return value
+
+    class BrokenWorkbook:
+        def __init__(self):
+            self.closed = False
+
+        def save(self, _buffer):
+            raise RuntimeError("save failure")
+
+        def close(self):
+            self.closed = True
+
+    class _FakeWorksheet:
+        def __init__(self, title):
+            self.title = title
+            self.rows = []
+
+        def append(self, row):
+            self.rows.append(row)
+
+    class _FakeWorkbookWithoutDefaultSheet:
+        def __init__(self):
+            self.worksheets = []
+            self.active = None
+            self.removed_called = False
+
+        def remove(self, _worksheet):
+            self.removed_called = True
+
+        def create_sheet(self, title):
+            worksheet = ExcelExportInternalHelperCoverageTest._FakeWorksheet(title)
+            self.worksheets.append(worksheet)
+            return worksheet
+
+        def close(self):
+            return None
+
+    def test_validate_excel_mapped_output_rejects_non_object_root(self):
+        with self.assertRaises(export_service.OutputExcelGenerationError):
+            export_service._validate_excel_mapped_output("invalid")
+
+    def test_validate_excel_mapped_output_rejects_non_list_sheets(self):
+        with self.assertRaises(export_service.OutputExcelGenerationError):
+            export_service._validate_excel_mapped_output({"sheets": "invalid"})
+
+    def test_serialize_excel_workbook_wraps_unexpected_error_and_closes_workbook(self):
+        workbook = self.BrokenWorkbook()
+
+        with self.assertRaises(export_service.OutputExcelGenerationError):
+            export_service._serialize_excel_workbook(workbook)
+
+        self.assertTrue(workbook.closed)
+
+    def test_build_excel_workbook_raises_clear_error_when_openpyxl_missing(self):
+        original_import = __import__
+
+        def _import_stub(name, *args, **kwargs):
+            if name == "openpyxl":
+                raise ImportError("openpyxl not installed")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=_import_stub):
+            with self.assertRaises(export_service.OutputExcelGenerationError):
+                export_service._build_excel_workbook(
+                    sheets=[],
+                    sanitization_policy=self.NoOpSanitizationPolicy(),
+                )
+
+    def test_build_excel_workbook_creates_default_sheet_when_sheet_input_is_empty(self):
+        workbook = export_service._build_excel_workbook(
+            sheets=[],
+            sanitization_policy=self.NoOpSanitizationPolicy(),
+        )
+        try:
+            self.assertEqual(workbook.sheetnames, ["Sheet1"])
+        finally:
+            workbook.close()
+
+    def test_build_excel_workbook_skips_default_sheet_removal_when_workbook_starts_empty(self):
+        original_import = __import__
+
+        def _import_stub(name, *args, **kwargs):
+            if name == "openpyxl":
+                return types.SimpleNamespace(
+                    Workbook=self._FakeWorkbookWithoutDefaultSheet
+                )
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=_import_stub):
+            workbook = export_service._build_excel_workbook(
+                sheets=[
+                    {
+                        "name": "SheetA",
+                        "headers": ["col1"],
+                        "rows": [["value1"]],
+                    }
+                ],
+                sanitization_policy=self.NoOpSanitizationPolicy(),
+            )
+
+        self.assertEqual(len(workbook.worksheets), 1)
+        self.assertEqual(workbook.worksheets[0].title, "SheetA")
+        self.assertFalse(workbook.removed_called)
+
+    def test_normalize_excel_sheet_name_uses_default_when_normalized_is_blank(self):
+        seen_names = set()
+
+        result = export_service._normalize_excel_sheet_name("   ", seen_names)
+
+        self.assertEqual(result, "Sheet1")
+        self.assertIn("sheet1", seen_names)
+
+    def test_normalize_excel_sheet_name_increments_suffix_until_unique(self):
+        seen_names = {"sheet", "sheet_1"}
+
+        result = export_service._normalize_excel_sheet_name("Sheet", seen_names)
+
+        self.assertEqual(result, "Sheet_2")
+        self.assertIn("sheet_2", seen_names)
 
 
 class ResolveCSVDownloadArtifactTest(unittest.TestCase):
