@@ -64,23 +64,21 @@ class DefaultRegisterUserUseCaseTest(APISimpleTestCase):
         self.assertEqual(strategy.received_command, RegisterCommand(name="John", email="john@example.com"))
         self.assertIsNone(strategy.received_user)
 
-    def test_passes_existing_user_to_selected_strategy(self) -> None:
+    def test_raises_registration_conflict_error_when_existing_user_is_found(self) -> None:
         existing_user = RegistrationUser(email="john@example.com", status="unverified")
         lookup = MagicMock()
         lookup.find_by_email.return_value = existing_user
-        strategy = SpyRegistrationStrategy()
         strategy_factory = MagicMock()
-        strategy_factory.create.return_value = strategy
         use_case = DefaultRegisterUserUseCase(
             lookup_port=lookup,
             strategy_factory=strategy_factory,
         )
 
-        result = use_case.execute(RegisterCommand(name="John", email="john@example.com"))
+        with self.assertRaises(RegistrationConflictError):
+            use_case.execute(RegisterCommand(name="John", email="john@example.com"))
 
-        self.assertEqual(result.message, REGISTER_SUCCESS_MESSAGE)
-        strategy_factory.create.assert_called_once_with(existing_user)
-        self.assertEqual(strategy.received_user, existing_user)
+        lookup.find_by_email.assert_called_once_with("john@example.com")
+        strategy_factory.create.assert_not_called()
 
     def test_raises_registration_conflict_error_when_duplicate_email_exists(self) -> None:
         existing_user = RegistrationUser(email="john@example.com", status="unverified")
