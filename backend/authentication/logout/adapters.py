@@ -37,7 +37,6 @@ class CallableTokenBlacklistRepository(TokenBlacklistPort):
 
     def blacklist(self, refresh_token: str) -> None:
         self._blacklister(refresh_token)
-        DjangoTokenBlacklistRepository().blacklist(refresh_token)
 
 
 def build_logout_user_use_case(
