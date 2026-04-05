@@ -12,6 +12,7 @@ from rest_framework.test import APITestCase
 from authentication.logout.adapters import DjangoTokenBlacklistRepository
 from authentication.models import User
 from authentication.services import generate_tokens
+from authentication.views import blacklist_refresh_token
 
 
 @override_settings(JWT_SECRET_KEY="test-jwt-secret-key-with-at-least-32-bytes")
@@ -269,3 +270,13 @@ class DjangoTokenBlacklistRepositoryTest(APITestCase):
             self.repo.blacklist("")
 
         self.assertEqual(str(ctx.exception), "Refresh token is required")
+
+
+class LogoutViewCompatibilityHelperTest(APITestCase):
+    @patch("authentication.views.DjangoTokenBlacklistRepository")
+    def test_blacklist_refresh_token_delegates_to_django_repository(self, mock_repo_cls):
+        mock_repo = mock_repo_cls.return_value
+
+        blacklist_refresh_token("refresh-token")
+
+        mock_repo.blacklist.assert_called_once_with("refresh-token")
