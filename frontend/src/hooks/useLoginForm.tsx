@@ -37,6 +37,12 @@ export default function useLoginForm(options?: UseLoginFormOptions) {
             setError('Password is required.')
             return
         }
+
+        // Validasi password tidak hanya spasi
+        if (!password.trim()) {
+            setError('Password is required.')
+            return
+        }
         options?.onSubmit?.({ email, password, rememberMe })
     }
 
