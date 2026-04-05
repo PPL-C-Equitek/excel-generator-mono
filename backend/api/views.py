@@ -63,7 +63,12 @@ def _resolve_download_filename(requested_name, default_name, artifact_type):
     if not safe_name:
         return default_name
 
-    expected_ext = ".zip" if artifact_type == "zip" else ".csv"
+    if artifact_type == "zip":
+        expected_ext = ".zip"
+    elif artifact_type == "xlsx":
+        expected_ext = ".xlsx"
+    else:
+        expected_ext = ".csv"
     root, ext = os.path.splitext(safe_name)
     if ext.lower() != expected_ext:
         if ext:
@@ -401,10 +406,15 @@ def download_excel(request, export_id):
     except Exception:
         logger.exception("Unexpected error while preparing Excel download.")
         return _excel_download_internal_error_response()
+    download_name = _resolve_download_filename(
+        requested_name=request.query_params.get("filename"),
+        default_name=artifact["file_name"],
+        artifact_type=artifact["artifact_type"],
+    )
 
     return FileResponse(
         file_handle,
         as_attachment=True,
-        filename=artifact["file_name"],
+        filename=download_name,
         content_type=artifact["content_type"],
     )
