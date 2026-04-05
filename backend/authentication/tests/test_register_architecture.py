@@ -249,6 +249,25 @@ class RegisterViewDependencyInjectionTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertEqual(response.data["message"], "An internal server error occurred")
 
+    def test_view_returns_500_when_use_case_raises_unhandled_exception(self) -> None:
+        use_case = MagicMock()
+        use_case.execute.side_effect = Exception("unexpected boom")
+
+        class TestableRegisterView(RegisterView):
+            def get_register_use_case(self):  # type: ignore[override]
+                return use_case
+
+        request = self.factory.post(
+            "/auth/register/",
+            {"name": "John", "email": "john@example.com"},
+            format="json",
+        )
+
+        response = TestableRegisterView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(response.data["message"], "An internal server error occurred")
+
     def test_view_short_circuits_before_use_case_when_payload_is_invalid(self) -> None:
         use_case = MagicMock()
 

@@ -62,3 +62,9 @@ class RegisterView(APIView):
                 {"message": "An internal server error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+        except Exception:
+            logger.exception("Unhandled error during user registration.")
+            return Response(
+                {"message": "An internal server error occurred"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
