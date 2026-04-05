@@ -1,15 +1,25 @@
+'use client'
+
+import { useEffect, useState } from "react"
+import { getStoredUser } from "@/lib/auth"
 interface SidebarProps {
     readonly activeMenu: 'convert' | 'schema' | 'history'
-    readonly username: string
     readonly onLogout?: () => void
 }
 
-export default function Sidebar({ activeMenu, username, onLogout }: SidebarProps) {
+export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
     const menus = [
         { key: 'convert', label: 'Convert', href: '/convert' },
         { key: 'schema', label: 'Schema', href: '/schema' },
         { key: 'history', label: 'History', href: '/history' },
     ]
+
+    const [username, setUsername] = useState<string>("User")
+
+    useEffect(() => {
+        const user = getStoredUser()
+        if (user) setUsername(user.name)
+    }, [])
 
     return (
         <aside className="fixed inset-y-0 left-0 w-56 overflow-y-auto bg-red-700 flex flex-col">

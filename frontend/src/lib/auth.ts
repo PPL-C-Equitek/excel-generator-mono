@@ -194,3 +194,37 @@ export function getStoredAccessToken(): string | null {
         readFromStorage(globalThis.window.sessionStorage)
     )
 }
+
+type StoredUser = {
+    id: number | string
+    email: string
+    name: string
+}
+
+export function getStoredUser(): StoredUser | null {
+    if (globalThis.window === undefined) return null
+
+    const token = getStoredAccessToken()
+    if (!token) return null
+
+    const name = globalThis.window.localStorage.getItem('user_name')
+    const email = globalThis.window.localStorage.getItem('user_email')
+
+    if (name || email) {
+        return {
+            id: '',
+            email: email ?? '',
+            name: name ?? email ?? 'User',
+        }
+    }
+
+    // Fallback ke JWT payload
+    const payload = decodeJwtPayload(token)
+    if (!payload) return null
+
+    return {
+        id: payload.user_id as number,
+        email: payload.email as string,
+        name: (payload.name ?? payload.email ?? 'User') as string,
+    }
+}
