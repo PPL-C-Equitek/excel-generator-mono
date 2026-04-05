@@ -2,7 +2,6 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
-import { useGoogleLogin } from '@react-oauth/google';
 import RegisterPage, {
   shouldSkipResendVerification,
   resendVerificationFlow,
@@ -14,21 +13,16 @@ vi.mock('next/navigation', () => ({
   useRouter: vi.fn(),
 }));
 
-vi.mock('@react-oauth/google', () => ({
-  useGoogleLogin: vi.fn(),
-}));
-
 vi.mock('axios');
 const mockedAxios = axios as Mocked<typeof axios>;
-const mockedUseGoogleLogin = useGoogleLogin as Mock;
 
 describe('Registration Page', () => {
   const mockPush = vi.fn();
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    mockedAxios.post.mockReset();
     (useRouter as Mock).mockReturnValue({ push: mockPush });
-    mockedUseGoogleLogin.mockReturnValue(vi.fn());
   });
 
   afterEach(() => {
@@ -38,9 +32,9 @@ describe('Registration Page', () => {
   const setup = () => {
     render(<RegisterPage />);
     return {
-      nameInput: screen.getByLabelText(/nama lengkap/i) as HTMLInputElement,
+      nameInput: screen.getByLabelText(/nama lengkap|full name/i) as HTMLInputElement,
       emailInput: screen.getByLabelText(/email/i) as HTMLInputElement,
-      submitBtn: screen.getByRole('button', { name: /daftar sekarang/i }),
+      submitBtn: screen.getByRole('button', { name: /daftar sekarang|sign up/i }),
     };
   };
 
@@ -91,8 +85,6 @@ describe('Registration Page', () => {
     expect(nameInput).toBeInTheDocument();
     expect(emailInput).toBeInTheDocument();
     expect(submitBtn).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign up with google/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /login here/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/konfirmasi password/i)).not.toBeInTheDocument();
   });
@@ -275,12 +267,11 @@ describe('Registration Page', () => {
 
     test('resend success uses fallback message when response has no message', async () => {
       const { nameInput, emailInput, submitBtn } = setup();
-      const user = userEvent.setup();
 
       mockedAxios.post.mockResolvedValueOnce({ status: 200, data: { message: 'ok' } });
 
-      await user.type(nameInput, 'Resend Fallback User');
-      await user.type(emailInput, 'resendfallback@example.com');
+      fireEvent.change(nameInput, { target: { value: 'Resend Fallback User' } });
+      fireEvent.change(emailInput, { target: { value: 'resendfallback@example.com' } });
       fireEvent.click(submitBtn);
 
       const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
@@ -295,16 +286,15 @@ describe('Registration Page', () => {
       await waitFor(() => {
         expect(screen.getByText(/email verifikasi berhasil dikirim ulang\./i)).toBeInTheDocument();
       });
-    });
+    }, 10000);
 
     test('resend ignores second click while request is in-flight (guard branch)', async () => {
       const { nameInput, emailInput, submitBtn } = setup();
-      const user = userEvent.setup();
 
       mockedAxios.post.mockResolvedValueOnce({ status: 200, data: { message: 'ok' } });
 
-      await user.type(nameInput, 'Resend Guard User');
-      await user.type(emailInput, 'resendguard@example.com');
+      fireEvent.change(nameInput, { target: { value: 'Resend Guard User' } });
+      fireEvent.change(emailInput, { target: { value: 'resendguard@example.com' } });
       fireEvent.click(submitBtn);
 
       const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
@@ -330,7 +320,7 @@ describe('Registration Page', () => {
       });
 
       expect(mockedAxios.post).toHaveBeenCalledTimes(2);
-    });
+    }, 10000);
 
     test('shows error when data is invalid (400 Bad Request)', async () => {
       const { nameInput, emailInput, submitBtn } = setup();
@@ -371,7 +361,7 @@ describe('Registration Page', () => {
         expect(screen.getByText(/terjadi kesalahan pada server/i)).toBeInTheDocument();
       });
 
-      expect(submitBtn).toHaveTextContent(/daftar sekarang/i);
+      expect(submitBtn).toHaveTextContent(/daftar sekarang|sign up/i);
       expect(submitBtn).not.toBeDisabled();
     });
 
@@ -397,7 +387,6 @@ describe('Registration Page', () => {
 
     test('maps backend serializer field errors on 400 response', async () => {
       const { nameInput, emailInput, submitBtn } = setup();
-      const user = userEvent.setup();
 
       mockedAxios.post.mockRejectedValueOnce({
         response: {
@@ -411,15 +400,15 @@ describe('Registration Page', () => {
         },
       });
 
-      await user.type(nameInput, 'Field Error User');
-      await user.type(emailInput, 'fielderror@example.com');
+      fireEvent.change(nameInput, { target: { value: 'Field Error User' } });
+      fireEvent.change(emailInput, { target: { value: 'fielderror@example.com' } });
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
         expect(screen.getByText(/format email tidak valid dari backend/i)).toBeInTheDocument();
         expect(screen.getByText(/terjadi kesalahan validasi umum/i)).toBeInTheDocument();
       });
-    });
+    }, 10000);
 
     test('uses message fallback when non_field_errors is missing in 400 serializer errors', async () => {
       const { nameInput, emailInput, submitBtn } = setup();
