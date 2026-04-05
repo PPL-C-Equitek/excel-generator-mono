@@ -19,10 +19,10 @@ class RegisterViewTest(APISimpleTestCase):
             "email": "john@example.com",
         }
 
-    @patch("authentication.views.send_verification_email")
-    @patch("authentication.views.User")
+    @patch("authentication.register.adapters.send_verification_email")
+    @patch("authentication.register.adapters.User")
     def test_register_valid_data_returns_200(self, mock_user_model, mock_send_email):
-        mock_user_model.objects.filter.return_value.exists.return_value = False
+        mock_user_model.objects.filter.return_value.first.return_value = None
 
         saved_user = MagicMock()
         saved_user.id = uuid.uuid4()
@@ -40,10 +40,10 @@ class RegisterViewTest(APISimpleTestCase):
         self.assertEqual(call_kwargs["name"], "John Doe")
         self.assertEqual(call_kwargs["email"], "john@example.com")
 
-    @patch("authentication.views.send_verification_email")
-    @patch("authentication.views.User")
+    @patch("authentication.register.adapters.send_verification_email")
+    @patch("authentication.register.adapters.User")
     def test_register_sends_verification_email(self, mock_user_model, mock_send_email):
-        mock_user_model.objects.filter.return_value.exists.return_value = False
+        mock_user_model.objects.filter.return_value.first.return_value = None
 
         saved_user = MagicMock()
         saved_user.id = uuid.uuid4()
@@ -55,10 +55,10 @@ class RegisterViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_send_email.assert_called_once_with(saved_user.email)
 
-    @patch("authentication.views.send_verification_email")
-    @patch("authentication.views.User")
+    @patch("authentication.register.adapters.send_verification_email")
+    @patch("authentication.register.adapters.User")
     def test_register_normalizes_email(self, mock_user_model, mock_send_email):
-        mock_user_model.objects.filter.return_value.exists.return_value = False
+        mock_user_model.objects.filter.return_value.first.return_value = None
 
         saved_user = MagicMock()
         saved_user.id = uuid.uuid4()
@@ -82,18 +82,23 @@ class RegisterViewTest(APISimpleTestCase):
         self.assertEqual(call_kwargs["email"], "john@example.com")
         mock_send_email.assert_called_once()
 
-    @patch("authentication.views.User")
-    def test_register_duplicate_email_returns_generic_success(self, mock_user_model):
-        mock_user_model.objects.filter.return_value.exists.return_value = True
+    @patch("authentication.register.adapters.send_verification_email")
+    @patch("authentication.register.adapters.User")
+    def test_register_duplicate_email_returns_generic_success(self, mock_user_model, mock_send_email):
+        existing_user = MagicMock()
+        existing_user.status = "unverified"
+        existing_user.email = "john@example.com"
+        mock_user_model.objects.filter.return_value.first.return_value = existing_user
 
         response = self.client.post(self.url, self.valid_payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["message"], self.success_message)
         mock_user_model.objects.create_user.assert_not_called()
+        mock_send_email.assert_called_once_with("john@example.com")
 
-    @patch("authentication.views.send_verification_email")
-    @patch("authentication.views.User")
+    @patch("authentication.register.adapters.send_verification_email")
+    @patch("authentication.register.adapters.User")
     def test_register_duplicate_verified_user_returns_generic_success_without_resend(
         self, mock_user_model, mock_send_email
     ):
@@ -101,7 +106,6 @@ class RegisterViewTest(APISimpleTestCase):
         existing_user.status = "verified"
         existing_user.email = "john@example.com"
 
-        mock_user_model.objects.filter.return_value.exists.return_value = True
         mock_user_model.objects.filter.return_value.first.return_value = existing_user
 
         response = self.client.post(self.url, self.valid_payload, format="json")
@@ -133,19 +137,18 @@ class RegisterViewTest(APISimpleTestCase):
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch("authentication.views.User")
+    @patch("authentication.register.adapters.User")
     def test_register_server_error_returns_500(self, mock_user_model):
-        mock_user_model.objects.filter.return_value.exists.return_value = False
-        mock_user_model.objects.create_user.side_effect = Exception("DB connection lost")
+        mock_user_model.objects.filter.return_value.first.side_effect = Exception("DB connection lost")
 
         response = self.client.post(self.url, self.valid_payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertEqual(response.data["message"], "An internal server error occurred")
 
-    @patch("authentication.views.User")
+    @patch("authentication.register.adapters.User")
     def test_register_integrity_error_returns_generic_success(self, mock_user_model):
-        mock_user_model.objects.filter.return_value.exists.return_value = False
+        mock_user_model.objects.filter.return_value.first.return_value = None
         mock_user_model.objects.create_user.side_effect = IntegrityError(
             "duplicate key value violates unique constraint"
         )
@@ -155,12 +158,12 @@ class RegisterViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["message"], self.success_message)
 
-    @patch("authentication.views.send_verification_email")
-    @patch("authentication.views.User")
+    @patch("authentication.register.adapters.send_verification_email")
+    @patch("authentication.register.adapters.User")
     def test_register_rate_limit_returns_429_on_61st_request(
         self, mock_user_model, mock_send_email
     ):
-        mock_user_model.objects.filter.return_value.exists.return_value = False
+        mock_user_model.objects.filter.return_value.first.return_value = None
         saved_user = MagicMock()
         saved_user.email = "ratelimit@example.com"
         mock_user_model.objects.create_user.return_value = saved_user
