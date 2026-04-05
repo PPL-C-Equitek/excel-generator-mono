@@ -908,6 +908,31 @@ class DownloadCSVViewTest(APISimpleTestCase):
 
     @patch("api.views.resolve_csv_download_artifact", create=True)
     @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_uses_custom_filename_with_zip_artifact(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.zip",
+            "file_path": "/safe/storage/export_abc123.zip",
+            "artifact_type": "zip",
+            "content_type": "application/zip",
+        }
+        mocked_open.return_value.__enter__.return_value = b"fake zip content"
+
+        response = self.client.get(
+            "/export/csv/zip_abc123/download?filename=arsip_laporan"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="arsip_laporan.zip"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
     def test_download_csv_endpoint_falls_back_to_default_filename_when_query_is_unsafe(
         self,
         mocked_open,
