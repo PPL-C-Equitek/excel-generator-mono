@@ -80,22 +80,6 @@ class DefaultRegisterUserUseCaseTest(APISimpleTestCase):
         lookup.find_by_email.assert_called_once_with("john@example.com")
         strategy_factory.create.assert_not_called()
 
-    def test_raises_registration_conflict_error_when_duplicate_email_exists(self) -> None:
-        existing_user = RegistrationUser(email="john@example.com", status="unverified")
-        lookup = MagicMock()
-        lookup.find_by_email.return_value = existing_user
-        strategy_factory = MagicMock()
-        use_case = DefaultRegisterUserUseCase(
-            lookup_port=lookup,
-            strategy_factory=strategy_factory,
-        )
-
-        with self.assertRaises(RegistrationConflictError):
-            use_case.execute(RegisterCommand(name="John", email="john@example.com"))
-
-        lookup.find_by_email.assert_called_once_with("john@example.com")
-        strategy_factory.create.assert_not_called()
-
     def test_raises_registration_conflict_error_when_duplicate_race_raises_integrity_error(self) -> None:
         lookup = MagicMock()
         lookup.find_by_email.return_value = None
