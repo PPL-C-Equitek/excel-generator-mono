@@ -9,12 +9,22 @@ from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
+from authentication.logout.adapters import (
+    CallableTokenBlacklistRepository,
+    DjangoTokenBlacklistRepository,
+    build_logout_user_use_case,
+)
+from authentication.logout.http import LogoutView as CleanLogoutView
 from authentication.models import User
 from authentication.serializers import VerifyEmailSerializer, LoginSerializer
 from authentication.services import send_verification_email, generate_tokens
 
 logger = logging.getLogger(__name__)
 SERVER_ERROR_MESSAGE = "An internal server error occurred. Please try again later."
+
+
+def blacklist_refresh_token(refresh_token: str) -> None:
+    DjangoTokenBlacklistRepository().blacklist(refresh_token)
 
 
 class ResendVerificationThrottle(SimpleRateThrottle):
@@ -221,4 +231,11 @@ class LoginView(APIView):
                 {"message": SERVER_ERROR_MESSAGE},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class LogoutView(CleanLogoutView):
+    def get_logout_use_case(self):
+        return build_logout_user_use_case(
+            token_blacklist_port=CallableTokenBlacklistRepository(blacklist_refresh_token)
+        )
 
