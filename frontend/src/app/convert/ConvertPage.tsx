@@ -21,6 +21,7 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
         canDownloadExcel,
         error,
         excelError,
+        excelSuccessMessage,
         outputFile,
         csvMetadata,
         handleFileSelect,
@@ -107,8 +108,24 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                                 )}
                             </div>
 
+                            {excelSuccessMessage && (
+                                <p className="mt-3 text-sm text-green-700">{excelSuccessMessage}</p>
+                            )}
+
                             {excelError && (
-                                <p className="mt-3 text-sm text-red-700">{excelError}</p>
+                                <div className="mt-3 flex items-center gap-3">
+                                    <p className="text-sm text-red-700">{excelError}</p>
+                                    <button
+                                        data-testid="retry-excel-btn"
+                                        onClick={() => {
+                                            void handleExcelDownload()
+                                        }}
+                                        disabled={isConverting || isExcelDownloading}
+                                        className="text-sm font-semibold text-emerald-700 transition hover:text-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Retry
+                                    </button>
+                                </div>
                             )}
                         </div>
                     )}

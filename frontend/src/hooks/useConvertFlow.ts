@@ -71,6 +71,7 @@ export interface UseConvertFlowReturn {
     canDownloadExcel: boolean
     error: string | null
     excelError: string | null
+    excelSuccessMessage: string | null
     outputFile: OutputFile | null
     csvMetadata: CsvMetadata | null
     handleFileSelect: (file: File) => Promise<void>
@@ -85,6 +86,7 @@ export function useConvertFlow(
     const [isExcelDownloading, setIsExcelDownloading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [excelError, setExcelError] = useState<string | null>(null)
+    const [excelSuccessMessage, setExcelSuccessMessage] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
     const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
@@ -173,6 +175,7 @@ export function useConvertFlow(
 
         setError(null)
         setExcelError(null)
+        setExcelSuccessMessage(null)
         setOutputFile(null)
         setCsvMetadata(null)
         setGeneratedOutput(null)
@@ -197,6 +200,7 @@ export function useConvertFlow(
         }
 
         setExcelError(null)
+        setExcelSuccessMessage(null)
         setIsExcelDownloading(true)
 
         try {
@@ -206,7 +210,9 @@ export function useConvertFlow(
                 getExcelDownloadFilename(outputFile.filename)
             )
             setExcelError(null)
+            setExcelSuccessMessage('Successfully downloaded')
         } catch (err: unknown) {
+            setExcelSuccessMessage(null)
             setExcelError(err instanceof Error ? err.message : 'Failed to export')
         } finally {
             setIsExcelDownloading(false)
@@ -225,6 +231,7 @@ export function useConvertFlow(
         canDownloadExcel,
         error,
         excelError,
+        excelSuccessMessage,
         outputFile,
         csvMetadata,
         handleFileSelect,
