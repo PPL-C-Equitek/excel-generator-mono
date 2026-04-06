@@ -54,7 +54,24 @@ describe('getStoredAccessToken', () => {
         expect(getStoredAccessToken()).toBeNull()
     })
 
+    it('returns null when prototype storage access throws', () => {
+        vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+            throw new Error('storage blocked')
+        })
+
+        expect(getStoredAccessToken()).toBeNull()
+    })
+
     it('returns null when neither storage contains a usable token', () => {
+        expect(getStoredAccessToken()).toBeNull()
+    })
+
+    it('returns null when sessionStorage access throws after localStorage is blank', () => {
+        window.localStorage.setItem('accessToken', '   ')
+        vi.spyOn(window.sessionStorage, 'getItem').mockImplementation(() => {
+            throw new Error('session storage blocked')
+        })
+
         expect(getStoredAccessToken()).toBeNull()
     })
 
@@ -81,6 +98,22 @@ describe('getStoredAccessToken', () => {
         window.sessionStorage.setItem('auth.refreshToken', 'session-refresh')
 
         expect(getStoredRefreshToken()).toBe('session-refresh')
+    })
+
+    it('returns null when refresh token storage access throws', () => {
+        vi.spyOn(window.localStorage, 'getItem').mockImplementation(() => {
+            throw new Error('storage blocked')
+        })
+
+        expect(getStoredRefreshToken()).toBeNull()
+    })
+
+    it('returns null when prototype refresh token storage access throws', () => {
+        vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+            throw new Error('storage blocked')
+        })
+
+        expect(getStoredRefreshToken()).toBeNull()
     })
 })
 
@@ -298,10 +331,86 @@ describe('auth token refresh helpers', () => {
         expect(() => storeAuthTokens('access', 'refresh')).not.toThrow()
     })
 
+    it('does not throw when storage setItem throws during storeAuthTokens', () => {
+        vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+            throw new Error('write blocked')
+        })
+
+        expect(() => storeAuthTokens('access', 'refresh')).not.toThrow()
+    })
+
     it('does not throw when clearing tokens and window is unavailable', () => {
         vi.stubGlobal('window', undefined)
 
         expect(() => clearAuthTokens()).not.toThrow()
+    })
+
+    it('does not throw when storage removeItem throws during clearAuthTokens', () => {
+        vi.spyOn(window.localStorage, 'removeItem').mockImplementation(() => {
+            throw new Error('remove blocked')
+        })
+
+        expect(() => clearAuthTokens()).not.toThrow()
+    })
+
+    it('handles missing storage objects as no-ops', () => {
+        vi.stubGlobal('window', {
+            localStorage: undefined,
+            sessionStorage: undefined,
+        } as unknown as Window)
+
+        expect(getStoredAccessToken()).toBeNull()
+        expect(getStoredRefreshToken()).toBeNull()
+        expect(() => storeAuthTokens('access', 'refresh')).not.toThrow()
+        expect(() => clearAuthTokens()).not.toThrow()
+    })
+
+    it('refreshes when access token payload has no exp claim', async () => {
+        const accessTokenWithoutExp = makeJwt({ user_id: 'no-exp', email: 'no-exp@example.com' })
+        const refreshedAccessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 })
+
+        storeAuthTokens(accessTokenWithoutExp, 'refresh-token')
+
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                access_token: refreshedAccessToken,
+                refresh_token: 'new-refresh-token',
+            }),
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(getValidAccessToken()).resolves.toBe(refreshedAccessToken)
+    })
+
+    it('normalizes a trailing slash in NEXT_PUBLIC_API_URL when building the refresh endpoint', async () => {
+        vi.resetModules()
+        vi.stubEnv('NEXT_PUBLIC_API_URL', 'https://example.com/')
+
+        const { storeAuthTokens: importedStoreAuthTokens, refreshAccessToken: importedRefreshAccessToken } = await import('@/lib/auth')
+        const expiredAccessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) - 10 })
+
+        importedStoreAuthTokens(expiredAccessToken, 'refresh-token')
+
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                access_token: makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 }),
+                refresh_token: 'new-refresh-token',
+            }),
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await importedRefreshAccessToken()
+
+        expect(mockedFetch).toHaveBeenCalledWith(
+            'https://example.com/auth/refresh/',
+            expect.objectContaining({
+                method: 'POST',
+            })
+        )
     })
 })
 
@@ -335,6 +444,18 @@ describe('getStoredUser', () => {
             id: '',
             email: 'stored@example.com',
             name: 'Stored Name',
+        })
+    })
+
+    it('uses stored user name when email metadata is missing', () => {
+        const accessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 })
+        window.localStorage.setItem('access_token', accessToken)
+        window.localStorage.setItem('user_name', 'Name Only')
+
+        expect(getStoredUser()).toEqual({
+            id: '',
+            email: '',
+            name: 'Name Only',
         })
     })
 
@@ -381,8 +502,33 @@ describe('getStoredUser', () => {
         })
     })
 
+    it('falls back to a default user name when JWT payload has no name or email', () => {
+        const accessToken = makeJwt({
+            exp: Math.floor(Date.now() / 1000) + 3600,
+            user_id: 'user-789',
+        })
+        window.localStorage.setItem('access_token', accessToken)
+
+        expect(getStoredUser()).toEqual({
+            id: 'user-789',
+            email: undefined,
+            name: 'User',
+        })
+    })
+
     it('returns null when JWT payload is not decodable', () => {
-        window.localStorage.setItem('access_token', 'not-a-jwt')
+        window.localStorage.setItem('access_token', 'header.invalid-base64.signature')
+
+        expect(getStoredUser()).toBeNull()
+    })
+
+    it('returns null when JWT payload JSON is malformed', () => {
+        const malformedJsonPayload = globalThis.btoa('{"broken":')
+            .replace(/=/g, '')
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+
+        window.localStorage.setItem('access_token', `header.${malformedJsonPayload}.signature`)
 
         expect(getStoredUser()).toBeNull()
     })

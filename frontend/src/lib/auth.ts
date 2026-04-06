@@ -211,10 +211,21 @@ export function getStoredUser(): StoredUser | null {
     const email = globalThis.window.localStorage.getItem('user_email')
 
     if (name || email) {
+        const resolvedEmail = email ?? ''
+        let resolvedName = 'User'
+
+        if (email) {
+            resolvedName = email
+        }
+
+        if (name) {
+            resolvedName = name
+        }
+
         return {
             id: '',
-            email: email ?? '',
-            name: name ?? email ?? 'User',
+            email: resolvedEmail,
+            name: resolvedName,
         }
     }
 
