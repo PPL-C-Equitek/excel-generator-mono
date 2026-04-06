@@ -196,17 +196,17 @@ class LoginService:
         try:
             user = self.user_gateway.get_by_email(normalized_email)
         except User.DoesNotExist as exc:
-            print(f"Login failed for {normalized_email}: user not found.")
+            logger.warning("Login failed for %s: user not found.", normalized_email)
             self.failure_tracker.record_failure(normalized_email)
             raise InvalidCredentialsError() from exc
         
         if user.status != "verified":
-            print(f"Login failed for {normalized_email}: email not verified.")
+            logger.warning("Login failed for %s: email not verified.", normalized_email)
             self.failure_tracker.record_failure(normalized_email)
             raise EmailNotVerifiedError()
 
         if not user.check_password(password):
-            print(f"Login failed for {normalized_email}: incorrect password.")
+            logger.warning("Login failed for %s: incorrect password.", normalized_email)
             self.failure_tracker.record_failure(normalized_email)
             raise InvalidCredentialsError()
 
@@ -244,6 +244,15 @@ class RefreshTokenService:
         if not user_id or not email:
             raise InvalidRefreshTokenError("Invalid token payload.")
 
+        # Ensure the refresh token still belongs to an existing verified user.
+        user_exists_and_verified = User.objects.filter(
+            id=user_id,
+            email=email,
+            status="verified",
+        ).exists()
+        if not user_exists_and_verified:
+            raise InvalidRefreshTokenError("User is not valid for refresh.")
+
         return self.token_generator(user_id, email)
 
     def _decode_refresh_token(self, refresh_token: str):
@@ -276,7 +285,7 @@ def send_verification_email(email):
                 "html": f'<p>Click the link below to verify: <a href="{verification_url}">{verification_url}</a></p>',
             })
         else:
-            print(f"\n--- VERIFICATION LINK ---\n{verification_url}\n-------------------------\n")
+            logger.info("Verification link (RESEND_API_KEY not set): %s", verification_url)
     except Exception:
         logger.exception("Failed to send verification email to %s", email)
         raise
