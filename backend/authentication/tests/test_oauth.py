@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from urllib.error import URLError
 
 from django.test import TestCase, override_settings
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -19,6 +20,7 @@ MOCK_ACCESS_TOKEN = "ya29.mock-access-token"
 class GoogleOAuthServiceTest(TestCase):
     def setUp(self):
         self.service = GoogleOAuthService(google_client_id=MOCK_CLIENT_ID)
+        cache.clear()
 
     # Positive
     @patch("authentication.oauth_services.urlopen")
@@ -212,6 +214,8 @@ class GoogleOAuthServiceTest(TestCase):
 class GoogleOAuthCallbackViewTest(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.client.credentials()
+        cache.clear()
 
     # Positive
     @override_settings(GOOGLE_OAUTH_CLIENT_ID=MOCK_CLIENT_ID)
@@ -332,3 +336,29 @@ class GoogleOAuthCallbackViewTest(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertNotIn("database unavailable", json.dumps(payload))
+
+    @override_settings(DEBUG=True)
+    def test_returns_400_when_token_exceeds_max_length(self):
+        """Should return 400 when token exceeds 2048 characters"""
+        response = self.client.post(
+            GOOGLE_OAUTH_URL,
+            {"token": "a" * 2049},
+            format="json",
+        )
+        payload = response.json()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("message", payload)
+
+    @override_settings(DEBUG=True)
+    def test_returns_400_when_token_is_not_a_string(self):
+        """Should return 400 when token is not a string"""
+        response = self.client.post(
+            GOOGLE_OAUTH_URL,
+            {"token": 123456},
+            format="json",
+        )
+        payload = response.json()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("message", payload)
