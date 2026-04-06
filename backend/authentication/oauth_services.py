@@ -24,7 +24,7 @@ class GoogleOAuthService:
             with urlopen(request, timeout=10) as response:
                 body = response.read().decode("utf-8")
                 return json.loads(body)
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (HTTPError, URLError, json.JSONDecodeError) as exc:
             logger.error("Failed to fetch Google OAuth endpoint: %s", exc)
             raise ValueError("Invalid Google token") from exc
 

@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from urllib.error import URLError
 
 from django.test import TestCase, override_settings
 from rest_framework import status
@@ -84,7 +85,7 @@ class GoogleOAuthServiceTest(TestCase):
 
 
     # Negative
-    @patch("authentication.oauth_services.urlopen", side_effect=TimeoutError("timeout"))
+    @patch("authentication.oauth_services.urlopen", side_effect=URLError("timeout"))
     def test_fetch_json_raises_value_error_when_upstream_fails(self, _mock_urlopen):
         """Should raise ValueError when external request fails"""
         with self.assertRaises(ValueError, msg="Invalid Google token"):
