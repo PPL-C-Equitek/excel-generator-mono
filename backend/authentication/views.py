@@ -236,6 +236,13 @@ class RefreshTokenView(APIView):
 @throttle_classes([GoogleOAuthRateThrottle]) 
 def google_oauth_callback(request):
     token = request.data.get("token")
+    
+    if not request.is_secure() and not settings.DEBUG:
+        return Response(
+            {"message": "HTTPS required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    
     if not token:
         return Response(
             {"message": "Token tidak ditemukan"},
