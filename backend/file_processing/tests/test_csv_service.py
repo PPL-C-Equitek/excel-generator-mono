@@ -1,4 +1,5 @@
-import tempfile, os
+import os
+import tempfile
 from unittest.mock import patch
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -362,7 +363,6 @@ class CsvProcessUploadTests(TestCase):
     def test_process_upload_csv_failure_propagates_error(
         self, mock_validate, mock_save, mock_txt
     ):
-        import tempfile, os
 
         fd, path = tempfile.mkstemp(suffix=".csv")
         os.close(fd)
