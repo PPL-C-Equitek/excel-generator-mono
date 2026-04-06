@@ -21,16 +21,45 @@ vi.mock('../../src/services/llm', () => ({
 import { uploadFile } from '../../src/lib/api'
 const mockUploadFile = vi.mocked(uploadFile)
 
+type UseConvertFlowExcelState = ReturnType<typeof useConvertFlow> & {
+    canDownloadExcel: boolean
+    isExcelDownloading: boolean
+    excelError: string | null
+    handleExcelDownload: () => Promise<void>
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
 const validUploadResponse = { filename: 'report.pdf', size: 20480, format: 'pdf' }
+const validExcelExportResponse = {
+    file_id: 'xlsx_12345',
+    file_name: 'export_12345.xlsx',
+    artifact_type: 'xlsx' as const,
+}
+
+function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+        resolve = res
+        reject = rej
+    })
+
+    return { promise, resolve, reject }
+}
+
+function getExcelState(result: { current: ReturnType<typeof useConvertFlow> }): UseConvertFlowExcelState {
+    return result.current as UseConvertFlowExcelState
+}
 
 function makeMockService(overrides?: Partial<ILLMService>): ILLMService {
     return {
         generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
         exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_12345' }),
+        exportToExcel: vi.fn().mockResolvedValue(validExcelExportResponse),
+        downloadExcelFile: vi.fn().mockResolvedValue(undefined),
         getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_12345/download'),
         ...overrides,
     }
@@ -710,6 +739,207 @@ describe('useConvertFlow', () => {
             expect(result.current.error).toBe('The export result is invalid. Please try again.')
             
             vi.unstubAllEnvs()
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // Export to Excel Flow
+    // -----------------------------------------------------------------------
+    describe('export to Excel flow', () => {
+        it('initializes excel state as idle and unavailable', () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+            const current = getExcelState(result)
+
+            expect(current.canDownloadExcel).toBe(false)
+            expect(current.isExcelDownloading).toBe(false)
+            expect(current.excelError).toBeNull()
+            expect(typeof current.handleExcelDownload).toBe('function')
+        })
+
+        it('does not start excel export when converted output is not ready', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+            const current = getExcelState(result)
+
+            await act(async () => {
+                await current.handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).not.toHaveBeenCalled()
+            expect(service.downloadExcelFile).not.toHaveBeenCalled()
+            expect(current.canDownloadExcel).toBe(false)
+            expect(current.isExcelDownloading).toBe(false)
+            expect(current.excelError).toBeNull()
+        })
+
+        it('starts excel export and downloads the file when converted output is ready', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).toHaveBeenCalledWith({ status: 'ok' })
+            expect(service.downloadExcelFile).toHaveBeenCalledWith(
+                'xlsx_12345',
+                'report.xlsx'
+            )
+            expect(getExcelState(result).excelError).toBeNull()
+        })
+
+        it('sets isExcelDownloading while the excel request is in flight', async () => {
+            const excelExportDeferred = deferred<typeof validExcelExportResponse>()
+            const service = makeMockService({
+                exportToExcel: vi.fn().mockReturnValue(excelExportDeferred.promise),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            act(() => {
+                void getExcelState(result).handleExcelDownload()
+            })
+
+            expect(getExcelState(result).isExcelDownloading).toBe(true)
+
+            await act(async () => {
+                excelExportDeferred.resolve(validExcelExportResponse)
+                await excelExportDeferred.promise
+            })
+
+            expect(getExcelState(result).isExcelDownloading).toBe(false)
+        })
+
+        it('ignores repeated excel clicks while a request is already active', async () => {
+            const excelExportDeferred = deferred<typeof validExcelExportResponse>()
+            const service = makeMockService({
+                exportToExcel: vi.fn().mockReturnValue(excelExportDeferred.promise),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            act(() => {
+                void getExcelState(result).handleExcelDownload()
+            })
+            act(() => {
+                void getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).toHaveBeenCalledTimes(1)
+            expect(service.downloadExcelFile).not.toHaveBeenCalled()
+
+            await act(async () => {
+                excelExportDeferred.resolve(validExcelExportResponse)
+                await excelExportDeferred.promise
+            })
+        })
+
+        it('stores excel error when the export step fails', async () => {
+            const service = makeMockService({
+                exportToExcel: vi.fn().mockRejectedValue(new Error('Excel export failed')),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).toHaveBeenCalledWith({ status: 'ok' })
+            expect(service.downloadExcelFile).not.toHaveBeenCalled()
+            expect(getExcelState(result).isExcelDownloading).toBe(false)
+            expect(getExcelState(result).excelError).toBe('Excel export failed')
+        })
+
+        it('stores excel error when the download step fails', async () => {
+            const service = makeMockService({
+                downloadExcelFile: vi.fn().mockRejectedValue(new Error('Failed to export')),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).toHaveBeenCalledWith({ status: 'ok' })
+            expect(service.downloadExcelFile).toHaveBeenCalledWith(
+                'xlsx_12345',
+                'report.xlsx'
+            )
+            expect(getExcelState(result).isExcelDownloading).toBe(false)
+            expect(getExcelState(result).excelError).toBe('Failed to export')
+        })
+
+        it('clears previous excel error after a successful second attempt', async () => {
+            const service = makeMockService({
+                exportToExcel: vi.fn()
+                    .mockRejectedValueOnce(new Error('Excel export failed'))
+                    .mockResolvedValueOnce(validExcelExportResponse),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(getExcelState(result).excelError).toBe('Excel export failed')
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).toHaveBeenCalledTimes(2)
+            expect(service.downloadExcelFile).toHaveBeenCalledWith(
+                'xlsx_12345',
+                'report.xlsx'
+            )
+            expect(getExcelState(result).excelError).toBeNull()
+        })
+
+        it('clears stale excel state when a new conversion starts', async () => {
+            const service = makeMockService({
+                exportToExcel: vi.fn().mockRejectedValue(new Error('Excel export failed')),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(getExcelState(result).excelError).toBe('Excel export failed')
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getExcelState(result).excelError).toBeNull()
+            expect(getExcelState(result).canDownloadExcel).toBe(true)
         })
     })
 })
