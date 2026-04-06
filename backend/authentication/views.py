@@ -235,6 +235,12 @@ class RefreshTokenView(APIView):
 @permission_classes([AllowAny])
 @throttle_classes([GoogleOAuthRateThrottle]) 
 def google_oauth_callback(request):
+    if request.method != "POST":
+        return Response(
+            {"message": "Method not allowed"},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
     token = request.data.get("token")
     
     if not request.is_secure() and not settings.DEBUG:
