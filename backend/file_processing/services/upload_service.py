@@ -174,13 +174,7 @@ def process_upload(uploaded_file):
                 return False, error, None, None
             extracted_data = data
 
-        elif ext == EXT_TXT:
-            success, error, data = process_uploaded_txt(file_path)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext == EXT_CSV:
+        elif ext in [EXT_TXT, EXT_CSV]:
             success, error, data = process_uploaded_txt(file_path)
             if not success:
                 return False, error, None, None
