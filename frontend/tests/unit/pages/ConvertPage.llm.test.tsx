@@ -42,12 +42,17 @@ vi.mock('../../../src/components/UploadZone', () => ({
 
 // Centralized mock return value — set per describe block
 const mockHandleFileSelect = vi.fn()
+const mockHandleExcelDownload = vi.fn()
 const mockHookReturn = {
     isConverting: false,
+    isExcelDownloading: false,
+    canDownloadExcel: false,
     error: null as string | null,
+    excelError: null as string | null,
     outputFile: null as OutputFile | null,
     csvMetadata: null as { file_id: string } | null,
     handleFileSelect: mockHandleFileSelect,
+    handleExcelDownload: mockHandleExcelDownload,
     llmService: { getDownloadUrl: vi.fn() }
 }
 
@@ -74,8 +79,14 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
         vi.clearAllMocks()
         // Reset hook state to idle
         mockHookReturn.isConverting = false
+        mockHookReturn.isExcelDownloading = false
+        mockHookReturn.canDownloadExcel = false
         mockHookReturn.error = null
+        mockHookReturn.excelError = null
         mockHookReturn.outputFile = null
+        mockHookReturn.csvMetadata = null
+        mockHookReturn.handleExcelDownload = mockHandleExcelDownload
+        mockHookReturn.llmService = { getDownloadUrl: vi.fn() }
     })
 
     // -----------------------------------------------------------------------
@@ -206,6 +217,61 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
             expect(screen.getByText('Download Output')).toBeInTheDocument()
+        })
+
+        it('shows Download Excel button when excel is available', () => {
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.csvMetadata = { file_id: 'csv_123' }
+            mockHookReturn.canDownloadExcel = true
+            render(<ConvertPage />)
+
+            expect(screen.getByTestId('download-excel-btn')).toBeInTheDocument()
+            expect(screen.getByText('Download Excel')).toBeInTheDocument()
+        })
+
+        it('does not show Download Excel button when excel is not available', () => {
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.csvMetadata = { file_id: 'csv_123' }
+            mockHookReturn.canDownloadExcel = false
+            render(<ConvertPage />)
+
+            expect(screen.queryByTestId('download-excel-btn')).not.toBeInTheDocument()
+        })
+
+        it('triggers handleExcelDownload when Download Excel is clicked', async () => {
+            const user = userEvent.setup()
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.csvMetadata = { file_id: 'csv_123' }
+            mockHookReturn.canDownloadExcel = true
+
+            render(<ConvertPage />)
+            await user.click(screen.getByTestId('download-excel-btn'))
+
+            expect(mockHandleExcelDownload).toHaveBeenCalledTimes(1)
+        })
+
+        it('disables Download Excel and shows loading text while excel download is active', () => {
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.csvMetadata = { file_id: 'csv_123' }
+            mockHookReturn.canDownloadExcel = true
+            mockHookReturn.isExcelDownloading = true
+
+            render(<ConvertPage />)
+
+            const excelButton = screen.getByTestId('download-excel-btn')
+            expect(excelButton).toBeDisabled()
+            expect(screen.getByText(/downloading excel/i)).toBeInTheDocument()
+        })
+
+        it('shows excel error feedback when excel download fails', () => {
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.csvMetadata = { file_id: 'csv_123' }
+            mockHookReturn.canDownloadExcel = true
+            mockHookReturn.excelError = 'Failed to export'
+
+            render(<ConvertPage />)
+
+            expect(screen.getByText('Failed to export')).toBeInTheDocument()
         })
 
         it('triggers output download using .csv filename and service URL', async () => {
