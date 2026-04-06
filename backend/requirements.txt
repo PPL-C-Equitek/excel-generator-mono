@@ -29,3 +29,4 @@ resend==2.26.0
 torch==2.2.2+cpu
 torchvision==0.17.2+cpu
 PyJWT
+google-auth-oauthlib

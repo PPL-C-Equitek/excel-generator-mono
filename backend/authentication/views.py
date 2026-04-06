@@ -7,7 +7,12 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from rest_framework.throttling import SimpleRateThrottle
+from rest_framework.throttling import AnonRateThrottle
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.views import APIView
+
+from django.conf import settings
+from authentication.oauth_services import GoogleOAuthService
 
 from authentication.models import User
 from authentication.serializers import LoginSerializer, RefreshTokenSerializer, VerifyEmailSerializer
@@ -27,6 +32,8 @@ from authentication.services import (
 logger = logging.getLogger(__name__)
 SERVER_ERROR_MESSAGE = "An internal server error occurred. Please try again later."
 
+class GoogleOAuthRateThrottle(AnonRateThrottle):
+    rate = "10/hour"
 
 class ResendVerificationThrottle(SimpleRateThrottle):
     scope = "resend_verification"
@@ -224,3 +231,56 @@ class RefreshTokenView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@throttle_classes([GoogleOAuthRateThrottle]) 
+def google_oauth_callback(request):
+    token = request.data.get("token")
+    if not token:
+        return Response(
+            {"message": "Token tidak ditemukan"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not isinstance(token, str) or len(token) > 2048:
+        return Response(
+            {"message": "Format token tidak valid"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    google_client_id = getattr(settings, "GOOGLE_OAUTH_CLIENT_ID", "")
+    if not google_client_id:
+        logger.error("GOOGLE_OAUTH_CLIENT_ID not configured")
+        return Response(
+            {"message": SERVER_ERROR_MESSAGE},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    try:
+        oauth_service = GoogleOAuthService(google_client_id)
+        result = oauth_service.authenticate_or_create_user(token)
+
+        return Response(
+            {
+                "access_token": result["tokens"]["access_token"],
+                "refresh_token": result["tokens"]["refresh_token"],
+                "user": {
+                    "id": result["user"].id,
+                    "email": result["user"].email,
+                    "name": result["user"].name,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+    except ValueError as e:
+        logger.warning(f"Google OAuth verification failed: {e}")
+        return Response(
+            {"message": "Invalid token atau gagal memverifikasi Google Token"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+    except Exception:
+        logger.exception("Unexpected error during Google OAuth")
+        return Response(
+            {"message": SERVER_ERROR_MESSAGE},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )

@@ -9,4 +9,5 @@ urlpatterns = [
     path("resend-verification/", views.ResendVerificationView.as_view(), name="resend-verification"),
     path("login/", views.LoginView.as_view(), name="login"),
     path("refresh/", views.RefreshTokenView.as_view(), name="refresh"),
+    path("google-oauth/", views.google_oauth_callback, name="google-oauth"),
 ]

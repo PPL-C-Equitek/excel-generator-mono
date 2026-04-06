@@ -2,6 +2,7 @@ import logging
 import jwt
 from datetime import timedelta
 from urllib.parse import quote
+
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, TypedDict
 from django.conf import settings
@@ -195,16 +196,19 @@ class LoginService:
         try:
             user = self.user_gateway.get_by_email(normalized_email)
         except User.DoesNotExist as exc:
+            print(f"Login failed for {normalized_email}: user not found.")
             self.failure_tracker.record_failure(normalized_email)
             raise InvalidCredentialsError() from exc
-
-        if not user.check_password(password):
-            self.failure_tracker.record_failure(normalized_email)
-            raise InvalidCredentialsError()
-
+        
         if user.status != "verified":
+            print(f"Login failed for {normalized_email}: email not verified.")
             self.failure_tracker.record_failure(normalized_email)
             raise EmailNotVerifiedError()
+
+        if not user.check_password(password):
+            print(f"Login failed for {normalized_email}: incorrect password.")
+            self.failure_tracker.record_failure(normalized_email)
+            raise InvalidCredentialsError()
 
         token_data = self.token_generator(user.id, user.email)
         self.failure_tracker.reset_failures(normalized_email)
