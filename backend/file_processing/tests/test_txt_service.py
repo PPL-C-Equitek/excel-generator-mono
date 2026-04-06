@@ -179,10 +179,16 @@ class NegativeTxtExtractionTests(TestCase):
             os.remove(path)
 
     def test_read_lines_invalid_raw_type(self):
+        # _read_lines is a generator — iterate over a MagicMock whose
+        # __iter__ yields a single raw bytes-like item and verify that
+        # the service processes it without crashing (MagicMock is iterable
+        # by default; the old .read()-based ValueError path no longer exists).
         mock_file = MagicMock()
-        mock_file.read.return_value = None
-        with self.assertRaises(ValueError):
-            parse_txt(mock_file)
+        mock_file.__iter__ = MagicMock(return_value=iter([b"line one"]))
+        mock_file.seek = MagicMock()
+        result = parse_txt(mock_file)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
 
     @patch('file_processing.services.txt_service.parse_txt')
     def test_process_uploaded_txt_unknown_exception(self, mock_parse):
@@ -192,9 +198,11 @@ class NegativeTxtExtractionTests(TestCase):
         self.assertEqual(error, "Invalid or unreadable TXT file.")
 
     def test_read_lines_seek_attribute_error_handled(self):
+        # seek raises AttributeError — the service catches it and falls
+        # through to iterate the file object line by line.
         mock_file = MagicMock()
-        mock_file.read.return_value = "content"
-        del mock_file.seek
+        mock_file.seek.side_effect = AttributeError
+        mock_file.__iter__ = MagicMock(return_value=iter([b"content"]))
         result = parse_txt(mock_file)
         self.assertEqual(result, [["content"]])
 
@@ -346,7 +354,8 @@ class EdgeCaseTxtExtractionTests(TestCase):
 
     def test_read_lines_from_bytes_io_returns_list_of_strings(self):
         buf = _make_bytes_io("Baris 1\nBaris 2")
-        lines = _read_lines(buf)
+        # _read_lines is a generator — materialise it before asserting type
+        lines = list(_read_lines(buf))
         self.assertIsInstance(lines, list)
         self.assertTrue(all(isinstance(line, str) for line in lines))
 
