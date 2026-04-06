@@ -84,7 +84,12 @@ describe('withProtectedPage', () => {
 
     describe('edge case', () => {
         it('sets displayName to fallback when component has no displayName or name', () => {
-            const AnonymousComponent = (() => <div />) as ComponentType & { displayName?: string }
+            const AnonymousComponent = Object.assign(
+                (() => <div />) as ComponentType,
+                { displayName: undefined }
+            ) as ComponentType & { name: string }
+            Object.defineProperty(AnonymousComponent, 'name', { value: '' })
+
             const ProtectedPage = withProtectedPage(AnonymousComponent)
 
             expect(ProtectedPage.displayName).toBe('withProtectedPage(Component)')
@@ -97,13 +102,7 @@ describe('withProtectedPage', () => {
         })
 
         it('sets displayName to fallback when component has no displayName or name', () => {
-            const AnonymousComponent = Object.assign(
-                (() => <div />) as ComponentType,
-                { displayName: undefined }
-            ) as ComponentType & { name: string }
-            Object.defineProperty(AnonymousComponent, 'name', { value: '' })
-
-            const ProtectedPage = withProtectedPage(AnonymousComponent)
+            const ProtectedPage = withProtectedPage(() => <div />)
 
             expect(ProtectedPage.displayName).toBe('withProtectedPage(Component)')
         })
