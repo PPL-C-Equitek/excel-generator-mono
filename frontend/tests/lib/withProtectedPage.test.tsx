@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { withProtectedPage } from '../../src/lib/withProtectedPage'
+import type { ComponentType } from 'react'
 
 const mockReplace = vi.fn()
 const mockGetValidAccessToken = vi.fn<() => Promise<string | null>>()
@@ -79,5 +80,32 @@ describe('withProtectedPage', () => {
         await Promise.resolve()
 
         expect(mockReplace).not.toHaveBeenCalled()
+    })
+
+    describe('edge case', () => {
+        it('sets displayName to fallback when component has no displayName or name', () => {
+            const AnonymousComponent = (() => <div />) as ComponentType & { displayName?: string }
+            const ProtectedPage = withProtectedPage(AnonymousComponent)
+
+            expect(ProtectedPage.displayName).toBe('withProtectedPage(Component)')
+        })
+
+        it('sets displayName using component name when displayName is not set', () => {
+            const ProtectedPage = withProtectedPage(DummyPage)
+
+            expect(ProtectedPage.displayName).toBe('withProtectedPage(DummyPage)')
+        })
+
+        it('sets displayName to fallback when component has no displayName or name', () => {
+            const AnonymousComponent = Object.assign(
+                (() => <div />) as ComponentType,
+                { displayName: undefined }
+            ) as ComponentType & { name: string }
+            Object.defineProperty(AnonymousComponent, 'name', { value: '' })
+
+            const ProtectedPage = withProtectedPage(AnonymousComponent)
+
+            expect(ProtectedPage.displayName).toBe('withProtectedPage(Component)')
+        })
     })
 })

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     clearAuthTokens,
     getStoredAccessToken,
+    getStoredRefreshToken,
+    getStoredUser,
     getValidAccessToken,
     refreshAccessToken,
     storeAuthTokens,
@@ -65,9 +67,20 @@ describe('getStoredAccessToken', () => {
     it('reads the new snake_case refresh token key', async () => {
         window.localStorage.setItem('refresh_token', 'snake-refresh')
 
-        const { getStoredRefreshToken } = await import('@/lib/auth')
-
         expect(getStoredRefreshToken()).toBe('snake-refresh')
+    })
+
+    it('returns null for refresh token when window is unavailable', () => {
+        vi.stubGlobal('window', undefined)
+
+        expect(getStoredRefreshToken()).toBeNull()
+    })
+
+    it('reads refresh token from sessionStorage when localStorage is blank', () => {
+        window.localStorage.setItem('refresh_token', '   ')
+        window.sessionStorage.setItem('auth.refreshToken', 'session-refresh')
+
+        expect(getStoredRefreshToken()).toBe('session-refresh')
     })
 })
 
@@ -192,6 +205,24 @@ describe('auth token refresh helpers', () => {
         expect(window.localStorage.getItem('refresh_token')).toBeNull()
     })
 
+    it('returns null when refresh response JSON parsing throws', async () => {
+        const expiredAccessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) - 10 })
+        storeAuthTokens(expiredAccessToken, 'refresh-token')
+
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => {
+                throw new Error('invalid json')
+            },
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(refreshAccessToken()).resolves.toBeNull()
+        expect(window.localStorage.getItem('access_token')).toBeNull()
+        expect(window.localStorage.getItem('refresh_token')).toBeNull()
+    })
+
     it('refreshes expired access token when getValidAccessToken sees an expired JWT', async () => {
         const expiredAccessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) - 10 })
         const refreshedAccessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 })
@@ -241,5 +272,118 @@ describe('auth token refresh helpers', () => {
         vi.stubGlobal('window', undefined)
 
         await expect(getValidAccessToken()).resolves.toBeNull()
+    })
+
+    it('tries refresh flow when there is no access token', async () => {
+        const refreshedAccessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 })
+        window.localStorage.setItem('refresh_token', 'refresh-token')
+
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                access_token: refreshedAccessToken,
+                refresh_token: 'new-refresh-token',
+            }),
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(getValidAccessToken()).resolves.toBe(refreshedAccessToken)
+        expect(mockedFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not throw when storing tokens and window is unavailable', () => {
+        vi.stubGlobal('window', undefined)
+
+        expect(() => storeAuthTokens('access', 'refresh')).not.toThrow()
+    })
+
+    it('does not throw when clearing tokens and window is unavailable', () => {
+        vi.stubGlobal('window', undefined)
+
+        expect(() => clearAuthTokens()).not.toThrow()
+    })
+})
+
+describe('getStoredUser', () => {
+    afterEach(() => {
+        vi.restoreAllMocks()
+        vi.unstubAllGlobals()
+        window.localStorage.clear()
+        window.sessionStorage.clear()
+    })
+
+    it('returns null when window is unavailable', () => {
+        vi.stubGlobal('window', undefined)
+
+        expect(getStoredUser()).toBeNull()
+    })
+
+    it('returns null when there is no stored access token', () => {
+        window.localStorage.setItem('user_name', 'Name Only')
+
+        expect(getStoredUser()).toBeNull()
+    })
+
+    it('uses localStorage user_name and user_email when present', () => {
+        const accessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 })
+        window.localStorage.setItem('access_token', accessToken)
+        window.localStorage.setItem('user_name', 'Stored Name')
+        window.localStorage.setItem('user_email', 'stored@example.com')
+
+        expect(getStoredUser()).toEqual({
+            id: '',
+            email: 'stored@example.com',
+            name: 'Stored Name',
+        })
+    })
+
+    it('falls back to email when user_name is missing in storage', () => {
+        const accessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 })
+        window.localStorage.setItem('access_token', accessToken)
+        window.localStorage.setItem('user_email', 'emailonly@example.com')
+
+        expect(getStoredUser()).toEqual({
+            id: '',
+            email: 'emailonly@example.com',
+            name: 'emailonly@example.com',
+        })
+    })
+
+    it('falls back to JWT payload when storage metadata is absent', () => {
+        const accessToken = makeJwt({
+            exp: Math.floor(Date.now() / 1000) + 3600,
+            user_id: 'user-123',
+            email: 'jwt@example.com',
+            name: 'JWT Name',
+        })
+        window.localStorage.setItem('access_token', accessToken)
+
+        expect(getStoredUser()).toEqual({
+            id: 'user-123',
+            email: 'jwt@example.com',
+            name: 'JWT Name',
+        })
+    })
+
+    it('falls back to JWT email when JWT name is missing', () => {
+        const accessToken = makeJwt({
+            exp: Math.floor(Date.now() / 1000) + 3600,
+            user_id: 'user-456',
+            email: 'jwt-email@example.com',
+        })
+        window.localStorage.setItem('access_token', accessToken)
+
+        expect(getStoredUser()).toEqual({
+            id: 'user-456',
+            email: 'jwt-email@example.com',
+            name: 'jwt-email@example.com',
+        })
+    })
+
+    it('returns null when JWT payload is not decodable', () => {
+        window.localStorage.setItem('access_token', 'not-a-jwt')
+
+        expect(getStoredUser()).toBeNull()
     })
 })
