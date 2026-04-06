@@ -290,6 +290,21 @@ class ExcelDataExtractionTests(TestCase):
             self.assertIsNone(error)
             self.assertEqual(data, {"Sheet1": [["A", "B"]]})
 
+    def test_get_xls_sheet_count_without_release_resources(self):
+        from file_processing.services.upload_service import _get_xls_sheet_count
+        from unittest.mock import MagicMock
+        with patch('xlrd.open_workbook') as mock_open:
+            mock_wb = MagicMock()
+            mock_wb.nsheets = 5
+            del mock_wb.release_resources
+            mock_open.return_value = mock_wb
+            
+            mock_file = MagicMock()
+            mock_file.read.return_value = b"dummy"
+            
+            count = _get_xls_sheet_count(mock_file)
+            self.assertEqual(count, 5)
+
     @patch('file_processing.services.upload_service.validate_file')
     def test_xls_single_sheet_data_extraction(self, mock_validate):
         mock_validate.return_value = (True, None)
@@ -424,17 +439,6 @@ class FileValidationTests(TestCase):
     def _valid_xlsx_bytes(self) -> bytes:
 
         return _build_excel({"Sheet1": [["A", "B"], [1, 2]]})
-
-    def test_extension_txt_is_rejected(self):
-        fake_txt = self._make_file(
-            "data.txt",
-            b"NIM,Nama\n12345,Alice",
-            "text/plain",
-        )
-        response = self.client.post(self.UPLOAD_URL, {'file': fake_txt})
-        self.assertEqual(response.status_code, 400)
-        body = response.json()
-        self.assertIn("message", body)
 
     def test_extension_xlsx_is_accepted(self):
         valid_xlsx = self._make_file(

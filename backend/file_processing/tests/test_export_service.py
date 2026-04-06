@@ -132,6 +132,12 @@ class ValidateOutputLLMTest(unittest.TestCase):
         with self.assertRaises(OutputLLMValidationError):
             validate_output_llm(payload)
 
+    def test_validate_output_llm_rejects_empty_content_data_list(self):
+        payload = self._build_valid_payload()
+        payload["content_data"] = []
+        with self.assertRaises(OutputLLMValidationError):
+            validate_output_llm(payload)
+
     def test_validate_output_llm_rejects_invalid_content_data_structure(self):
         cases = [
             ("table_non_object", ["x"]),

@@ -1,3 +1,5 @@
+import uuid
+
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -5,7 +7,9 @@ from .services import build_schema_prompt_fragment, validate_schema_definition
 
 
 class CustomSchema(models.Model):
-    name = models.CharField(max_length=120, unique=True)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner_id = models.UUIDField(db_index=True)
+    name = models.CharField(max_length=120)
     description = models.TextField(blank=True)
     version = models.PositiveIntegerField(default=1)
     is_active = models.BooleanField(default=True)
@@ -15,6 +19,12 @@ class CustomSchema(models.Model):
 
     class Meta:
         ordering = ("name", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("owner_id", "name"),
+                name="unique_custom_schema_name_per_owner_id",
+            )
+        ]
 
     def __str__(self):
         return f"{self.name} (v{self.version})"
