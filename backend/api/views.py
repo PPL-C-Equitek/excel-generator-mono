@@ -398,13 +398,12 @@ def download_excel(request, export_id):
         logger.exception("Unexpected error while resolving Excel download artifact.")
         return _excel_download_internal_error_response()
 
-    file_path = artifact.get("file_path")
-    if not file_path:
-        logger.warning("Excel download resolved artifact without file_path.")
-        return _excel_download_not_found_response()
-
     try:
-        file_handle = open(file_path, "rb")
+        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+        file_handle = open(safe_file_path, "rb")
+    except (KeyError, SuspiciousFileOperation, ValueError):
+        logger.warning("Excel download resolved unsafe artifact metadata.", exc_info=True)
+        return _excel_download_not_found_response()
     except OSError:
         logger.exception("Excel download failed while reading generated artifact.")
         return _excel_download_internal_error_response()

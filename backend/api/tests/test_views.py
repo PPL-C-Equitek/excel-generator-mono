@@ -1,4 +1,5 @@
 from PyPDF2 import PdfReader, PdfWriter
+from django.core.exceptions import SuspiciousFileOperation
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch, MagicMock
@@ -1182,15 +1183,16 @@ class DownloadExcelViewTest(APISimpleTestCase):
         self.assertEqual(response_data.get("message"), "Excel file not found.")
         mocked_resolver.assert_called_once()
 
+    @patch("api.views.safe_join", side_effect=SuspiciousFileOperation("path traversal attempt"), create=True)
     @patch("api.views.resolve_excel_download_artifact", create=True)
-    @patch("api.views.open", create=True)
-    def test_download_excel_endpoint_returns_404_when_resolver_returns_missing_file_path(
+    def test_download_excel_endpoint_returns_404_for_unsafe_artifact_filename(
         self,
-        mocked_open,
         mocked_resolver,
+        _mocked_safe_join,
     ):
         mocked_resolver.return_value = {
-            "file_name": "export_abc123.xlsx",
+            "file_name": "../evil.xlsx",
+            "file_path": "/safe/storage/../evil.xlsx",
             "artifact_type": "xlsx",
             "content_type": (
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -1203,7 +1205,6 @@ class DownloadExcelViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response_data.get("status"), "error")
         self.assertEqual(response_data.get("message"), "Excel file not found.")
-        mocked_open.assert_not_called()
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
     @patch("api.views.open", side_effect=OSError("disk read failed"), create=True)
