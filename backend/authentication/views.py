@@ -13,6 +13,12 @@ from rest_framework.views import APIView
 from django.conf import settings
 from authentication.oauth_services import GoogleOAuthService
 
+from authentication.logout.adapters import (
+    CallableTokenBlacklistRepository,
+    DjangoTokenBlacklistRepository,
+    build_logout_user_use_case,
+)
+from authentication.logout.http import LogoutView as CleanLogoutView
 from authentication.models import User
 from authentication.serializers import LoginSerializer, RefreshTokenSerializer, VerifyEmailSerializer
 from authentication.services import (
@@ -33,6 +39,10 @@ SERVER_ERROR_MESSAGE = "An internal server error occurred. Please try again late
 
 class GoogleOAuthRateThrottle(AnonRateThrottle):
     rate = "10/hour"
+
+def blacklist_refresh_token(refresh_token: str) -> None:
+    DjangoTokenBlacklistRepository().blacklist(refresh_token)
+
 
 class ResendVerificationThrottle(SimpleRateThrottle):
     scope = "resend_verification"
@@ -294,3 +304,9 @@ class GoogleOAuthCallbackView(APIView):
 
 
 google_oauth_callback = GoogleOAuthCallbackView.as_view()
+class LogoutView(CleanLogoutView):
+    def get_logout_use_case(self):
+        return build_logout_user_use_case(
+            token_blacklist_port=CallableTokenBlacklistRepository(blacklist_refresh_token)
+        )
+
