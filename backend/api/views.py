@@ -19,13 +19,17 @@ from file_processing.services.upload_service import (
 from file_processing.serializers import (
     CsvExportRequestSerializer,
     CsvExportResponseSerializer,
+    ExcelExportRequestSerializer,
+    ExcelExportResponseSerializer,
 )
 from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
     OutputCSVMappingError,
+    OutputExcelGenerationError,
     OutputLLMValidationError,
     export_csv_to_filesystem,
+    export_excel_to_filesystem,
     resolve_csv_download_artifact,
 )
 
@@ -65,6 +69,64 @@ def _resolve_download_filename(requested_name, default_name, artifact_type):
         return f"{safe_name}{expected_ext}"
 
     return safe_name
+
+
+def _build_export_success_response(
+    metadata,
+    response_serializer_class,
+    invalid_metadata_message,
+):
+    response_serializer = response_serializer_class(data=metadata)
+    if not response_serializer.is_valid():
+        return Response(
+            {
+                "status": "error",
+                "message": invalid_metadata_message,
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+
+
+def _build_export_error_response(
+    error,
+    validation_error_types,
+    generation_error_types,
+    invalid_request_message,
+    internal_error_message,
+    validation_log_message,
+    generation_log_message,
+    unexpected_log_message,
+):
+    if isinstance(error, validation_error_types):
+        logger.warning(validation_log_message, exc_info=True)
+        return Response(
+            {
+                "status": "error",
+                "message": invalid_request_message,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if isinstance(error, generation_error_types):
+        logger.exception(generation_log_message)
+        return Response(
+            {
+                "status": "error",
+                "message": internal_error_message,
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    logger.exception(unexpected_log_message)
+    return Response(
+        {
+            "status": "error",
+            "message": internal_error_message,
+        },
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
 
 
 @api_view(["GET"])
@@ -159,45 +221,58 @@ def export_csv(request):
             output_json=serializer.validated_data["output_json"],
             storage_dir=settings.CSV_EXPORT_DIR,
         )
-    except (OutputLLMValidationError, OutputCSVMappingError):
-        logger.warning("Validation or mapping error during CSV export.", exc_info=True)
-        return Response(
-            {
-                "status": "error",
-                "message": "Invalid CSV export request.",
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    except OutputCSVGenerationError:
-        logger.exception("CSV generation error during CSV export.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to generate CSV due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-    except Exception:
-        logger.exception("Unexpected error during CSV export.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to generate CSV due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    except Exception as exc:
+        return _build_export_error_response(
+            error=exc,
+            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
+            generation_error_types=(OutputCSVGenerationError,),
+            invalid_request_message="Invalid CSV export request.",
+            internal_error_message="Failed to generate CSV due to internal error.",
+            validation_log_message="Validation or mapping error during CSV export.",
+            generation_log_message="CSV generation error during CSV export.",
+            unexpected_log_message="Unexpected error during CSV export.",
         )
 
-    response_serializer = CsvExportResponseSerializer(data=metadata)
-    if not response_serializer.is_valid():
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to generate CSV due to invalid response metadata.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    return _build_export_success_response(
+        metadata=metadata,
+        response_serializer_class=CsvExportResponseSerializer,
+        invalid_metadata_message=(
+            "Failed to generate CSV due to invalid response metadata."
+        ),
+    )
+
+
+@require_POST
+@api_view(["POST"])
+def export_excel(request):
+    serializer = ExcelExportRequestSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        metadata = export_excel_to_filesystem(
+            output_json=serializer.validated_data["output_json"],
+            storage_dir=settings.EXCEL_EXPORT_DIR,
+        )
+    except Exception as exc:
+        return _build_export_error_response(
+            error=exc,
+            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
+            generation_error_types=(OutputExcelGenerationError,),
+            invalid_request_message="Invalid Excel export request.",
+            internal_error_message="Failed to generate Excel due to internal error.",
+            validation_log_message="Validation or mapping error during Excel export.",
+            generation_log_message="Excel generation error during Excel export.",
+            unexpected_log_message="Unexpected error during Excel export.",
         )
 
-    return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+    return _build_export_success_response(
+        metadata=metadata,
+        response_serializer_class=ExcelExportResponseSerializer,
+        invalid_metadata_message=(
+            "Failed to generate Excel due to invalid response metadata."
+        ),
+    )
 
 
 @require_GET

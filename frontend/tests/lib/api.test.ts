@@ -231,6 +231,21 @@ describe("uploadFile", () => {
         await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupt or has an invalid structure.");
     });
 
+    it("maps strictly 'cannot read' Excel error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Excel error: cannot read format" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "cannot_read.xls", {
+            type: "application/vnd.ms-excel",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Excel file is corrupt or has an invalid structure.");
+    });
+
     it("maps rate-limit upload error from message field", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,

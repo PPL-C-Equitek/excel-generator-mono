@@ -16,7 +16,6 @@ import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -31,6 +30,7 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_SYSTEM_PROMPT = os.environ.get("OPENAI_SYSTEM_PROMPT", "")
 LLM_CACHE_TTL_SECONDS = int(os.environ.get("LLM_CACHE_TTL_SECONDS", "300"))
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "")
 
 # Application definition
 
@@ -44,8 +44,10 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "api",
+    "custom_schemas",
     "llm",
     "file_processing",
+    "authentication"
 ]
 
 MIDDLEWARE = [
@@ -144,6 +146,10 @@ UPLOAD_TEMP_DIR = os.path.join(MEDIA_ROOT, 'uploads', 'tmp')
 CSV_EXPORT_DIR = os.environ.get(
     'CSV_EXPORT_DIR',
     os.path.join(MEDIA_ROOT, 'exports', 'csv')
+)
+EXCEL_EXPORT_DIR = os.environ.get(
+    'EXCEL_EXPORT_DIR',
+    os.path.join(MEDIA_ROOT, 'exports', 'excel')
 )
 
 # Default primary key field type

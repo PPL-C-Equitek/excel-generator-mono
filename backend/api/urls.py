@@ -7,5 +7,6 @@ urlpatterns = [
     path("members/", views.members),
     path("upload/", views.upload),
     path("export/csv", views.export_csv),
+    path("export/excel", views.export_excel),
     path("export/csv/<str:file_id>/download", views.download_csv),
 ]
