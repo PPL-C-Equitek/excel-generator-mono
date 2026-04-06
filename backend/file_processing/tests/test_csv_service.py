@@ -1,7 +1,15 @@
+import tempfile, os
 from unittest.mock import patch
-
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from io import BytesIO
+from file_processing.services.upload_service import (
+    _validate_csv_content,
+    CSV_CORRUPT_ERROR,
+    CSV_PROTECTED_ERROR,
+    FILE_EXTENSION_MISMATCH_ERROR,
+    process_upload,
+)
 
 UPLOAD_URL = "/upload/"
 
@@ -284,3 +292,93 @@ class CsvValidationEdgeCaseTests(TestCase):
                 "raise ", error_msg,
                 "Pesan error tidak boleh mengandung statement raise Python.",
             )
+
+def _bio(content: bytes) -> BytesIO:
+    buf = BytesIO(content)
+    return buf
+
+class CsvUnitTests(TestCase):
+
+    def test_ole_header_returns_csv_protected_error(self):
+        ole = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + b"\x00" * 8
+        buf = _bio(ole)
+        ok, err = _validate_csv_content(buf, "application/octet-stream")
+        self.assertFalse(ok)
+        self.assertEqual(err, CSV_PROTECTED_ERROR)
+
+    def test_non_ole_binary_signature_returns_mismatch_error(self):
+        zip_content = b"\x50\x4B\x03\x04" + b"\x00" * 8
+        buf = _bio(zip_content)
+        ok, err = _validate_csv_content(buf, "application/zip")
+        self.assertFalse(ok)
+        self.assertEqual(err, FILE_EXTENSION_MISMATCH_ERROR)
+
+    def test_text_mime_is_accepted(self):
+        buf = _bio(b"id,name\n1,Alice\n")
+        ok, err = _validate_csv_content(buf, "text/plain")
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+
+    def test_allowed_non_text_mime_is_accepted(self):
+        buf = _bio(b"id,name\n1,Alice\n")
+        ok, err = _validate_csv_content(buf, "application/csv")
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+
+    def test_unknown_mime_returns_csv_corrupt_error(self):
+        buf = _bio(b"id,name\n1,Alice\n")
+        ok, err = _validate_csv_content(buf, "application/random-illegal")
+        self.assertFalse(ok)
+        self.assertEqual(err, CSV_CORRUPT_ERROR)
+
+    def test_none_mime_falls_through_to_corrupt_error(self):
+        buf = _bio(b"id,name\n1,Alice\n")
+        ok, err = _validate_csv_content(buf, None)
+        self.assertFalse(ok)
+        self.assertEqual(err, CSV_CORRUPT_ERROR)
+
+class CsvProcessUploadTests(TestCase):
+    @patch("file_processing.services.upload_service.save_temp_file")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_csv_success(self, mock_validate, mock_save):
+
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("id,name\n1,Alice\n")
+
+        mock_validate.return_value = (True, None)
+        mock_save.return_value = path
+
+        f = _csv_file("data.csv", b"id,name\n1,Alice\n", "text/csv")
+        success, error, _, data = process_upload(f)
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertIsNotNone(data)
+
+    @patch("file_processing.services.upload_service.process_uploaded_txt")
+    @patch("file_processing.services.upload_service.save_temp_file")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_csv_failure_propagates_error(
+        self, mock_validate, mock_save, mock_txt
+    ):
+        import tempfile, os
+
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        os.close(fd)
+
+        mock_validate.return_value = (True, None)
+        mock_save.return_value = path
+        mock_txt.return_value = (False, "CSV parse error", None)
+
+        f = _csv_file("bad.csv", b"broken", "text/csv")
+        success, error, _, data = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "CSV parse error")
+        self.assertIsNone(data)
+
+        try:
+            os.remove(path)
+        except OSError:
+            pass
