@@ -31,6 +31,7 @@ type UseConvertFlowExcelState = ReturnType<typeof useConvertFlow> & {
     canDownloadExcel: boolean
     isExcelDownloading: boolean
     excelError: string | null
+    excelSuccessMessage: string | null
     handleExcelDownload: () => Promise<void>
 }
 
@@ -760,6 +761,7 @@ describe('useConvertFlow', () => {
             expect(current.canDownloadExcel).toBe(false)
             expect(current.isExcelDownloading).toBe(false)
             expect(current.excelError).toBeNull()
+            expect(current.excelSuccessMessage).toBeNull()
             expect(typeof current.handleExcelDownload).toBe('function')
         })
 
@@ -797,6 +799,7 @@ describe('useConvertFlow', () => {
                 'report.xlsx'
             )
             expect(getExcelState(result).excelError).toBeNull()
+            expect(getExcelState(result).excelSuccessMessage).toBe('Successfully downloaded')
         })
 
         it('sets isExcelDownloading while the excel request is in flight', async () => {
@@ -869,6 +872,7 @@ describe('useConvertFlow', () => {
             expect(service.downloadExcelFile).not.toHaveBeenCalled()
             expect(getExcelState(result).isExcelDownloading).toBe(false)
             expect(getExcelState(result).excelError).toBe('Excel export failed')
+            expect(getExcelState(result).excelSuccessMessage).toBeNull()
         })
 
         it('stores excel error when the download step fails', async () => {
@@ -892,6 +896,7 @@ describe('useConvertFlow', () => {
             )
             expect(getExcelState(result).isExcelDownloading).toBe(false)
             expect(getExcelState(result).excelError).toBe('Failed to export')
+            expect(getExcelState(result).excelSuccessMessage).toBeNull()
         })
 
         it('clears previous excel error after a successful second attempt', async () => {
@@ -922,12 +927,11 @@ describe('useConvertFlow', () => {
                 'report.xlsx'
             )
             expect(getExcelState(result).excelError).toBeNull()
+            expect(getExcelState(result).excelSuccessMessage).toBe('Successfully downloaded')
         })
 
         it('clears stale excel state when a new conversion starts', async () => {
-            const service = makeMockService({
-                exportToExcel: vi.fn().mockRejectedValue(new Error('Excel export failed')),
-            })
+            const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
 
             await act(async () => {
@@ -938,13 +942,14 @@ describe('useConvertFlow', () => {
                 await getExcelState(result).handleExcelDownload()
             })
 
-            expect(getExcelState(result).excelError).toBe('Excel export failed')
+            expect(getExcelState(result).excelSuccessMessage).toBe('Successfully downloaded')
 
             await act(async () => {
                 await result.current.handleFileSelect(testFile)
             })
 
             expect(getExcelState(result).excelError).toBeNull()
+            expect(getExcelState(result).excelSuccessMessage).toBeNull()
             expect(getExcelState(result).canDownloadExcel).toBe(true)
         })
     })

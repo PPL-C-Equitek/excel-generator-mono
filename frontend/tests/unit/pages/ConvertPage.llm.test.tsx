@@ -49,6 +49,7 @@ const mockHookReturn = {
     canDownloadExcel: false,
     error: null as string | null,
     excelError: null as string | null,
+    excelSuccessMessage: null as string | null,
     outputFile: null as OutputFile | null,
     csvMetadata: null as { file_id: string } | null,
     handleFileSelect: mockHandleFileSelect,
@@ -83,6 +84,7 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
         mockHookReturn.canDownloadExcel = false
         mockHookReturn.error = null
         mockHookReturn.excelError = null
+        mockHookReturn.excelSuccessMessage = null
         mockHookReturn.outputFile = null
         mockHookReturn.csvMetadata = null
         mockHookReturn.handleExcelDownload = mockHandleExcelDownload
@@ -272,6 +274,42 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             render(<ConvertPage />)
 
             expect(screen.getByText('Failed to export')).toBeInTheDocument()
+        })
+
+        it('shows success feedback when excel download succeeds', () => {
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.csvMetadata = { file_id: 'csv_123' }
+            mockHookReturn.canDownloadExcel = true
+            mockHookReturn.excelSuccessMessage = 'Successfully downloaded'
+
+            render(<ConvertPage />)
+
+            expect(screen.getByText('Successfully downloaded')).toBeInTheDocument()
+        })
+
+        it('shows Retry action when excel download fails', () => {
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.csvMetadata = { file_id: 'csv_123' }
+            mockHookReturn.canDownloadExcel = true
+            mockHookReturn.excelError = 'Failed to export'
+
+            render(<ConvertPage />)
+
+            expect(screen.getByTestId('retry-excel-btn')).toBeInTheDocument()
+            expect(screen.getByText('Retry')).toBeInTheDocument()
+        })
+
+        it('triggers handleExcelDownload when Retry is clicked', async () => {
+            const user = userEvent.setup()
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.csvMetadata = { file_id: 'csv_123' }
+            mockHookReturn.canDownloadExcel = true
+            mockHookReturn.excelError = 'Failed to export'
+
+            render(<ConvertPage />)
+            await user.click(screen.getByTestId('retry-excel-btn'))
+
+            expect(mockHandleExcelDownload).toHaveBeenCalledTimes(1)
         })
 
         it('triggers output download using .csv filename and service URL', async () => {
