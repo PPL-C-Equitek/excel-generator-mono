@@ -268,6 +268,18 @@ class GoogleOAuthCallbackViewTest(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_rejects_get_requests(self):
+        """Should reject safe HTTP methods that are not explicitly allowed"""
+        response = self.client.get(GOOGLE_OAUTH_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def test_rejects_put_requests(self):
+        """Should reject unsafe HTTP methods other than POST"""
+        response = self.client.put(GOOGLE_OAUTH_URL, {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
     @override_settings(GOOGLE_OAUTH_CLIENT_ID=MOCK_CLIENT_ID)
     @patch("authentication.views.GoogleOAuthService")
     def test_returns_401_when_service_raises_value_error(self, mock_service_class):
