@@ -54,7 +54,9 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
             return null
         }
 
-        const normalizedPayload = payloadPart.replaceAll(/-/g, '+').replaceAll(/_/g, '/')
+        const normalizedPayload = payloadPart
+            .replaceAll('-', '+')
+            .replaceAll('_', '/');
         const paddedPayload = normalizedPayload.padEnd(
             normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
             '='
