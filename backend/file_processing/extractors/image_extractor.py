@@ -15,7 +15,7 @@ import os
 from typing import Any, Dict, List
 
 import logging
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 
 from file_processing.extractors.ocr.base_ocr_engine import BaseOCREngine
 from file_processing.extractors.image_preprocessors import (
@@ -56,7 +56,7 @@ class ImageExtractor:
     def _load_image(self, file_path: str) -> Image.Image:
         try:
             return Image.open(file_path)
-        except (UnidentifiedImageError, OSError) as exc:
+        except OSError as exc:
             raise ValueError("Image file is corrupted or unreadable.") from exc
 
     def extract(self, file_path: str) -> Dict[str, Any]:
