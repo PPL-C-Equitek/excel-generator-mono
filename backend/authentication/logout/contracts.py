@@ -10,6 +10,10 @@ class TokenBlacklistPort(ABC):
     def blacklist(self, refresh_token: str) -> None:
         pass  # pragma: no cover
 
+    @abstractmethod
+    def is_blacklisted(self, refresh_token: str) -> bool:
+        pass  # pragma: no cover
+
 
 class LogoutUserUseCase(ABC):
     @abstractmethod

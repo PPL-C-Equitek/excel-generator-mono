@@ -1,6 +1,6 @@
 import hashlib
 from datetime import datetime, timedelta, timezone as dt_timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import jwt
 from django.conf import settings
@@ -9,7 +9,10 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from authentication.logout.adapters import DjangoTokenBlacklistRepository
+from authentication.logout.adapters import (
+    CallableTokenBlacklistRepository,
+    DjangoTokenBlacklistRepository,
+)
 from authentication.models import User
 from authentication.services import generate_tokens
 from authentication.views import blacklist_refresh_token
@@ -270,6 +273,45 @@ class DjangoTokenBlacklistRepositoryTest(APITestCase):
             self.repo.blacklist("")
 
         self.assertEqual(str(ctx.exception), "Refresh token is required")
+
+    def test_is_blacklisted_returns_false_for_empty_token(self):
+        self.assertFalse(self.repo.is_blacklisted(""))
+
+    @patch("authentication.logout.adapters.cache.get")
+    def test_is_blacklisted_returns_true_when_cache_contains_token(self, mock_cache_get):
+        mock_cache_get.return_value = True
+
+        result = self.repo.is_blacklisted(self.refresh_token)
+
+        expected_hash = hashlib.sha256(self.refresh_token.encode()).hexdigest()
+        mock_cache_get.assert_called_once_with(
+            f"blacklisted_refresh_token:{expected_hash}",
+            False,
+        )
+        self.assertTrue(result)
+
+    @patch("authentication.logout.adapters.cache.get")
+    def test_is_blacklisted_returns_false_when_cache_miss(self, mock_cache_get):
+        mock_cache_get.return_value = None
+
+        result = self.repo.is_blacklisted(self.refresh_token)
+
+        self.assertFalse(result)
+
+
+class CallableTokenBlacklistRepositoryTest(APITestCase):
+    def test_blacklist_delegates_to_callable(self):
+        mock_blacklister = MagicMock()
+
+        repo = CallableTokenBlacklistRepository(mock_blacklister)
+        repo.blacklist("refresh-token")
+
+        mock_blacklister.assert_called_once_with("refresh-token")
+
+    def test_is_blacklisted_returns_false(self):
+        repo = CallableTokenBlacklistRepository(lambda _token: None)
+
+        self.assertFalse(repo.is_blacklisted("refresh-token"))
 
 
 class LogoutViewCompatibilityHelperTest(APITestCase):
