@@ -107,37 +107,15 @@ class TestOCRService(TestCase):
         self.assertEqual(result["content"], [])
 
     @patch("file_processing.services.ocr_service.TesseractEngine")
-    def test_try_tesseract_fallback_success(self, mock_tesseract):
+    def test_ocr_single_image_success(self, mock_tesseract):
         mock_engine = MagicMock()
-        mock_engine.extract_text_with_confidence.return_value = ("Fallback text", 60.0)
+        mock_engine.extract_text_with_confidence.return_value = ("OCR text", 60.0)
         mock_tesseract.return_value = mock_engine
 
-        text = OCRService._try_tesseract_fallback("mock_image")
+        text = OCRService._ocr_single_image("mock_image")
 
-        self.assertEqual(text, "Fallback text")
+        self.assertEqual(text, "OCR text")
 
-
-    @patch("file_processing.services.ocr_service.OCRService._try_tesseract_fallback")
-    def test_ocr_single_image_high_confidence(self, mock_fallback):
-        engine = MagicMock()
-        engine.extract_text_with_confidence.return_value = ("EasyOCR is confident", 85.0)
-
-        text = OCRService._ocr_single_image("image", engine)
-
-        self.assertEqual(text, "EasyOCR is confident")
-        mock_fallback.assert_not_called()
-
-    @patch("file_processing.services.ocr_service.OCRService._try_tesseract_fallback")
-    def test_ocr_single_image_low_confidence_fallback_better(self, mock_fallback):
-        engine = MagicMock()
-        engine.extract_text_with_confidence.return_value = ("e4sy0cr is bad.", 25.0)
-
-        mock_fallback.return_value = "Tesseract is much better here."
-
-        text = OCRService._ocr_single_image("image", engine)
-
-        self.assertEqual(text, "Tesseract is much better here.")
-        mock_fallback.assert_called_once_with("image")
 
     @patch("file_processing.services.ocr_service.OCRService._ocr_single_image")
     def test_process_image_success(self, mock_ocr_single):
@@ -188,32 +166,21 @@ class TestOCRService(TestCase):
         self.assertEqual(result["content"][0]["text"], ["OCR TEXT"])
 
     @patch("file_processing.services.ocr_service.TesseractEngine")
-    def test_try_tesseract_fallback_import_error(self, mock_tesseract):
+    def test_ocr_single_image_import_error(self, mock_tesseract):
         mock_tesseract.side_effect = ImportError()
 
-        result = OCRService._try_tesseract_fallback("img")
+        result = OCRService._ocr_single_image("img")
 
         self.assertEqual(result, "")
 
-    @patch("file_processing.services.ocr_service.OCRService._try_tesseract_fallback")
-    def test_ocr_single_image_low_confidence_fallback_worse(self, mock_fallback):
-        engine = MagicMock()
-        engine.extract_text_with_confidence.return_value = ("good easyocr text", 20.0)
-
-        mock_fallback.return_value = "bad"
-
-        result = OCRService._ocr_single_image("img", engine)
-
-        self.assertEqual(result, "good easyocr text")
-
     @patch("file_processing.services.ocr_service.TesseractEngine")
-    def test_try_tesseract_fallback_generic_exception(self, mock_tesseract):
+    def test_ocr_single_image_generic_exception(self, mock_tesseract):
         mock_engine = MagicMock()
         mock_engine.extract_text_with_confidence.side_effect = Exception("boom")
 
         mock_tesseract.return_value = mock_engine
 
-        result = OCRService._try_tesseract_fallback("img")
+        result = OCRService._ocr_single_image("img")
 
         self.assertEqual(result, "")
 
