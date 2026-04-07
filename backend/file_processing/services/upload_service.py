@@ -9,6 +9,11 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+from file_processing.services.upload_processing_strategy import (
+    CallableUploadProcessingStrategy,
+    UploadProcessingStrategy,
+    UploadProcessingStrategyRegistry,
+)
 from file_processing.services.word_extraction_service import WordExtractionService
 from file_processing.services import word_validation_service
 
@@ -183,6 +188,42 @@ def process_word(file_path, ext):
     return True, None, extracted_data
 
 
+def _build_upload_strategy_registry(file_path, uploaded_file):
+    registry = UploadProcessingStrategyRegistry()
+
+    registry.register(
+        [EXT_PDF],
+        CallableUploadProcessingStrategy(
+            lambda: _process_pdf(file_path, uploaded_file)
+        ),
+    )
+    registry.register(
+        [EXT_XLS, EXT_XLSX],
+        CallableUploadProcessingStrategy(lambda: process_uploaded_excel(file_path)),
+    )
+    registry.register(
+        [EXT_DOC],
+        CallableUploadProcessingStrategy(lambda: process_word(file_path, EXT_DOC)),
+    )
+    registry.register(
+        [EXT_DOCX],
+        CallableUploadProcessingStrategy(lambda: process_word(file_path, EXT_DOCX)),
+    )
+    registry.register(
+        [EXT_TXT],
+        CallableUploadProcessingStrategy(lambda: process_uploaded_txt(file_path)),
+    )
+
+    return registry
+
+
+def _run_upload_strategy(strategy: UploadProcessingStrategy):
+    success, error, data = strategy.process()
+    if not success:
+        return False, error, None, None
+    return True, None, None, data
+
+
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
     if not is_valid:
@@ -191,35 +232,13 @@ def process_upload(uploaded_file):
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
     file_path = save_temp_file(uploaded_file)
-    extracted_data = None
-
     try:
-        if ext == ".pdf":
-            success, error, data = _process_pdf(file_path, uploaded_file)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext in [".xlsx", ".xls"]:
-            success, error, data = process_uploaded_excel(file_path)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext in [".docx", ".doc"]:
-            success, error, data = process_word(file_path, ext)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext == EXT_TXT:
-            success, error, data = process_uploaded_txt(file_path)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        else:
+        registry = _build_upload_strategy_registry(file_path, uploaded_file)
+        strategy = registry.resolve(ext)
+        if strategy is None:
             return False, "Unsupported file type", None, None
+
+        return _run_upload_strategy(strategy)
 
     finally:
         try:
@@ -228,8 +247,6 @@ def process_upload(uploaded_file):
         except Exception:
             logger.exception("Failed to delete temporary upload file.")
 
-    return True, None, None, extracted_data
-
 
 def validate_file(uploaded_file):
     filename = uploaded_file.name
@@ -237,7 +254,10 @@ def validate_file(uploaded_file):
 
     # Validate extension
     if ext not in ALLOWED_EXTENSIONS:
-        return False, "Unsupported file type. Only PDF, XLS, XLSX, DOC, DOCX, and TXT are allowed."
+        return (
+            False,
+            "Unsupported file type. Only PDF, XLS, XLSX, DOC, DOCX, and TXT are allowed.",
+        )
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
