@@ -1,9 +1,8 @@
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
-from types import SimpleNamespace
-import uuid
 
+from authentication.models import User
 from custom_schemas.models import CustomSchema
 from custom_schemas.views import CustomSchemaDetailView, CustomSchemaListCreateView
 
@@ -24,15 +23,17 @@ class CustomSchemaApiViewTest(TestCase):
         self.factory = APIRequestFactory()
         self.list_view = CustomSchemaListCreateView.as_view()
         self.detail_view = CustomSchemaDetailView.as_view()
-        self.user = SimpleNamespace(
-            id=uuid.uuid4(),
+        self.user = User.objects.create_user(
             email="owner@example.com",
-            is_authenticated=True,
+            name="Owner",
+            password="Test12345",
+            status="verified",
         )
-        self.other_user = SimpleNamespace(
-            id=uuid.uuid4(),
+        self.other_user = User.objects.create_user(
             email="other@example.com",
-            is_authenticated=True,
+            name="Other Owner",
+            password="Test12345",
+            status="verified",
         )
 
     def test_create_schema_returns_created_resource_for_authenticated_user(self):
@@ -74,14 +75,37 @@ class CustomSchemaApiViewTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(CustomSchema.objects.count(), 0)
 
+    def test_create_schema_requires_verified_user(self):
+        unverified_user = User.objects.create_user(
+            email="pending@example.com",
+            name="Pending User",
+            password="Test12345",
+            status="unverified",
+        )
+        request = self.factory.post(
+            "/schemas/",
+            {
+                "name": "Invoice Mapping",
+                "description": "Maps invoice data into a flat table",
+                "definition": make_definition(),
+            },
+            format="json",
+        )
+        force_authenticate(request, user=unverified_user)
+
+        response = self.list_view(request)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(CustomSchema.objects.count(), 0)
+
     def test_list_schemas_returns_only_current_users_items(self):
         owned_schema = CustomSchema.objects.create(
-            owner_id=self.user.id,
+            owner=self.user,
             name="Owned Schema",
             definition=make_definition("owned_column"),
         )
         other_owned_schema = CustomSchema.objects.create(
-            owner_id=self.other_user.id,
+            owner=self.other_user,
             name="Other User Schema",
             definition=make_definition("other_column"),
         )
@@ -98,18 +122,18 @@ class CustomSchemaApiViewTest(TestCase):
 
     def test_list_schema_can_filter_active_items_for_current_user(self):
         active_schema = CustomSchema.objects.create(
-            owner_id=self.user.id,
+            owner=self.user,
             name="Active Schema",
             definition=make_definition("active_column"),
         )
         CustomSchema.objects.create(
-            owner_id=self.user.id,
+            owner=self.user,
             name="Inactive Schema",
             is_active=False,
             definition=make_definition("inactive_column"),
         )
         CustomSchema.objects.create(
-            owner_id=self.other_user.id,
+            owner=self.other_user,
             name="Other User Active Schema",
             definition=make_definition("other_active_column"),
         )
@@ -125,18 +149,18 @@ class CustomSchemaApiViewTest(TestCase):
 
     def test_list_schema_with_invalid_active_param_returns_all_current_users_items(self):
         active_schema = CustomSchema.objects.create(
-            owner_id=self.user.id,
+            owner=self.user,
             name="Visible Active Schema",
             definition=make_definition("visible_active_column"),
         )
         inactive_schema = CustomSchema.objects.create(
-            owner_id=self.user.id,
+            owner=self.user,
             name="Visible Inactive Schema",
             is_active=False,
             definition=make_definition("visible_inactive_column"),
         )
         CustomSchema.objects.create(
-            owner_id=self.other_user.id,
+            owner=self.other_user,
             name="Other User Schema",
             definition=make_definition("other_visible_column"),
         )
@@ -152,7 +176,7 @@ class CustomSchemaApiViewTest(TestCase):
 
     def test_owner_can_update_definition(self):
         schema = CustomSchema.objects.create(
-            owner_id=self.user.id,
+            owner=self.user,
             name="Receipt Mapping",
             definition=make_definition("receipt_number"),
         )
@@ -176,7 +200,7 @@ class CustomSchemaApiViewTest(TestCase):
 
     def test_user_cannot_retrieve_another_users_schema(self):
         schema = CustomSchema.objects.create(
-            owner_id=self.other_user.id,
+            owner=self.other_user,
             name="Private Mapping",
             definition=make_definition("private_column"),
         )
@@ -190,7 +214,7 @@ class CustomSchemaApiViewTest(TestCase):
 
     def test_user_cannot_update_another_users_schema(self):
         schema = CustomSchema.objects.create(
-            owner_id=self.other_user.id,
+            owner=self.other_user,
             name="Private Mapping",
             definition=make_definition("private_column"),
         )
@@ -208,7 +232,7 @@ class CustomSchemaApiViewTest(TestCase):
 
     def test_delete_schema_returns_no_content_for_owner(self):
         schema = CustomSchema.objects.create(
-            owner_id=self.user.id,
+            owner=self.user,
             name="Temporary Mapping",
             definition=make_definition("temporary_column"),
         )
@@ -223,7 +247,7 @@ class CustomSchemaApiViewTest(TestCase):
 
     def test_user_cannot_delete_another_users_schema(self):
         schema = CustomSchema.objects.create(
-            owner_id=self.other_user.id,
+            owner=self.other_user,
             name="Other User Temporary Mapping",
             definition=make_definition("other_temporary_column"),
         )
@@ -239,7 +263,7 @@ class CustomSchemaApiViewTest(TestCase):
     def test_create_schema_rejects_sixth_schema_for_same_user(self):
         for index in range(5):
             CustomSchema.objects.create(
-                owner_id=self.user.id,
+                owner=self.user,
                 name=f"Schema {index + 1}",
                 definition=make_definition(f"column_{index + 1}"),
             )
@@ -259,7 +283,7 @@ class CustomSchemaApiViewTest(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("message", response.data)
-        self.assertEqual(CustomSchema.objects.filter(owner_id=self.user.id).count(), 5)
+        self.assertEqual(CustomSchema.objects.filter(owner=self.user).count(), 5)
 
     def test_same_schema_name_is_allowed_for_different_users(self):
         request = self.factory.post(
@@ -295,7 +319,7 @@ class CustomSchemaApiViewTest(TestCase):
 
     def test_duplicate_schema_name_for_same_user_returns_400(self):
         CustomSchema.objects.create(
-            owner_id=self.user.id,
+            owner=self.user,
             name="Duplicate Mapping",
             definition=make_definition("first_column"),
         )

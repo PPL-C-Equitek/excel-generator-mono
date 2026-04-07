@@ -1,5 +1,6 @@
-import SchemaPage from './SchemaPage'
+"use client"
 
-export default function Page() {
-    return <SchemaPage />
-}
+import SchemaPage from './SchemaPage'
+import { withProtectedPage } from '@/lib/withProtectedPage'
+
+export default withProtectedPage(SchemaPage)

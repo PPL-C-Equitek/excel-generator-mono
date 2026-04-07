@@ -1,13 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { getStoredAccessToken } from '@/lib/auth'
+import { useCallback, useEffect, useState } from 'react'
+import { getValidAccessToken, getStoredAccessToken } from '@/lib/auth'
 import type {
     CreateCustomSchemaInput,
     CustomSchemaRecord,
     ICustomSchemaService,
 } from '@/lib/ICustomSchemaService'
 import { customSchemaService } from '@/services/customSchemas'
+
+type AccessTokenResolver = () => string | null | Promise<string | null>
 
 export interface UseCustomSchemasReturn {
     hasAccessToken: boolean
@@ -23,32 +25,69 @@ export interface UseCustomSchemasReturn {
     deleteSchema: (schemaId: string) => Promise<boolean>
 }
 
+interface InitialAuthState {
+    hasAccessToken: boolean
+    isLoading: boolean
+}
+
 function sortSchemas(schemas: CustomSchemaRecord[]): CustomSchemaRecord[] {
     return [...schemas].sort((left, right) => left.name.localeCompare(right.name))
 }
 
+function getInitialAuthState(
+    accessTokenResolver: AccessTokenResolver
+): InitialAuthState {
+    if (accessTokenResolver === getValidAccessToken) {
+        const initialAccessToken = getStoredAccessToken()
+        const authenticated = !!initialAccessToken
+        return {
+            hasAccessToken: authenticated,
+            isLoading: authenticated,
+        }
+    }
+
+    const initialAccessToken = accessTokenResolver()
+    if (typeof initialAccessToken === 'string') {
+        const authenticated = initialAccessToken.length > 0
+        return {
+            hasAccessToken: authenticated,
+            isLoading: authenticated,
+        }
+    }
+
+    return {
+        hasAccessToken: false,
+        isLoading: initialAccessToken instanceof Promise,
+    }
+}
+
 export function useCustomSchemas(
     service: ICustomSchemaService = customSchemaService,
-    accessTokenResolver: () => string | null = getStoredAccessToken
+    accessTokenResolver: AccessTokenResolver = getValidAccessToken
 ): UseCustomSchemasReturn {
-    const initialAccessToken = accessTokenResolver()
+    const [initialAuthState] = useState(() =>
+        getInitialAuthState(accessTokenResolver)
+    )
     const [hasAccessToken, setHasAccessToken] = useState(
-        typeof initialAccessToken === 'string' && initialAccessToken.length > 0
+        initialAuthState.hasAccessToken
     )
-    const [isLoading, setIsLoading] = useState(
-        typeof initialAccessToken === 'string' && initialAccessToken.length > 0
-    )
+    const [isLoading, setIsLoading] = useState(initialAuthState.isLoading)
     const [isSaving, setIsSaving] = useState(false)
     const [deletingSchemaId, setDeletingSchemaId] = useState<string | null>(null)
     const [schemas, setSchemas] = useState<CustomSchemaRecord[]>([])
     const [error, setError] = useState<string | null>(null)
     const [message, setMessage] = useState<string | null>(null)
 
+    const resolveAccessToken = useCallback(async (): Promise<string | null> => {
+        const value = accessTokenResolver()
+        return value instanceof Promise ? await value : value
+    }, [accessTokenResolver])
+
     useEffect(() => {
         let isCancelled = false
 
         const load = async () => {
-            const accessToken = accessTokenResolver()
+            const accessToken = await resolveAccessToken()
             const authenticated = typeof accessToken === 'string' && accessToken.length > 0
 
             setHasAccessToken(authenticated)
@@ -85,10 +124,10 @@ export function useCustomSchemas(
         return () => {
             isCancelled = true
         }
-    }, [accessTokenResolver, service])
+    }, [resolveAccessToken, service])
 
     const reloadSchemas = async () => {
-        const accessToken = accessTokenResolver()
+        const accessToken = await resolveAccessToken()
         const authenticated = typeof accessToken === 'string' && accessToken.length > 0
 
         setHasAccessToken(authenticated)
@@ -115,7 +154,7 @@ export function useCustomSchemas(
     }
 
     const createSchema = async (input: CreateCustomSchemaInput): Promise<boolean> => {
-        const accessToken = accessTokenResolver()
+        const accessToken = await resolveAccessToken()
 
         if (!accessToken) {
             setHasAccessToken(false)
@@ -145,7 +184,7 @@ export function useCustomSchemas(
         schemaId: string,
         input: CreateCustomSchemaInput
     ): Promise<boolean> => {
-        const accessToken = accessTokenResolver()
+        const accessToken = await resolveAccessToken()
 
         if (!accessToken) {
             setHasAccessToken(false)
@@ -178,7 +217,7 @@ export function useCustomSchemas(
     }
 
     const deleteSchema = async (schemaId: string): Promise<boolean> => {
-        const accessToken = accessTokenResolver()
+        const accessToken = await resolveAccessToken()
 
         if (!accessToken) {
             setHasAccessToken(false)

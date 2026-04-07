@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useCustomSchemas } from '@/hooks/useCustomSchemas'
-import { getStoredAccessToken } from '@/lib/auth'
+import { getValidAccessToken } from '@/lib/auth'
 import type {
     CustomSchemaRecord,
     ICustomSchemaService,
@@ -11,13 +11,13 @@ import { customSchemaService } from '@/services/customSchemas'
 
 interface SchemaSelectorProps {
     readonly service?: ICustomSchemaService
-    readonly accessTokenResolver?: () => string | null
+    readonly accessTokenResolver?: () => string | null | Promise<string | null>
     readonly onSchemaChange?: (schema: CustomSchemaRecord | null) => void
 }
 
 export default function SchemaSelector({
     service = customSchemaService,
-    accessTokenResolver = getStoredAccessToken,
+    accessTokenResolver = getValidAccessToken,
     onSchemaChange,
 }: SchemaSelectorProps) {
     const { hasAccessToken, isLoading, schemas, error } = useCustomSchemas(

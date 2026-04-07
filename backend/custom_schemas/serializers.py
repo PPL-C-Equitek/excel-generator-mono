@@ -1,9 +1,9 @@
 from rest_framework import serializers
 
 from .models import CustomSchema
-from .services import (
-    CustomSchemaApplicationService,
-    CUSTOM_SCHEMA_DUPLICATE_NAME_ERROR_MESSAGE,
+from .application_service import CustomSchemaApplicationService
+from .constants import CUSTOM_SCHEMA_DUPLICATE_NAME_ERROR_MESSAGE
+from .definition_service import (
     build_schema_prompt_fragment,
     validate_schema_definition,
 )

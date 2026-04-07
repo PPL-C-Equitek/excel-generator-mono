@@ -1,9 +1,9 @@
-import uuid
 from unittest.mock import Mock
 
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase
 
+from authentication.models import User
 from custom_schemas.services import (
     CustomSchemaApplicationService,
     CustomSchemaDefinitionService,
@@ -283,7 +283,12 @@ class CustomSchemaApplicationServiceTest(SimpleTestCase):
 class DjangoCustomSchemaQueryRepositoryTest(TestCase):
     def setUp(self):
         self.repository = DjangoCustomSchemaQueryRepository()
-        self.owner_id = uuid.uuid4()
+        self.owner = User.objects.create_user(
+            email="repository-owner@example.com",
+            name="Repository Owner",
+            password="Test12345",
+            status="verified",
+        )
 
     def test_none_returns_empty_queryset(self):
         result = self.repository.none()
@@ -292,13 +297,13 @@ class DjangoCustomSchemaQueryRepositoryTest(TestCase):
 
     def test_name_exists_for_owner_excludes_current_schema_when_requested(self):
         schema = CustomSchema.objects.create(
-            owner_id=self.owner_id,
+            owner=self.owner,
             name="Invoice Mapping",
             definition=make_definition(),
         )
 
         result = self.repository.name_exists_for_owner(
-            owner_id=self.owner_id,
+            owner_id=self.owner.id,
             name="Invoice Mapping",
             exclude_pk=schema.pk,
         )

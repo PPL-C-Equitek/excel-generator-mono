@@ -2,12 +2,20 @@ import uuid
 
 from django.db import models
 
-from .services import build_schema_prompt_fragment, validate_schema_definition
+from .definition_service import (
+    build_schema_prompt_fragment,
+    validate_schema_definition,
+)
 
 
 class CustomSchema(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    owner_id = models.UUIDField(db_index=True)
+    owner = models.ForeignKey(
+        "authentication.User",
+        db_column="owner_id",
+        on_delete=models.CASCADE,
+        related_name="custom_schemas",
+    )
     name = models.CharField(max_length=120)
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
@@ -19,8 +27,8 @@ class CustomSchema(models.Model):
         ordering = ("name", "id")
         constraints = [
             models.UniqueConstraint(
-                fields=("owner_id", "name"),
-                name="unique_custom_schema_name_per_owner_id",
+                fields=("owner", "name"),
+                name="unique_custom_schema_name_per_owner",
             )
         ]
 

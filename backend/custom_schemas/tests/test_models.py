@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 import uuid
 
+from authentication.models import User
 from custom_schemas.models import CustomSchema
 
 
@@ -18,12 +19,22 @@ def make_definition(column_name="customer_name", description="Mapped customer fi
 
 class CustomSchemaModelTest(TestCase):
     def setUp(self):
-        self.owner_id = uuid.uuid4()
-        self.other_owner_id = uuid.uuid4()
+        self.owner = User.objects.create_user(
+            email="owner@example.com",
+            name="Owner",
+            password="Test12345",
+            status="verified",
+        )
+        self.other_owner = User.objects.create_user(
+            email="other-owner@example.com",
+            name="Other Owner",
+            password="Test12345",
+            status="verified",
+        )
 
     def test_str_returns_name(self):
         schema = CustomSchema(
-            owner_id=self.owner_id,
+            owner=self.owner,
             name="Invoice Mapping",
             definition=make_definition(),
         )
@@ -32,7 +43,7 @@ class CustomSchemaModelTest(TestCase):
 
     def test_primary_key_defaults_to_uuid(self):
         schema = CustomSchema.objects.create(
-            owner_id=self.owner_id,
+            owner=self.owner,
             name="UUID Mapping",
             definition=make_definition(),
         )
@@ -41,7 +52,7 @@ class CustomSchemaModelTest(TestCase):
 
     def test_prompt_fragment_uses_definition(self):
         schema = CustomSchema(
-            owner_id=self.owner_id,
+            owner=self.owner,
             name="Invoice Mapping",
             definition=make_definition("invoice_number", "Invoice identifier"),
         )
@@ -53,7 +64,7 @@ class CustomSchemaModelTest(TestCase):
 
     def test_save_persists_definition_changes_without_versioning(self):
         schema = CustomSchema.objects.create(
-            owner_id=self.owner_id,
+            owner=self.owner,
             name="Receipt Mapping",
             definition=make_definition("receipt_number", "Receipt number"),
         )
@@ -69,13 +80,13 @@ class CustomSchemaModelTest(TestCase):
 
     def test_same_name_is_allowed_for_different_users(self):
         CustomSchema.objects.create(
-            owner_id=self.owner_id,
+            owner=self.owner,
             name="Shared Name",
             definition=make_definition("owner_column", "Owner column"),
         )
 
         schema = CustomSchema.objects.create(
-            owner_id=self.other_owner_id,
+            owner=self.other_owner,
             name="Shared Name",
             definition=make_definition("other_column", "Other owner column"),
         )
@@ -84,13 +95,13 @@ class CustomSchemaModelTest(TestCase):
 
     def test_duplicate_name_for_same_user_is_rejected(self):
         CustomSchema.objects.create(
-            owner_id=self.owner_id,
+            owner=self.owner,
             name="Duplicate Name",
             definition=make_definition("first_column", "First column"),
         )
 
         duplicate_schema = CustomSchema(
-            owner_id=self.owner_id,
+            owner=self.owner,
             name="Duplicate Name",
             definition=make_definition("second_column", "Second column"),
         )

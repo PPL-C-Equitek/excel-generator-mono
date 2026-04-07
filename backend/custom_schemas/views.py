@@ -2,15 +2,14 @@ from rest_framework import generics
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 
+from authentication.permissions import IsVerifiedUser
 from .serializers import CustomSchemaSerializer
-from .services import (
-    CustomSchemaApplicationService,
-    CustomSchemaLimitExceededError,
-)
+from .application_service import CustomSchemaApplicationService
+from .policy_service import CustomSchemaLimitExceededError
 
 
 class UserOwnedCustomSchemaMixin:
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsVerifiedUser]
     application_service_class = CustomSchemaApplicationService
 
     def get_application_service(self) -> CustomSchemaApplicationService:

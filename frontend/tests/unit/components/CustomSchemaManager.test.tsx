@@ -147,16 +147,25 @@ describe('CustomSchemaManager', () => {
         await user.click(screen.getByTestId('add-schema-btn'))
 
         const dialog = screen.getByRole('dialog', { name: /add schema/i })
-        await user.type(within(dialog).getByLabelText(/schema name/i), 'Order Mapping')
-        await user.type(within(dialog).getByLabelText(/^description$/i), 'Maps order rows')
-        await user.type(within(dialog).getByLabelText(/column name/i), 'order_id')
-        await user.type(within(dialog).getByLabelText(/column description/i), 'Order identifier')
+        fireEvent.change(within(dialog).getByLabelText(/schema name/i), {
+            target: { value: 'Order Mapping' },
+        })
+        fireEvent.change(within(dialog).getByLabelText(/^description$/i), {
+            target: { value: 'Maps order rows' },
+        })
+        fireEvent.change(within(dialog).getByLabelText(/column name/i), {
+            target: { value: 'order_id' },
+        })
+        fireEvent.change(within(dialog).getByLabelText(/column description/i), {
+            target: { value: 'Order identifier' },
+        })
         await user.click(within(dialog).getByRole('button', { name: /add column/i }))
-        await user.type(within(dialog).getAllByLabelText(/column name/i)[1], 'customer_name')
-        await user.type(
-            within(dialog).getAllByLabelText(/column description/i)[1],
-            'Customer full name'
-        )
+        fireEvent.change(within(dialog).getAllByLabelText(/column name/i)[1], {
+            target: { value: 'customer_name' },
+        })
+        fireEvent.change(within(dialog).getAllByLabelText(/column description/i)[1], {
+            target: { value: 'Customer full name' },
+        })
         await user.click(within(dialog).getByTestId('schema-save-btn'))
 
         await waitFor(() => {

@@ -174,6 +174,10 @@ describe('SchemaSelector', () => {
 
         expect(screen.getByText('Loading available schemas...')).toBeInTheDocument()
 
+        await waitFor(() => {
+            expect(service.list).toHaveBeenCalledWith('access-token')
+        })
+
         resolveList?.([])
 
         await waitFor(() => {

@@ -5,7 +5,7 @@ import type {
 } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCustomSchemas } from '@/hooks/useCustomSchemas'
-import { getStoredAccessToken } from '@/lib/auth'
+import { getValidAccessToken } from '@/lib/auth'
 import type {
     CreateCustomSchemaInput,
     CustomSchemaDefinition,
@@ -16,7 +16,7 @@ import { customSchemaService } from '@/services/customSchemas'
 
 interface CustomSchemaManagerProps {
     readonly service?: ICustomSchemaService
-    readonly accessTokenResolver?: () => string | null
+    readonly accessTokenResolver?: () => string | null | Promise<string | null>
 }
 
 interface SchemaColumnDraft {
@@ -119,7 +119,7 @@ export function buildCustomSchemaInput(
 
 export default function CustomSchemaManager({
     service = customSchemaService,
-    accessTokenResolver = getStoredAccessToken,
+    accessTokenResolver = getValidAccessToken,
 }: CustomSchemaManagerProps) {
     const [draft, setDraft] = useState<CustomSchemaFormDraft>(createEmptyDraft)
     const [formError, setFormError] = useState<string | null>(null)

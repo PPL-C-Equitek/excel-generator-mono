@@ -1,8 +1,20 @@
-import { render, screen } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Page from '../../../src/app/schema/page'
 
 const mockSchemaPageRender = vi.fn()
+const mockReplace = vi.fn()
+const mockGetValidAccessToken = vi.fn<() => Promise<string | null>>()
+
+vi.mock('next/navigation', () => ({
+    useRouter: () => ({
+        replace: mockReplace,
+    }),
+}))
+
+vi.mock('@/lib/auth', () => ({
+    getValidAccessToken: () => mockGetValidAccessToken(),
+}))
 
 vi.mock('../../../src/app/schema/SchemaPage', () => ({
     default: () => {
@@ -16,32 +28,51 @@ vi.mock('../../../src/app/schema/SchemaPage', () => ({
     }
 }))
 
-describe('Schema Page Wrapper', () => {
+describe('Schema Page Route Guard', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        mockSchemaPageRender.mockClear()
+        mockGetValidAccessToken.mockResolvedValue('mock-token')
     })
 
-    afterEach(() => {
-        vi.resetAllMocks()
-    })
-
-    it('renders SchemaPage component', () => {
+    it('renders SchemaPage when access token exists', async () => {
         render(<Page />)
-        expect(screen.getByTestId('schema-page')).toBeInTheDocument()
-        expect(screen.getByText('SchemaPage Component')).toBeInTheDocument()
-    })
 
-    it('acts as a thin wrapper around SchemaPage', () => {
-        const { container } = render(<Page />)
-        expect(container.firstChild).toBe(screen.getByTestId('schema-page'))
-    })
+        await waitFor(() => {
+            expect(screen.getByTestId('schema-page')).toBeInTheDocument()
+        })
 
-    it('calls SchemaPage exactly once per render', () => {
-        const { rerender } = render(<Page />)
+        expect(mockReplace).not.toHaveBeenCalled()
         expect(mockSchemaPageRender).toHaveBeenCalledTimes(1)
+    })
 
-        rerender(<Page />)
-        expect(mockSchemaPageRender).toHaveBeenCalledTimes(2)
+    it('redirects to login when access token is missing', async () => {
+        mockGetValidAccessToken.mockResolvedValue(null)
+
+        const { container } = render(<Page />)
+
+        await waitFor(() => {
+            expect(mockReplace).toHaveBeenCalledWith('/login')
+        })
+
+        expect(screen.queryByTestId('schema-page')).not.toBeInTheDocument()
+        expect(container.firstChild).toBeNull()
+        expect(mockSchemaPageRender).not.toHaveBeenCalled()
+    })
+
+    it('does not redirect after unmount when async auth check resolves late', async () => {
+        let resolveToken: ((value: string | null) => void) | null = null
+        const pendingToken = new Promise<string | null>((resolve) => {
+            resolveToken = resolve
+        })
+        mockGetValidAccessToken.mockReturnValue(pendingToken)
+
+        const { unmount } = render(<Page />)
+        unmount()
+
+        resolveToken?.(null)
+        await Promise.resolve()
+
+        expect(mockReplace).not.toHaveBeenCalled()
+        expect(mockSchemaPageRender).not.toHaveBeenCalled()
     })
 })
