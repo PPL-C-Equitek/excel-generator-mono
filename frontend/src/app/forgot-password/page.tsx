@@ -1,10 +1,13 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
+import AuthEmailSuccessCard from '@/components/AuthEmailSuccessCard';
 import Navbar from '@/components/Navbar';
 import { LANDING_NAV_LINKS } from '@/constants/landing';
+import { useResendCooldown } from '@/hooks/useResendCooldown';
 import { requestPasswordReset, resendPasswordReset } from '@/lib/api';
+import { resendEmailActionFlow, shouldSkipEmailResend } from '@/lib/authEmailAction';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const DEFAULT_SUCCESS_MESSAGE =
@@ -55,7 +58,7 @@ export function shouldSkipPasswordResetResend(
   isResending: boolean,
   resendCooldown: number
 ): boolean {
-  return !email.trim() || isResending || resendCooldown > 0;
+  return shouldSkipEmailResend(email, isResending, resendCooldown);
 }
 
 type ResendPasswordResetFlowParams = {
@@ -77,23 +80,18 @@ export async function resendPasswordResetFlow({
   setResendErrorMessage,
   setResendCooldown,
 }: ResendPasswordResetFlowParams): Promise<void> {
-  if (shouldSkipPasswordResetResend(email, isResending, resendCooldown)) return;
-
-  setIsResending(true);
-  setResendStatusMessage('');
-  setResendErrorMessage('');
-
-  try {
-    const response = await resendPasswordReset(email.trim());
-    setResendStatusMessage(response.message || DEFAULT_RESEND_SUCCESS_MESSAGE);
-    setResendCooldown(60);
-  } catch (error: unknown) {
-    setResendErrorMessage(
-      error instanceof Error ? error.message : DEFAULT_RESEND_ERROR_MESSAGE
-    );
-  } finally {
-    setIsResending(false);
-  }
+  await resendEmailActionFlow({
+    email,
+    isSubmitting: isResending,
+    cooldown: resendCooldown,
+    sendRequest: resendPasswordReset,
+    successFallbackMessage: DEFAULT_RESEND_SUCCESS_MESSAGE,
+    errorFallbackMessage: DEFAULT_RESEND_ERROR_MESSAGE,
+    setIsSubmitting: setIsResending,
+    setStatusMessage: setResendStatusMessage,
+    setErrorMessage: setResendErrorMessage,
+    setCooldown: setResendCooldown,
+  });
 }
 
 export default function ForgotPasswordPage() {
@@ -107,23 +105,7 @@ export default function ForgotPasswordPage() {
   const [isResending, setIsResending] = useState(false);
   const [resendStatusMessage, setResendStatusMessage] = useState('');
   const [resendErrorMessage, setResendErrorMessage] = useState('');
-  const [resendCooldown, setResendCooldown] = useState(0);
-
-  useEffect(() => {
-    if (resendCooldown <= 0) return undefined;
-
-    const timer = setInterval(() => {
-      setResendCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [resendCooldown]);
+  const { cooldown: resendCooldown, setCooldown: setResendCooldown } = useResendCooldown();
 
   const handleSubmit = async (event: FormSubmitEvent) => {
     event.preventDefault();
@@ -185,64 +167,18 @@ export default function ForgotPasswordPage() {
           </div>
 
           {successMessage ? (
-            <div className="mt-8 space-y-4">
-              <div className="flex flex-col items-center gap-4 rounded-xl border border-green-200 bg-green-50 p-5 text-sm text-green-700">
-                <div className="flex items-center gap-3 text-green-600">
-                  <svg className="h-8 w-8 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <span className="break-words text-center text-lg font-medium">
-                    {successMessage}
-                  </span>
-                </div>
-                <p className="text-center text-sm text-green-700">
-                  We sent the reset link to <span className="font-semibold">{email}</span>.
-                </p>
-
-                {resendStatusMessage && (
-                  <p className="w-full rounded-md bg-green-100 px-3 py-2 text-center text-sm text-green-700">
-                    {resendStatusMessage}
-                  </p>
-                )}
-
-                {resendErrorMessage && (
-                  <p className="w-full rounded-md bg-red-100 px-3 py-2 text-center text-sm text-red-600">
-                    {resendErrorMessage}
-                  </p>
-                )}
-
-                <div className="mt-2 flex w-full flex-col gap-3 sm:flex-row">
-                  <Link
-                    href="/login"
-                    className="flex w-full justify-center rounded-xl border border-transparent bg-white px-4 py-3 text-sm font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2"
-                    style={{ color: 'var(--brand-primary)' }}
-                  >
-                    Back to Login
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={handleResendPasswordReset}
-                    disabled={isResending || resendCooldown > 0}
-                    className={`w-full rounded-xl border px-4 py-3 text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 ${
-                      isResending || resendCooldown > 0
-                        ? 'cursor-not-allowed border-gray-300 bg-gray-100 text-gray-500'
-                        : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
-                    }`}
-                    style={
-                      isResending || resendCooldown > 0
-                        ? undefined
-                        : { color: 'var(--brand-primary)' }
-                    }
-                  >
-                    {getResendButtonText(isResending, resendCooldown)}
-                  </button>
-                </div>
-              </div>
-            </div>
+            <AuthEmailSuccessCard
+              successMessage={successMessage}
+              email={email}
+              emailNotice={<>We sent the reset link to </>}
+              statusMessage={resendStatusMessage}
+              errorMessage={resendErrorMessage}
+              primaryHref="/login"
+              primaryLabel="Back to Login"
+              secondaryButtonText={getResendButtonText(isResending, resendCooldown)}
+              onSecondaryAction={handleResendPasswordReset}
+              isSecondaryDisabled={isResending || resendCooldown > 0}
+            />
           ) : (
             <form className="mt-8 space-y-6" onSubmit={handleSubmit} noValidate>
               {errors.form && (
