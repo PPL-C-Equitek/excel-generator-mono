@@ -50,9 +50,19 @@ describe('LogoutButton', () => {
         await user.click(screen.getByRole('button', { name: /logout/i }))
 
         await waitFor(() => {
-            expect(mockFetch).toHaveBeenCalledWith('/auth/logout/', {
-                method: 'POST',
-            })
+            expect(mockFetch).toHaveBeenCalledWith(
+                expect.stringMatching(/\/auth\/logout\/$/),
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({
+                        Authorization: 'Bearer access-token',
+                        'Content-Type': 'application/json',
+                    }),
+                    body: JSON.stringify({
+                        refresh_token: 'refresh-token',
+                    }),
+                })
+            )
         })
 
         expect(window.localStorage.getItem('access_token')).toBeNull()
@@ -61,9 +71,84 @@ describe('LogoutButton', () => {
         expect(mockPush).toHaveBeenCalledWith('/')
     })
 
+    it('shows an error message and keeps auth state when logout fails on the server', async () => {
+        const user = userEvent.setup()
+
+        window.localStorage.setItem('access_token', 'access-token')
+        window.localStorage.setItem('refresh_token', 'refresh-token')
+
+        mockFetch.mockResolvedValueOnce({
+            ok: false,
+            json: async () => ({ message: 'Unauthorized' }),
+        })
+
+        render(<LogoutButton />)
+
+        await user.click(screen.getByRole('button', { name: /logout/i }))
+
+        await waitFor(() => {
+            expect(screen.getByRole('status')).toHaveTextContent(
+                'Logout gagal. Silakan coba lagi.'
+            )
+        })
+
+        expect(window.localStorage.getItem('access_token')).toBe('access-token')
+        expect(window.localStorage.getItem('refresh_token')).toBe('refresh-token')
+        expect(mockPush).not.toHaveBeenCalled()
+    })
+
+    it('shows the backend detail message when logout fails with detail only', async () => {
+        const user = userEvent.setup()
+
+        window.localStorage.setItem('access_token', 'access-token')
+        window.localStorage.setItem('refresh_token', 'refresh-token')
+
+        mockFetch.mockResolvedValueOnce({
+            ok: false,
+            json: async () => ({ detail: 'Token invalid' }),
+        })
+
+        render(<LogoutButton />)
+
+        await user.click(screen.getByRole('button', { name: /logout/i }))
+
+        await waitFor(() => {
+            expect(screen.getByRole('status')).toHaveTextContent(
+                'Logout gagal. Silakan coba lagi.'
+            )
+        })
+    })
+
+    it('falls back to the generic error when logout response body cannot be parsed', async () => {
+        const user = userEvent.setup()
+
+        window.localStorage.setItem('access_token', 'access-token')
+        window.localStorage.setItem('refresh_token', 'refresh-token')
+
+        mockFetch.mockResolvedValueOnce({
+            ok: false,
+            json: async () => {
+                throw new Error('invalid json')
+            },
+        })
+
+        render(<LogoutButton />)
+
+        await user.click(screen.getByRole('button', { name: /logout/i }))
+
+        await waitFor(() => {
+            expect(screen.getByRole('status')).toHaveTextContent(
+                'Logout gagal. Silakan coba lagi.'
+            )
+        })
+    })
+
     it('disables the button and prevents duplicate logout requests during rapid double click', async () => {
         const user = userEvent.setup()
         let resolveRequest: (() => void) | undefined
+
+        window.localStorage.setItem('access_token', 'access-token')
+        window.localStorage.setItem('refresh_token', 'refresh-token')
 
         mockFetch.mockImplementation(
             () =>
@@ -111,5 +196,38 @@ describe('LogoutButton', () => {
         await waitFor(() => {
             expect(mockReplace).toHaveBeenCalledWith('/login')
         })
+    })
+
+    it('normalizes a trailing slash in the API base URL', async () => {
+        vi.unstubAllGlobals()
+        vi.resetModules()
+
+        const previousApiUrl = process.env.NEXT_PUBLIC_API_URL
+        process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8000/'
+
+        const { default: LogoutButtonWithSlash } = await import('@/components/LogoutButton')
+        const user = userEvent.setup()
+
+        window.localStorage.setItem('access_token', 'access-token')
+        window.localStorage.setItem('refresh_token', 'refresh-token')
+
+        const trailingSlashFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ detail: 'Logged out successfully' }),
+        })
+        vi.stubGlobal('fetch', trailingSlashFetch)
+
+        render(<LogoutButtonWithSlash />)
+
+        await user.click(screen.getByRole('button', { name: /logout/i }))
+
+        await waitFor(() => {
+            expect(trailingSlashFetch).toHaveBeenCalledWith(
+                'http://localhost:8000/auth/logout/',
+                expect.objectContaining({ method: 'POST' })
+            )
+        })
+
+        process.env.NEXT_PUBLIC_API_URL = previousApiUrl
     })
 })

@@ -47,13 +47,13 @@ export default function AuthGuard({
         }
 
         void verifyAccess()
-        window.addEventListener('popstate', revalidateAccess)
-        window.addEventListener('pageshow', revalidateAccess)
+        globalThis.addEventListener('popstate', revalidateAccess)
+        globalThis.addEventListener('pageshow', revalidateAccess)
 
         return () => {
             isCancelled = true
-            window.removeEventListener('popstate', revalidateAccess)
-            window.removeEventListener('pageshow', revalidateAccess)
+            globalThis.removeEventListener('popstate', revalidateAccess)
+            globalThis.removeEventListener('pageshow', revalidateAccess)
         }
     }, [pathname, redirectTo, router])
 

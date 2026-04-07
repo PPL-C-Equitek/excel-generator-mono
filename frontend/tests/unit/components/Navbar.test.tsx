@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, it, expect } from 'vitest'
+import { vi } from 'vitest'
 import Navbar from '../../../src/components/Navbar'
 import type { NavLink } from '../../../src/constants/landing'
 
