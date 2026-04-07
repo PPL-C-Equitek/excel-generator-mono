@@ -11,6 +11,8 @@ from django.core.signing import TimestampSigner
 from django.utils import timezone
 
 from authentication.models import User
+from authentication.logout.adapters import DjangoTokenBlacklistRepository
+from authentication.logout.contracts import TokenBlacklistPort
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,10 @@ class RefreshTokenExpiredError(RefreshTokenError):
 
 
 class InvalidRefreshTokenError(RefreshTokenError):
+    pass
+
+
+class BlacklistedRefreshTokenError(RefreshTokenError):
     pass
 
 
@@ -230,8 +236,13 @@ class RefreshTokenService:
 
     algorithms = ["HS256"]
 
-    def __init__(self, token_generator: Callable[[object, str], TokenPayload] = generate_tokens):
+    def __init__(
+        self,
+        token_generator: Callable[[object, str], TokenPayload] = generate_tokens,
+        token_blacklist_port: TokenBlacklistPort | None = None,
+    ):
         self.token_generator = token_generator
+        self.token_blacklist_port = token_blacklist_port or DjangoTokenBlacklistRepository()
 
     def refresh(self, refresh_token: str) -> TokenPayload:
         payload = self._decode_refresh_token(refresh_token)
@@ -243,6 +254,9 @@ class RefreshTokenService:
         email = payload.get("email")
         if not user_id or not email:
             raise InvalidRefreshTokenError("Invalid token payload.")
+
+        if self.token_blacklist_port and self.token_blacklist_port.is_blacklisted(refresh_token):
+            raise BlacklistedRefreshTokenError("Refresh token is blacklisted.")
 
         # Ensure the refresh token still belongs to an existing verified user.
         user_exists_and_verified = User.objects.filter(

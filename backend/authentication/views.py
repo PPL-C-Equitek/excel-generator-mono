@@ -30,6 +30,7 @@ from authentication.services import (
     LoginRateLimitedError,
     InvalidCredentialsError,
     EmailNotVerifiedError,
+    BlacklistedRefreshTokenError,
     RefreshTokenExpiredError,
     InvalidRefreshTokenError,
 )
@@ -212,7 +213,10 @@ class RefreshTokenView(APIView):
             )
 
         refresh_token = serializer.validated_data["refresh_token"]
-        refresh_service = RefreshTokenService(token_generator=generate_tokens)
+        refresh_service = RefreshTokenService(
+            token_generator=generate_tokens,
+            token_blacklist_port=DjangoTokenBlacklistRepository(),
+        )
 
         try:
             tokens = refresh_service.refresh(refresh_token)
@@ -226,6 +230,11 @@ class RefreshTokenView(APIView):
         except RefreshTokenExpiredError:
             return Response(
                 {"message": "Token expired. Silakan login ulang."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        except BlacklistedRefreshTokenError:
+            return Response(
+                {"message": "Refresh token sudah logout."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
         except InvalidRefreshTokenError:
