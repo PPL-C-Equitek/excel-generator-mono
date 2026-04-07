@@ -1,12 +1,15 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import type { AxiosError } from 'axios';
+import AuthEmailSuccessCard from '@/components/AuthEmailSuccessCard';
 import Navbar from '@/components/Navbar';
 import { LANDING_NAV_LINKS } from '@/constants/landing';
+import { useResendCooldown } from '@/hooks/useResendCooldown';
+import { resendEmailActionFlow, shouldSkipEmailResend } from '@/lib/authEmailAction';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
@@ -71,7 +74,7 @@ export function shouldSkipResendVerification(
   isResending: boolean,
   resendCooldown: number
 ): boolean {
-  return !email || isResending || resendCooldown > 0;
+  return shouldSkipEmailResend(email, isResending, resendCooldown);
 }
 
 type ResendVerificationFlowParams = {
@@ -93,27 +96,24 @@ export async function resendVerificationFlow({
   setResendErrorMessage,
   setResendCooldown,
 }: ResendVerificationFlowParams): Promise<void> {
-  if (shouldSkipResendVerification(email, isResending, resendCooldown)) return;
-
-  setIsResending(true);
-  setResendStatusMessage('');
-  setResendErrorMessage('');
-
-  try {
-    const response = await axios.post(
-      `${process.env.NEXT_PUBLIC_API_URL || ''}/auth/resend-verification/`,
-      { email }
-    );
-    setResendStatusMessage(response.data?.message || 'Email verifikasi berhasil dikirim ulang.');
-    setResendCooldown(60);
-  } catch (error: unknown) {
-    const axiosError = error as AxiosError<{ message?: string }>;
-    setResendErrorMessage(
-      axiosError.response?.data?.message || 'Gagal mengirim ulang email verifikasi.'
-    );
-  } finally {
-    setIsResending(false);
-  }
+  await resendEmailActionFlow({
+    email,
+    isSubmitting: isResending,
+    cooldown: resendCooldown,
+    sendRequest: async (trimmedEmail) => {
+      const response = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL || ''}/auth/resend-verification/`,
+        { email: trimmedEmail }
+      );
+      return { message: response.data?.message };
+    },
+    successFallbackMessage: 'Email verifikasi berhasil dikirim ulang.',
+    errorFallbackMessage: 'Gagal mengirim ulang email verifikasi.',
+    setIsSubmitting: setIsResending,
+    setStatusMessage: setResendStatusMessage,
+    setErrorMessage: setResendErrorMessage,
+    setCooldown: setResendCooldown,
+  });
 }
 
 export default function RegisterPage() {
@@ -134,22 +134,7 @@ export default function RegisterPage() {
   const [isResending, setIsResending] = useState(false);
   const [resendStatusMessage, setResendStatusMessage] = useState('');
   const [resendErrorMessage, setResendErrorMessage] = useState('');
-  const [resendCooldown, setResendCooldown] = useState(0);
-
-  useEffect(() => {
-    if (resendCooldown <= 0) return undefined;
-
-    const timer = setInterval(() => {
-      setResendCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [resendCooldown]);
+  const { cooldown: resendCooldown, setCooldown: setResendCooldown } = useResendCooldown();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -259,56 +244,18 @@ export default function RegisterPage() {
           </div>
 
           {successMessage ? (
-            <div className="mt-8 space-y-4">
-              <div className="flex flex-col items-center gap-4 rounded-xl border border-green-200 bg-green-50 p-5 text-sm text-green-700">
-                <div className="flex items-center gap-3 text-green-600">
-                  <svg className="h-8 w-8 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    ></path>
-                  </svg>
-                  <span className="break-words text-center text-lg font-medium">{successMessage}</span>
-                </div>
-                <p className="text-center text-sm text-green-700">
-                  Email verifikasi sudah dikirim ke <span className="font-semibold">{formData.email}</span>.
-                </p>
-
-                {resendStatusMessage && (
-                  <p className="w-full rounded-md bg-green-100 px-3 py-2 text-center text-sm text-green-700">
-                    {resendStatusMessage}
-                  </p>
-                )}
-                {resendErrorMessage && (
-                  <p className="w-full rounded-md bg-red-100 px-3 py-2 text-center text-sm text-red-600">
-                    {resendErrorMessage}
-                  </p>
-                )}
-
-                <div className="mt-2 flex w-full flex-col gap-3 sm:flex-row">
-                  <Link
-                    href="/login"
-                    className="flex w-full justify-center rounded-xl border border-transparent bg-white px-4 py-3 text-sm font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2"
-                    style={{ color: 'var(--brand-primary)' }}
-                  >
-                    Pergi ke Halaman Login
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={handleResendVerificationEmail}
-                    disabled={isResending || resendCooldown > 0}
-                    className={`w-full rounded-xl border px-4 py-3 text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 ${isResending || resendCooldown > 0
-                      ? 'cursor-not-allowed border-gray-300 bg-gray-100 text-gray-500'
-                      : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
-                      }`}
-                    style={isResending || resendCooldown > 0 ? undefined : { color: 'var(--brand-primary)' }}
-                  >
-                    {getResendButtonText(isResending, resendCooldown)}
-                  </button>
-                </div>
-              </div>
-            </div>
+            <AuthEmailSuccessCard
+              successMessage={successMessage}
+              email={formData.email}
+              emailNotice={<>Email verifikasi sudah dikirim ke </>}
+              statusMessage={resendStatusMessage}
+              errorMessage={resendErrorMessage}
+              primaryHref="/login"
+              primaryLabel="Pergi ke Halaman Login"
+              secondaryButtonText={getResendButtonText(isResending, resendCooldown)}
+              onSecondaryAction={handleResendVerificationEmail}
+              isSecondaryDisabled={isResending || resendCooldown > 0}
+            />
           ) : (
             <form className="mt-8 space-y-6" onSubmit={handleSubmit} noValidate>
               {errors.form && (

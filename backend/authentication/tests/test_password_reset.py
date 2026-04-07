@@ -68,15 +68,13 @@ class ForgotPasswordViewTest(APISimpleTestCase):
         cache.clear()
         self.url = "/auth/forgot-password/"
 
-    @patch("authentication.views.send_password_reset_email")
-    @patch("authentication.views.User")
+    @patch("authentication.password_reset.adapters.send_password_reset_email")
+    @patch("authentication.password_reset.adapters.User")
     def test_verified_user_receives_password_reset_email(
         self, mock_user_model, mock_send_email
     ):
-        mock_user = MagicMock()
-        mock_user.email = "verified@example.com"
         mock_queryset = MagicMock()
-        mock_queryset.first.return_value = mock_user
+        mock_queryset.exists.return_value = True
         mock_user_model.objects.filter.return_value = mock_queryset
 
         response = self.client.post(
@@ -89,13 +87,13 @@ class ForgotPasswordViewTest(APISimpleTestCase):
         self.assertEqual(response.data["message"], PASSWORD_RESET_SUCCESS_MESSAGE)
         mock_send_email.assert_called_once_with("verified@example.com")
 
-    @patch("authentication.views.send_password_reset_email")
-    @patch("authentication.views.User")
+    @patch("authentication.password_reset.adapters.send_password_reset_email")
+    @patch("authentication.password_reset.adapters.User")
     def test_nonexistent_email_returns_generic_success_without_sending(
         self, mock_user_model, mock_send_email
     ):
         mock_queryset = MagicMock()
-        mock_queryset.first.return_value = None
+        mock_queryset.exists.return_value = False
         mock_user_model.objects.filter.return_value = mock_queryset
 
         response = self.client.post(
@@ -108,13 +106,13 @@ class ForgotPasswordViewTest(APISimpleTestCase):
         self.assertEqual(response.data["message"], PASSWORD_RESET_SUCCESS_MESSAGE)
         mock_send_email.assert_not_called()
 
-    @patch("authentication.views.send_password_reset_email")
-    @patch("authentication.views.User")
+    @patch("authentication.password_reset.adapters.send_password_reset_email")
+    @patch("authentication.password_reset.adapters.User")
     def test_unverified_user_returns_generic_success_without_sending(
         self, mock_user_model, mock_send_email
     ):
         mock_queryset = MagicMock()
-        mock_queryset.first.return_value = None
+        mock_queryset.exists.return_value = False
         mock_user_model.objects.filter.return_value = mock_queryset
 
         response = self.client.post(
@@ -133,15 +131,13 @@ class ForgotPasswordViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("errors", response.data)
 
-    @patch("authentication.views.send_password_reset_email")
-    @patch("authentication.views.User")
+    @patch("authentication.password_reset.adapters.send_password_reset_email")
+    @patch("authentication.password_reset.adapters.User")
     def test_rate_limit_returns_429_on_4th_request(
         self, mock_user_model, mock_send_email
     ):
-        mock_user = MagicMock()
-        mock_user.email = "ratelimit@example.com"
         mock_queryset = MagicMock()
-        mock_queryset.first.return_value = mock_user
+        mock_queryset.exists.return_value = True
         mock_user_model.objects.filter.return_value = mock_queryset
 
         payload = {"email": "ratelimit@example.com"}
@@ -159,15 +155,13 @@ class ResendPasswordResetViewTest(APISimpleTestCase):
         cache.clear()
         self.url = "/auth/resend-password-reset/"
 
-    @patch("authentication.views.send_password_reset_email")
-    @patch("authentication.views.User")
+    @patch("authentication.password_reset.adapters.send_password_reset_email")
+    @patch("authentication.password_reset.adapters.User")
     def test_verified_user_can_resend_password_reset_email(
         self, mock_user_model, mock_send_email
     ):
-        mock_user = MagicMock()
-        mock_user.email = "verified@example.com"
         mock_queryset = MagicMock()
-        mock_queryset.first.return_value = mock_user
+        mock_queryset.exists.return_value = True
         mock_user_model.objects.filter.return_value = mock_queryset
 
         response = self.client.post(
@@ -182,13 +176,13 @@ class ResendPasswordResetViewTest(APISimpleTestCase):
         )
         mock_send_email.assert_called_once_with("verified@example.com")
 
-    @patch("authentication.views.send_password_reset_email")
-    @patch("authentication.views.User")
+    @patch("authentication.password_reset.adapters.send_password_reset_email")
+    @patch("authentication.password_reset.adapters.User")
     def test_nonexistent_email_returns_generic_resend_success(
         self, mock_user_model, mock_send_email
     ):
         mock_queryset = MagicMock()
-        mock_queryset.first.return_value = None
+        mock_queryset.exists.return_value = False
         mock_user_model.objects.filter.return_value = mock_queryset
 
         response = self.client.post(
@@ -209,15 +203,13 @@ class ResendPasswordResetViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("errors", response.data)
 
-    @patch("authentication.views.send_password_reset_email")
-    @patch("authentication.views.User")
+    @patch("authentication.password_reset.adapters.send_password_reset_email")
+    @patch("authentication.password_reset.adapters.User")
     def test_rate_limit_returns_429_on_4th_request(
         self, mock_user_model, mock_send_email
     ):
-        mock_user = MagicMock()
-        mock_user.email = "ratelimit@example.com"
         mock_queryset = MagicMock()
-        mock_queryset.first.return_value = mock_user
+        mock_queryset.exists.return_value = True
         mock_user_model.objects.filter.return_value = mock_queryset
 
         payload = {"email": "ratelimit@example.com"}
@@ -239,14 +231,16 @@ class ResetPasswordViewTest(APISimpleTestCase):
             "password_confirm": "Strong#123",
         }
 
-    @patch("authentication.views.decode_password_reset_token")
-    @patch("authentication.views.User")
+    @patch("authentication.password_reset.adapters.decode_password_reset_token")
+    @patch("authentication.password_reset.adapters.User")
     def test_valid_token_sets_new_password_for_verified_user(
         self, mock_user_model, mock_decode_token
     ):
         mock_decode_token.return_value = "user@example.com"
         mock_user = MagicMock()
-        mock_user_model.objects.get.return_value = mock_user
+        mock_queryset = MagicMock()
+        mock_queryset.first.return_value = mock_user
+        mock_user_model.objects.filter.return_value = mock_queryset
 
         response = self.client.post(self.url, self.valid_payload, format="json")
 
@@ -254,12 +248,12 @@ class ResetPasswordViewTest(APISimpleTestCase):
         self.assertEqual(response.data["message"], "Password reset successfully")
         mock_user.set_password.assert_called_once_with("Strong#123")
         mock_user.save.assert_called_once_with(update_fields=["password"])
-        mock_user_model.objects.get.assert_called_once_with(
+        mock_user_model.objects.filter.assert_called_once_with(
             email="user@example.com",
             status="verified",
         )
 
-    @patch("authentication.views.decode_password_reset_token")
+    @patch("authentication.password_reset.adapters.decode_password_reset_token")
     def test_expired_token_returns_410(self, mock_decode_token):
         mock_decode_token.side_effect = SignatureExpired("Expired")
 
@@ -268,7 +262,7 @@ class ResetPasswordViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_410_GONE)
         self.assertIn("expired", response.data["message"].lower())
 
-    @patch("authentication.views.decode_password_reset_token")
+    @patch("authentication.password_reset.adapters.decode_password_reset_token")
     def test_invalid_token_returns_400(self, mock_decode_token):
         mock_decode_token.side_effect = BadSignature("Bad token")
 
@@ -290,14 +284,15 @@ class ResetPasswordViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("errors", response.data)
 
-    @patch("authentication.views.decode_password_reset_token")
-    @patch("authentication.views.User")
+    @patch("authentication.password_reset.adapters.decode_password_reset_token")
+    @patch("authentication.password_reset.adapters.User")
     def test_valid_token_but_user_not_found_returns_404(
         self, mock_user_model, mock_decode_token
     ):
         mock_decode_token.return_value = "ghost@example.com"
-        mock_user_model.DoesNotExist = type("DoesNotExist", (Exception,), {})
-        mock_user_model.objects.get.side_effect = mock_user_model.DoesNotExist
+        mock_queryset = MagicMock()
+        mock_queryset.first.return_value = None
+        mock_user_model.objects.filter.return_value = mock_queryset
 
         response = self.client.post(self.url, self.valid_payload, format="json")
 
