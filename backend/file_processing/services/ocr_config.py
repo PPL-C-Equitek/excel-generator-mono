@@ -29,17 +29,7 @@ def get_tesseract_config(psm: int | None = None):
     mode = psm if psm is not None else TESSERACT_PSM
     return f"--oem {TESSERACT_OEM} --psm {mode}"
 
-# EasyOCR settings
-# Languages supported by EasyOCR (list of language codes).
-EASYOCR_LANGUAGES = ["en", "id"]
-# Whether to use GPU acceleration (requires CUDA).  Set False for CPU-only.
-EASYOCR_GPU = False
-# Fraction of average text height used as the Y-distance threshold for
-# grouping EasyOCR text regions into visual lines.  Two regions whose
-# vertical midpoints are closer than (avg_height × this value) are
-# considered part of the same line.  0.6 works well for most financial
-# documents (invoices, receipts, statements).
-EASYOCR_LINE_Y_THRESHOLD = 0.6
+
 
 # PDF-to-image conversion
 # DPI for converting PDF pages to images.
