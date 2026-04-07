@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 MAX_IMAGE_DIMENSION = 10000  # Maximum width or height in pixels to prevent decompression bombs
+MAX_IMAGE_PIXELS = 50_000_000  # Maximum total pixels to prevent high-memory image payloads
 
 # Magic-number signatures
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -76,6 +77,8 @@ def validate_image_integrity(uploaded_file):
                 width, height = img.size
                 if width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
                     return False, f"Image dimensions exceed maximum allowed ({MAX_IMAGE_DIMENSION}x{MAX_IMAGE_DIMENSION})."
+                if width * height > MAX_IMAGE_PIXELS:
+                    return False, "Image pixel count exceeds maximum allowed limit."
                 img.verify()  # raises if data is corrupt
         return True, None
     except (
