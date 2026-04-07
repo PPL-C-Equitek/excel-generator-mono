@@ -8,6 +8,7 @@ from reportlab.pdfgen import canvas
 from openpyxl import Workbook
 
 from rest_framework.test import APIClient, APIRequestFactory, APISimpleTestCase
+from types import SimpleNamespace
 
 from api.models import GroupMember
 from api.views import _resolve_download_filename, _sanitize_download_filename, upload
@@ -744,6 +745,22 @@ class ExportExcelViewTest(APISimpleTestCase):
             ],
         }
 
+    def _verified_user(self):
+        return SimpleNamespace(
+            id="verified-user-id",
+            email="verified@example.com",
+            is_authenticated=True,
+            status="verified",
+        )
+
+    def _unverified_user(self):
+        return SimpleNamespace(
+            id="unverified-user-id",
+            email="unverified@example.com",
+            is_authenticated=True,
+            status="unverified",
+        )
+
     def test_export_excel_endpoint_rejects_get_method(self):
         response = self.client.get("/export/excel")
         self.assertEqual(response.status_code, 405)
@@ -755,7 +772,34 @@ class ExportExcelViewTest(APISimpleTestCase):
         self.assertIn("output_json", response.data)
 
     @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_returns_401_for_unauthenticated_user(
+        self,
+        mocked_export,
+    ):
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 401)
+        mocked_export.assert_not_called()
+
+    @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_returns_403_for_authenticated_unverified_user(
+        self,
+        mocked_export,
+    ):
+        self.client.force_authenticate(user=self._unverified_user())
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_export.assert_not_called()
+        self.client.force_authenticate(user=None)
+
+    @patch("api.views.export_excel_to_filesystem")
     def test_export_excel_endpoint_returns_200_with_metadata(self, mocked_export):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.return_value = {
             "file_id": "xlsx_abc123",
             "file_name": "export_abc123.xlsx",
@@ -772,12 +816,14 @@ class ExportExcelViewTest(APISimpleTestCase):
         self.assertEqual(response.data["file_name"], "export_abc123.xlsx")
         self.assertEqual(response.data["artifact_type"], "xlsx")
         mocked_export.assert_called_once()
+        self.client.force_authenticate(user=None)
 
     @patch("api.views.export_excel_to_filesystem")
     def test_export_excel_endpoint_returns_400_when_service_validation_fails(
         self,
         mocked_export,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = OutputLLMValidationError("invalid schema")
         payload = {"output_json": self._valid_output_json()}
 
@@ -786,12 +832,14 @@ class ExportExcelViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["status"], "error")
         self.assertEqual(response.data["message"], "Invalid Excel export request.")
+        self.client.force_authenticate(user=None)
 
     @patch("api.views.export_excel_to_filesystem")
     def test_export_excel_endpoint_returns_400_when_service_mapping_fails(
         self,
         mocked_export,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = OutputCSVMappingError("invalid mapping")
         payload = {"output_json": self._valid_output_json()}
 
@@ -800,9 +848,11 @@ class ExportExcelViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["status"], "error")
         self.assertEqual(response.data["message"], "Invalid Excel export request.")
+        self.client.force_authenticate(user=None)
 
     @patch("api.views.export_excel_to_filesystem")
     def test_export_excel_endpoint_returns_500_on_generation_error(self, mocked_export):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = OutputExcelGenerationError("storage failure")
         payload = {"output_json": self._valid_output_json()}
 
@@ -814,9 +864,11 @@ class ExportExcelViewTest(APISimpleTestCase):
             response.data["message"],
             "Failed to generate Excel due to internal error.",
         )
+        self.client.force_authenticate(user=None)
 
     @patch("api.views.export_excel_to_filesystem")
     def test_export_excel_endpoint_returns_500_on_unexpected_error(self, mocked_export):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = RuntimeError("disk full")
         payload = {"output_json": self._valid_output_json()}
 
@@ -828,12 +880,14 @@ class ExportExcelViewTest(APISimpleTestCase):
             response.data["message"],
             "Failed to generate Excel due to internal error.",
         )
+        self.client.force_authenticate(user=None)
 
     @patch("api.views.export_excel_to_filesystem")
     def test_export_excel_endpoint_returns_500_when_response_metadata_invalid(
         self,
         mocked_export,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.return_value = {
             "file_id": "xlsx_abc123",
             "file_name": "../unsafe.xlsx",
@@ -848,6 +902,7 @@ class ExportExcelViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data["status"], "error")
         self.assertIn("invalid response metadata", response.data["message"])
+        self.client.force_authenticate(user=None)
 
 
 class DownloadCSVViewTest(APISimpleTestCase):
