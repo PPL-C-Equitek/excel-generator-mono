@@ -31,18 +31,16 @@ describe('Integration: ConvertPage & UploadZone', () => {
         vi.unstubAllEnvs()
     })
 
-    it('ensures a single file selection action results in exactly one upload API call', async () => {
+    it('ensures confirming a file selection results in exactly one upload API call', async () => {
         const user = userEvent.setup()
         render(<ConvertPage />)
 
         const fileInput = screen.getByTestId('file-input')
         const file = new File(['content'], 'test.pdf', { type: 'application/pdf' })
 
-        // Simulate ONE user action (selecting a file)
         await user.upload(fileInput, file)
-
+        await user.click(screen.getByTestId('convert-btn'))
         await waitFor(() => {
-            // Assert exactly one upload call
             expect(mockUploadFile).toHaveBeenCalledTimes(1)
         })
     })

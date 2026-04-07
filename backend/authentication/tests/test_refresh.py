@@ -3,21 +3,29 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import jwt
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
 
+from authentication.models import User
 from authentication.services import generate_tokens
 
 
 SECRET_KEY = "test-secret-key-12345678901234567890"
 
 
-class RefreshTokenViewTest(SimpleTestCase):
+class RefreshTokenViewTest(TestCase):
     def setUp(self):
         self.url = "/auth/refresh/"
         self.user_id = uuid.uuid4()
         self.email = "user@example.com"
+        self.user = User.objects.create(
+            id=self.user_id,
+            email=self.email,
+            name="Refresh User",
+            password="",
+            status="verified",
+        )
 
     def _refresh_token(self):
         with override_settings(JWT_SECRET_KEY=SECRET_KEY):
@@ -107,6 +115,37 @@ class RefreshTokenViewTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertIn("expired", response.data["message"].lower())
+
+    def test_refresh_rejects_when_user_is_deleted(self):
+        refresh_token = self._refresh_token()
+        self.user.delete()
+
+        with override_settings(JWT_SECRET_KEY=SECRET_KEY):
+            response = self.client.post(
+                self.url,
+                {"refresh_token": refresh_token},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("message", response.data)
+        self.assertIn("tidak valid", response.data["message"].lower())
+
+    def test_refresh_rejects_when_user_is_unverified(self):
+        refresh_token = self._refresh_token()
+        self.user.status = "unverified"
+        self.user.save(update_fields=["status"])
+
+        with override_settings(JWT_SECRET_KEY=SECRET_KEY):
+            response = self.client.post(
+                self.url,
+                {"refresh_token": refresh_token},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("message", response.data)
+        self.assertIn("tidak valid", response.data["message"].lower())
         
     @patch("authentication.views.RefreshTokenService")
     def test_refresh_unexpected_error_returns_500(self, mock_service_class):

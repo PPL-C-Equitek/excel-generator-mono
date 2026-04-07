@@ -29,7 +29,7 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
 
     return (
         <div className="flex min-h-screen">
-            <Sidebar activeMenu="convert" username="Username" />
+            <Sidebar activeMenu="convert" />
             <main className="ml-56 flex flex-1 flex-col items-center justify-center bg-gray-50 px-16 py-12">
                 <h1 className="mb-3 text-2xl font-bold text-gray-900">
                     Automate Your Data Structuring

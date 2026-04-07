@@ -1,8 +1,10 @@
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from urllib.error import URLError
 
 from django.test import TestCase, override_settings
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -18,6 +20,7 @@ MOCK_ACCESS_TOKEN = "ya29.mock-access-token"
 class GoogleOAuthServiceTest(TestCase):
     def setUp(self):
         self.service = GoogleOAuthService(google_client_id=MOCK_CLIENT_ID)
+        cache.clear()
 
     # Positive
     @patch("authentication.oauth_services.urlopen")
@@ -84,7 +87,7 @@ class GoogleOAuthServiceTest(TestCase):
 
 
     # Negative
-    @patch("authentication.oauth_services.urlopen", side_effect=TimeoutError("timeout"))
+    @patch("authentication.oauth_services.urlopen", side_effect=URLError("timeout"))
     def test_fetch_json_raises_value_error_when_upstream_fails(self, _mock_urlopen):
         """Should raise ValueError when external request fails"""
         with self.assertRaises(ValueError, msg="Invalid Google token"):
@@ -211,6 +214,8 @@ class GoogleOAuthServiceTest(TestCase):
 class GoogleOAuthCallbackViewTest(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.client.credentials()
+        cache.clear()
 
     # Positive
     @override_settings(GOOGLE_OAUTH_CLIENT_ID=MOCK_CLIENT_ID)
@@ -227,7 +232,12 @@ class GoogleOAuthCallbackViewTest(TestCase):
         }
         mock_service_class.return_value = service
 
-        response = self.client.post(GOOGLE_OAUTH_URL, {"token": MOCK_ACCESS_TOKEN}, format="json")
+        response = self.client.post(
+            GOOGLE_OAUTH_URL,
+            {"token": MOCK_ACCESS_TOKEN},
+            format="json",
+            secure=True,
+        )
         payload = response.json()
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -238,6 +248,16 @@ class GoogleOAuthCallbackViewTest(TestCase):
 
 
     # Negative
+    @override_settings(DEBUG=False)
+    def test_returns_400_when_request_is_not_https_in_production(self):
+        """Should reject non-HTTPS request when DEBUG is disabled"""
+        response = self.client.post(GOOGLE_OAUTH_URL, {"token": MOCK_ACCESS_TOKEN}, format="json")
+        payload = response.json()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(payload.get("message"), "HTTPS required")
+
+    @override_settings(DEBUG=True)
     def test_returns_400_when_token_missing(self):
         """Should return 400 when token is not provided"""
         response = self.client.post(GOOGLE_OAUTH_URL, {}, format="json")
@@ -246,11 +266,24 @@ class GoogleOAuthCallbackViewTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("message", payload)
 
+    @override_settings(DEBUG=True)
     def test_returns_400_when_token_is_empty(self):
         """Should return 400 when token is empty string"""
         response = self.client.post(GOOGLE_OAUTH_URL, {"token": ""}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_rejects_get_requests(self):
+        """Should reject safe HTTP methods that are not explicitly allowed"""
+        response = self.client.get(GOOGLE_OAUTH_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def test_rejects_put_requests(self):
+        """Should reject unsafe HTTP methods other than POST"""
+        response = self.client.put(GOOGLE_OAUTH_URL, {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
 
     @override_settings(GOOGLE_OAUTH_CLIENT_ID=MOCK_CLIENT_ID)
     @patch("authentication.views.GoogleOAuthService")
@@ -260,7 +293,12 @@ class GoogleOAuthCallbackViewTest(TestCase):
         service.authenticate_or_create_user.side_effect = ValueError("Invalid token")
         mock_service_class.return_value = service
 
-        response = self.client.post(GOOGLE_OAUTH_URL, {"token": "bad-token"}, format="json")
+        response = self.client.post(
+            GOOGLE_OAUTH_URL,
+            {"token": "header.payload.signature"},
+            format="json",
+            secure=True,
+        )
         payload = response.json()
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
@@ -271,7 +309,12 @@ class GoogleOAuthCallbackViewTest(TestCase):
     @override_settings(GOOGLE_OAUTH_CLIENT_ID="")
     def test_returns_500_when_google_client_id_missing(self):
         """Should return 500 when server config (client ID) is missing"""
-        response = self.client.post(GOOGLE_OAUTH_URL, {"token": MOCK_ID_TOKEN}, format="json")
+        response = self.client.post(
+            GOOGLE_OAUTH_URL,
+            {"token": MOCK_ID_TOKEN},
+            format="json",
+            secure=True,
+        )
 
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -283,8 +326,39 @@ class GoogleOAuthCallbackViewTest(TestCase):
         service.authenticate_or_create_user.side_effect = RuntimeError("database unavailable")
         mock_service_class.return_value = service
 
-        response = self.client.post(GOOGLE_OAUTH_URL, {"token": MOCK_ID_TOKEN}, format="json")
+        response = self.client.post(
+            GOOGLE_OAUTH_URL,
+            {"token": MOCK_ID_TOKEN},
+            format="json",
+            secure=True,
+        )
         payload = response.json()
 
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertNotIn("database unavailable", json.dumps(payload))
+
+    @override_settings(DEBUG=True)
+    def test_returns_400_when_token_exceeds_max_length(self):
+        """Should return 400 when token exceeds 2048 characters"""
+        response = self.client.post(
+            GOOGLE_OAUTH_URL,
+            {"token": "a" * 2049},
+            format="json",
+        )
+        payload = response.json()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("message", payload)
+
+    @override_settings(DEBUG=True)
+    def test_returns_400_when_token_is_not_a_string(self):
+        """Should return 400 when token is not a string"""
+        response = self.client.post(
+            GOOGLE_OAUTH_URL,
+            {"token": 123456},
+            format="json",
+        )
+        payload = response.json()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("message", payload)

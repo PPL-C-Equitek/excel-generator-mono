@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchAPI, login, uploadFile } from "@/lib/api";
+import { fetchAPI, login, uploadFile, loginWithGoogle } from "@/lib/api";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
@@ -437,3 +437,124 @@ describe('login', () => {
     })
 })
 
+describe('loginWithGoogle', () => {
+    beforeEach(() => {
+        mockFetch.mockClear()
+    })
+
+    describe('positive', () => {
+        it('calls fetch with correct URL and method', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({
+                access_token: 'abc',
+                refresh_token: 'xyz',
+                user: { id: 1, email: 'user1@gmail.com', name: 'User 1' },
+            }))
+
+            await loginWithGoogle('mock-google-token')
+
+            expect(mockFetch).toHaveBeenCalledWith(
+                expect.stringContaining('auth/google-oauth/'),
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                })
+            )
+        })
+
+        it('calls fetch with token in request body', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({
+                access_token: 'abc',
+                refresh_token: 'xyz',
+                user: { id: 1, email: 'user1@gmail.com', name: 'User 1' },
+            }))
+
+            await loginWithGoogle('mock-google-token')
+
+            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            expect(body).toEqual({ token: 'mock-google-token' })
+        })
+
+        it('returns parsed AuthResponse on success', async () => {
+            const payload = {
+                access_token: 'abc',
+                refresh_token: 'xyz',
+                user: { id: 1, email: 'user1@gmail.com', name: 'User 1' },
+            }
+            mockFetch.mockResolvedValueOnce(mockResponse(payload))
+
+            const result = await loginWithGoogle('mock-google-token')
+
+            expect(result).toEqual(payload)
+        })
+    })
+
+    describe('negative', () => {
+        it('throws error with message from response body (message field)', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Invalid token' }, 401))
+
+            await expect(loginWithGoogle('bad-token')).rejects.toThrow('Invalid token')
+        })
+
+        it('throws error with message from response body (detail field)', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ detail: 'Token expired' }, 401))
+
+            await expect(loginWithGoogle('bad-token')).rejects.toThrow('Token expired')
+        })
+
+        it('throws error with fallback message when response body has no message or detail', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({}, 500))
+
+            await expect(loginWithGoogle('mock-google-token')).rejects.toThrow('Request failed. Please try again.')
+        })
+
+        it('throws error with fallback message when response body is not valid JSON', async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                json: vi.fn().mockRejectedValue(new SyntaxError('Invalid JSON')),
+            } as unknown as Response)
+
+            await expect(loginWithGoogle('mock-google-token')).rejects.toThrow('Request failed. Please try again.')
+        })
+
+        it('throws HTTPError with correct status code', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Invalid token' }, 401))
+
+            const error = await loginWithGoogle('bad-token').catch(e => e)
+            expect(error.status).toBe(401)
+        })
+    })
+
+    describe('edge case', () => {
+        it('constructs URL with correct endpoint path', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({
+                access_token: 'abc',
+                refresh_token: 'xyz',
+                user: { id: 1, email: 'user1@gmail.com', name: 'User 1' },
+            }))
+
+            await loginWithGoogle('mock-google-token')
+
+            const url = mockFetch.mock.calls[0][0] as string
+            expect(url).toMatch(/\/auth\/google-oauth\/$/)
+        })
+
+        it('throws when fetch rejects due to network error', async () => {
+            mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+            await expect(loginWithGoogle('mock-google-token')).rejects.toThrow('Failed to fetch')
+        })
+
+        it('uses fallback message when response body message field is not a string', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ message: 123 }, 400))
+
+            await expect(loginWithGoogle('mock-google-token')).rejects.toThrow('Request failed. Please try again.')
+        })
+
+        it('uses fallback message when response body detail field is not a string', async () => {
+            mockFetch.mockResolvedValueOnce(mockResponse({ detail: ['error'] }, 400))
+
+            await expect(loginWithGoogle('mock-google-token')).rejects.toThrow('Request failed. Please try again.')
+        })
+    })
+})

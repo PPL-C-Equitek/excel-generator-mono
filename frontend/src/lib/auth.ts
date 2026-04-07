@@ -54,7 +54,9 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
             return null
         }
 
-        const normalizedPayload = payloadPart.replace(/-/g, '+').replace(/_/g, '/')
+        const normalizedPayload = payloadPart
+            .replaceAll('-', '+')
+            .replaceAll('_', '/');
         const paddedPayload = normalizedPayload.padEnd(
             normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
             '='
@@ -211,10 +213,21 @@ export function getStoredUser(): StoredUser | null {
     const email = globalThis.window.localStorage.getItem('user_email')
 
     if (name || email) {
+        const resolvedEmail = email ?? ''
+        let resolvedName = 'User'
+
+        if (email) {
+            resolvedName = email
+        }
+
+        if (name) {
+            resolvedName = name
+        }
+
         return {
             id: '',
-            email: email ?? '',
-            name: name ?? email ?? 'User',
+            email: resolvedEmail,
+            name: resolvedName,
         }
     }
 

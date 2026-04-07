@@ -25,14 +25,13 @@ class GenerateVerificationTokenTest(SimpleTestCase):
 
 class SendVerificationEmailTest(SimpleTestCase):
     @override_settings(RESEND_API_KEY="", FRONTEND_URL="http://localhost:3000")
-    @patch("builtins.print")
-    def test_prints_verification_link_when_no_api_key(self, mock_print):
-        send_verification_email("user@example.com")
+    def test_logs_verification_link_when_no_api_key(self):
+        with self.assertLogs("authentication.services", level="INFO") as log:
+            send_verification_email("user@example.com")
 
-        mock_print.assert_called_once()
-        printed_text = mock_print.call_args[0][0]
-        self.assertIn("VERIFICATION LINK", printed_text)
-        self.assertIn("verify-email?token=", printed_text)
+        log_text = "\n".join(log.output)
+        self.assertIn("Verification link", log_text)
+        self.assertIn("verify-email?token=", log_text)
 
     @override_settings(
         RESEND_API_KEY="re_test_key",
@@ -66,12 +65,12 @@ class SendVerificationEmailTest(SimpleTestCase):
         self.assertTrue(any("Failed to send" in msg for msg in log.output))
 
     @override_settings(RESEND_API_KEY="", FRONTEND_URL="https://myapp.com")
-    @patch("builtins.print")
-    def test_uses_frontend_url_setting(self, mock_print):
-        send_verification_email("user@example.com")
+    def test_uses_frontend_url_setting(self):
+        with self.assertLogs("authentication.services", level="INFO") as log:
+            send_verification_email("user@example.com")
 
-        printed_text = mock_print.call_args[0][0]
-        self.assertIn("https://myapp.com/auth/verify-email?token=", printed_text)
+        log_text = "\n".join(log.output)
+        self.assertIn("https://myapp.com/auth/verify-email?token=", log_text)
 
 class GenerateTokensTest(SimpleTestCase):
     SECRET_KEY = "test-secret-key"
