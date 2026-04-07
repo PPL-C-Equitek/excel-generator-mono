@@ -1902,17 +1902,17 @@ class TestWordExtractionService(unittest.TestCase):
         return_value=(True, None),
     )
     @patch("file_processing.services.upload_service.save_temp_file")
-    @patch("file_processing.services.upload_service._process_word")
+    @patch("file_processing.services.upload_service.process_word")
     @patch("file_processing.services.upload_service.os.path.exists", return_value=False)
     def test_process_upload_docx_success_sets_extracted_data(
         self,
         _exists,
-        mock_process_word,
+        mockprocess_word,
         mock_save,
         _validate,
     ):
         mock_save.return_value = "/tmp/f.docx"
-        mock_process_word.return_value = (
+        mockprocess_word.return_value = (
             True,
             None,
             {"content": [{"page": 1, "text": ["from word"]}]},
