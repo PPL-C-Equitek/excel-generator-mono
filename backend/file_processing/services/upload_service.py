@@ -158,8 +158,16 @@ def process_upload(uploaded_file):
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
-    file_path = save_temp_file(uploaded_file)
     extracted_data = None
+
+    if ext in [EXT_TXT, EXT_CSV]:
+        uploaded_file.seek(0)
+        success, error, data = process_uploaded_txt(uploaded_file)
+        if not success:
+            return False, error, None, None
+        return True, None, None, data
+
+    file_path = save_temp_file(uploaded_file)
 
     try:
         if ext == ".pdf":
@@ -170,12 +178,6 @@ def process_upload(uploaded_file):
 
         elif ext in [".xlsx", ".xls"]:
             success, error, data = process_uploaded_excel(file_path)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext in [EXT_TXT, EXT_CSV]:
-            success, error, data = process_uploaded_txt(file_path)
             if not success:
                 return False, error, None, None
             extracted_data = data

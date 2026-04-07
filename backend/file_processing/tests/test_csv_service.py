@@ -1,5 +1,3 @@
-import os
-import tempfile
 from unittest.mock import patch
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -339,16 +337,9 @@ class CsvUnitTests(TestCase):
         self.assertEqual(err, CSV_CORRUPT_ERROR)
 
 class CsvProcessUploadTests(TestCase):
-    @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_csv_success(self, mock_validate, mock_save):
-
-        fd, path = tempfile.mkstemp(suffix=".csv")
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write("id,name\n1,Alice\n")
-
+    def test_process_upload_csv_success(self, mock_validate):
         mock_validate.return_value = (True, None)
-        mock_save.return_value = path
 
         f = _csv_file("data.csv", b"id,name\n1,Alice\n", "text/csv")
         success, error, _, data = process_upload(f)
@@ -358,17 +349,11 @@ class CsvProcessUploadTests(TestCase):
         self.assertIsNotNone(data)
 
     @patch("file_processing.services.upload_service.process_uploaded_txt")
-    @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service.validate_file")
     def test_process_upload_csv_failure_propagates_error(
-        self, mock_validate, mock_save, mock_txt
+        self, mock_validate, mock_txt
     ):
-
-        fd, path = tempfile.mkstemp(suffix=".csv")
-        os.close(fd)
-
         mock_validate.return_value = (True, None)
-        mock_save.return_value = path
         mock_txt.return_value = (False, "CSV parse error", None)
 
         f = _csv_file("bad.csv", b"broken", "text/csv")
@@ -377,8 +362,3 @@ class CsvProcessUploadTests(TestCase):
         self.assertFalse(success)
         self.assertEqual(error, "CSV parse error")
         self.assertIsNone(data)
-
-        try:
-            os.remove(path)
-        except OSError:
-            pass
