@@ -77,7 +77,7 @@ samp {
 }
 
 /* Force light mode */
-.force-light {
+:root.force-light {
   --background: #ffffff;
   --foreground: #171717;
   --surface-1: #f9fafb;

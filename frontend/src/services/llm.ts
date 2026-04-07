@@ -71,7 +71,17 @@ export async function generateJson(
             body: JSON.stringify({ input_json: inputJson }),
         });
     } catch (err: unknown) {
-        rethrowMappedApiError(err);
+        if (err instanceof Error) {
+            const status = getErrorStatus(err);
+            if (status !== null) {
+                const userMessage = ERROR_MESSAGES[status];
+                if (userMessage) {
+                    throw new Error(userMessage);
+                }
+                throw new Error("Request failed. Please try again.");
+            }
+        }
+        throw err;
     }
 
     if (
@@ -148,7 +158,17 @@ export async function exportToCsv(
             body: JSON.stringify({ output_json: outputJson }),
         });
     } catch (err: unknown) {
-        rethrowMappedApiError(err);
+        if (err instanceof Error) {
+            const status = getErrorStatus(err);
+            if (status !== null) {
+                const userMessage = ERROR_MESSAGES[status];
+                if (userMessage) {
+                    throw new Error(userMessage);
+                }
+                throw new Error("Request failed. Please try again.");
+            }
+        }
+        throw err;
     }
 
     if (

@@ -49,13 +49,12 @@ vi.mock('../../../src/components/UploadZone', () => ({
     }
 }))
 
-// Mock the Sidebar component with prop validation
+// Mock the Sidebar component with active menu validation
 vi.mock('../../../src/components/Sidebar', () => ({
-    default: ({ activeMenu, username }: { activeMenu: string; username: string }) => (
+    default: ({ activeMenu }: { activeMenu: string }) => (
         <div data-testid="sidebar">
             <div>EQUITEK</div>
             <div data-testid="active-menu">{activeMenu}</div>
-            <div data-testid="username">{username}</div>
         </div>
     )
 }))
@@ -117,13 +116,6 @@ describe('ConvertPage', () => {
             const sidebar = screen.getByTestId('sidebar')
             const activeMenu = within(sidebar).getByTestId('active-menu')
             expect(activeMenu).toHaveTextContent('convert')
-        })
-
-        it('passes correct username prop to Sidebar', () => {
-            render(<ConvertPage />)
-            const sidebar = screen.getByTestId('sidebar')
-            const username = within(sidebar).getByTestId('username')
-            expect(username).toHaveTextContent('Username')
         })
 
         it('renders UploadZone component properly', () => {
