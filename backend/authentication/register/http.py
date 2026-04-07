@@ -55,7 +55,7 @@ class RegisterView(APIView):
             )
             return Response(
                 {"message": result.message},
-                status=status.HTTP_200_OK,
+                status=status.HTTP_201_CREATED,
             )
         except RegistrationServiceError:
             logger.exception("Unexpected error during user registration.")

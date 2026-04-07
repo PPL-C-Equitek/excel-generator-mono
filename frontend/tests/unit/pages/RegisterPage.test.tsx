@@ -158,7 +158,7 @@ describe('Registration Page', () => {
       const user = userEvent.setup();
 
       mockedAxios.post.mockResolvedValueOnce({
-        status: 200,
+        status: 201,
         data: { message: 'Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda.' },
       });
 
@@ -215,6 +215,8 @@ describe('Registration Page', () => {
       await waitFor(() => {
         expect(screen.getByText(/registrasi berhasil\. cek email anda\./i)).toBeInTheDocument();
       });
+
+      expect(mockPush).not.toHaveBeenCalled();
     });
 
     test('successful resend verification shows success message', async () => {

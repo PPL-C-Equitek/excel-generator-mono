@@ -21,7 +21,7 @@ class RegisterViewTest(APISimpleTestCase):
 
     @patch("authentication.register.adapters.send_verification_email")
     @patch("authentication.register.adapters.User")
-    def test_register_valid_data_returns_200(self, mock_user_model, mock_send_email):
+    def test_register_valid_data_returns_201(self, mock_user_model, mock_send_email):
         mock_user_model.objects.filter.return_value.first.return_value = None
 
         saved_user = MagicMock()
@@ -31,7 +31,7 @@ class RegisterViewTest(APISimpleTestCase):
 
         response = self.client.post(self.url, self.valid_payload, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["message"], self.success_message)
 
         mock_user_model.objects.create_user.assert_called_once()
@@ -52,7 +52,7 @@ class RegisterViewTest(APISimpleTestCase):
 
         response = self.client.post(self.url, self.valid_payload, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         mock_send_email.assert_called_once_with(saved_user.email)
 
     @patch("authentication.register.adapters.send_verification_email")
@@ -71,7 +71,7 @@ class RegisterViewTest(APISimpleTestCase):
         }
         response = self.client.post(self.url, payload, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["message"], self.success_message)
 
         mock_user_model.objects.filter.assert_called_once_with(
@@ -186,7 +186,7 @@ class RegisterViewTest(APISimpleTestCase):
             response = self.client.post(self.url, payload, format="json")
             self.assertEqual(
                 response.status_code,
-                status.HTTP_200_OK,
+                status.HTTP_201_CREATED,
                 f"Request {i + 1} should succeed but got {response.status_code}",
             )
 

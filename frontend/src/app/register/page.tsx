@@ -184,7 +184,9 @@ export default function RegisterPage() {
       });
 
       setSuccessMessage(response.data?.message || 'Registrasi berhasil. Cek email Anda.');
-      router.push('/login');
+      if (response.status === 201) {
+        router.push('/login');
+      }
     } catch (error: unknown) {
       const axiosError = error as AxiosError<RegisterErrorResponse>;
       const responseData = axiosError.response?.data;

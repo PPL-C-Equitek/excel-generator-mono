@@ -222,7 +222,7 @@ class RegisterViewDependencyInjectionTest(APISimpleTestCase):
 
         response = TestableRegisterView.as_view()(request)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         use_case.execute.assert_called_once_with(
             RegisterCommand(name="John", email="john@example.com")
         )
