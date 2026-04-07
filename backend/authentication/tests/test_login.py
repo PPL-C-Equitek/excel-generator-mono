@@ -87,8 +87,8 @@ class LoginViewTest(APISimpleTestCase):
             
             with patch("authentication.views.generate_tokens") as mock_gen_tokens:
                 mock_gen_tokens.return_value = {
-                    "accessToken": "access_token",
-                    "refreshToken": "refresh_token"
+                    "access_token": "access_token",
+                    "refresh_token": "refresh_token"
                 }
                 response = self.client.post(self.url, payload, format="json")
                 # Should not return 400 for extra fields
@@ -157,8 +157,8 @@ class LoginViewTest(APISimpleTestCase):
         
         mock_user_model.objects.get.return_value = mock_user
         mock_gen_tokens.return_value = {
-            "accessToken": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-            "refreshToken": "refresh_token_value"
+            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+            "refresh_token": "refresh_token_value"
         }
         
         response = self.client.post(self.url, self.valid_payload, format="json")
@@ -167,7 +167,7 @@ class LoginViewTest(APISimpleTestCase):
     @patch("authentication.views.User")
     @patch("authentication.views.generate_tokens")
     def test_login_response_contains_access_token(self, mock_gen_tokens, mock_user_model):
-        """System should return accessToken in response"""
+        """System should return access_token in response"""
         mock_user = MagicMock()
         mock_user.id = uuid.uuid4()
         mock_user.email = "user@example.com"
@@ -177,18 +177,18 @@ class LoginViewTest(APISimpleTestCase):
         
         mock_user_model.objects.get.return_value = mock_user
         mock_gen_tokens.return_value = {
-            "accessToken": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-            "refreshToken": "refresh_token_value"
+            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+            "refresh_token": "refresh_token_value"
         }
         
         response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertIn("accessToken", response.data)
-        self.assertEqual(response.data["accessToken"], "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...")
+        self.assertIn("access_token", response.data)
+        self.assertEqual(response.data["access_token"], "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...")
 
     @patch("authentication.views.User")
     @patch("authentication.views.generate_tokens")
     def test_login_response_contains_refresh_token(self, mock_gen_tokens, mock_user_model):
-        """System should return refreshToken in response"""
+        """System should return refresh_token in response"""
         mock_user = MagicMock()
         mock_user.id = uuid.uuid4()
         mock_user.email = "user@example.com"
@@ -198,13 +198,13 @@ class LoginViewTest(APISimpleTestCase):
         
         mock_user_model.objects.get.return_value = mock_user
         mock_gen_tokens.return_value = {
-            "accessToken": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-            "refreshToken": "refresh_token_value"
+            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+            "refresh_token": "refresh_token_value"
         }
         
         response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertIn("refreshToken", response.data)
-        self.assertEqual(response.data["refreshToken"], "refresh_token_value")
+        self.assertIn("refresh_token", response.data)
+        self.assertEqual(response.data["refresh_token"], "refresh_token_value")
 
     @patch("authentication.views.User")
     @patch("authentication.views.generate_tokens")
@@ -220,8 +220,8 @@ class LoginViewTest(APISimpleTestCase):
         
         mock_user_model.objects.get.return_value = mock_user
         mock_gen_tokens.return_value = {
-            "accessToken": "access_token",
-            "refreshToken": "refresh_token"
+            "access_token": "access_token",
+            "refresh_token": "refresh_token"
         }
         
         response = self.client.post(self.url, self.valid_payload, format="json")
@@ -248,8 +248,8 @@ class LoginViewTest(APISimpleTestCase):
         
         mock_user_model.objects.get.return_value = mock_user
         mock_gen_tokens.return_value = {
-            "accessToken": "token",
-            "refreshToken": "refresh"
+            "access_token": "token",
+            "refresh_token": "refresh"
         }
         
         response = self.client.post(self.url, payload, format="json")
@@ -307,8 +307,8 @@ class LoginViewTest(APISimpleTestCase):
         
         mock_user_model.objects.get.return_value = mock_user
         mock_gen_tokens.return_value = {
-            "accessToken": "token",
-            "refreshToken": "refresh"
+            "access_token": "token",
+            "refresh_token": "refresh"
         }
         mock_tracker.is_rate_limited.return_value = False
         
@@ -369,8 +369,8 @@ class LoginViewTest(APISimpleTestCase):
         
         with patch("authentication.views.generate_tokens") as mock_gen_tokens:
             mock_gen_tokens.return_value = {
-                "accessToken": "token",
-                "refreshToken": "refresh"
+                "access_token": "token",
+                "refresh_token": "refresh"
             }
             response = self.client.post(self.url, payload, format="json")
             self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -403,8 +403,8 @@ class LoginViewTest(APISimpleTestCase):
         
         mock_user_model.objects.get.return_value = mock_user
         mock_gen_tokens.return_value = {
-            "accessToken": "token",
-            "refreshToken": "refresh"
+            "access_token": "token",
+            "refresh_token": "refresh"
         }
         
         response = self.client.post(self.url, self.valid_payload, format="json")

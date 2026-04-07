@@ -5,18 +5,26 @@ from uuid import uuid4
 from django.conf import settings
 from django.utils.text import get_valid_filename
 from .excel_service import process_uploaded_excel
+from .txt_service import process_uploaded_txt
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+from file_processing.services.image_validation_service import validate_image
+from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 
 logger = logging.getLogger(__name__)
 
 EXT_XLSX = ".xlsx"
 EXT_XLS = ".xls"
 EXT_PDF = ".pdf"
+EXT_TXT = ".txt"
+EXT_PNG = ".png"
+EXT_JPG = ".jpg"
+EXT_JPEG = ".jpeg"
 
-ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX]
+IMAGE_EXTENSIONS = {EXT_PNG, EXT_JPG, EXT_JPEG}
+ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_PNG, EXT_JPG, EXT_JPEG, EXT_TXT]
 ALLOWED_MIME_TYPES = {
     EXT_PDF: [
         "application/pdf",
@@ -45,9 +53,12 @@ ALLOWED_MIME_TYPES = {
         "application/x-zip-compressed",
         "application/octet-stream",
     ],
+
+    EXT_TXT: [
+        "text/plain",
+        "text/x-log",
+    ],
 }
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-FILE_TOO_LARGE_ERROR = "File too large. Maximum allowed size is 10MB."
 MAX_PDF_PAGES = 100
 MAX_EXCEL_SHEETS = 100
 PDF_CORRUPT_ERROR = "PDF file is corrupt or has an invalid structure."
@@ -58,8 +69,25 @@ EXCEL_TOO_MANY_SHEETS_ERROR = (
 EXCEL_PASSWORD_PROTECTED_ERROR = (
     "Excel file is password-protected. Please remove the password and try again."
 )
+TXT_CORRUPT_ERROR = "File teks tidak dapat dibaca atau rusak (corrupt)."
+TXT_PROTECTED_ERROR = (
+    "File terdeteksi sebagai format terproteksi atau terenkripsi. "
+    "Pastikan file adalah teks biasa (.txt) yang tidak diproteksi."
+)
+FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
 OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 ZIP_SIGNATURE_PREFIX = b"PK"
+
+BINARY_SIGNATURES: list[tuple[bytes, str]] = [
+    (b"\x50\x4B\x03\x04", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\x50\x4B\x05\x06", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", TXT_PROTECTED_ERROR),
+    (b"\x7fELF", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"MZ", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"%PDF", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\xff\xd8\xff", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\x89PNG", FILE_EXTENSION_MISMATCH_ERROR),
+]
 
 def _has_extracted_text(extracted_data):
     """Return True if any page contains extracted text."""
@@ -121,6 +149,11 @@ def process_upload(uploaded_file):
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
+    # Temporary image path: validation has passed, but extraction is not implemented yet.
+    # Return upload success without extracted payload.
+    if ext in IMAGE_EXTENSIONS:
+        return True, None, None, None
+
     file_path = save_temp_file(uploaded_file)
     extracted_data = None
 
@@ -133,6 +166,12 @@ def process_upload(uploaded_file):
 
         elif ext in [".xlsx", ".xls"]:
             success, error, data = process_uploaded_excel(file_path)
+            if not success:
+                return False, error, None, None
+            extracted_data = data
+
+        elif ext == EXT_TXT:
+            success, error, data = process_uploaded_txt(file_path)
             if not success:
                 return False, error, None, None
             extracted_data = data
@@ -156,7 +195,11 @@ def validate_file(uploaded_file):
 
     # Validate extension
     if ext not in ALLOWED_EXTENSIONS:
-        return False, "Unsupported file type. Only PDF, XLS, and XLSX are allowed."
+        return False, "Unsupported file type. Only PDF, XLS, XLSX, TXT, PNG, JPG, and JPEG are allowed."
+
+    # Image files have their own dedicated validation pipeline
+    if ext in IMAGE_EXTENSIONS:
+        return validate_image(uploaded_file)
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
@@ -298,10 +341,13 @@ def validate_mime_type(uploaded_file, ext):
             return False, EXCEL_PASSWORD_PROTECTED_ERROR
 
         if ext == EXT_XLSX and not _has_zip_signature(uploaded_file):
-            return False, "File content does not match its extension."
+            return False, FILE_EXTENSION_MISMATCH_ERROR
+
+        if ext == EXT_TXT:
+            return _validate_txt_content(uploaded_file, mime)
 
         if mime not in expected_mimes:
-            return False, "File content does not match its extension."
+            return False, FILE_EXTENSION_MISMATCH_ERROR
 
         return True, None
 
@@ -349,6 +395,35 @@ def _has_zip_signature(uploaded_file):
         return header == ZIP_SIGNATURE_PREFIX
     except Exception:
         return False
+
+def _has_binary_signature(uploaded_file):
+    try:
+        max_prefix = max(len(sig) for sig, _ in BINARY_SIGNATURES)
+        uploaded_file.seek(0)
+        header = uploaded_file.read(max_prefix)
+        uploaded_file.seek(0)
+
+        for signature, error_msg in BINARY_SIGNATURES:
+            if header.startswith(signature):
+                return True, error_msg
+
+        return False, None
+    except Exception:
+        return False, None
+
+def _validate_txt_content(uploaded_file, detected_mime: str):
+    is_binary, binary_error = _has_binary_signature(uploaded_file)
+    if is_binary:
+        return False, binary_error
+
+    if detected_mime and detected_mime.startswith("text/"):
+        return True, None
+
+    allowed = ALLOWED_MIME_TYPES.get(EXT_TXT, [])
+    if detected_mime in allowed:
+        return True, None
+
+    return False, TXT_CORRUPT_ERROR
 
 
 def save_temp_file(uploaded_file):
