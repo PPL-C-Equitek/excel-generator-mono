@@ -1,5 +1,6 @@
-import ConvertPage from './ConvertPage'
+"use client"
 
-export default function Page() {
-    return <ConvertPage />
-}
+import ConvertPage from './ConvertPage'
+import { withProtectedPage } from '@/lib/withProtectedPage'
+
+export default withProtectedPage(ConvertPage)

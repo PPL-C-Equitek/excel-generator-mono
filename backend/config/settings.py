@@ -31,6 +31,7 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_SYSTEM_PROMPT = os.environ.get("OPENAI_SYSTEM_PROMPT", "")
 LLM_CACHE_TTL_SECONDS = int(os.environ.get("LLM_CACHE_TTL_SECONDS", "300"))
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "")
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.environ.get(
     "RESEND_FROM_EMAIL",
@@ -162,3 +163,13 @@ EXCEL_EXPORT_DIR = os.environ.get(
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "authentication.jwt_authentication.JWTAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.AllowAny",
+    ],
+}

@@ -248,9 +248,12 @@ export default function RegisterPage() {
       <Navbar links={LANDING_NAV_LINKS} />
 
       <main className="mx-auto flex w-full max-w-6xl items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
-        <div className="w-full max-w-md space-y-8 rounded-2xl border border-gray-100 bg-white p-8 shadow-xl shadow-gray-200/70">
+        <div className="mx-auto w-full max-w-lg space-y-8 rounded-2xl p-10" style={{ backgroundColor: 'var(--brand-primary)' }}>
           <div>
-            <h2 className="mt-2 text-center text-3xl font-extrabold text-gray-900">Daftar Akun Baru</h2>
+            <h1 className="text-white font-bold text-2xl text-center mb-1">Register</h1>
+            <p className="mt-1 text-center text-sm" style={{ color: 'rgba(255,255,255,0.75)' }}>
+              Join us! Please fill in your details to create an account.
+            </p>
           </div>
 
           {successMessage ? (
@@ -284,7 +287,8 @@ export default function RegisterPage() {
                 <div className="mt-2 flex w-full flex-col gap-3 sm:flex-row">
                   <Link
                     href="/login"
-                    className="flex w-full justify-center rounded-md border border-transparent bg-red-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                    className="flex w-full justify-center rounded-xl border border-transparent bg-white px-4 py-3 text-sm font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2"
+                    style={{ color: 'var(--brand-primary)' }}
                   >
                     Pergi ke Halaman Login
                   </Link>
@@ -292,11 +296,11 @@ export default function RegisterPage() {
                     type="button"
                     onClick={handleResendVerificationEmail}
                     disabled={isResending || resendCooldown > 0}
-                    className={`w-full rounded-md border px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ${
-                      isResending || resendCooldown > 0
-                        ? 'cursor-not-allowed border-gray-300 bg-gray-100 text-gray-500'
-                        : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
-                    }`}
+                    className={`w-full rounded-xl border px-4 py-3 text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 ${isResending || resendCooldown > 0
+                      ? 'cursor-not-allowed border-gray-300 bg-gray-100 text-gray-500'
+                      : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
+                      }`}
+                    style={isResending || resendCooldown > 0 ? undefined : { color: 'var(--brand-primary)' }}
                   >
                     {getResendButtonText(isResending, resendCooldown)}
                   </button>
@@ -309,10 +313,10 @@ export default function RegisterPage() {
                 <div className="rounded-md bg-red-100 p-3 text-sm text-red-600">{errors.form}</div>
               )}
 
-              <div className="space-y-6">
+              <div className="space-y-6 force-light">
                 <div>
-                  <label htmlFor="name" className="mb-1 block text-sm font-medium text-gray-700">
-                    Nama Lengkap
+                  <label htmlFor="name" className="mb-2 block text-sm font-bold text-white">
+                    Full Name
                   </label>
                   <input
                     id="name"
@@ -320,15 +324,19 @@ export default function RegisterPage() {
                     type="text"
                     value={formData.name}
                     onChange={handleChange}
-                    className={`relative block w-full appearance-none rounded-md border px-4 py-2 text-gray-900 placeholder-gray-500 focus:border-red-500 focus:outline-none focus:ring-red-500 sm:text-sm ${
-                      errors.name ? 'border-red-300' : 'border-gray-300'
-                    }`}
+                    placeholder="Enter your full name"
+                    className={`relative block w-full appearance-none rounded-xl border px-4 py-3 text-sm outline-none ${errors.name ? 'border-red-300' : 'border-transparent'
+                      }`}
+                    style={{
+                      backgroundColor: 'var(--surface-2)',
+                      color: 'var(--foreground)',
+                    }}
                   />
                   {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
                 </div>
 
-                <div>
-                  <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
+                <div className="force-light">
+                  <label htmlFor="email" className="mb-2 block text-sm font-bold text-white">
                     Email
                   </label>
                   <input
@@ -337,9 +345,13 @@ export default function RegisterPage() {
                     type="email"
                     value={formData.email}
                     onChange={handleChange}
-                    className={`relative block w-full appearance-none rounded-md border px-4 py-2 text-gray-900 placeholder-gray-500 focus:border-red-500 focus:outline-none focus:ring-red-500 sm:text-sm ${
-                      errors.email ? 'border-red-300' : 'border-gray-300'
-                    }`}
+                    placeholder="Enter your email"
+                    className={`relative block w-full appearance-none rounded-xl border px-4 py-3 text-sm outline-none ${errors.email ? 'border-red-300' : 'border-transparent'
+                      }`}
+                    style={{
+                      backgroundColor: 'var(--surface-2)',
+                      color: 'var(--foreground)',
+                    }}
                   />
                   {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
                 </div>
@@ -349,13 +361,20 @@ export default function RegisterPage() {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className={`group relative flex w-full justify-center rounded-md border border-transparent bg-red-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ${
-                    isLoading ? 'cursor-not-allowed opacity-70' : ''
-                  }`}
+                  className={`group relative flex w-full justify-center rounded-xl border border-transparent bg-white px-4 py-3 text-sm font-bold transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 ${isLoading ? 'cursor-not-allowed opacity-70' : ''
+                    }`}
+                  style={{ color: 'var(--brand-primary)' }}
                 >
-                  {isLoading ? 'Mendaftar...' : 'Daftar Sekarang'}
+                  {isLoading ? 'Mendaftar...' : 'Sign Up'}
                 </button>
               </div>
+
+              <p className="text-center text-sm" style={{ color: 'rgba(255,255,255,0.75)' }}>
+                Already have an account?{' '}
+                <Link href="/login" className="font-semibold text-white underline hover:text-red-50">
+                  login here
+                </Link>
+              </p>
             </form>
           )}
         </div>
