@@ -7,6 +7,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
 
+from authentication.logout.adapters import DjangoTokenBlacklistRepository
 from authentication.models import User
 from authentication.services import generate_tokens
 
@@ -146,6 +147,22 @@ class RefreshTokenViewTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertIn("message", response.data)
         self.assertIn("tidak valid", response.data["message"].lower())
+
+    def test_refresh_rejects_blacklisted_refresh_token(self):
+        refresh_token = self._refresh_token()
+
+        with override_settings(JWT_SECRET_KEY=SECRET_KEY):
+            DjangoTokenBlacklistRepository().blacklist(refresh_token)
+
+        with override_settings(JWT_SECRET_KEY=SECRET_KEY):
+            response = self.client.post(
+                self.url,
+                {"refresh_token": refresh_token},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("logout", response.data["message"].lower())
         
     @patch("authentication.views.RefreshTokenService")
     def test_refresh_unexpected_error_returns_500(self, mock_service_class):
