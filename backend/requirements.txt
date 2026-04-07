@@ -26,7 +26,7 @@ numpy==1.26.4
 resend==2.26.0
 
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.2.2+cpu
+torch==2.11.0+cpu
 torchvision==0.17.2+cpu
 PyJWT
 google-auth-oauthlib
