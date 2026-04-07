@@ -1,20 +1,34 @@
 import { render, screen } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, it, expect } from 'vitest'
 import Navbar from '../../../src/components/Navbar'
 import type { NavLink } from '../../../src/constants/landing'
 
+vi.mock('@/components/LogoutButton', () => ({
+    default: () => <button type="button">Logout</button>,
+}))
+
 // Mock data for testing - demonstrates DIP principle
 const mockNavLinks: NavLink[] = [
-    { label: 'Login', href: '/login' },
-    { label: 'Register', href: '/register' },
+    { label: 'Login', href: '/login', key: 'login' },
+    { label: 'Register', href: '/register', key: 'register' },
 ]
 
 describe('Navbar', () => {
+    beforeEach(() => {
+        window.localStorage.clear()
+        window.sessionStorage.clear()
+    })
+
     // Positive tests
     describe('positive', () => {
         it('renders brand name EQUITEK by default', () => {
             render(<Navbar links={mockNavLinks} />)
             expect(screen.getByText('EQUITEK')).toBeInTheDocument()
+        })
+
+        it('links brand name to home', () => {
+            render(<Navbar links={mockNavLinks} />)
+            expect(screen.getByText('EQUITEK')).toHaveAttribute('href', '/')
         })
 
         it('renders custom brand name when provided', () => {
@@ -45,8 +59,8 @@ describe('Navbar', () => {
 
         it('renders custom links when different NavLink array provided', () => {
             const customLinks: NavLink[] = [
-                { label: 'Home', href: '/' },
-                { label: 'About', href: '/about' },
+                { label: 'Home', href: '/', key: 'login' },
+                { label: 'About', href: '/about', key: 'register' },
             ]
             render(<Navbar links={customLinks} />)
             expect(screen.getByText('Home')).toBeInTheDocument()
@@ -81,11 +95,24 @@ describe('Navbar', () => {
 
         it('does not render links that are not in the provided array', () => {
             const minimalLinks: NavLink[] = [
-                { label: 'Home', href: '/' }
+                { label: 'Home', href: '/', key: 'login' }
             ]
             render(<Navbar links={minimalLinks} />)
             expect(screen.queryByText('Login')).not.toBeInTheDocument()
             expect(screen.queryByText('Register')).not.toBeInTheDocument()
+        })
+
+        it('does not render Login and Register links when user is already authenticated', () => {
+            window.localStorage.setItem('access_token', 'existing-token')
+
+            render(<Navbar links={mockNavLinks} />)
+
+            expect(screen.queryByText('Login')).not.toBeInTheDocument()
+            expect(screen.queryByText('Register')).not.toBeInTheDocument()
+            expect(screen.getByText('Convert')).toBeInTheDocument()
+            expect(screen.getByText('Schema')).toBeInTheDocument()
+            expect(screen.getByText('History')).toBeInTheDocument()
+            expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
         })
     })
 })
