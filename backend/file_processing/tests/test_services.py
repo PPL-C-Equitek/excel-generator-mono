@@ -553,10 +553,13 @@ class TestUploadService(TestCase):
 
         is_valid, error = validate_file(f)
 
-        self.assertTrue(is_valid)
-        self.assertIsNone(error)
-        mock_validate_mime.assert_called_once_with(f, ".doc")
-        mock_validate_word.assert_called_once_with(f, ".doc")
+        self.assertFalse(is_valid)
+        self.assertEqual(
+            error,
+            "Unsupported file type. Only PDF, XLS, XLSX, and TXT are allowed.",
+        )
+        mock_validate_mime.assert_not_called()
+        mock_validate_word.assert_not_called()
 
     @patch(
         "file_processing.services.upload_service.word_validation_service.validate_word"
@@ -576,10 +579,13 @@ class TestUploadService(TestCase):
 
         is_valid, error = validate_file(f)
 
-        self.assertTrue(is_valid)
-        self.assertIsNone(error)
-        mock_validate_mime.assert_called_once_with(f, ".docx")
-        mock_validate_word.assert_called_once_with(f, ".docx")
+        self.assertFalse(is_valid)
+        self.assertEqual(
+            error,
+            "Unsupported file type. Only PDF, XLS, XLSX, and TXT are allowed.",
+        )
+        mock_validate_mime.assert_not_called()
+        mock_validate_word.assert_not_called()
 
     @patch(
         "file_processing.services.upload_service.word_validation_service.validate_word"
@@ -600,7 +606,12 @@ class TestUploadService(TestCase):
         is_valid, error = validate_file(f)
 
         self.assertFalse(is_valid)
-        self.assertEqual(error, "Word file is password-protected.")
+        self.assertEqual(
+            error,
+            "Unsupported file type. Only PDF, XLS, XLSX, and TXT are allowed.",
+        )
+        mock_validate_mime.assert_not_called()
+        mock_validate_word.assert_not_called()
 
     def test_validate_word_docx_happy_path(self):
         content = BytesIO()
@@ -1127,12 +1138,12 @@ class TestUploadService(TestCase):
 
         mock_validate.return_value = (True, None)
         mock_mime.return_value = (True, None)
-        mock_save.return_value = "/tmp/test.txt"
+        mock_save.return_value = "/tmp/test.bin"
 
         f = SimpleUploadedFile(
-            "file.txt",
+            "file.bin",
             b"dummy",
-            content_type="text/plain",
+            content_type="application/octet-stream",
         )
 
         success, error, _, _ = process_upload(f)

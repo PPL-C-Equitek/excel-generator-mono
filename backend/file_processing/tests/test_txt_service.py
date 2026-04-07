@@ -15,6 +15,7 @@ from file_processing.services.txt_service import (
     process_uploaded_txt,
 )
 
+
 def _make_txt_file(content: str, suffix: str = ".txt") -> str:
     fd, path = tempfile.mkstemp(suffix=suffix)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -168,7 +169,6 @@ class PositiveTxtExtractionTests(TestCase):
 
 
 class NegativeTxtExtractionTests(TestCase):
-
     def test_empty_file_returns_empty_list(self):
         path = _make_txt_file("")
         try:
@@ -190,7 +190,7 @@ class NegativeTxtExtractionTests(TestCase):
         self.assertIsInstance(result, list)
         self.assertEqual(len(result), 1)
 
-    @patch('file_processing.services.txt_service.parse_txt')
+    @patch("file_processing.services.txt_service.parse_txt")
     def test_process_uploaded_txt_unknown_exception(self, mock_parse):
         mock_parse.side_effect = Exception("System meltdown")
         success, error, data = process_uploaded_txt("dummy.txt")
@@ -246,7 +246,6 @@ class NegativeTxtExtractionTests(TestCase):
 
 
 class EdgeCaseTxtExtractionTests(TestCase):
-
     def test_very_long_single_line_is_read_completely(self):
         long_line = "X" * 10_001
         path = _make_txt_file(long_line)
@@ -369,9 +368,13 @@ class EdgeCaseTxtExtractionTests(TestCase):
         finally:
             os.remove(path)
 
+
 UPLOAD_URL = "/upload/"
 
-def _txt_file(name: str, content: bytes, content_type: str = "text/plain") -> SimpleUploadedFile:
+
+def _txt_file(
+    name: str, content: bytes, content_type: str = "text/plain"
+) -> SimpleUploadedFile:
     return SimpleUploadedFile(name, content, content_type=content_type)
 
 
@@ -380,17 +383,21 @@ def _valid_txt_content() -> bytes:
 
 
 def _docx_like_content() -> bytes:
-    zip_header = b"\x50\x4B\x03\x04"
+    zip_header = b"\x50\x4b\x03\x04"
     return zip_header + b"\x00" * 100
 
 
 class TxtValidationTests(TestCase):
-
+    @patch(
+        "file_processing.services.upload_service.magic.from_buffer",
+        return_value="text/plain",
+    )
     def test_txt_extension_is_accepted(self):
         uploaded = _txt_file("data.txt", _valid_txt_content(), "text/plain")
         response = self.client.post(UPLOAD_URL, {"file": uploaded})
         self.assertIn(
-            response.status_code, [200],
+            response.status_code,
+            [200],
             f"File .txt valid seharusnya diterima, status={response.status_code}",
         )
 
@@ -414,7 +421,8 @@ class TxtValidationTests(TestCase):
         )
         response = self.client.post(UPLOAD_URL, {"file": fake_txt})
         self.assertIn(
-            response.status_code, [400, 415],
+            response.status_code,
+            [400, 415],
             "File .docx berekstensi .txt seharusnya ditolak oleh sistem.",
         )
 
@@ -428,7 +436,8 @@ class TxtValidationTests(TestCase):
         if response.status_code in [400, 415]:
             body = response.json()
             self.assertIn(
-                "message", body,
+                "message",
+                body,
                 "Respons error harus mengandung kunci 'message'.",
             )
             self.assertTrue(
@@ -444,7 +453,8 @@ class TxtValidationTests(TestCase):
         )
         response = self.client.post(UPLOAD_URL, {"file": oversized})
         self.assertIn(
-            response.status_code, [400, 413],
+            response.status_code,
+            [400, 413],
             f"File >10 MB seharusnya ditolak, status={response.status_code}",
         )
 
@@ -468,27 +478,36 @@ class TxtValidationTests(TestCase):
         )
         response = self.client.post(UPLOAD_URL, {"file": exactly_10mb})
         self.assertNotEqual(
-            response.status_code, 500,
+            response.status_code,
+            500,
             "File tepat 10 MB tidak boleh menyebabkan server error.",
         )
 
+    @patch(
+        "file_processing.services.upload_service.magic.from_buffer",
+        return_value="text/plain",
+    )
     def test_correct_mime_text_plain_is_accepted(self):
         uploaded = _txt_file("dokumen.txt", _valid_txt_content(), "text/plain")
         response = self.client.post(UPLOAD_URL, {"file": uploaded})
         self.assertEqual(
-            response.status_code, 200,
+            response.status_code,
+            200,
             "File .txt dengan MIME 'text/plain' seharusnya diterima.",
         )
 
-    @patch('file_processing.services.upload_service.magic.from_buffer')
+    @patch("file_processing.services.upload_service.magic.from_buffer")
     def test_txt_mime_fallback_allowed(self, mock_magic):
         mock_magic.return_value = "application/custom-log"
-        with patch.dict("file_processing.services.upload_service.ALLOWED_MIME_TYPES", {".txt": ["application/custom-log"]}):
+        with patch.dict(
+            "file_processing.services.upload_service.ALLOWED_MIME_TYPES",
+            {".txt": ["application/custom-log"]},
+        ):
             uploaded = _txt_file("data.txt", b"plain text", "text/plain")
             resp = self.client.post(UPLOAD_URL, {"file": uploaded})
             self.assertEqual(resp.status_code, 200)
 
-    @patch('file_processing.services.upload_service.magic.from_buffer')
+    @patch("file_processing.services.upload_service.magic.from_buffer")
     def test_txt_mime_not_allowed(self, mock_magic):
         mock_magic.return_value = "application/random-illegal"
         uploaded = _txt_file("data.txt", b"plain text", "text/plain")
@@ -511,7 +530,8 @@ class TxtValidationTests(TestCase):
         )
         response = self.client.post(UPLOAD_URL, {"file": fake_txt})
         self.assertIn(
-            response.status_code, [400, 415],
+            response.status_code,
+            [400, 415],
             "File .txt dengan konten binary/MIME salah seharusnya ditolak.",
         )
 
@@ -525,7 +545,8 @@ class TxtValidationTests(TestCase):
         )
         response = self.client.post(UPLOAD_URL, {"file": corrupted})
         self.assertNotEqual(
-            response.status_code, 500,
+            response.status_code,
+            500,
             "File corrupt tidak boleh menyebabkan server error (500).",
         )
         if response.status_code in [400, 415, 422]:
@@ -549,7 +570,7 @@ class TxtValidationTests(TestCase):
             self.assertNotIn("raise ", error_msg)
 
     def test_password_protected_txt_is_rejected(self):
-        ole_header = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + b"\x00" * 500
+        ole_header = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 500
 
         protected_fake_txt = _txt_file(
             "protected.txt",
@@ -558,12 +579,13 @@ class TxtValidationTests(TestCase):
         )
         response = self.client.post(UPLOAD_URL, {"file": protected_fake_txt})
         self.assertIn(
-            response.status_code, [400, 415, 422],
+            response.status_code,
+            [400, 415, 422],
             "File terproteksi/berenkripsi berekstensi .txt harus ditolak.",
         )
 
     def test_protected_file_error_message_is_relevant(self):
-        ole_header = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + b"\x00" * 500
+        ole_header = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 500
 
         protected_fake_txt = _txt_file(
             "protected2.txt",
@@ -574,10 +596,12 @@ class TxtValidationTests(TestCase):
         if response.status_code in [400, 415, 422]:
             body = response.json()
             self.assertIn(
-                "message", body,
+                "message",
+                body,
                 "Respons error harus mengandung kunci 'message'.",
             )
             self.assertGreater(
-                len(body.get("message", "")), 0,
+                len(body.get("message", "")),
+                0,
                 "Pesan error tidak boleh kosong.",
             )
