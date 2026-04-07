@@ -20,9 +20,19 @@ from authentication.logout.adapters import (
 )
 from authentication.logout.http import LogoutView as CleanLogoutView
 from authentication.models import User
-from authentication.serializers import LoginSerializer, RefreshTokenSerializer, VerifyEmailSerializer
+from authentication.serializers import (
+    EmailRequestSerializer,
+    LoginSerializer,
+    RefreshTokenSerializer,
+    ResetPasswordSerializer,
+    VerifyEmailSerializer,
+)
 from authentication.services import (
+    PASSWORD_RESET_RESEND_SUCCESS_MESSAGE,
+    PASSWORD_RESET_SUCCESS_MESSAGE,
+    decode_password_reset_token,
     send_verification_email,
+    send_password_reset_email,
     generate_tokens,
     LoginFailureTracker as BaseLoginFailureTracker,
     LoginService,
@@ -47,6 +57,32 @@ def blacklist_refresh_token(refresh_token: str) -> None:
 
 class ResendVerificationThrottle(SimpleRateThrottle):
     scope = "resend_verification"
+    rate = "3/15min"
+
+    def get_cache_key(self, request, view):
+        email = request.data.get("email", "")
+        ident = email.lower().strip() if email else self.get_ident(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+    def parse_rate(self, rate):
+        return (3, 900)
+
+
+class PasswordResetRequestThrottle(SimpleRateThrottle):
+    scope = "password_reset_request"
+    rate = "3/15min"
+
+    def get_cache_key(self, request, view):
+        email = request.data.get("email", "")
+        ident = email.lower().strip() if email else self.get_ident(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+    def parse_rate(self, rate):
+        return (3, 900)
+
+
+class ResendPasswordResetThrottle(SimpleRateThrottle):
+    scope = "resend_password_reset"
     rate = "3/15min"
 
     def get_cache_key(self, request, view):
@@ -131,6 +167,98 @@ class ResendVerificationView(APIView):
 
         return Response(
             {"message": "Verification email has been resent"},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ForgotPasswordView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [PasswordResetRequestThrottle]
+
+    def post(self, request):
+        serializer = EmailRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        email = serializer.validated_data["email"].lower().strip()
+        user = User.objects.filter(email=email, status="verified").first()
+
+        if user is not None:
+            send_password_reset_email(user.email)
+
+        return Response(
+            {"message": PASSWORD_RESET_SUCCESS_MESSAGE},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ResendPasswordResetView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ResendPasswordResetThrottle]
+
+    def post(self, request):
+        serializer = EmailRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        email = serializer.validated_data["email"].lower().strip()
+        user = User.objects.filter(email=email, status="verified").first()
+
+        if user is not None:
+            send_password_reset_email(user.email)
+
+        return Response(
+            {"message": PASSWORD_RESET_RESEND_SUCCESS_MESSAGE},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ResetPasswordView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        token = serializer.validated_data["token"]
+        password = serializer.validated_data["password"]
+
+        try:
+            email = decode_password_reset_token(token, max_age=timedelta(hours=1))
+        except SignatureExpired:
+            return Response(
+                {"message": "Token expired. Please request a new password reset email."},
+                status=status.HTTP_410_GONE,
+            )
+        except (BadSignature, ValueError):
+            return Response(
+                {"message": "Invalid token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = User.objects.get(email=email, status="verified")
+        except User.DoesNotExist:
+            return Response(
+                {"message": "User not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        user.set_password(password)
+        user.save(update_fields=["password"])
+
+        return Response(
+            {"message": "Password reset successfully"},
             status=status.HTTP_200_OK,
         )
 
