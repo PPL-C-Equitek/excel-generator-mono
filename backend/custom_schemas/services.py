@@ -14,64 +14,76 @@ CUSTOM_SCHEMA_LIMIT_EXCEEDED_ERROR_TEMPLATE = (
 )
 
 
+class CustomSchemaDefinitionService:
+    def validate_schema_definition(self, definition):
+        errors = []
+
+        if not isinstance(definition, dict):
+            raise ValidationError({"definition": ["Definition must be a JSON object."]})
+
+        columns = definition.get("columns")
+        if not isinstance(columns, list) or not columns:
+            raise ValidationError(
+                {"definition": ["Definition must include a non-empty 'columns' list."]}
+            )
+
+        seen_column_names = set()
+        for column_index, column in enumerate(columns):
+            if not isinstance(column, dict):
+                errors.append(f"columns[{column_index}] must be an object.")
+                continue
+
+            column_name = column.get("name")
+            if not isinstance(column_name, str) or not column_name.strip():
+                errors.append(
+                    f"columns[{column_index}].name must be a non-empty string."
+                )
+            else:
+                normalized_column_name = column_name.strip().lower()
+                if normalized_column_name in seen_column_names:
+                    errors.append("columns must not contain duplicate names.")
+                seen_column_names.add(normalized_column_name)
+
+            description = column.get("description")
+            if description is None:
+                errors.append(f"columns[{column_index}].description is required.")
+            elif not isinstance(description, str):
+                errors.append(
+                    f"columns[{column_index}].description must be a string."
+                )
+
+        if errors:
+            raise ValidationError({"definition": errors})
+
+        return definition
+
+    def build_prompt_fragment(self, definition):
+        self.validate_schema_definition(definition)
+
+        lines = [
+            "Apply the following custom output schema.",
+            "Keep the top-level JSON keys exactly as: document_info, summary, content_data.",
+            f'Use a single content_data table named "{DEFAULT_OUTPUT_TABLE_NAME}".',
+            "Use the following headers exactly and keep each row object limited to these headers.",
+            "Custom schema columns:",
+        ]
+
+        for column in definition["columns"]:
+            description = column["description"].strip()
+            detail = f'  - {column["name"]}'
+            if description:
+                detail += f": {description}"
+            lines.append(detail)
+
+        return "\n".join(lines)
+
+
 def validate_schema_definition(definition):
-    errors = []
-
-    if not isinstance(definition, dict):
-        raise ValidationError({"definition": ["Definition must be a JSON object."]})
-
-    columns = definition.get("columns")
-    if not isinstance(columns, list) or not columns:
-        raise ValidationError(
-            {"definition": ["Definition must include a non-empty 'columns' list."]}
-        )
-
-    seen_column_names = set()
-    for column_index, column in enumerate(columns):
-        if not isinstance(column, dict):
-            errors.append(f"columns[{column_index}] must be an object.")
-            continue
-
-        column_name = column.get("name")
-        if not isinstance(column_name, str) or not column_name.strip():
-            errors.append(f"columns[{column_index}].name must be a non-empty string.")
-        else:
-            normalized_column_name = column_name.strip().lower()
-            if normalized_column_name in seen_column_names:
-                errors.append("columns must not contain duplicate names.")
-            seen_column_names.add(normalized_column_name)
-
-        description = column.get("description")
-        if description is None:
-            errors.append(f"columns[{column_index}].description is required.")
-        elif not isinstance(description, str):
-            errors.append(f"columns[{column_index}].description must be a string.")
-
-    if errors:
-        raise ValidationError({"definition": errors})
-
-    return definition
+    return CustomSchemaDefinitionService().validate_schema_definition(definition)
 
 
 def build_schema_prompt_fragment(definition):
-    validate_schema_definition(definition)
-
-    lines = [
-        "Apply the following custom output schema.",
-        "Keep the top-level JSON keys exactly as: document_info, summary, content_data.",
-        f'Use a single content_data table named "{DEFAULT_OUTPUT_TABLE_NAME}".',
-        "Use the following headers exactly and keep each row object limited to these headers.",
-        "Custom schema columns:",
-    ]
-
-    for column in definition["columns"]:
-        description = column["description"].strip()
-        detail = f'  - {column["name"]}'
-        if description:
-            detail += f": {description}"
-        lines.append(detail)
-
-    return "\n".join(lines)
+    return CustomSchemaDefinitionService().build_prompt_fragment(definition)
 
 
 class CustomSchemaQueryRepository(Protocol):
@@ -176,3 +188,43 @@ class CustomSchemaPolicyService:
             )
 
         return owner_id
+
+
+class CustomSchemaApplicationService:
+    def __init__(
+        self,
+        policy_service: CustomSchemaPolicyService | None = None,
+    ):
+        self.policy_service = policy_service or CustomSchemaPolicyService()
+
+    def get_owner_id(self, user) -> object | None:
+        return self.policy_service.get_owner_id(user)
+
+    def get_queryset_for_user(self, user):
+        return self.policy_service.get_queryset_for_user(user)
+
+    def get_filtered_queryset_for_user(self, user, active_value):
+        return self.policy_service.filter_queryset_by_active(
+            queryset=self.get_queryset_for_user(user),
+            active_value=active_value,
+        )
+
+    def has_name_conflict(
+        self,
+        user,
+        name: str,
+        exclude_pk: object | None = None,
+    ) -> bool:
+        return self.policy_service.has_name_conflict(
+            user=user,
+            name=name,
+            exclude_pk=exclude_pk,
+        )
+
+    def get_create_owner_id(self, user) -> object | None:
+        return self.policy_service.ensure_can_create_for_user(user)
+
+    def get_limit_exceeded_message(self) -> str:
+        return CUSTOM_SCHEMA_LIMIT_EXCEEDED_ERROR_TEMPLATE.format(
+            max_count=self.policy_service.max_custom_schemas_per_user
+        )

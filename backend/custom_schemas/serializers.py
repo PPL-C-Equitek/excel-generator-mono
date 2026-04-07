@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from .models import CustomSchema
 from .services import (
-    CustomSchemaPolicyService,
+    CustomSchemaApplicationService,
     CUSTOM_SCHEMA_DUPLICATE_NAME_ERROR_MESSAGE,
     build_schema_prompt_fragment,
     validate_schema_definition,
@@ -38,17 +38,17 @@ class CustomSchemaSerializer(serializers.ModelSerializer):
         validate_schema_definition(value)
         return value
 
-    def get_policy_service(self) -> CustomSchemaPolicyService:
-        policy_service = self.context.get("policy_service")
-        if policy_service is not None:
-            return policy_service
-        return CustomSchemaPolicyService()
+    def get_application_service(self) -> CustomSchemaApplicationService:
+        application_service = self.context.get("application_service")
+        if application_service is not None:
+            return application_service
+        return CustomSchemaApplicationService()
 
     def validate_name(self, value):
         request = self.context.get("request")
         owner = getattr(request, "user", None)
         exclude_pk = getattr(self.instance, "pk", None)
-        if not self.get_policy_service().has_name_conflict(
+        if not self.get_application_service().has_name_conflict(
             user=owner,
             name=value,
             exclude_pk=exclude_pk,
