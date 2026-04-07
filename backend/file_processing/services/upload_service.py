@@ -8,11 +8,13 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+from file_processing.services.word_extraction_service import WordExtractionService
 from file_processing.services import word_validation_service
 
 try:
     import magic
 except Exception:  # pragma: no cover - optional dependency in local envs
+
     class _MagicShim:
         @staticmethod
         def from_buffer(_buffer, mime=True):
@@ -38,7 +40,6 @@ ALLOWED_MIME_TYPES = {
         "application/x-pdf",
         "application/vnd.pdf",
     ],
-
     EXT_XLS: [
         "application/vnd.ms-excel",
         "application/msexcel",
@@ -52,7 +53,6 @@ ALLOWED_MIME_TYPES = {
         "application/CDFV2",
         "application/vnd.ms-office",
     ],
-
     EXT_XLSX: [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         MIME_ZIP,
@@ -60,7 +60,6 @@ ALLOWED_MIME_TYPES = {
         "application/x-zip-compressed",
         MIME_OCTET_STREAM,
     ],
-
     EXT_DOC: [
         "application/msword",
         "application/doc",
@@ -70,7 +69,6 @@ ALLOWED_MIME_TYPES = {
         MIME_OLE_STORAGE,
         "application/CDFV2",
     ],
-
     EXT_DOCX: [
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         MIME_ZIP,
@@ -86,17 +84,16 @@ MAX_PDF_PAGES = 100
 MAX_EXCEL_SHEETS = 100
 PDF_CORRUPT_ERROR = "PDF file is corrupt or has an invalid structure."
 EXCEL_CORRUPT_ERROR = "Invalid or corrupted Excel file."
-EXCEL_TOO_MANY_SHEETS_ERROR = (
-    f"Excel has too many sheets (maximum {MAX_EXCEL_SHEETS})."
-)
+EXCEL_TOO_MANY_SHEETS_ERROR = f"Excel has too many sheets (maximum {MAX_EXCEL_SHEETS})."
 EXCEL_PASSWORD_PROTECTED_ERROR = (
     "Excel file is password-protected. Please remove the password and try again."
 )
 MAX_WORD_PAGES = word_validation_service.MAX_WORD_PAGES
 WORD_CORRUPT_ERROR = word_validation_service.WORD_CORRUPT_ERROR
-OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
+OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
+
 
 def _has_extracted_text(extracted_data):
     """Return True if any page contains extracted text."""
@@ -138,9 +135,7 @@ def _process_pdf(file_path, uploaded_file):
             if empty_pages:
                 ocr_data = OCRService.process_pdf_pages(file_path, empty_pages)
                 # Merge OCR results into the extracted data
-                ocr_by_page = {
-                    p["page"]: p for p in ocr_data.get("content", [])
-                }
+                ocr_by_page = {p["page"]: p for p in ocr_data.get("content", [])}
                 for page in extracted_data["content"]:
                     if page["page"] in ocr_by_page:
                         page["text"] = ocr_by_page[page["page"]]["text"]
@@ -150,6 +145,19 @@ def _process_pdf(file_path, uploaded_file):
         extracted_data = OCRService.process_pdf(file_path)
 
     return True, None, extracted_data
+
+
+def process_word(file_path, ext):
+    try:
+        extracted_data = WordExtractionService.extract_word_to_json(file_path, ext)
+    except ValueError as exc:
+        return False, str(exc), None
+    except Exception:
+        logger.exception("Word extraction failed")
+        return False, WORD_CORRUPT_ERROR, None
+
+    return True, None, extracted_data
+
 
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
@@ -174,6 +182,12 @@ def process_upload(uploaded_file):
                 return False, error, None, None
             extracted_data = data
 
+        elif ext in [".docx", ".doc"]:
+            success, error, data = process_word(file_path, ext)
+            if not success:
+                return False, error, None, None
+            extracted_data = data
+
         else:
             return False, "Unsupported file type", None, None
 
@@ -193,7 +207,10 @@ def validate_file(uploaded_file):
 
     # Validate extension
     if ext not in ALLOWED_EXTENSIONS:
-        return False, "Unsupported file type. Only PDF, XLS, XLSX, DOC, and DOCX are allowed."
+        return (
+            False,
+            "Unsupported file type. Only PDF, XLS, XLSX, DOC, and DOCX are allowed.",
+        )
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
@@ -210,11 +227,14 @@ def validate_file(uploaded_file):
             return False, excel_error
 
     if ext in {EXT_DOC, EXT_DOCX}:
-        is_valid_word, word_error = word_validation_service.validate_word(uploaded_file, ext)
+        is_valid_word, word_error = word_validation_service.validate_word(
+            uploaded_file, ext
+        )
         if not is_valid_word:
             return False, word_error
 
     return True, None
+
 
 def validate_pdf(uploaded_file):
     """Single-parse PDF validation: encryption, structure, and page count."""
@@ -323,6 +343,7 @@ def _get_xls_sheet_count(uploaded_file):
             release_resources()
         uploaded_file.seek(0)
 
+
 def validate_mime_type(uploaded_file, ext):
     try:
         head = _read_head(uploaded_file)
@@ -357,6 +378,7 @@ def validate_mime_type(uploaded_file, ext):
     except Exception:
         return False, "Unable to determine file type."
 
+
 def _read_head(uploaded_file, size=2048):
     uploaded_file.seek(0)
     head = uploaded_file.read(size)
@@ -381,6 +403,7 @@ def _fallback_mime(head, ext):
     if ext in {EXT_XLS, EXT_DOC}:
         return MIME_OCTET_STREAM
     return None
+
 
 def _is_ole_container(uploaded_file):
     """Return True if file starts with OLE Compound File signature."""
