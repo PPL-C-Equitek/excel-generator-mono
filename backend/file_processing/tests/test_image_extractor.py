@@ -25,6 +25,16 @@ class _DummyEngine(BaseOCREngine):
 
 
 class TestImageExtractor(SimpleTestCase):
+    @patch("file_processing.extractors.image_extractor.TesseractEngine")
+    def test_default_engine_disables_internal_preprocessing(self, mock_tesseract_engine):
+        mock_engine = MagicMock()
+        mock_tesseract_engine.return_value = mock_engine
+
+        extractor = ImageExtractor()
+
+        mock_tesseract_engine.assert_called_once_with(apply_preprocessing=False)
+        self.assertIs(extractor.ocr_engine, mock_engine)
+
     def _make_temp_image(self, suffix=".png", fmt="PNG"):
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             path = temp_file.name

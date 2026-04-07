@@ -39,7 +39,7 @@ class ImageExtractor:
         *,
         preprocessor: BaseImagePreprocessor | None = None,
     ):
-        self.ocr_engine = ocr_engine or TesseractEngine(apply_preprocessing=True)
+        self.ocr_engine = ocr_engine or TesseractEngine(apply_preprocessing=False)
         self.preprocessor = preprocessor or GrayscaleThresholdPreprocessor()
 
     def _validate_extension(self, file_path: str) -> None:
