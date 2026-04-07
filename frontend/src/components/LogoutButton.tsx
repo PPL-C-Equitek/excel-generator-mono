@@ -2,15 +2,12 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { logout } from '@/lib/api'
 import {
     clearAuthTokens,
     getStoredAccessToken,
     getStoredRefreshToken,
 } from '@/lib/auth'
-
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
-    .split('')
-    .reduceRight((acc, ch) => (acc === '' && ch === '/' ? acc : ch + acc), '')
 
 function clearCookie(name: string) {
     document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`
@@ -38,25 +35,7 @@ export default function LogoutButton() {
         }
 
         try {
-            const response = await fetch(`${API_URL}/auth/logout/`, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ refresh_token: refreshToken }),
-            })
-
-            if (!response.ok) {
-                const data = (await response.json().catch(() => null)) as
-                    | { message?: string; detail?: string }
-                    | null
-
-                throw new Error(
-                    data?.message ?? data?.detail ?? 'Logout gagal. Silakan coba lagi.'
-                )
-            }
-
+            await logout(accessToken, refreshToken)
             clearAuthTokens()
             clearCookie('access_token')
             clearCookie('refresh_token')
@@ -64,9 +43,13 @@ export default function LogoutButton() {
             clearCookie('refreshToken')
             setMessage('Berhasil keluar')
             router.push('/')
-        } catch {
+        } catch (error) {
             setIsError(true)
-            setMessage('Logout gagal. Silakan coba lagi.')
+            setMessage(
+                error instanceof Error && error.message
+                    ? error.message
+                    : 'Logout gagal. Silakan coba lagi.'
+            )
         } finally {
             setIsLoading(false)
         }
