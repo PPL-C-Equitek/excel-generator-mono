@@ -215,10 +215,10 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(screen.getByTestId('file-size')).toHaveTextContent('20 KB')
         })
 
-        it('shows Download Output label', () => {
+        it('shows Download CSV label', () => {
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
-            expect(screen.getByText('Download Output')).toBeInTheDocument()
+            expect(screen.getByText('Download CSV')).toBeInTheDocument()
         })
 
         it('shows Download Excel button when excel is available', () => {

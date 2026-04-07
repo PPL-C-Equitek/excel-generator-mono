@@ -90,7 +90,7 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                                         disabled={isConverting || !csvMetadata}
                                         className="rounded-xl bg-green-700 px-6 py-2 font-bold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
-                                        Download Output
+                                        Download CSV
                                     </button>
                                 )}
 
