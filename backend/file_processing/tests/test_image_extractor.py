@@ -113,6 +113,17 @@ class TestImagePreprocessor(SimpleTestCase):
         with self.assertRaises(TypeError):
             BaseImagePreprocessor()
 
+    def test_base_preprocessor_default_method_raises_not_implemented(self):
+        from file_processing.extractors.image_preprocessors import BaseImagePreprocessor
+
+        class _CallsSuperPreprocessor(BaseImagePreprocessor):
+            def preprocess(self, image):
+                return super().preprocess(image)
+
+        preprocessor = _CallsSuperPreprocessor()
+        with self.assertRaises(NotImplementedError):
+            preprocessor.preprocess(Image.new("RGB", (1, 1), color="white"))
+
     def test_grayscale_threshold_applied(self):
         image = Image.new("L", (2, 2))
         image.putdata([10, 200, 30, 255])
@@ -163,6 +174,18 @@ class TestProcessImage(SimpleTestCase):
     def test_process_image_value_error(self, mock_extractor_cls):
         mock_extractor = MagicMock()
         mock_extractor.extract.side_effect = ValueError("Image OCR extraction failed.")
+        mock_extractor_cls.return_value = mock_extractor
+
+        success, error, data = _process_image("/tmp/example.png")
+
+        self.assertFalse(success)
+        self.assertEqual(error, "Image OCR extraction failed.")
+        self.assertIsNone(data)
+
+    @patch("file_processing.services.upload_service.ImageExtractor")
+    def test_process_image_unexpected_exception_returns_generic_error(self, mock_extractor_cls):
+        mock_extractor = MagicMock()
+        mock_extractor.extract.side_effect = Exception("unexpected")
         mock_extractor_cls.return_value = mock_extractor
 
         success, error, data = _process_image("/tmp/example.png")
