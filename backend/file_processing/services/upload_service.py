@@ -9,6 +9,7 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+from file_processing.services.word_extraction_service import WordExtractionService
 from file_processing.services import word_validation_service
 
 try:
@@ -32,10 +33,8 @@ MIME_OCTET_STREAM = "application/octet-stream"
 MIME_OLE_STORAGE = "application/x-ole-storage"
 MIME_ZIP = "application/zip"
 
-ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_DOCX, EXT_DOC]
 EXT_TXT = ".txt"
-
-ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_TXT]
+ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_DOCX, EXT_DOC, EXT_TXT]
 ALLOWED_MIME_TYPES = {
     EXT_PDF: [
         "application/pdf",
@@ -177,6 +176,18 @@ def _process_pdf(file_path, uploaded_file):
 
     return True, None, extracted_data
 
+
+def process_word(file_path, ext):
+    try:
+        extracted_data = WordExtractionService.extract_word_to_json(file_path, ext)
+    except ValueError as exc:
+        return False, str(exc), None
+    except Exception:
+        logger.exception("Word extraction failed")
+        return False, WORD_CORRUPT_ERROR, None
+
+    return True, None, extracted_data
+
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
     if not is_valid:
@@ -206,6 +217,12 @@ def process_upload(uploaded_file):
                 return False, error, None, None
             extracted_data = data
 
+        elif ext in [EXT_DOC, EXT_DOCX]:
+            success, error, data = process_word(file_path, ext)
+            if not success:
+                return False, error, None, None
+            extracted_data = data
+
         else:
             return False, "Unsupported file type", None, None
 
@@ -225,7 +242,10 @@ def validate_file(uploaded_file):
 
     # Validate extension
     if ext not in ALLOWED_EXTENSIONS:
-        return False, "Unsupported file type. Only PDF, XLS, XLSX, and TXT are allowed."
+        return (
+            False,
+            "Unsupported file type. Only PDF, XLS, XLSX, DOC, DOCX, and TXT are allowed.",
+        )
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
@@ -381,11 +401,18 @@ def validate_mime_type(uploaded_file, ext):
         if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
             return False, DOES_NOT_MATCH_EXTENSION_ERROR
 
+        if ext == EXT_TXT:
+            detected_mime = mime
+            request_mime = (getattr(uploaded_file, "content_type", "") or "").lower()
+
+            # Some environments report plain text as octet-stream; prefer request MIME then.
+            if detected_mime in {MIME_OCTET_STREAM, MIME_ZIP, MIME_OLE_STORAGE} and request_mime:
+                detected_mime = request_mime
+
+            return _validate_txt_content(uploaded_file, detected_mime)
+
         if mime not in expected_mimes:
             return False, DOES_NOT_MATCH_EXTENSION_ERROR
-
-        if ext == EXT_TXT:
-            return _validate_txt_content(uploaded_file, mime)
 
         if mime not in expected_mimes:
             return False, FILE_EXTENSION_MISMATCH_ERROR
