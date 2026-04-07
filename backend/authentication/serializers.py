@@ -28,6 +28,10 @@ class RegisterSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
 
 
+class EmailRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+
+
 class VerifyEmailSerializer(serializers.Serializer):
     token = serializers.CharField(required=True)
     password = serializers.CharField(
@@ -48,6 +52,10 @@ class VerifyEmailSerializer(serializers.Serializer):
                 {"password_confirm": "Password confirmation does not match"}
             )
         return attrs
+
+
+class ResetPasswordSerializer(VerifyEmailSerializer):
+    pass
 
 
 class LoginSerializer(serializers.Serializer):
