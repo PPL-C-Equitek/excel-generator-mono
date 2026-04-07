@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { getStoredAccessToken } from '@/lib/auth'
 import LogoutButton from '@/components/LogoutButton'
 import { AUTHENTICATED_NAV_LINKS, type AppPage, type NavLink } from '@/constants/landing'
@@ -24,12 +25,12 @@ export default function Navbar({
             style={{ backgroundColor: 'var(--brand-primary)' }}
             data-testid="navbar"
         >
-            <a
+            <Link
                 href="/"
                 className="rounded-xl px-2 py-1 text-white font-extrabold text-xl tracking-widest transition-all duration-150 hover:bg-red-600 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
                 {brandName}
-            </a>
+            </Link>
             <div className="flex gap-6">
                 {visibleLinks.map((link) => {
                     const isActive = link.key === activePage

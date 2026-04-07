@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import * as auth from '@/lib/auth'
 import Sidebar from '../../../src/components/Sidebar'
@@ -49,5 +49,14 @@ describe('Sidebar', () => {
     it('renders logout button when onLogout is not provided', () => {
         render(<Sidebar activeMenu="convert" />)
         expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
+    })
+
+    it('calls onLogout when custom logout button is clicked', () => {
+        const onLogout = vi.fn()
+
+        render(<Sidebar activeMenu="convert" onLogout={onLogout} />)
+        fireEvent.click(screen.getByRole('button', { name: /logout/i }))
+
+        expect(onLogout).toHaveBeenCalledTimes(1)
     })
 })

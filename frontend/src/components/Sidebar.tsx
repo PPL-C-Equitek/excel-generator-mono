@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from "react"
 import { getStoredUser } from "@/lib/auth"
 import LogoutButton from "@/components/LogoutButton"
@@ -22,12 +23,12 @@ export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
     return (
         <aside className="fixed inset-y-0 left-0 w-56 overflow-y-auto bg-red-700 flex flex-col">
             <div className="px-6 py-5">
-                <a
+                <Link
                     href="/"
                     className="inline-flex rounded-xl px-2 py-1 text-white font-extrabold text-xl tracking-widest transition-all duration-150 hover:bg-red-600 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                     EQUITEK
-                </a>
+                </Link>
             </div>
 
             <nav className="flex flex-col gap-1 px-3">
