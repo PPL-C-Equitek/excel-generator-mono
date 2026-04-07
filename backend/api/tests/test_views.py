@@ -2,6 +2,7 @@ from PyPDF2 import PdfReader, PdfWriter
 from django.core.exceptions import SuspiciousFileOperation
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 from PIL import Image
 
@@ -1086,6 +1087,44 @@ class DownloadExcelViewTest(APISimpleTestCase):
         if hasattr(response, "data"):
             return response.data
         return {}
+
+    def _verified_user(self):
+        return SimpleNamespace(
+            id="verified-user-id",
+            email="verified@example.com",
+            is_authenticated=True,
+            status="verified",
+        )
+
+    def _unverified_user(self):
+        return SimpleNamespace(
+            id="unverified-user-id",
+            email="unverified@example.com",
+            is_authenticated=True,
+            status="unverified",
+        )
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
+    def test_download_excel_endpoint_returns_403_for_unauthenticated_user(
+        self,
+        mocked_resolver,
+    ):
+        response = self.client.get("/export/excel/xlsx_abc123/download")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_resolver.assert_not_called()
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
+    def test_download_excel_endpoint_returns_403_for_authenticated_unverified_user(
+        self,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._unverified_user())
+
+        response = self.client.get("/export/excel/xlsx_abc123/download")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_resolver.assert_not_called()
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
     @patch("api.views.open", create=True)
