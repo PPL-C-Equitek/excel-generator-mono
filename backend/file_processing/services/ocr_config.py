@@ -78,7 +78,5 @@ CONFIDENCE_THRESHOLD = 40.0
 TEXT_LAYER_MIN_CHARS_PER_PAGE = 50
 
 # Standalone image OCR preprocessing
-IMAGE_OCR_APPLY_THRESHOLD = (
-    os.getenv("IMAGE_OCR_APPLY_THRESHOLD", "true").strip().lower() in {"1", "true", "yes"}
-)
-IMAGE_OCR_THRESHOLD = int(os.getenv("IMAGE_OCR_THRESHOLD", "180"))
+IMAGE_OCR_APPLY_THRESHOLD = True
+IMAGE_OCR_THRESHOLD = 180
