@@ -12,6 +12,7 @@ import pytesseract
 
 from .base_ocr_engine import BaseOCREngine
 from file_processing.services.ocr_config import (
+    TESSERACT_CONFIDENCE_EARLY_EXIT,
     TESSERACT_PSM_MODES,
     get_tesseract_lang,
     get_tesseract_config,
@@ -160,6 +161,14 @@ class TesseractEngine(BaseOCREngine):
                 best_text = text
                 best_conf = avg_conf
                 best_psm = psm
+
+            if best_conf >= TESSERACT_CONFIDENCE_EARLY_EXIT:
+                logger.debug(
+                    "Tesseract early exit at PSM %d (confidence %.1f%%)",
+                    psm,
+                    best_conf,
+                )
+                break
 
         logger.info(
             "Tesseract multi-PSM winner: PSM %d — %d chars, confidence %.1f%%",

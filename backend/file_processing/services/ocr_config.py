@@ -67,6 +67,10 @@ BORDER_PADDING_PX = 20
 MORPH_KERNEL_SIZE = 2
 
 # Confidence / pipeline thresholds
+# Skip remaining Tesseract PSM attempts when confidence is already strong.
+# Keep this conservative to avoid missing a better-fit PSM on harder images.
+TESSERACT_CONFIDENCE_EARLY_EXIT = 85.0
+
 # Minimum average EasyOCR confidence (0-100 scale) before falling back
 # to Tesseract.  EasyOCR is the primary engine; if its confidence drops
 # below this threshold, Tesseract (with heavy preprocessing) is tried as
