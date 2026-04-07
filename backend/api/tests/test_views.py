@@ -14,6 +14,8 @@ from api.views import _resolve_download_filename, _sanitize_download_filename, u
 from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
+    OutputCSVMappingError,
+    OutputExcelGenerationError,
     OutputLLMValidationError,
 )
 
@@ -261,7 +263,7 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 200)
 
     def test_upload_unsupported_type(self):
-        resp = self._post_file("note.txt", b"hello", "text/plain")
+        resp = self._post_file("note.html", b"<html></html>", "text/html")
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["status"], "error")
         self.assertIn("message", resp.data)
@@ -714,6 +716,134 @@ class ExportCSVViewTest(APISimpleTestCase):
         payload = {"output_json": self._valid_output_json()}
 
         response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertIn("invalid response metadata", response.data["message"])
+
+
+class ExportExcelViewTest(APISimpleTestCase):
+    def _valid_output_json(self):
+        return {
+            "document_info": {
+                "source_type": "Excel",
+                "filename": "laporan_tahunan.xlsx",
+            },
+            "summary": {
+                "grand_total": 1500000,
+                "period": "2026",
+            },
+            "content_data": [
+                {
+                    "table_name": "Sheet1_Januari",
+                    "headers": ["item_name", "quantity", "price"],
+                    "rows": [
+                        {"item_name": "Kertas", "quantity": 10, "price": 50000},
+                    ],
+                }
+            ],
+        }
+
+    def test_export_excel_endpoint_rejects_get_method(self):
+        response = self.client.get("/export/excel")
+        self.assertEqual(response.status_code, 405)
+
+    def test_export_excel_endpoint_returns_400_if_output_json_missing(self):
+        response = self.client.post("/export/excel", data={}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("output_json", response.data)
+
+    @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_returns_200_with_metadata(self, mocked_export):
+        mocked_export.return_value = {
+            "file_id": "xlsx_abc123",
+            "file_name": "export_abc123.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 512,
+            "created_at": "2026-03-29T10:00:00Z",
+        }
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["file_id"], "xlsx_abc123")
+        self.assertEqual(response.data["file_name"], "export_abc123.xlsx")
+        self.assertEqual(response.data["artifact_type"], "xlsx")
+        mocked_export.assert_called_once()
+
+    @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_returns_400_when_service_validation_fails(
+        self,
+        mocked_export,
+    ):
+        mocked_export.side_effect = OutputLLMValidationError("invalid schema")
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(response.data["message"], "Invalid Excel export request.")
+
+    @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_returns_400_when_service_mapping_fails(
+        self,
+        mocked_export,
+    ):
+        mocked_export.side_effect = OutputCSVMappingError("invalid mapping")
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(response.data["message"], "Invalid Excel export request.")
+
+    @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_returns_500_on_generation_error(self, mocked_export):
+        mocked_export.side_effect = OutputExcelGenerationError("storage failure")
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to generate Excel due to internal error.",
+        )
+
+    @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_returns_500_on_unexpected_error(self, mocked_export):
+        mocked_export.side_effect = RuntimeError("disk full")
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to generate Excel due to internal error.",
+        )
+
+    @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_returns_500_when_response_metadata_invalid(
+        self,
+        mocked_export,
+    ):
+        mocked_export.return_value = {
+            "file_id": "xlsx_abc123",
+            "file_name": "../unsafe.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 512,
+            "created_at": "2026-03-29T10:00:00Z",
+        }
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/excel", data=payload, format="json")
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data["status"], "error")

@@ -4,6 +4,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.utils.text import get_valid_filename
 from .excel_service import process_uploaded_excel
+from .txt_service import process_uploaded_txt
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
@@ -32,6 +33,9 @@ MIME_OLE_STORAGE = "application/x-ole-storage"
 MIME_ZIP = "application/zip"
 
 ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_DOCX, EXT_DOC]
+EXT_TXT = ".txt"
+
+ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_TXT]
 ALLOWED_MIME_TYPES = {
     EXT_PDF: [
         "application/pdf",
@@ -79,6 +83,11 @@ ALLOWED_MIME_TYPES = {
         MIME_OCTET_STREAM,
         MIME_OLE_STORAGE,
     ],
+
+    EXT_TXT: [
+        "text/plain",
+        "text/x-log",
+    ],
 }
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 FILE_TOO_LARGE_ERROR = "File too large. Maximum allowed size is 10MB."
@@ -94,9 +103,26 @@ EXCEL_PASSWORD_PROTECTED_ERROR = (
 )
 MAX_WORD_PAGES = word_validation_service.MAX_WORD_PAGES
 WORD_CORRUPT_ERROR = word_validation_service.WORD_CORRUPT_ERROR
+TXT_CORRUPT_ERROR = "File teks tidak dapat dibaca atau rusak (corrupt)."
+TXT_PROTECTED_ERROR = (
+    "File terdeteksi sebagai format terproteksi atau terenkripsi. "
+    "Pastikan file adalah teks biasa (.txt) yang tidak diproteksi."
+)
+FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
 OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
+
+BINARY_SIGNATURES: list[tuple[bytes, str]] = [
+    (b"\x50\x4B\x03\x04", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\x50\x4B\x05\x06", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", TXT_PROTECTED_ERROR),
+    (b"\x7fELF", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"MZ", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"%PDF", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\xff\xd8\xff", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\x89PNG", FILE_EXTENSION_MISMATCH_ERROR),
+]
 
 def _has_extracted_text(extracted_data):
     """Return True if any page contains extracted text."""
@@ -174,6 +200,12 @@ def process_upload(uploaded_file):
                 return False, error, None, None
             extracted_data = data
 
+        elif ext == EXT_TXT:
+            success, error, data = process_uploaded_txt(file_path)
+            if not success:
+                return False, error, None, None
+            extracted_data = data
+
         else:
             return False, "Unsupported file type", None, None
 
@@ -193,7 +225,7 @@ def validate_file(uploaded_file):
 
     # Validate extension
     if ext not in ALLOWED_EXTENSIONS:
-        return False, "Unsupported file type. Only PDF, XLS, XLSX, DOC, and DOCX are allowed."
+        return False, "Unsupported file type. Only PDF, XLS, XLSX, and TXT are allowed."
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
@@ -352,6 +384,12 @@ def validate_mime_type(uploaded_file, ext):
         if mime not in expected_mimes:
             return False, DOES_NOT_MATCH_EXTENSION_ERROR
 
+        if ext == EXT_TXT:
+            return _validate_txt_content(uploaded_file, mime)
+
+        if mime not in expected_mimes:
+            return False, FILE_EXTENSION_MISMATCH_ERROR
+
         return True, None
 
     except Exception:
@@ -422,6 +460,35 @@ def _has_zip_signature(uploaded_file):
         return header == ZIP_SIGNATURE_PREFIX
     except Exception:
         return False
+
+def _has_binary_signature(uploaded_file):
+    try:
+        max_prefix = max(len(sig) for sig, _ in BINARY_SIGNATURES)
+        uploaded_file.seek(0)
+        header = uploaded_file.read(max_prefix)
+        uploaded_file.seek(0)
+
+        for signature, error_msg in BINARY_SIGNATURES:
+            if header.startswith(signature):
+                return True, error_msg
+
+        return False, None
+    except Exception:
+        return False, None
+
+def _validate_txt_content(uploaded_file, detected_mime: str):
+    is_binary, binary_error = _has_binary_signature(uploaded_file)
+    if is_binary:
+        return False, binary_error
+
+    if detected_mime and detected_mime.startswith("text/"):
+        return True, None
+
+    allowed = ALLOWED_MIME_TYPES.get(EXT_TXT, [])
+    if detected_mime in allowed:
+        return True, None
+
+    return False, TXT_CORRUPT_ERROR
 
 
 def save_temp_file(uploaded_file):
