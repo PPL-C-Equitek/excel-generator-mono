@@ -6,11 +6,13 @@ from django.core.exceptions import SuspiciousFileOperation
 from django.http import FileResponse
 from django.utils._os import safe_join
 from django.views.decorators.http import require_GET, require_POST
-from rest_framework.decorators import api_view, parser_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import MultiPartParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
+from authentication.permissions import IsVerifiedUser
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
     MAX_FILE_SIZE,
@@ -372,6 +374,7 @@ def download_csv(request, file_id):
 
 @require_GET
 @api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
 def download_excel(request, export_id):
     try:
         artifact = resolve_excel_download_artifact(

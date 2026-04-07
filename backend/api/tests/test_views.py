@@ -1133,6 +1133,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.xlsx",
             "file_path": "/safe/storage/export_abc123.xlsx",
@@ -1163,6 +1164,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.xlsx",
             "file_path": "/safe/storage/export_abc123.xlsx",
@@ -1190,6 +1192,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.xlsx",
             "file_path": "/safe/storage/export_abc123.xlsx",
@@ -1215,6 +1218,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         self,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.side_effect = OutputExcelDownloadLookupError(
             "export_id format is invalid."
         )
@@ -1232,6 +1236,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         self,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.side_effect = OutputExcelDownloadLookupError(
             "Excel artifact not found for given export_id."
         )
@@ -1251,6 +1256,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         mocked_resolver,
         _mocked_safe_join,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "../evil.xlsx",
             "file_path": "/safe/storage/../evil.xlsx",
@@ -1274,6 +1280,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         _mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.xlsx",
             "file_path": "/safe/storage/export_abc123.xlsx",
@@ -1299,6 +1306,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         _mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.xlsx",
             "file_path": "/safe/storage/export_abc123.xlsx",
@@ -1322,6 +1330,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         self,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.side_effect = RuntimeError("unexpected resolver failure")
 
         response = self.client.get("/export/excel/xlsx_abc123/download")
@@ -1338,6 +1347,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         self,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.side_effect = OutputExcelDownloadStorageError(
             "Excel artifact storage is unavailable."
         )
