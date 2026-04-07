@@ -14,10 +14,6 @@ export default function LogoutButton() {
     const [message, setMessage] = useState('')
 
     const handleLogout = async () => {
-        if (isLoading) {
-            return
-        }
-
         setIsLoading(true)
 
         try {
