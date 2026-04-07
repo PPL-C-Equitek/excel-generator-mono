@@ -294,6 +294,14 @@ describe("exportToExcel", () => {
     );
   });
 
+  it("supports legacy message-based API errors without a status property", async () => {
+    vi.spyOn(api, "fetchAPI").mockRejectedValue(new Error("API error: 503"));
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "Service is currently unavailable. Please try again later."
+    );
+  });
+
   it("passes through unknown errors from fetchAPI", async () => {
     vi.spyOn(api, "fetchAPI").mockRejectedValue(new Error("Unknown Failure"));
 

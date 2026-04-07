@@ -899,6 +899,25 @@ describe('useConvertFlow', () => {
             expect(getExcelState(result).excelSuccessMessage).toBeNull()
         })
 
+        it('falls back to the default excel error message when the failure is not an Error instance', async () => {
+            const service = makeMockService({
+                downloadExcelFile: vi.fn().mockRejectedValue('fatal'),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(getExcelState(result).isExcelDownloading).toBe(false)
+            expect(getExcelState(result).excelError).toBe('Failed to export')
+            expect(getExcelState(result).excelSuccessMessage).toBeNull()
+        })
+
         it('clears previous excel error after a successful second attempt', async () => {
             const service = makeMockService({
                 exportToExcel: vi.fn()

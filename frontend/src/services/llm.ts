@@ -139,14 +139,6 @@ function cleanupExcelDownloadResources(
     }
 }
 
-/**
- * Mengekspor hasil generasi JSON ke format CSV.
- * Berkomunikasi dengan endpoint REST (POST /export/csv)
- * dan mengembalikan file_id dengan prefix keamanan 'csv_'.
- *
- * @param outputJson JSON hasil LLM yang valid.
- * @returns Promise berisi file_id yang digenerate oleh backend.
- */
 export async function exportToCsv(
     outputJson: JsonValue
 ): Promise<{ file_id: string }> {
@@ -251,15 +243,6 @@ export async function downloadExcelFile(
     }
 }
 
-/**
- * Menghasilkan URL lengkap untuk mengunduh hasil konversi CSV.
- * Pemanggilan URL ini akan menuju ke GET /export/csv/{fileId}/download
- * bersama param filename opsional.
- *
- * @param fileId string ID dengan prefix 'csv_'.
- * @param filename Opsional, nama file target untuk download.
- * @returns URL valid untuk pengunduhan file dari API backend.
- */
 export function getDownloadUrl(fileId: string, filename?: string): string {
     const base = getApiBaseOrigin();
     let url = `${base}/export/csv/${fileId}/download`;
