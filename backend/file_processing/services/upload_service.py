@@ -30,14 +30,12 @@ EXT_XLS = ".xls"
 EXT_PDF = ".pdf"
 EXT_DOCX = ".docx"
 EXT_DOC = ".doc"
+EXT_TXT = ".txt"
 MIME_OCTET_STREAM = "application/octet-stream"
 MIME_OLE_STORAGE = "application/x-ole-storage"
 MIME_ZIP = "application/zip"
 
-ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_DOCX, EXT_DOC]
-EXT_TXT = ".txt"
-
-ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_TXT]
+ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_DOCX, EXT_DOC, EXT_TXT]
 ALLOWED_MIME_TYPES = {
     EXT_PDF: [
         "application/pdf",
@@ -105,7 +103,6 @@ TXT_PROTECTED_ERROR = (
     "Pastikan file adalah teks biasa (.txt) yang tidak diproteksi."
 )
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
-OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
 
@@ -211,6 +208,10 @@ def process_upload(uploaded_file):
 
         elif ext in [".docx", ".doc"]:
             success, error, data = process_word(file_path, ext)
+            if not success:
+                return False, error, None, None
+            extracted_data = data
+
         elif ext == EXT_TXT:
             success, error, data = process_uploaded_txt(file_path)
             if not success:
@@ -236,7 +237,7 @@ def validate_file(uploaded_file):
 
     # Validate extension
     if ext not in ALLOWED_EXTENSIONS:
-        return False, "Unsupported file type. Only PDF, XLS, XLSX, and TXT are allowed."
+        return False, "Unsupported file type. Only PDF, XLS, XLSX, DOC, DOCX, and TXT are allowed."
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:

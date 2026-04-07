@@ -392,7 +392,7 @@ class TxtValidationTests(TestCase):
         "file_processing.services.upload_service.magic.from_buffer",
         return_value="text/plain",
     )
-    def test_txt_extension_is_accepted(self):
+    def test_txt_extension_is_accepted(self, _mock_magic):
         uploaded = _txt_file("data.txt", _valid_txt_content(), "text/plain")
         response = self.client.post(UPLOAD_URL, {"file": uploaded})
         self.assertIn(
@@ -487,7 +487,7 @@ class TxtValidationTests(TestCase):
         "file_processing.services.upload_service.magic.from_buffer",
         return_value="text/plain",
     )
-    def test_correct_mime_text_plain_is_accepted(self):
+    def test_correct_mime_text_plain_is_accepted(self, _mock_magic):
         uploaded = _txt_file("dokumen.txt", _valid_txt_content(), "text/plain")
         response = self.client.post(UPLOAD_URL, {"file": uploaded})
         self.assertEqual(

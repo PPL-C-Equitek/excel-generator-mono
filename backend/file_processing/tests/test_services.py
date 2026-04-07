@@ -553,13 +553,10 @@ class TestUploadService(TestCase):
 
         is_valid, error = validate_file(f)
 
-        self.assertFalse(is_valid)
-        self.assertEqual(
-            error,
-            "Unsupported file type. Only PDF, XLS, XLSX, and TXT are allowed.",
-        )
-        mock_validate_mime.assert_not_called()
-        mock_validate_word.assert_not_called()
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+        mock_validate_mime.assert_called_once_with(f, ".doc")
+        mock_validate_word.assert_called_once_with(f, ".doc")
 
     @patch(
         "file_processing.services.upload_service.word_validation_service.validate_word"
@@ -579,13 +576,10 @@ class TestUploadService(TestCase):
 
         is_valid, error = validate_file(f)
 
-        self.assertFalse(is_valid)
-        self.assertEqual(
-            error,
-            "Unsupported file type. Only PDF, XLS, XLSX, and TXT are allowed.",
-        )
-        mock_validate_mime.assert_not_called()
-        mock_validate_word.assert_not_called()
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+        mock_validate_mime.assert_called_once_with(f, ".docx")
+        mock_validate_word.assert_called_once_with(f, ".docx")
 
     @patch(
         "file_processing.services.upload_service.word_validation_service.validate_word"
@@ -606,12 +600,7 @@ class TestUploadService(TestCase):
         is_valid, error = validate_file(f)
 
         self.assertFalse(is_valid)
-        self.assertEqual(
-            error,
-            "Unsupported file type. Only PDF, XLS, XLSX, and TXT are allowed.",
-        )
-        mock_validate_mime.assert_not_called()
-        mock_validate_word.assert_not_called()
+        self.assertEqual(error, "Word file is password-protected.")
 
     def test_validate_word_docx_happy_path(self):
         content = BytesIO()
