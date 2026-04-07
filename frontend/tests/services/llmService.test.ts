@@ -294,6 +294,17 @@ describe("exportToExcel", () => {
     );
   });
 
+  it("maps API errors that expose a numeric status property", async () => {
+    const errorWithStatus = Object.assign(new Error("Service Unavailable"), {
+      status: 503,
+    });
+    vi.spyOn(api, "fetchAPI").mockRejectedValue(errorWithStatus);
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "Service is currently unavailable. Please try again later."
+    );
+  });
+
   it("supports legacy message-based API errors without a status property", async () => {
     vi.spyOn(api, "fetchAPI").mockRejectedValue(new Error("API error: 503"));
 
