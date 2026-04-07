@@ -19,7 +19,12 @@ export interface UseCustomSchemasReturn {
     message: string | null
     reloadSchemas: () => Promise<void>
     createSchema: (input: CreateCustomSchemaInput) => Promise<boolean>
+    updateSchema: (schemaId: string, input: CreateCustomSchemaInput) => Promise<boolean>
     deleteSchema: (schemaId: string) => Promise<boolean>
+}
+
+function sortSchemas(schemas: CustomSchemaRecord[]): CustomSchemaRecord[] {
+    return [...schemas].sort((left, right) => left.name.localeCompare(right.name))
 }
 
 export function useCustomSchemas(
@@ -125,11 +130,47 @@ export function useCustomSchemas(
 
         try {
             const createdSchema = await service.create(input, accessToken)
-            setSchemas((prev) => [...prev, createdSchema].sort((left, right) => left.name.localeCompare(right.name)))
+            setSchemas((prev) => sortSchemas([...prev, createdSchema]))
             setMessage(`"${createdSchema.name}" saved successfully.`)
             return true
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Failed to save custom schema.')
+            return false
+        } finally {
+            setIsSaving(false)
+        }
+    }
+
+    const updateSchema = async (
+        schemaId: string,
+        input: CreateCustomSchemaInput
+    ): Promise<boolean> => {
+        const accessToken = accessTokenResolver()
+
+        if (!accessToken) {
+            setHasAccessToken(false)
+            setError('Sign in before updating a custom schema.')
+            return false
+        }
+
+        setHasAccessToken(true)
+        setIsSaving(true)
+        setError(null)
+        setMessage(null)
+
+        try {
+            const updatedSchema = await service.update(schemaId, input, accessToken)
+            setSchemas((prev) =>
+                sortSchemas(
+                    prev.map((schema) =>
+                        schema.id === schemaId ? updatedSchema : schema
+                    )
+                )
+            )
+            setMessage(`"${updatedSchema.name}" updated successfully.`)
+            return true
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to update custom schema.')
             return false
         } finally {
             setIsSaving(false)
@@ -177,6 +218,7 @@ export function useCustomSchemas(
         message,
         reloadSchemas,
         createSchema,
+        updateSchema,
         deleteSchema,
     }
 }

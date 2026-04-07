@@ -20,7 +20,6 @@ class CustomSchemaSerializer(serializers.ModelSerializer):
             "owner_id",
             "name",
             "description",
-            "version",
             "is_active",
             "definition",
             "prompt_fragment",
@@ -30,7 +29,6 @@ class CustomSchemaSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "owner_id",
-            "version",
             "prompt_fragment",
             "created_at",
             "updated_at",

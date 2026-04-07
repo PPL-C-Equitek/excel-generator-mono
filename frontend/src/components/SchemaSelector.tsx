@@ -42,13 +42,12 @@ export default function SchemaSelector({
                 <div>
                     <h2 className="text-lg font-semibold text-gray-900">Choose A Schema</h2>
                     <p className="mt-1 text-sm text-gray-500">
-                        Choose a saved schema if you want to guide this conversion. You can
-                        continue without one.
+                        Use a saved schema, or continue without one.
                     </p>
                 </div>
                 <a
                     href="/schema"
-                    className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+                    className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100"
                 >
                     Open Schema Builder
                 </a>
@@ -81,48 +80,47 @@ export default function SchemaSelector({
                         >
                             Which schema do you want to use?
                         </label>
-                        <select
-                            id="convert-schema-select"
-                            data-testid="schema-select"
-                            value={selectValue}
-                            onChange={(event) => {
-                                setSelectedSchemaId(event.target.value)
-                            }}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
-                        >
-                            <option value="none">No schema</option>
-                            {schemas.map((schema) => (
-                                <option key={schema.id} value={String(schema.id)}>
-                                    {schema.name}
-                                </option>
-                            ))}
-                        </select>
+                        <div className="relative">
+                            <select
+                                id="convert-schema-select"
+                                data-testid="schema-select"
+                                value={selectValue}
+                                onChange={(event) => {
+                                    setSelectedSchemaId(event.target.value)
+                                    event.currentTarget.blur()
+                                }}
+                                className="w-full appearance-none rounded-lg border border-gray-300 px-3 py-2 pr-11 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                            >
+                                <option value="none">No schema</option>
+                                {schemas.map((schema) => (
+                                    <option key={schema.id} value={String(schema.id)}>
+                                        {schema.name}
+                                    </option>
+                                ))}
+                            </select>
+                            <span
+                                aria-hidden="true"
+                                data-testid="schema-select-chevron"
+                                className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-gray-500"
+                            >
+                                <svg
+                                    className="h-4 w-4"
+                                    viewBox="0 0 20 20"
+                                    fill="none"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                >
+                                    <path
+                                        d="M5 7.5L10 12.5L15 7.5"
+                                        stroke="currentColor"
+                                        strokeWidth="1.75"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                                </svg>
+                            </span>
+                        </div>
                     </div>
 
-                    {selectedSchema && (
-                        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                            <h3 className="text-base font-semibold text-gray-900">
-                                {selectedSchema.name}
-                            </h3>
-
-                            {selectedSchema.description && (
-                                <p className="mt-2 text-sm text-gray-600">
-                                    {selectedSchema.description}
-                                </p>
-                            )}
-
-                            <div className="mt-3 flex flex-wrap gap-2">
-                                {selectedSchema.definition.columns.map((column) => (
-                                    <span
-                                        key={`${selectedSchema.id}-${column.name}`}
-                                        className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700"
-                                    >
-                                        {column.name}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                    )}
                 </div>
             )}
         </section>
