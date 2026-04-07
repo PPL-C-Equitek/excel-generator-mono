@@ -19,6 +19,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import upload_service
+from file_processing.services.word_extraction_service import WordExtractionService
 
 
 from file_processing.services import word_validation_service
@@ -1870,6 +1871,98 @@ class TestWordValidationService(unittest.TestCase):
 
         self.assertFalse(is_valid)
         self.assertEqual(error, word_validation_service.WORD_CORRUPT_ERROR)
+
+
+class TestWordExtractionCoverage(unittest.TestCase):
+    def _create_temp_docx(self, document_xml: str) -> str:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        tmp.close()
+        with zipfile.ZipFile(tmp.name, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types></Types>")
+            archive.writestr("word/document.xml", document_xml)
+        return tmp.name
+
+    def test_extract_word_to_json_docx_success(self):
+        path = self._create_temp_docx(
+            """
+            <w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>
+              <w:body>
+                <w:p><w:r><w:t>Halo</w:t></w:r><w:tab/><w:r><w:t>Dunia</w:t></w:r></w:p>
+                <w:p><w:r><w:t>Baris</w:t></w:r><w:br/><w:r><w:t>Kedua</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        try:
+            result = WordExtractionService.extract_word_to_json(path, ".docx")
+            self.assertEqual(result["content"][0]["page"], 1)
+            self.assertEqual(result["content"][0]["text"], ["Halo Dunia", "Baris Kedua"])
+        finally:
+            os.unlink(path)
+
+    def test_extract_word_to_json_docx_invalid_raises(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        tmp.write(b"not-a-zip")
+        tmp.close()
+        try:
+            with self.assertRaises(ValueError):
+                WordExtractionService.extract_word_to_json(tmp.name, ".docx")
+        finally:
+            os.unlink(tmp.name)
+
+    def test_extract_word_to_json_doc_filters_and_deduplicates(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
+        tmp.write(
+            upload_service.OLE_SIGNATURE
+            + b"WordDocument\nInvoice 001\nInvoice 001\n12345\n"
+        )
+        tmp.close()
+        try:
+            result = WordExtractionService.extract_word_to_json(tmp.name, ".doc")
+            self.assertEqual(result["content"][0]["text"], ["WordDocument", "Invoice 001"])
+        finally:
+            os.unlink(tmp.name)
+
+    def test_extract_word_to_json_unsupported_ext_raises(self):
+        with self.assertRaises(ValueError):
+            WordExtractionService.extract_word_to_json("/tmp/file.txt", ".txt")
+
+    def test_local_name_without_namespace(self):
+        self.assertEqual(WordExtractionService._local_name("p"), "p")
+
+    @patch(
+        "file_processing.services.upload_service.WordExtractionService.extract_word_to_json",
+        side_effect=ValueError("bad word"),
+    )
+    def test_process_word_returns_value_error_message(self, _mock_extract):
+        success, error, data = upload_service.process_word("/tmp/f.docx", ".docx")
+        self.assertFalse(success)
+        self.assertEqual(error, "bad word")
+        self.assertIsNone(data)
+
+    @patch(
+        "file_processing.services.upload_service.WordExtractionService.extract_word_to_json",
+        side_effect=RuntimeError("boom"),
+    )
+    def test_process_word_returns_corrupt_error_on_unexpected_exception(self, _mock_extract):
+        success, error, data = upload_service.process_word("/tmp/f.docx", ".docx")
+        self.assertFalse(success)
+        self.assertEqual(error, upload_service.WORD_CORRUPT_ERROR)
+        self.assertIsNone(data)
+
+    def test_estimate_doc_page_count_handles_decode_failures(self):
+        class BadContent:
+            def __bool__(self):
+                return True
+
+            def count(self, _value):
+                return 2
+
+            def decode(self, *_args, **_kwargs):
+                raise ValueError("decode failed")
+
+        page_count = word_validation_service.estimate_doc_page_count(BadContent())
+        self.assertEqual(page_count, 3)
 
     def test_extract_docx_page_count_without_pages_returns_zero(self):
         class ArchiveNoPages:
