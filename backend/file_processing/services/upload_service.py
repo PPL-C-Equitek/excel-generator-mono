@@ -414,9 +414,6 @@ def validate_mime_type(uploaded_file, ext):
         if mime not in expected_mimes:
             return False, DOES_NOT_MATCH_EXTENSION_ERROR
 
-        if mime not in expected_mimes:
-            return False, FILE_EXTENSION_MISMATCH_ERROR
-
         return True, None
 
     except Exception:

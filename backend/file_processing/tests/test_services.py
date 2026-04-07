@@ -1950,6 +1950,57 @@ class TestWordExtractionCoverage(unittest.TestCase):
         self.assertEqual(error, upload_service.WORD_CORRUPT_ERROR)
         self.assertIsNone(data)
 
+    @patch(
+        "file_processing.services.upload_service.WordExtractionService.extract_word_to_json",
+        return_value={"content": [{"page": 1, "text": ["ok"]}]},
+    )
+    def test_process_word_success_path(self, _mock_extract):
+        success, error, data = upload_service.process_word("/tmp/f.docx", ".docx")
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(data, {"content": [{"page": 1, "text": ["ok"]}]})
+
+    @patch("builtins.open", side_effect=OSError("open failed"))
+    def test_extract_word_to_json_doc_open_error_raises_value_error(self, _mock_open):
+        with self.assertRaises(ValueError):
+            WordExtractionService.extract_word_to_json("/tmp/notfound.doc", ".doc")
+
+    @patch(
+        "file_processing.services.upload_service.validate_file",
+        return_value=(True, None),
+    )
+    @patch(
+        "file_processing.services.upload_service.save_temp_file",
+        return_value="/tmp/f.docx",
+    )
+    @patch(
+        "file_processing.services.upload_service.process_word",
+        return_value=(False, "word failed", None),
+    )
+    @patch("file_processing.services.upload_service.os.path.exists", return_value=False)
+    def test_process_upload_docx_word_processing_failure(
+        self, _exists, _process_word, _save, _validate
+    ):
+        uploaded = SimpleUploadedFile(
+            "f.docx",
+            b"dummy",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        success, error, _, extracted = upload_service.process_upload(uploaded)
+        self.assertFalse(success)
+        self.assertEqual(error, "word failed")
+        self.assertIsNone(extracted)
+
+    def test_validate_mime_type_fallback_zip_branch(self):
+        with patch(
+            "file_processing.services.upload_service.magic.from_buffer",
+            side_effect=Exception("boom"),
+        ):
+            f = SimpleUploadedFile("z.docx", b"PK\x03\x04payload", content_type="application/zip")
+            is_valid, error = upload_service.validate_mime_type(f, ".docx")
+            self.assertTrue(is_valid)
+            self.assertIsNone(error)
+
     def test_estimate_doc_page_count_handles_decode_failures(self):
         class BadContent:
             def __bool__(self):
@@ -1963,6 +2014,9 @@ class TestWordExtractionCoverage(unittest.TestCase):
 
         page_count = word_validation_service.estimate_doc_page_count(BadContent())
         self.assertEqual(page_count, 3)
+
+    def test_estimate_doc_page_count_empty_content_returns_zero(self):
+        self.assertEqual(word_validation_service.estimate_doc_page_count(b""), 0)
 
     def test_extract_docx_page_count_without_pages_returns_zero(self):
         class ArchiveNoPages:
