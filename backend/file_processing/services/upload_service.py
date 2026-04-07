@@ -156,6 +156,24 @@ def _process_image(file_path):
         return False, "Image OCR extraction failed.", None
 
 
+def _dispatch_upload_processing(ext, file_path, uploaded_file):
+    processors = {
+        EXT_PDF: lambda: _process_pdf(file_path, uploaded_file),
+        EXT_XLS: lambda: process_uploaded_excel(file_path),
+        EXT_XLSX: lambda: process_uploaded_excel(file_path),
+        EXT_TXT: lambda: process_uploaded_txt(file_path),
+        EXT_PNG: lambda: _process_image(file_path),
+        EXT_JPG: lambda: _process_image(file_path),
+        EXT_JPEG: lambda: _process_image(file_path),
+    }
+
+    processor = processors.get(ext)
+    if processor is None:
+        return False, "Unsupported file type", None
+
+    return processor()
+
+
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
     if not is_valid:
@@ -164,35 +182,15 @@ def process_upload(uploaded_file):
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
     file_path = save_temp_file(uploaded_file)
-    extracted_data = None
 
     try:
-        if ext == ".pdf":
-            success, error, data = _process_pdf(file_path, uploaded_file)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext in [".xlsx", ".xls"]:
-            success, error, data = process_uploaded_excel(file_path)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext == EXT_TXT:
-            success, error, data = process_uploaded_txt(file_path)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext in IMAGE_EXTENSIONS:
-            success, error, data = _process_image(file_path)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        else:
-            return False, "Unsupported file type", None, None
+        success, error, extracted_data = _dispatch_upload_processing(
+            ext,
+            file_path,
+            uploaded_file,
+        )
+        if not success:
+            return False, error, None, None
 
     finally:
         try:
