@@ -13,7 +13,6 @@ function createSchemaRecord(overrides: Partial<CustomSchemaRecord> = {}): Custom
         owner_id: '11111111-1111-1111-1111-111111111111',
         name: 'Invoice Mapping',
         description: 'Maps invoice rows',
-        version: 1,
         is_active: false,
         definition: {
             columns: [
@@ -48,6 +47,7 @@ function createService(overrides: Partial<ICustomSchemaService> = {}): ICustomSc
     return {
         list: vi.fn().mockResolvedValue([]),
         create: vi.fn(),
+        update: vi.fn(),
         remove: vi.fn().mockResolvedValue(undefined),
         ...overrides,
     }
@@ -300,6 +300,98 @@ describe('useCustomSchemas', () => {
         expect(wasDeleted).toBe(false)
         expect(result.current.hasAccessToken).toBe(false)
         expect(result.current.error).toBe('Sign in before deleting a custom schema.')
+    })
+
+    it('updateSchema rejects when there is no access token', async () => {
+        const service = createService()
+        const accessTokenResolver = () => null
+
+        const { result } = renderHook(() => useCustomSchemas(service, accessTokenResolver))
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        let wasUpdated = true
+        await act(async () => {
+            wasUpdated = await result.current.updateSchema(
+                '00000000-0000-0000-0000-000000000001',
+                createInput
+            )
+        })
+
+        expect(wasUpdated).toBe(false)
+        expect(result.current.hasAccessToken).toBe(false)
+        expect(result.current.error).toBe('Sign in before updating a custom schema.')
+    })
+
+    it('updateSchema replaces the schema and reports success', async () => {
+        const service = createService({
+            list: vi.fn().mockResolvedValue([
+                createSchemaRecord({
+                    id: '00000000-0000-0000-0000-000000000002',
+                    name: 'Zulu Mapping',
+                }),
+                createSchemaRecord({
+                    id: '00000000-0000-0000-0000-000000000001',
+                    name: 'Bravo Mapping',
+                }),
+            ]),
+            update: vi.fn().mockResolvedValue(
+                createSchemaRecord({
+                    id: '00000000-0000-0000-0000-000000000001',
+                    name: 'Alpha Mapping',
+                })
+            ),
+        })
+        const accessTokenResolver = () => 'access-token'
+
+        const { result } = renderHook(() => useCustomSchemas(service, accessTokenResolver))
+
+        await waitFor(() => {
+            expect(result.current.schemas).toHaveLength(2)
+        })
+
+        let wasUpdated = false
+        await act(async () => {
+            wasUpdated = await result.current.updateSchema(
+                '00000000-0000-0000-0000-000000000001',
+                createInput
+            )
+        })
+
+        expect(wasUpdated).toBe(true)
+        expect(result.current.isSaving).toBe(false)
+        expect(result.current.schemas.map((schema) => schema.name)).toEqual([
+            'Alpha Mapping',
+            'Zulu Mapping',
+        ])
+        expect(result.current.message).toBe('"Alpha Mapping" updated successfully.')
+    })
+
+    it('updateSchema uses the fallback error for non-Error failures', async () => {
+        const service = createService({
+            update: vi.fn().mockRejectedValue('update failure'),
+        })
+        const accessTokenResolver = () => 'access-token'
+
+        const { result } = renderHook(() => useCustomSchemas(service, accessTokenResolver))
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        let wasUpdated = true
+        await act(async () => {
+            wasUpdated = await result.current.updateSchema(
+                '00000000-0000-0000-0000-000000000001',
+                createInput
+            )
+        })
+
+        expect(wasUpdated).toBe(false)
+        expect(result.current.error).toBe('Failed to update custom schema.')
+        expect(result.current.isSaving).toBe(false)
     })
 
     it('deleteSchema removes the schema and reports success when the name is known', async () => {

@@ -52,7 +52,6 @@ class CustomSchemaApiViewTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["id"], str(CustomSchema.objects.get().id))
         self.assertEqual(response.data["name"], "Invoice Mapping")
-        self.assertEqual(response.data["version"], 1)
         self.assertEqual(response.data["owner_id"], str(self.user.id))
         self.assertIn("prompt_fragment", response.data)
 
@@ -151,7 +150,7 @@ class CustomSchemaApiViewTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(returned_ids, {str(active_schema.id), str(inactive_schema.id)})
 
-    def test_update_definition_increments_schema_version_for_owner(self):
+    def test_owner_can_update_definition(self):
         schema = CustomSchema.objects.create(
             owner_id=self.user.id,
             name="Receipt Mapping",
@@ -169,8 +168,11 @@ class CustomSchemaApiViewTest(TestCase):
         schema.refresh_from_db()
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["version"], 2)
-        self.assertEqual(schema.version, 2)
+        self.assertEqual(
+            response.data["definition"],
+            make_definition("receipt_code"),
+        )
+        self.assertEqual(schema.definition, make_definition("receipt_code"))
 
     def test_user_cannot_retrieve_another_users_schema(self):
         schema = CustomSchema.objects.create(

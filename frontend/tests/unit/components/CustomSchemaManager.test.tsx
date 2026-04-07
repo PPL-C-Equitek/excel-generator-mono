@@ -17,7 +17,6 @@ function createSchemaRecord(overrides: Partial<CustomSchemaRecord> = {}): Custom
         owner_id: '11111111-1111-1111-1111-111111111111',
         name: 'Invoice Mapping',
         description: 'Maps invoice rows',
-        version: 1,
         is_active: true,
         definition: {
             columns: [
@@ -38,6 +37,7 @@ function createService(overrides: Partial<ICustomSchemaService> = {}): ICustomSc
     return {
         list: vi.fn().mockResolvedValue([]),
         create: vi.fn(),
+        update: vi.fn(),
         remove: vi.fn().mockResolvedValue(undefined),
         ...overrides,
     }
@@ -101,6 +101,8 @@ describe('CustomSchemaManager', () => {
 
         expect(screen.getByText('Invoice Mapping')).toBeInTheDocument()
         expect(screen.getByText('Receipt Mapping')).toBeInTheDocument()
+        expect(screen.queryByText('invoice_number')).not.toBeInTheDocument()
+        expect(screen.queryByText('receipt_number')).not.toBeInTheDocument()
         expect(screen.getByTestId('schema-count')).toHaveTextContent('2/5 saved')
         expect(screen.getByTestId('add-schema-btn')).toBeEnabled()
         expect(screen.queryByText(/^Active$/i)).not.toBeInTheDocument()
@@ -198,6 +200,10 @@ describe('CustomSchemaManager', () => {
 
         await screen.findByText('Invoice Mapping')
         await user.click(screen.getByRole('button', { name: /delete/i }))
+        expect(
+            screen.getByRole('dialog', { name: /delete schema/i })
+        ).toBeInTheDocument()
+        await user.click(screen.getByTestId('confirm-delete-schema-btn'))
 
         await waitFor(() => {
             expect(service.remove).toHaveBeenCalledWith(
@@ -208,6 +214,88 @@ describe('CustomSchemaManager', () => {
 
         expect(screen.queryByText('Invoice Mapping')).not.toBeInTheDocument()
         expect(screen.getByText('"Invoice Mapping" deleted successfully.')).toBeInTheDocument()
+    })
+
+    it('opens the modal in edit mode and updates an existing schema', async () => {
+        const user = userEvent.setup()
+        const updatedSchema = createSchemaRecord({
+            name: 'Updated Invoice Mapping',
+            description: 'Updated schema description',
+            definition: {
+                columns: [
+                    {
+                        name: 'invoice_code',
+                        description: 'Updated invoice identifier',
+                    },
+                ],
+            },
+        })
+        const service = createService({
+            list: vi.fn().mockResolvedValue([createSchemaRecord()]),
+            update: vi.fn().mockResolvedValue(updatedSchema),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await screen.findByText('Invoice Mapping')
+        await user.click(screen.getByRole('button', { name: /^edit$/i }))
+
+        const dialog = screen.getByRole('dialog', { name: /edit schema/i })
+        const nameInput = within(dialog).getByLabelText(/schema name/i)
+        const descriptionInput = within(dialog).getByLabelText(/^description$/i)
+        const columnNameInput = within(dialog).getByLabelText(/column name/i)
+        const columnDescriptionInput = within(dialog).getByLabelText(/column description/i)
+
+        expect(nameInput).toHaveValue('Invoice Mapping')
+        expect(descriptionInput).toHaveValue('Maps invoice rows')
+        expect(columnNameInput).toHaveValue('invoice_number')
+        expect(columnDescriptionInput).toHaveValue('Invoice identifier')
+
+        await user.clear(nameInput)
+        await user.type(nameInput, 'Updated Invoice Mapping')
+        await user.clear(descriptionInput)
+        await user.type(descriptionInput, 'Updated schema description')
+        await user.clear(columnNameInput)
+        await user.type(columnNameInput, 'invoice_code')
+        await user.clear(columnDescriptionInput)
+        await user.type(columnDescriptionInput, 'Updated invoice identifier')
+        await user.click(within(dialog).getByTestId('schema-save-btn'))
+
+        await waitFor(() => {
+            expect(service.update).toHaveBeenCalledWith(
+                '00000000-0000-0000-0000-000000000001',
+                {
+                    name: 'Updated Invoice Mapping',
+                    description: 'Updated schema description',
+                    is_active: false,
+                    definition: {
+                        columns: [
+                            {
+                                name: 'invoice_code',
+                                description: 'Updated invoice identifier',
+                            },
+                        ],
+                    },
+                },
+                'access-token'
+            )
+        })
+
+        await waitFor(() => {
+            expect(
+                screen.queryByRole('dialog', { name: /edit schema/i })
+            ).not.toBeInTheDocument()
+        })
+
+        expect(screen.getByText('Updated Invoice Mapping')).toBeInTheDocument()
+        expect(
+            screen.getByText('"Updated Invoice Mapping" updated successfully.')
+        ).toBeInTheDocument()
     })
 
     it('shows the per-user limit and disables adding after five schemas', async () => {
@@ -300,6 +388,32 @@ describe('CustomSchemaManager', () => {
         await waitFor(() => {
             expect(screen.queryByRole('dialog', { name: /add schema/i })).not.toBeInTheDocument()
         })
+    })
+
+    it('requires delete confirmation before removing a schema', async () => {
+        const user = userEvent.setup()
+        const service = createService({
+            list: vi.fn().mockResolvedValue([createSchemaRecord()]),
+            remove: vi.fn().mockResolvedValue(undefined),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await screen.findByText('Invoice Mapping')
+        await user.click(screen.getByRole('button', { name: /delete/i }))
+        expect(service.remove).not.toHaveBeenCalled()
+
+        await user.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+        expect(
+            screen.queryByRole('dialog', { name: /delete schema/i })
+        ).not.toBeInTheDocument()
+        expect(service.remove).not.toHaveBeenCalled()
     })
 
     it('keeps a single column row when the forced remove action targets the last remaining column', async () => {

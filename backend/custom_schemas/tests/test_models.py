@@ -21,15 +21,14 @@ class CustomSchemaModelTest(TestCase):
         self.owner_id = uuid.uuid4()
         self.other_owner_id = uuid.uuid4()
 
-    def test_str_returns_name_and_version(self):
+    def test_str_returns_name(self):
         schema = CustomSchema(
             owner_id=self.owner_id,
             name="Invoice Mapping",
-            version=3,
             definition=make_definition(),
         )
 
-        self.assertEqual(str(schema), "Invoice Mapping (v3)")
+        self.assertEqual(str(schema), "Invoice Mapping")
 
     def test_primary_key_defaults_to_uuid(self):
         schema = CustomSchema.objects.create(
@@ -52,20 +51,7 @@ class CustomSchemaModelTest(TestCase):
         self.assertIn('single content_data table named "result"', prompt_fragment)
         self.assertIn("invoice_number: Invoice identifier", prompt_fragment)
 
-    def test_clean_rejects_version_lower_than_one(self):
-        schema = CustomSchema(
-            owner_id=self.owner_id,
-            name="Invalid Version Schema",
-            version=0,
-            definition=make_definition(),
-        )
-
-        with self.assertRaises(ValidationError) as context:
-            schema.clean()
-
-        self.assertIn("Version must be at least 1", str(context.exception))
-
-    def test_save_increments_version_when_definition_changes(self):
+    def test_save_persists_definition_changes_without_versioning(self):
         schema = CustomSchema.objects.create(
             owner_id=self.owner_id,
             name="Receipt Mapping",
@@ -76,20 +62,10 @@ class CustomSchemaModelTest(TestCase):
         schema.save()
         schema.refresh_from_db()
 
-        self.assertEqual(schema.version, 2)
-
-    def test_save_keeps_version_when_definition_does_not_change(self):
-        schema = CustomSchema.objects.create(
-            owner_id=self.owner_id,
-            name="Stable Mapping",
-            definition=make_definition("stable_column", "Stable description"),
+        self.assertEqual(
+            schema.definition,
+            make_definition("receipt_code", "Receipt code"),
         )
-
-        schema.description = "Updated metadata only"
-        schema.save()
-        schema.refresh_from_db()
-
-        self.assertEqual(schema.version, 1)
 
     def test_same_name_is_allowed_for_different_users(self):
         CustomSchema.objects.create(
