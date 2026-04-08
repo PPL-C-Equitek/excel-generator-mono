@@ -21,7 +21,7 @@ class RegisterViewTest(APISimpleTestCase):
 
     @patch("authentication.register.adapters.send_verification_email")
     @patch("authentication.register.adapters.User")
-    def test_register_valid_data_returns_200(self, mock_user_model, mock_send_email):
+    def test_register_valid_data_returns_201(self, mock_user_model, mock_send_email):
         mock_user_model.objects.filter.return_value.first.return_value = None
 
         saved_user = MagicMock()
@@ -31,7 +31,7 @@ class RegisterViewTest(APISimpleTestCase):
 
         response = self.client.post(self.url, self.valid_payload, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["message"], self.success_message)
 
         mock_user_model.objects.create_user.assert_called_once()
@@ -52,7 +52,7 @@ class RegisterViewTest(APISimpleTestCase):
 
         response = self.client.post(self.url, self.valid_payload, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         mock_send_email.assert_called_once_with(saved_user.email)
 
     @patch("authentication.register.adapters.send_verification_email")
@@ -71,7 +71,7 @@ class RegisterViewTest(APISimpleTestCase):
         }
         response = self.client.post(self.url, payload, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["message"], self.success_message)
 
         mock_user_model.objects.filter.assert_called_once_with(
@@ -84,22 +84,27 @@ class RegisterViewTest(APISimpleTestCase):
 
     @patch("authentication.register.adapters.send_verification_email")
     @patch("authentication.register.adapters.User")
-    def test_register_duplicate_email_returns_generic_success(self, mock_user_model, mock_send_email):
+    def test_register_duplicate_email_returns_409_conflict(self, mock_user_model, mock_send_email):
         existing_user = MagicMock()
         existing_user.status = "unverified"
         existing_user.email = "john@example.com"
         mock_user_model.objects.filter.return_value.first.return_value = existing_user
 
-        response = self.client.post(self.url, self.valid_payload, format="json")
+        payload = {
+            "name": "John Doe",
+            "email": "  JOHN@EXAMPLE.COM  ",
+        }
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["message"], self.success_message)
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         mock_user_model.objects.create_user.assert_not_called()
-        mock_send_email.assert_called_once_with("john@example.com")
+        mock_user_model.objects.filter.assert_called_once_with(email="john@example.com")
+        mock_send_email.assert_not_called()
 
     @patch("authentication.register.adapters.send_verification_email")
     @patch("authentication.register.adapters.User")
-    def test_register_duplicate_verified_user_returns_generic_success_without_resend(
+    def test_register_duplicate_verified_user_returns_409_conflict_without_resend(
         self, mock_user_model, mock_send_email
     ):
         existing_user = MagicMock()
@@ -108,10 +113,15 @@ class RegisterViewTest(APISimpleTestCase):
 
         mock_user_model.objects.filter.return_value.first.return_value = existing_user
 
-        response = self.client.post(self.url, self.valid_payload, format="json")
+        payload = {
+            "name": "John Doe",
+            "email": "  JOHN@EXAMPLE.COM  ",
+        }
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["message"], self.success_message)
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        mock_user_model.objects.filter.assert_called_once_with(email="john@example.com")
         mock_send_email.assert_not_called()
         mock_user_model.objects.create_user.assert_not_called()
 
@@ -147,7 +157,7 @@ class RegisterViewTest(APISimpleTestCase):
         self.assertEqual(response.data["message"], "An internal server error occurred")
 
     @patch("authentication.register.adapters.User")
-    def test_register_integrity_error_returns_generic_success(self, mock_user_model):
+    def test_register_integrity_error_returns_409_conflict(self, mock_user_model):
         mock_user_model.objects.filter.return_value.first.return_value = None
         mock_user_model.objects.create_user.side_effect = IntegrityError(
             "duplicate key value violates unique constraint"
@@ -155,8 +165,7 @@ class RegisterViewTest(APISimpleTestCase):
 
         response = self.client.post(self.url, self.valid_payload, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["message"], self.success_message)
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
 
     @patch("authentication.register.adapters.send_verification_email")
     @patch("authentication.register.adapters.User")
@@ -177,7 +186,7 @@ class RegisterViewTest(APISimpleTestCase):
             response = self.client.post(self.url, payload, format="json")
             self.assertEqual(
                 response.status_code,
-                status.HTTP_200_OK,
+                status.HTTP_201_CREATED,
                 f"Request {i + 1} should succeed but got {response.status_code}",
             )
 

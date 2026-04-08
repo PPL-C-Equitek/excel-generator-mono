@@ -4,12 +4,12 @@ export interface Feature {
     readonly icon?: React.ReactNode;
 }
 
-type Page = 'login' | 'register'
+export type AppPage = 'home' | 'convert' | 'schema' | 'history' | 'login' | 'register'
 
 export interface NavLink {
     readonly label: string;
     readonly href: string;
-    readonly key: Page
+    readonly key: AppPage
 }
 
 export const LANDING_FEATURES: readonly Feature[] = [
@@ -43,6 +43,12 @@ export const LANDING_FEATURES: readonly Feature[] = [
 export const LANDING_NAV_LINKS: readonly NavLink[] = [
     { label: 'Login', href: '/login', key: 'login' },
     { label: 'Register', href: '/register', key: 'register' },
+] as const;
+
+export const AUTHENTICATED_NAV_LINKS: readonly NavLink[] = [
+    { label: 'Convert', href: '/convert', key: 'convert' },
+    { label: 'Schema', href: '/schema', key: 'schema' },
+    { label: 'History', href: '/history', key: 'history' },
 ] as const;
 
 /* Hero section config. */

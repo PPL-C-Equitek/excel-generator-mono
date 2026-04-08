@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 
 from api.decorators import rate_limit
 from authentication.register import RegisterCommand, RegistrationServiceError, build_register_user_use_case
+from authentication.register.exceptions import RegistrationConflictError
 from authentication.serializers import RegisterSerializer
 
 logger = logging.getLogger(__name__)
@@ -54,13 +55,18 @@ class RegisterView(APIView):
             )
             return Response(
                 {"message": result.message},
-                status=status.HTTP_200_OK,
+                status=status.HTTP_201_CREATED,
             )
         except RegistrationServiceError:
             logger.exception("Unexpected error during user registration.")
             return Response(
                 {"message": "An internal server error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        except RegistrationConflictError:
+            return Response(
+                {"message": "Email is already registered."},
+                status=status.HTTP_409_CONFLICT,
             )
         except Exception:
             logger.exception("Unhandled error during user registration.")
