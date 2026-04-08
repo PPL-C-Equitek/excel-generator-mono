@@ -303,3 +303,35 @@ def send_verification_email(email):
     except Exception:
         logger.exception("Failed to send verification email to %s", email)
         raise
+
+
+def send_password_changed_email(email):
+    try:
+        resend_api_key = getattr(settings, "RESEND_API_KEY", "")
+        if resend_api_key:
+            import resend
+
+            resend.api_key = resend_api_key
+            resend.Emails.send(
+                {
+                    "from": getattr(
+                        settings,
+                        "RESEND_FROM_EMAIL",
+                        "noreply@excelprojectequitek.my.id",
+                    ),
+                    "to": email,
+                    "subject": "Your Password Was Changed",
+                    "html": (
+                        "<p>Your account password was changed successfully.</p>"
+                        "<p>If this was not you, please contact support immediately.</p>"
+                    ),
+                }
+            )
+        else:
+            logger.info(
+                "Password changed notification (RESEND_API_KEY not set) for %s",
+                email,
+            )
+    except Exception:
+        logger.exception("Failed to send password changed email to %s", email)
+        raise

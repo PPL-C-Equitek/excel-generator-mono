@@ -48,3 +48,6 @@ class JWTAuthentication(authentication.BaseAuthentication):
             raise exceptions.AuthenticationFailed("Token has expired.") from exc
         except jwt.InvalidTokenError as exc:
             raise exceptions.AuthenticationFailed("Invalid token.") from exc
+
+    def authenticate_header(self, request):
+        return self.keyword
