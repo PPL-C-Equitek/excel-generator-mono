@@ -61,35 +61,3 @@ class LoginSerializer(serializers.Serializer):
 
 class RefreshTokenSerializer(serializers.Serializer):
     refresh_token = serializers.CharField(required=True, write_only=True)
-
-
-class ChangePasswordSerializer(serializers.Serializer):
-    current_password = serializers.CharField(
-        max_length=128,
-        required=False,
-        allow_blank=True,
-        write_only=True,
-    )
-    new_password = serializers.CharField(
-        max_length=128,
-        required=True,
-        write_only=True,
-        validators=[validate_password_strength],
-    )
-    new_password_confirm = serializers.CharField(
-        max_length=128,
-        required=True,
-        write_only=True,
-    )
-    refresh_token = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        write_only=True,
-    )
-
-    def validate(self, attrs):
-        if attrs["new_password"] != attrs["new_password_confirm"]:
-            raise serializers.ValidationError(
-                {"new_password_confirm": "Password confirmation does not match"}
-            )
-        return attrs

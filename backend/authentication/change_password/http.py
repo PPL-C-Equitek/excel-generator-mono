@@ -14,15 +14,14 @@ from authentication.change_password.constants import (
     CHANGE_PASSWORD_PASSWORD_REUSE_MESSAGE,
     CHANGE_PASSWORD_SERVER_ERROR_MESSAGE,
 )
-from authentication.change_password.entities import ChangePasswordCommand
 from authentication.change_password.exceptions import (
     ChangePasswordServiceError,
     CurrentPasswordRequiredError,
     InvalidCurrentPasswordError,
     PasswordReuseError,
 )
+from authentication.change_password.serializers import ChangePasswordSerializer
 from authentication.jwt_authentication import JWTAuthentication
-from authentication.serializers import ChangePasswordSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -44,14 +43,7 @@ class ChangePasswordView(APIView):
 
         try:
             result = self.get_change_password_use_case().execute(
-                ChangePasswordCommand(
-                    user=request.user,
-                    current_password=serializer.validated_data.get(
-                        "current_password", ""
-                    ),
-                    new_password=serializer.validated_data["new_password"],
-                    refresh_token=serializer.validated_data.get("refresh_token") or None,
-                )
+                serializer.to_command(request.user)
             )
             return Response(
                 {"message": result.message},

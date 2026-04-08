@@ -10,65 +10,17 @@ import {
     getStoredRefreshToken,
     getValidAccessToken,
 } from '@/lib/auth'
-
-type ChangePasswordErrors = {
-    currentPassword: string
-    newPassword: string
-    newPasswordConfirm: string
-    form: string
-}
+import {
+    buildChangePasswordPayload,
+    EMPTY_CHANGE_PASSWORD_ERRORS,
+    type ChangePasswordErrors,
+    validateChangePasswordForm,
+} from './form'
 
 type FormSubmitEvent = Parameters<
     NonNullable<ComponentProps<'form'>['onSubmit']>
 >[0]
-
-const PASSWORD_RULE_MESSAGE =
-    'Password must be at least 8 characters long and include a letter, a number, and a special character.'
-
-function isStrongEnough(password: string): boolean {
-    return (
-        password.length >= 8 &&
-        /[a-zA-Z]/.test(password) &&
-        /\d/.test(password) &&
-        /[^A-Za-z0-9]/.test(password)
-    )
-}
-
-export function validateChangePasswordForm({
-    newPassword,
-    newPasswordConfirm,
-}: {
-    currentPassword: string
-    newPassword: string
-    newPasswordConfirm: string
-}): {
-    isValid: boolean
-    errors: ChangePasswordErrors
-} {
-    const errors: ChangePasswordErrors = {
-        currentPassword: '',
-        newPassword: '',
-        newPasswordConfirm: '',
-        form: '',
-    }
-
-    if (!newPassword) {
-        errors.newPassword = 'New password is required.'
-    } else if (!isStrongEnough(newPassword)) {
-        errors.newPassword = PASSWORD_RULE_MESSAGE
-    }
-
-    if (!newPasswordConfirm) {
-        errors.newPasswordConfirm = 'Password confirmation is required.'
-    } else if (newPassword !== newPasswordConfirm) {
-        errors.newPasswordConfirm = 'Password confirmation does not match.'
-    }
-
-    return {
-        isValid: !errors.newPassword && !errors.newPasswordConfirm,
-        errors,
-    }
-}
+export { validateChangePasswordForm } from './form'
 
 export default function ChangePasswordPage() {
     const router = useRouter()
@@ -78,10 +30,7 @@ export default function ChangePasswordPage() {
     const [newPassword, setNewPassword] = useState('')
     const [newPasswordConfirm, setNewPasswordConfirm] = useState('')
     const [errors, setErrors] = useState<ChangePasswordErrors>({
-        currentPassword: '',
-        newPassword: '',
-        newPasswordConfirm: '',
-        form: '',
+        ...EMPTY_CHANGE_PASSWORD_ERRORS,
     })
     const [isLoading, setIsLoading] = useState(false)
     const [successMessage, setSuccessMessage] = useState('')
@@ -117,12 +66,15 @@ export default function ChangePasswordPage() {
             }
 
             const refreshToken = getStoredRefreshToken()
-            const response = await changePassword(accessToken, {
-                current_password: currentPassword,
-                new_password: newPassword,
-                new_password_confirm: newPasswordConfirm,
-                refresh_token: refreshToken ?? undefined,
-            })
+            const response = await changePassword(
+                accessToken,
+                buildChangePasswordPayload({
+                    currentPassword,
+                    newPassword,
+                    newPasswordConfirm,
+                    refreshToken,
+                })
+            )
 
             clearAuthTokens()
             setSuccessMessage(
