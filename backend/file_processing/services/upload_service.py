@@ -10,10 +10,10 @@ from PyPDF2.errors import PdfReadError
 from .excel_service import process_uploaded_excel
 from .txt_service import process_uploaded_txt
 from file_processing.extractors.image_extractor import ImageExtractor
+from file_processing.services.ocr_service import OCRService
+from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import word_validation_service
 from file_processing.services.image_validation_service import validate_image
-from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
-from file_processing.services.ocr_service import OCRService
 from file_processing.services.word_extraction_service import WordExtractionService
 from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 
@@ -28,6 +28,9 @@ except Exception:  # pragma: no cover - optional dependency in local envs
 
     magic = _MagicShim()
 
+from file_processing.services.image_validation_service import validate_image
+from file_processing.extractors.image_extractor import ImageExtractor
+from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,10 @@ EXT_XLS = ".xls"
 EXT_PDF = ".pdf"
 EXT_DOCX = ".docx"
 EXT_DOC = ".doc"
+MIME_OCTET_STREAM = "application/octet-stream"
+MIME_OLE_STORAGE = "application/x-ole-storage"
+MIME_ZIP = "application/zip"
+
 EXT_TXT = ".txt"
 EXT_CSV = ".csv"
 EXT_PNG = ".png"
@@ -61,7 +68,11 @@ ALLOWED_EXTENSIONS = [
 ]
 
 ALLOWED_MIME_TYPES = {
-    EXT_PDF: ["application/pdf", "application/x-pdf", "application/vnd.pdf"],
+    EXT_PDF: [
+        "application/pdf",
+        "application/x-pdf",
+        "application/vnd.pdf",
+    ],
     EXT_XLS: [
         "application/vnd.ms-excel",
         "application/msexcel",
@@ -99,8 +110,16 @@ ALLOWED_MIME_TYPES = {
         MIME_OCTET_STREAM,
         MIME_OLE_STORAGE,
     ],
-    EXT_TXT: ["text/plain", "text/x-log"],
-    EXT_CSV: ["text/csv", "text/plain", "application/csv", "application/vnd.ms-excel"],
+    EXT_TXT: [
+        "text/plain",
+        "text/x-log",
+    ],
+    EXT_CSV: [
+        "text/csv",
+        "text/plain",
+        "application/csv",
+        "application/vnd.ms-excel",
+    ],
 }
 
 MAX_PDF_PAGES = 100
@@ -124,6 +143,8 @@ CSV_PROTECTED_ERROR = (
     "Pastikan file adalah CSV biasa yang tidak diproteksi."
 )
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
+OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
 
 OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -174,6 +195,7 @@ def _process_pdf(file_path, uploaded_file):
             empty_pages = _get_empty_page_numbers(extracted_data)
             if empty_pages:
                 ocr_data = OCRService.process_pdf_pages(file_path, empty_pages)
+                # Merge OCR results into the extracted data
                 ocr_by_page = {p["page"]: p for p in ocr_data.get("content", [])}
                 for page in extracted_data["content"]:
                     if page["page"] in ocr_by_page:
@@ -396,23 +418,23 @@ def _get_xls_sheet_count(uploaded_file):
 def _validate_xlsx_mime_structure(uploaded_file):
     if _is_ole_container(uploaded_file):
         if _is_legacy_xls_content(uploaded_file):
-            return True, None, True
-        return False, EXCEL_PASSWORD_PROTECTED_ERROR, False
+            return "legacy", None
+        return "invalid", EXCEL_PASSWORD_PROTECTED_ERROR
 
     if not _has_zip_signature(uploaded_file):
-        return False, FILE_EXTENSION_MISMATCH_ERROR, False
+        return "invalid", DOES_NOT_MATCH_EXTENSION_ERROR
 
-    return True, None, False
+    return "valid", None
 
 
 def _validate_word_mime_structure(uploaded_file, ext):
     if ext == EXT_DOC and not _is_ole_container(uploaded_file):
-        return False, DOES_NOT_MATCH_EXTENSION_ERROR
+        return DOES_NOT_MATCH_EXTENSION_ERROR
 
     if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
-        return False, DOES_NOT_MATCH_EXTENSION_ERROR
+        return DOES_NOT_MATCH_EXTENSION_ERROR
 
-    return True, None
+    return None
 
 
 def _resolve_txt_detected_mime(uploaded_file, detected_mime):
@@ -436,14 +458,11 @@ def validate_mime_type(uploaded_file, ext):
         expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
 
         if ext == EXT_XLSX:
-            is_valid, structure_error, skip_mime_check = _validate_xlsx_mime_structure(
-                uploaded_file
-            )
-            if not is_valid:
-                return False, structure_error
-            if skip_mime_check:
-                # Legacy .xls content uploaded as .xlsx is accepted.
+            xlsx_state, xlsx_error = _validate_xlsx_mime_structure(uploaded_file)
+            if xlsx_state == "legacy":
                 return True, None
+            if xlsx_error:
+                return False, xlsx_error
 
         if ext == EXT_TXT:
             detected_mime = _resolve_txt_detected_mime(uploaded_file, mime)
@@ -453,14 +472,12 @@ def validate_mime_type(uploaded_file, ext):
             return _validate_csv_content(uploaded_file, mime)
 
         if ext in {EXT_DOC, EXT_DOCX}:
-            is_valid, structure_error = _validate_word_mime_structure(
-                uploaded_file, ext
-            )
-            if not is_valid:
-                return False, structure_error
+            word_error = _validate_word_mime_structure(uploaded_file, ext)
+            if word_error:
+                return False, word_error
 
         if mime not in expected_mimes:
-            return False, FILE_EXTENSION_MISMATCH_ERROR
+            return False, DOES_NOT_MATCH_EXTENSION_ERROR
 
         return True, None
 

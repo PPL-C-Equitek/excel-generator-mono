@@ -4,6 +4,7 @@ import os
 import tempfile
 from unittest.mock import patch, MagicMock
 from file_processing.services.upload_service import _has_binary_signature
+from file_processing.services import upload_service
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -513,6 +514,28 @@ class TxtValidationTests(TestCase):
         uploaded = _txt_file("data.txt", b"plain text", "text/plain")
         resp = self.client.post(UPLOAD_URL, {"file": uploaded})
         self.assertEqual(resp.status_code, 400)
+
+    @patch(
+        "file_processing.services.upload_service.magic.from_buffer",
+        return_value="application/octet-stream",
+    )
+    def test_validate_mime_type_txt_uses_request_mime_fallback(self, _mock_magic):
+        uploaded = _txt_file("fallback.txt", b"plain text", "text/plain")
+        is_valid, error = upload_service.validate_mime_type(uploaded, ".txt")
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    @patch(
+        "file_processing.services.upload_service.magic.from_buffer",
+        return_value="application/octet-stream",
+    )
+    def test_validate_mime_type_txt_octet_stream_without_text_mime_rejected(
+        self, _mock_magic
+    ):
+        uploaded = _txt_file("bad.txt", b"plain text", "application/octet-stream")
+        is_valid, error = upload_service.validate_mime_type(uploaded, ".txt")
+        self.assertFalse(is_valid)
+        self.assertEqual(error, upload_service.TXT_CORRUPT_ERROR)
 
     def test_has_binary_signature_exception_handled_real(self):
         mock_file = MagicMock()

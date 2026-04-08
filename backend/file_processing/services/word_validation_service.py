@@ -8,7 +8,7 @@ EXT_DOC = ".doc"
 MAX_WORD_PAGES = 100
 WORD_CORRUPT_ERROR = "Word file is corrupt or has an invalid structure."
 WORD_PROTECTED_ERROR = "Word file is password-protected."
-OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
+OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 
 @dataclass
@@ -22,7 +22,9 @@ class WordValidationHandler:
     def __init__(self, next_handler: Optional["WordValidationHandler"] = None):
         self._next_handler = next_handler
 
-    def set_next(self, next_handler: "WordValidationHandler") -> "WordValidationHandler":
+    def set_next(
+        self, next_handler: "WordValidationHandler"
+    ) -> "WordValidationHandler":
         self._next_handler = next_handler
         return next_handler
 
@@ -49,7 +51,10 @@ class DocxStructureValidationHandler(WordValidationHandler):
             context.uploaded_file.seek(0)
             with zipfile.ZipFile(context.uploaded_file) as archive:
                 names = set(archive.namelist())
-                if "[Content_Types].xml" not in names or "word/document.xml" not in names:
+                if (
+                    "[Content_Types].xml" not in names
+                    or "word/document.xml" not in names
+                ):
                     return False, WORD_CORRUPT_ERROR
 
                 context.page_count = extract_docx_page_count(archive)
@@ -91,7 +96,7 @@ class DocStructureValidationHandler(WordValidationHandler):
             if b"WordDocument" not in content:
                 return False, WORD_CORRUPT_ERROR
 
-            context.page_count = 0
+            context.page_count = estimate_doc_page_count(content)
         except Exception:
             return False, WORD_CORRUPT_ERROR
 
@@ -199,9 +204,38 @@ def check_doc_structure(uploaded_file: Any) -> Tuple[bool, Any]:
         if b"WordDocument" not in content:
             return False, WORD_CORRUPT_ERROR
 
-        return True, 0
+        return True, estimate_doc_page_count(content)
     except Exception:
         return False, WORD_CORRUPT_ERROR
+
+
+def estimate_doc_page_count(content: bytes) -> int:
+    """Best-effort page estimation for binary .doc content.
+
+    Legacy .doc does not expose page count cheaply without full OLE parsing,
+    so we estimate from page-break markers to make max-page checks enforceable.
+    """
+    if not content:
+        return 0
+
+    marker_count = content.count(b"\x0c")
+
+    try:
+        utf16_text = content.decode("utf-16-le", errors="ignore")
+        marker_count = max(marker_count, utf16_text.count("\x0c"))
+    except Exception:
+        pass
+
+    try:
+        latin_text = content.decode("latin-1", errors="ignore")
+        marker_count = max(marker_count, latin_text.count("\x0c"))
+    except Exception:
+        pass
+
+    if marker_count <= 0:
+        return 0
+
+    return marker_count + 1
 
 
 def check_word_page_count(page_count: int) -> Tuple[bool, Optional[str]]:

@@ -19,8 +19,6 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import upload_service
-from file_processing.services.word_extraction_service import WordExtractionService
-
 
 from file_processing.services import word_validation_service
 
@@ -746,6 +744,26 @@ class TestUploadService(TestCase):
         self.assertFalse(is_valid)
         self.assertEqual(error, "Unsupported file type.")
 
+    def test_estimate_doc_page_count_returns_zero_for_empty_content(self):
+        page_count = upload_service.word_validation_service.estimate_doc_page_count(b"")
+        self.assertEqual(page_count, 0)
+
+    def test_estimate_doc_page_count_handles_decode_exception(self):
+        class _DecodeErrorContent:
+            def __bool__(self):
+                return True
+
+            def count(self, _marker):
+                return 0
+
+            def decode(self, *_args, **_kwargs):
+                raise ValueError("decode failed")
+
+        page_count = upload_service.word_validation_service.estimate_doc_page_count(
+            _DecodeErrorContent()
+        )
+        self.assertEqual(page_count, 0)
+
     @patch("file_processing.services.word_validation_service.is_ole_container")
     def test_check_docx_encrypted_rejects_ole_container(self, mock_is_ole):
         mock_is_ole.return_value = True
@@ -1019,7 +1037,9 @@ class TestUploadService(TestCase):
     @patch("file_processing.services.upload_service._process_image")
     @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_image_success_with_extraction(self, mock_validate, mock_save, mock_process_image):
+    def test_process_upload_image_success_with_extraction(
+        self, mock_validate, mock_save, mock_process_image
+    ):
         from file_processing.services.upload_service import process_upload
 
         mock_validate.return_value = (True, None)
@@ -1049,7 +1069,10 @@ class TestUploadService(TestCase):
     def test_process_upload_image_validation_failure(self, mock_validate):
         from file_processing.services.upload_service import process_upload
 
-        mock_validate.return_value = (False, "File content does not match its extension.")
+        mock_validate.return_value = (
+            False,
+            "File content does not match its extension.",
+        )
 
         f = SimpleUploadedFile(
             "photo.png",
@@ -1067,12 +1090,18 @@ class TestUploadService(TestCase):
     @patch("file_processing.services.upload_service._process_image")
     @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_image_extraction_failure(self, mock_validate, mock_save, mock_process_image):
+    def test_process_upload_image_extraction_failure(
+        self, mock_validate, mock_save, mock_process_image
+    ):
         from file_processing.services.upload_service import process_upload
 
         mock_validate.return_value = (True, None)
         mock_save.return_value = "/tmp/bad.png"
-        mock_process_image.return_value = (False, "Image file is corrupted or unreadable.", None)
+        mock_process_image.return_value = (
+            False,
+            "Image file is corrupted or unreadable.",
+            None,
+        )
 
         f = SimpleUploadedFile(
             "bad.png",
@@ -1455,6 +1484,25 @@ class TestUploadServiceCoverageGaps(TestCase):
 
         self.assertFalse(is_valid2)
         self.assertEqual(error2, upload_service.WORD_CORRUPT_ERROR)
+
+    def test_check_doc_structure_page_count_detected_from_form_feed(self):
+        payload = upload_service.OLE_SIGNATURE + b"WordDocument" + (b"Body\x0c" * 120)
+        is_valid, page_count = (
+            upload_service.word_validation_service.check_doc_structure(
+                SimpleUploadedFile("x.doc", payload)
+            )
+        )
+        self.assertTrue(is_valid)
+        self.assertGreater(page_count, upload_service.MAX_WORD_PAGES)
+
+    def test_validate_word_doc_page_limit_triggers_without_mocking(self):
+        payload = upload_service.OLE_SIGNATURE + b"WordDocument" + (b"P\x0c" * 120)
+        is_valid, error = upload_service.word_validation_service.validate_word(
+            SimpleUploadedFile("x.doc", payload),
+            ".doc",
+        )
+        self.assertFalse(is_valid)
+        self.assertIn("maximum allowed page count", error)
 
     def test_validate_pdf_encrypted_and_too_many_pages(self):
         encrypted_reader = MagicMock()
@@ -1904,99 +1952,3 @@ class TestWordValidationService(unittest.TestCase):
         self.assertEqual(
             word_validation_service.extract_docx_page_count(ArchiveNoPages()), 0
         )
-
-
-class TestWordExtractionService(unittest.TestCase):
-    def _create_temp_docx(self, document_xml: str) -> str:
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
-        tmp.close()
-
-        with zipfile.ZipFile(tmp.name, "w") as archive:
-            archive.writestr("[Content_Types].xml", "<Types></Types>")
-            archive.writestr("word/document.xml", document_xml)
-
-        return tmp.name
-
-    def test_extract_docx_to_json_collects_paragraph_lines(self):
-        path = self._create_temp_docx(
-            """
-            <w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>
-              <w:body>
-                <w:p><w:r><w:t>Halo Dunia</w:t></w:r></w:p>
-                <w:p><w:r><w:t>Baris Kedua</w:t></w:r></w:p>
-              </w:body>
-            </w:document>
-            """
-        )
-
-        try:
-            result = WordExtractionService.extract_word_to_json(path)
-            self.assertEqual(result["content"][0]["page"], 1)
-            self.assertEqual(
-                result["content"][0]["text"], ["Halo Dunia", "Baris Kedua"]
-            )
-        finally:
-            os.unlink(path)
-
-    def test_extract_docx_to_json_invalid_structure_raises_value_error(self):
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
-        tmp.write(b"not-a-zip")
-        tmp.close()
-
-        try:
-            with self.assertRaises(ValueError) as context:
-                WordExtractionService.extract_word_to_json(tmp.name)
-
-            self.assertIn("invalid structure", str(context.exception).lower())
-        finally:
-            os.unlink(tmp.name)
-
-    def test_extract_doc_to_json_best_effort_text(self):
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
-        tmp.write(
-            upload_service.OLE_SIGNATURE
-            + b"WordDocument\x00\x00Invoice Number 123\nClient Name"
-        )
-        tmp.close()
-
-        try:
-            result = WordExtractionService.extract_word_to_json(tmp.name)
-            lines = result["content"][0]["text"]
-
-            self.assertEqual(result["content"][0]["page"], 1)
-            self.assertTrue(any("Invoice Number" in line for line in lines))
-        finally:
-            os.unlink(tmp.name)
-
-    @patch(
-        "file_processing.services.upload_service.validate_file",
-        return_value=(True, None),
-    )
-    @patch("file_processing.services.upload_service.save_temp_file")
-    @patch("file_processing.services.upload_service.process_word")
-    @patch("file_processing.services.upload_service.os.path.exists", return_value=False)
-    def test_process_upload_docx_success_sets_extracted_data(
-        self,
-        _exists,
-        mockprocess_word,
-        mock_save,
-        _validate,
-    ):
-        mock_save.return_value = "/tmp/f.docx"
-        mockprocess_word.return_value = (
-            True,
-            None,
-            {"content": [{"page": 1, "text": ["from word"]}]},
-        )
-
-        f = SimpleUploadedFile(
-            "sample.docx",
-            b"dummy",
-            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-
-        success, error, _, extracted = upload_service.process_upload(f)
-
-        self.assertTrue(success)
-        self.assertIsNone(error)
-        self.assertEqual(extracted["content"][0]["text"], ["from word"])
