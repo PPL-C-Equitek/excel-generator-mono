@@ -155,6 +155,20 @@ export async function loginWithGoogle(token: string): Promise<AuthResponse> {
   }) as Promise<AuthResponse>
 }
 
+export async function requestPasswordReset(email: string): Promise<MessageResponse> {
+  return fetchAPI("auth/forgot-password/", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  }) as Promise<MessageResponse>
+}
+
+export async function resendPasswordReset(email: string): Promise<MessageResponse> {
+  return fetchAPI("auth/resend-password-reset/", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  }) as Promise<MessageResponse>
+}
+
 export async function logout(accessToken: string, refreshToken: string): Promise<void> {
   const res = await fetch(`${API_URL}/auth/logout/`, {
     method: "POST",
