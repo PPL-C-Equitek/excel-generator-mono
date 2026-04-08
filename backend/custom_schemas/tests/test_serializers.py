@@ -59,24 +59,27 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
                 )
             }
         )
-        policy_service = Mock()
-        policy_service.has_name_conflict.return_value = False
-        serializer.context["policy_service"] = policy_service
+        application_service = Mock()
+        application_service.has_name_conflict.return_value = False
+        serializer.context["application_service"] = application_service
 
         result = serializer.validate_name("Invoice Mapping")
 
         self.assertEqual(result, "Invoice Mapping")
-        policy_service.has_name_conflict.assert_called_once_with(
+        application_service.has_name_conflict.assert_called_once_with(
             user=serializer.context["request"].user,
             name="Invoice Mapping",
             exclude_pk=None,
         )
 
     def test_validate_name_rejects_duplicate_name_for_current_owner(self):
-        policy_service = Mock()
-        policy_service.has_name_conflict.return_value = True
+        application_service = Mock()
+        application_service.has_name_conflict.return_value = True
         serializer = CustomSchemaSerializer(
-            context={"request": self.request, "policy_service": policy_service}
+            context={
+                "request": self.request,
+                "application_service": application_service,
+            }
         )
 
         with self.assertRaises(serializers.ValidationError) as context:
@@ -86,7 +89,7 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
             "You already have a custom schema with this name.",
             context.exception.detail,
         )
-        policy_service.has_name_conflict.assert_called_once_with(
+        application_service.has_name_conflict.assert_called_once_with(
             user=self.request.user,
             name="Invoice Mapping",
             exclude_pk=None,
@@ -94,18 +97,50 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
 
     def test_validate_name_excludes_current_instance_from_duplicate_check(self):
         existing_instance = SimpleNamespace(pk=uuid.uuid4(), name="Invoice Mapping")
-        policy_service = Mock()
-        policy_service.has_name_conflict.return_value = False
+        application_service = Mock()
+        application_service.has_name_conflict.return_value = False
         serializer = CustomSchemaSerializer(
             instance=existing_instance,
-            context={"request": self.request, "policy_service": policy_service},
+            context={
+                "request": self.request,
+                "application_service": application_service,
+            },
         )
 
         result = serializer.validate_name("Invoice Mapping")
 
         self.assertEqual(result, "Invoice Mapping")
-        policy_service.has_name_conflict.assert_called_once_with(
+        application_service.has_name_conflict.assert_called_once_with(
             user=self.request.user,
             name="Invoice Mapping",
             exclude_pk=existing_instance.pk,
+        )
+
+    def test_get_application_service_returns_context_service_when_available(self):
+        application_service = Mock()
+        serializer = CustomSchemaSerializer(
+            context={"application_service": application_service}
+        )
+
+        result = serializer.get_application_service()
+
+        self.assertIs(result, application_service)
+
+    def test_validate_name_uses_default_application_service_when_not_in_context(self):
+        serializer = CustomSchemaSerializer(context={"request": self.request})
+        application_service = Mock()
+        application_service.has_name_conflict.return_value = False
+
+        with patch(
+            "custom_schemas.serializers.CustomSchemaApplicationService",
+            return_value=application_service,
+        ) as application_service_class:
+            result = serializer.validate_name("Invoice Mapping")
+
+        self.assertEqual(result, "Invoice Mapping")
+        application_service_class.assert_called_once_with()
+        application_service.has_name_conflict.assert_called_once_with(
+            user=self.request.user,
+            name="Invoice Mapping",
+            exclude_pk=None,
         )

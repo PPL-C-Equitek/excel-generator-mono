@@ -1,9 +1,12 @@
-import uuid
+from unittest.mock import Mock
 
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase
 
+from authentication.models import User
 from custom_schemas.services import (
+    CustomSchemaApplicationService,
+    CustomSchemaDefinitionService,
     CustomSchemaLimitExceededError,
     CustomSchemaPolicyService,
     DjangoCustomSchemaQueryRepository,
@@ -113,6 +116,15 @@ class CustomSchemaServiceTest(SimpleTestCase):
 
         self.assertIn("description is required", str(context.exception))
 
+    def test_definition_service_build_prompt_fragment_delegates_validation(self):
+        service = CustomSchemaDefinitionService()
+        definition = make_definition()
+
+        prompt_fragment = service.build_prompt_fragment(definition)
+
+        self.assertIn('single content_data table named "result"', prompt_fragment)
+        self.assertIn("customer_name: Customer full name", prompt_fragment)
+
 
 class CustomSchemaPolicyServiceTest(SimpleTestCase):
     def setUp(self):
@@ -216,10 +228,77 @@ class CustomSchemaPolicyServiceTest(SimpleTestCase):
         self.assertIsNone(result)
 
 
+class CustomSchemaApplicationServiceTest(SimpleTestCase):
+    def setUp(self):
+        self.owner_id = "owner-1"
+        self.user = type(
+            "User",
+            (),
+            {"id": self.owner_id, "is_authenticated": True},
+        )()
+
+    def test_get_filtered_queryset_for_user_delegates_to_policy_service(self):
+        policy_service = Mock()
+        policy_service.get_queryset_for_user.return_value = "base-queryset"
+        policy_service.filter_queryset_by_active.return_value = "filtered-queryset"
+        service = CustomSchemaApplicationService(policy_service=policy_service)
+
+        result = service.get_filtered_queryset_for_user(self.user, "true")
+
+        self.assertEqual(result, "filtered-queryset")
+        policy_service.get_queryset_for_user.assert_called_once_with(self.user)
+        policy_service.filter_queryset_by_active.assert_called_once_with(
+            queryset="base-queryset",
+            active_value="true",
+        )
+
+    def test_get_owner_id_delegates_to_policy_service(self):
+        policy_service = Mock()
+        policy_service.get_owner_id.return_value = self.owner_id
+        service = CustomSchemaApplicationService(policy_service=policy_service)
+
+        result = service.get_owner_id(self.user)
+
+        self.assertEqual(result, self.owner_id)
+        policy_service.get_owner_id.assert_called_once_with(self.user)
+
+    def test_has_name_conflict_delegates_to_policy_service(self):
+        policy_service = Mock()
+        policy_service.has_name_conflict.return_value = True
+        service = CustomSchemaApplicationService(policy_service=policy_service)
+
+        result = service.has_name_conflict(
+            self.user,
+            "Invoice Mapping",
+            exclude_pk="schema-1",
+        )
+
+        self.assertTrue(result)
+        policy_service.has_name_conflict.assert_called_once_with(
+            user=self.user,
+            name="Invoice Mapping",
+            exclude_pk="schema-1",
+        )
+
+    def test_get_limit_exceeded_message_uses_policy_limit(self):
+        policy_service = Mock()
+        policy_service.max_custom_schemas_per_user = 7
+        service = CustomSchemaApplicationService(policy_service=policy_service)
+
+        result = service.get_limit_exceeded_message()
+
+        self.assertEqual(result, "A user can only have up to 7 custom schemas.")
+
+
 class DjangoCustomSchemaQueryRepositoryTest(TestCase):
     def setUp(self):
         self.repository = DjangoCustomSchemaQueryRepository()
-        self.owner_id = uuid.uuid4()
+        self.owner = User.objects.create_user(
+            email="repository-owner@example.com",
+            name="Repository Owner",
+            password="Test12345",
+            status="verified",
+        )
 
     def test_none_returns_empty_queryset(self):
         result = self.repository.none()
@@ -228,13 +307,13 @@ class DjangoCustomSchemaQueryRepositoryTest(TestCase):
 
     def test_name_exists_for_owner_excludes_current_schema_when_requested(self):
         schema = CustomSchema.objects.create(
-            owner_id=self.owner_id,
+            owner=self.owner,
             name="Invoice Mapping",
             definition=make_definition(),
         )
 
         result = self.repository.name_exists_for_owner(
-            owner_id=self.owner_id,
+            owner_id=self.owner.id,
             name="Invoice Mapping",
             exclude_pk=schema.pk,
         )

@@ -1,5 +1,5 @@
 import { fetchAPI } from "@/lib/api";
-import { getValidAccessToken } from "@/lib/auth";
+import { getStoredAccessToken, getValidAccessToken } from "@/lib/auth";
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { isJsonObject } from "@/utils/schemaValidator";
 import type { JsonValue } from "@/utils/schemaValidator";
@@ -16,6 +16,15 @@ export interface LLMRequest {
 export interface LLMResponse {
     output_json: JsonValue;
 }
+
+export interface ExcelExportResponse {
+    file_id: string;
+    file_name: string;
+    artifact_type: "xlsx";
+}
+
+const EXCEL_EXPORT_ERROR_MESSAGE = "The Excel export response is invalid.";
+const EXCEL_DOWNLOAD_ERROR_MESSAGE = "Failed to export";
 
 function buildJsonRequestHeaders(customSchemaId?: string | null): HeadersInit {
     const shouldAuthorize =
@@ -75,9 +84,9 @@ export async function generateJson(
     }
 
     let data: unknown;
-    const requestBody: LLMRequest = { input_json: inputJson }
-    if (typeof customSchemaId === 'string' && customSchemaId.trim().length > 0) {
-        requestBody.custom_schema_id = customSchemaId
+    const requestBody: LLMRequest = { input_json: inputJson };
+    if (typeof customSchemaId === "string" && customSchemaId.trim().length > 0) {
+        requestBody.custom_schema_id = customSchemaId;
     }
 
     try {

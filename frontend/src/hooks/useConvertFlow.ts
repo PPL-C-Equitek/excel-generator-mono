@@ -12,6 +12,7 @@ import {
 import { isJsonObject } from '@/utils/schemaValidator'
 import { sanitizeCSVCell } from '@/utils/csvSanitizer'
 import type { ILLMService } from '@/lib/ILLMService'
+import type { ExcelExportResponse } from '@/services/llm'
 import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
 
 const defaultService: ILLMService = {
@@ -65,9 +66,17 @@ function getExcelDownloadFilename(baseFilename: string): string {
     return baseFilename.replace(/\.[^/.]+$/, '') + '.xlsx'
 }
 
+function isExportOutputEmpty(output: unknown): boolean {
+    const isStringEmpty = typeof output === 'string' && output.trim() === ''
+    return output === null || isStringEmpty ||
+        (Array.isArray(output) && output.length === 0) ||
+        (typeof output === 'object' && output !== null && Object.keys(output).length === 0)
+}
+
 export interface UseConvertFlowReturn {
     isConverting: boolean
     isExcelDownloading: boolean
+    canDownloadCsv: boolean
     canDownloadExcel: boolean
     error: string | null
     excelError: string | null
@@ -75,6 +84,8 @@ export interface UseConvertFlowReturn {
     outputFile: OutputFile | null
     csvMetadata: CsvMetadata | null
     handleFileSelect: (file: File, customSchemaId?: string | null) => Promise<void>
+    handleCsvDownload: () => Promise<void>
+    handleExcelDownload: () => Promise<void>
     llmService: ILLMService
 }
 
@@ -88,8 +99,10 @@ export function useConvertFlow(
     const [excelSuccessMessage, setExcelSuccessMessage] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
+    const [excelMetadata, setExcelMetadata] = useState<ExcelExportResponse | null>(null)
     const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
+    const conversionRequestIdRef = useRef(0)
 
     const abortPreviousRequest = (): AbortSignal => {
         if (abortControllerRef.current) {
@@ -123,32 +136,15 @@ export function useConvertFlow(
         }
     }
 
-    const processCsvExport = async (out: unknown, signal: AbortSignal) => {
-        if (!llmService.exportToCsv || signal.aborted) return
-
-        try {
-            const isStringEmpty = typeof out === 'string' && out.trim() === ''
-            const isEmpty = out === null || isStringEmpty ||
-                (Array.isArray(out) && out.length === 0) ||
-                (typeof out === 'object' && out !== null && Object.keys(out).length === 0)
-
-            if (isEmpty) {
-                throw new Error("The converted data is empty or invalid, so it can't be exported.")
-            }
-
-            const sanitizedJSON = sanitizeCSVCell(out) as JsonValue
-            const csvResult = await llmService.exportToCsv(sanitizedJSON)
-
-            if (!signal.aborted) {
-                if (csvResult.file_id?.startsWith('csv_')) {
-                    setCsvMetadata({ file_id: csvResult.file_id })
-                } else {
-                    throw new Error('The export result is invalid. Please try again.')
-                }
-            }
-        } catch (csvErr: unknown) {
-            handleProcessError(csvErr, 'CSV Export failed', signal)
-        }
+    const resetConversionState = () => {
+        setError(null)
+        setExcelError(null)
+        setExcelSuccessMessage(null)
+        setOutputFile(null)
+        setCsvMetadata(null)
+        setExcelMetadata(null)
+        setGeneratedOutput(null)
+        setIsExcelDownloading(false)
     }
 
     const processConversion = async (
@@ -166,8 +162,6 @@ export function useConvertFlow(
 
             setGeneratedOutput(llmResult.output_json)
             setOutputFile(parseOutputFile(uploadResult, file))
-
-            await processCsvExport(llmResult.output_json, signal)
         } catch (err: unknown) {
             handleProcessError(err, 'Conversion failed', signal)
         } finally {
@@ -181,21 +175,54 @@ export function useConvertFlow(
         file: File,
         customSchemaId?: string | null
     ): Promise<void> => {
+        conversionRequestIdRef.current += 1
         const signal = abortPreviousRequest()
 
-        setError(null)
-        setExcelError(null)
-        setExcelSuccessMessage(null)
-        setOutputFile(null)
-        setCsvMetadata(null)
-        setGeneratedOutput(null)
-        setIsExcelDownloading(false)
+        resetConversionState()
         setIsConverting(true)
 
         const uploadResult = await processUpload(file, signal)
         if (!uploadResult) return
 
         await processConversion(uploadResult, file, signal, customSchemaId)
+    }
+
+    const handleCsvDownload = async (): Promise<void> => {
+        if (!outputFile || !llmService.exportToCsv) {
+            return
+        }
+
+        if (csvMetadata) {
+            return
+        }
+
+        const requestId = conversionRequestIdRef.current
+        const csvOutput = generatedOutput
+
+        if (isExportOutputEmpty(csvOutput)) {
+            setError("The converted data is empty or invalid, so it can't be exported.")
+            return
+        }
+
+        try {
+            const sanitizedJSON = sanitizeCSVCell(csvOutput) as JsonValue
+            const csvResult = await llmService.exportToCsv(sanitizedJSON)
+
+            if (requestId !== conversionRequestIdRef.current) {
+                return
+            }
+
+            if (csvResult.file_id?.startsWith('csv_')) {
+                setCsvMetadata({ file_id: csvResult.file_id })
+            } else {
+                throw new Error('The export result is invalid. Please try again.')
+            }
+        } catch (csvErr: unknown) {
+            if (requestId !== conversionRequestIdRef.current) {
+                return
+            }
+            setError(csvErr instanceof Error ? csvErr.message : 'CSV Export failed')
+        }
     }
 
     const handleExcelDownload = async (): Promise<void> => {
@@ -214,7 +241,11 @@ export function useConvertFlow(
         setIsExcelDownloading(true)
 
         try {
-            const excelResult = await llmService.exportToExcel(generatedOutput)
+            let excelResult = excelMetadata
+            if (!excelResult) {
+                excelResult = await llmService.exportToExcel(generatedOutput)
+                setExcelMetadata(excelResult)
+            }
             await llmService.downloadExcelFile(
                 excelResult.file_id,
                 getExcelDownloadFilename(outputFile.filename)
@@ -229,6 +260,11 @@ export function useConvertFlow(
         }
     }
 
+    const canDownloadCsv = (
+        generatedOutput !== null &&
+        !!llmService.exportToCsv
+    )
+
     const canDownloadExcel = (
         generatedOutput !== null &&
         !!llmService.exportToExcel &&
@@ -238,6 +274,7 @@ export function useConvertFlow(
     return {
         isConverting,
         isExcelDownloading,
+        canDownloadCsv,
         canDownloadExcel,
         error,
         excelError,
@@ -245,6 +282,7 @@ export function useConvertFlow(
         outputFile,
         csvMetadata,
         handleFileSelect,
+        handleCsvDownload,
         handleExcelDownload,
         llmService
     }
