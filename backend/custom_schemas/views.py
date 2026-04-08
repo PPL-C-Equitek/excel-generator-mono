@@ -2,57 +2,51 @@ from rest_framework import generics
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 
-from .models import CustomSchema
 from .serializers import CustomSchemaSerializer
-
-
-MAX_CUSTOM_SCHEMAS_PER_USER = 5
+from .services import (
+    CUSTOM_SCHEMA_LIMIT_EXCEEDED_ERROR_TEMPLATE,
+    MAX_CUSTOM_SCHEMAS_PER_USER,
+    CustomSchemaLimitExceededError,
+    CustomSchemaPolicyService,
+)
 
 
 class UserOwnedCustomSchemaMixin:
     permission_classes = [IsAuthenticated]
+    policy_service_class = CustomSchemaPolicyService
+
+    def get_policy_service(self) -> CustomSchemaPolicyService:
+        return self.policy_service_class()
 
     def get_current_user_id(self):
-        user_id = getattr(self.request.user, "id", None)
-        if user_id is None:
-            return None
-        return user_id
+        return self.get_policy_service().get_owner_id(self.request.user)
 
     def get_base_queryset(self):
-        user = self.request.user
-        user_id = self.get_current_user_id()
-        if not getattr(user, "is_authenticated", False) or user_id is None:
-            return CustomSchema.objects.none()
-        return CustomSchema.objects.filter(owner_id=user_id)
+        return self.get_policy_service().get_queryset_for_user(self.request.user)
 
 
 class CustomSchemaListCreateView(UserOwnedCustomSchemaMixin, generics.ListCreateAPIView):
     serializer_class = CustomSchemaSerializer
 
     def get_queryset(self):
-        queryset = self.get_base_queryset()
-        active = self.request.query_params.get("active")
-        if active is None:
-            return queryset
-
-        normalized = active.strip().lower()
-        if normalized in {"true", "1", "yes"}:
-            return queryset.filter(is_active=True)
-        if normalized in {"false", "0", "no"}:
-            return queryset.filter(is_active=False)
-        return queryset
+        return self.get_policy_service().filter_queryset_by_active(
+            queryset=self.get_base_queryset(),
+            active_value=self.request.query_params.get("active"),
+        )
 
     def perform_create(self, serializer):
-        owner_id = self.get_current_user_id()
-        existing_count = self.get_base_queryset().count()
-        if existing_count >= MAX_CUSTOM_SCHEMAS_PER_USER:
+        try:
+            owner_id = self.get_policy_service().ensure_can_create_for_user(
+                self.request.user
+            )
+        except CustomSchemaLimitExceededError as exc:
             raise ValidationError(
                 {
-                    "message": (
-                        f"Maksimal {MAX_CUSTOM_SCHEMAS_PER_USER} custom schemas per user."
+                    "message": CUSTOM_SCHEMA_LIMIT_EXCEEDED_ERROR_TEMPLATE.format(
+                        max_count=MAX_CUSTOM_SCHEMAS_PER_USER
                     )
                 }
-            )
+            ) from exc
 
         serializer.save(owner_id=owner_id)
 

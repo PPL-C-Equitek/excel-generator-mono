@@ -58,7 +58,7 @@ export interface UseConvertFlowReturn {
     error: string | null
     outputFile: OutputFile | null
     csvMetadata: CsvMetadata | null
-    handleFileSelect: (file: File) => Promise<void>
+    handleFileSelect: (file: File, customSchemaId?: string | null) => Promise<void>
     llmService: ILLMService
 }
 
@@ -131,9 +131,17 @@ export function useConvertFlow(
         }
     }
 
-    const processConversion = async (uploadResult: JsonObject, file: File, signal: AbortSignal) => {
+    const processConversion = async (
+        uploadResult: JsonObject,
+        file: File,
+        signal: AbortSignal,
+        customSchemaId?: string | null
+    ) => {
         try {
-            const llmResult = await llmService.generate(uploadResult)
+            const llmResult =
+                typeof customSchemaId === 'string' && customSchemaId.length > 0
+                    ? await llmService.generate(uploadResult, customSchemaId)
+                    : await llmService.generate(uploadResult)
             if (signal.aborted) return
 
             setOutputFile(parseOutputFile(uploadResult, file))
@@ -148,7 +156,10 @@ export function useConvertFlow(
         }
     }
 
-    const handleFileSelect = async (file: File): Promise<void> => {
+    const handleFileSelect = async (
+        file: File,
+        customSchemaId?: string | null
+    ): Promise<void> => {
         const signal = abortPreviousRequest()
 
         setError(null)
@@ -159,7 +170,7 @@ export function useConvertFlow(
         const uploadResult = await processUpload(file, signal)
         if (!uploadResult) return
 
-        await processConversion(uploadResult, file, signal)
+        await processConversion(uploadResult, file, signal, customSchemaId)
     }
 
     return { isConverting, error, outputFile, csvMetadata, handleFileSelect, llmService }
