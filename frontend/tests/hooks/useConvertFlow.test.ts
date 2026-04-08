@@ -579,12 +579,16 @@ describe('useConvertFlow', () => {
             vi.unstubAllEnvs()
         })
 
-        it('calls exportToCsv after successful LLM generation and sets csvMetadata', async () => {
+        it('exports csv on explicit request and sets csvMetadata', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
 
             await act(async () => {
                 await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
             })
 
             expect(service.exportToCsv).toHaveBeenCalledWith({ status: 'ok' })
@@ -594,7 +598,7 @@ describe('useConvertFlow', () => {
             vi.unstubAllEnvs()
         })
 
-        it('handles exportToCsv error properly', async () => {
+        it('handles exportToCsv error properly when download is requested', async () => {
             const service = makeMockService({
                 exportToCsv: vi.fn().mockRejectedValue(new Error('CSV Export failed'))
             })
@@ -602,6 +606,10 @@ describe('useConvertFlow', () => {
 
             await act(async () => {
                 await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
             })
 
             expect(result.current.error).toBe('CSV Export failed')
@@ -625,7 +633,7 @@ describe('useConvertFlow', () => {
             vi.unstubAllEnvs()
         })
 
-        it('ignores setting csvMetadata if request is aborted during exportToCsv', async () => {
+        it('ignores setting csvMetadata if request is aborted during manual exportToCsv', async () => {
             let resolveExport: (v: unknown) => void = () => {}
             const service = makeMockService({
                 exportToCsv: vi.fn()
@@ -635,20 +643,20 @@ describe('useConvertFlow', () => {
             
             const { result } = renderHook(() => useConvertFlow(service))
 
-            // Start first
-            act(() => { result.current.handleFileSelect(testFile) })
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
             
-            // Wait for it to specifically reach exportToCsv
+            act(() => { void getDownloadState(result).handleCsvDownload() })
             await waitFor(() => expect(service.exportToCsv).toHaveBeenCalledTimes(1))
             
-            // Start second request (which will abort the first)
+            // Start second conversion, which clears stale CSV metadata/results
             await act(async () => { await result.current.handleFileSelect(testFile) })
             
             // Now resolve the first request which is stale and aborted
             await act(async () => { resolveExport({ file_id: 'csv_stale' }) })
 
-            // The active request will set it to csv_999, so it should not be 'csv_stale'
-            expect(result.current.csvMetadata?.file_id).toBe('csv_999')
+            expect(result.current.csvMetadata).toBeNull()
             
             vi.unstubAllEnvs()
         })
@@ -680,6 +688,10 @@ describe('useConvertFlow', () => {
                 await result.current.handleFileSelect(testFile)
             })
 
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
             // generate() receives exactly what was originally intended by standard flows
             // but exportToCsv expects the SANITIZED version
             expect(service.exportToCsv).toHaveBeenCalledWith(expectedPayload)
@@ -704,6 +716,10 @@ describe('useConvertFlow', () => {
                 await result.current.handleFileSelect(testFile)
             })
 
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
             // These characters do not require prepending single quotes, they just pass through cleanly
             expect(service.exportToCsv).toHaveBeenCalledWith(rawOutput)
             
@@ -724,9 +740,12 @@ describe('useConvertFlow', () => {
                     await result.current.handleFileSelect(testFile)
                 })
 
+                await act(async () => {
+                    await getDownloadState(result).handleCsvDownload()
+                })
+
                 expect(service.exportToCsv).not.toHaveBeenCalled()
                 expect(result.current.csvMetadata).toBeNull()
-                // Assuming we want to set a specific error message for empty payload edge cases
                 expect(result.current.error).toBe("The converted data is empty or invalid, so it can't be exported.")
             }
             
@@ -750,6 +769,10 @@ describe('useConvertFlow', () => {
                 await result.current.handleFileSelect(testFile)
             })
 
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
             // Expect that exportToCsv is called with the exact full structure spanning all sheets
             expect(service.exportToCsv).toHaveBeenCalledWith(rawOutput)
             
@@ -766,6 +789,10 @@ describe('useConvertFlow', () => {
 
             await act(async () => {
                 await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
             })
 
             expect(result.current.csvMetadata).toBeNull()
