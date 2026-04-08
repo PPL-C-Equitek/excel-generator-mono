@@ -90,6 +90,19 @@ describe('Registration Page', () => {
   });
 
   describe('client-side validation', () => {
+    test('shows invalid email error in real-time and does not call API before submit', async () => {
+      const { emailInput } = setup();
+      const user = userEvent.setup();
+
+      await user.type(emailInput, 'not-an-email');
+
+      await waitFor(() => {
+        expect(screen.getByText(/format email tidak valid/i)).toBeInTheDocument();
+      });
+
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+    });
+
     test('shows required error messages if fields are empty on submit', async () => {
       const { submitBtn } = setup();
 
@@ -119,12 +132,33 @@ describe('Registration Page', () => {
   });
 
   describe('API integration and loading state', () => {
-    test('successful registration posts only name/email and shows success block', async () => {
+    test('submits trimmed email payload when user enters leading and trailing spaces', async () => {
       const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
       mockedAxios.post.mockResolvedValueOnce({
         status: 200,
+        data: { message: 'Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda.' },
+      });
+
+      await user.type(nameInput, 'Trim User');
+      await user.type(emailInput, '  user@email.com  ');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(mockedAxios.post).toHaveBeenCalledWith(expect.stringContaining('/auth/register/'), {
+          name: 'Trim User',
+          email: 'user@email.com',
+        });
+      });
+    });
+
+    test('successful registration posts only name/email and shows success block', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 201,
         data: { message: 'Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda.' },
       });
 
@@ -150,6 +184,24 @@ describe('Registration Page', () => {
       });
     });
 
+    test('navigates to login page on successful registration', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockResolvedValueOnce({
+        status: 201,
+        data: { message: 'Registrasi berhasil' },
+      });
+
+      await user.type(nameInput, 'Router User');
+      await user.type(emailInput, 'router@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/login');
+      });
+    });
+
     test('success fallback message is shown when response has no message', async () => {
       const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
@@ -163,6 +215,8 @@ describe('Registration Page', () => {
       await waitFor(() => {
         expect(screen.getByText(/registrasi berhasil\. cek email anda\./i)).toBeInTheDocument();
       });
+
+      expect(mockPush).not.toHaveBeenCalled();
     });
 
     test('successful resend verification shows success message', async () => {
@@ -363,6 +417,26 @@ describe('Registration Page', () => {
 
       expect(submitBtn).toHaveTextContent(/daftar sekarang|sign up/i);
       expect(submitBtn).not.toBeDisabled();
+    });
+
+    test('maps 409 conflict to friendly duplicate email message', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {},
+        },
+      });
+
+      await user.type(nameInput, 'Duplicate User');
+      await user.type(emailInput, 'duplicate@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/email ini sudah terdaftar, silakan login/i)).toBeInTheDocument();
+      });
     });
 
     test('shows rate limit fallback message on 429 when no data.message is provided', async () => {
