@@ -113,6 +113,7 @@ describe('Navbar', () => {
             expect(screen.getByText('Convert')).toBeInTheDocument()
             expect(screen.getByText('Schema')).toBeInTheDocument()
             expect(screen.getByText('History')).toBeInTheDocument()
+            expect(screen.queryByText('Change Password')).not.toBeInTheDocument()
             expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
         })
     })

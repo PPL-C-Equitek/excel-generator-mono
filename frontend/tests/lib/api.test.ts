@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchAPI, login, uploadFile, loginWithGoogle, logout } from "@/lib/api";
+import { fetchAPI, login, uploadFile, loginWithGoogle, logout, changePassword } from "@/lib/api";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
@@ -647,5 +647,82 @@ describe('logout', () => {
         await expect(logout('access-token', 'refresh-token')).rejects.toThrow(
             'Logout gagal. Silakan coba lagi.'
         )
+    })
+})
+
+describe('changePassword', () => {
+    beforeEach(() => {
+        mockFetch.mockClear()
+        vi.stubGlobal('fetch', mockFetch)
+    })
+
+    it('calls the change-password endpoint with bearer token and payload', async () => {
+        mockFetch.mockResolvedValueOnce(
+            mockResponse({ message: 'Password changed successfully.' })
+        )
+
+        await changePassword('access-token', {
+            current_password: 'Current#123',
+            new_password: 'Updated#123',
+            new_password_confirm: 'Updated#123',
+            refresh_token: 'refresh-token',
+        })
+
+        expect(mockFetch).toHaveBeenCalledWith(
+            expect.stringContaining('/auth/change-password/'),
+            expect.objectContaining({
+                method: 'POST',
+                headers: {
+                    Authorization: 'Bearer access-token',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    current_password: 'Current#123',
+                    new_password: 'Updated#123',
+                    new_password_confirm: 'Updated#123',
+                    refresh_token: 'refresh-token',
+                }),
+            })
+        )
+    })
+
+    it('returns parsed JSON on success', async () => {
+        mockFetch.mockResolvedValueOnce(
+            mockResponse({ message: 'Password changed successfully.' })
+        )
+
+        const result = await changePassword('access-token', {
+            current_password: '',
+            new_password: 'Updated#123',
+            new_password_confirm: 'Updated#123',
+        })
+
+        expect(result).toEqual({ message: 'Password changed successfully.' })
+    })
+
+    it('throws API message on failure', async () => {
+        mockFetch.mockResolvedValueOnce(
+            mockResponse({ message: 'Current password is incorrect.' }, 400)
+        )
+
+        await expect(
+            changePassword('access-token', {
+                current_password: 'Wrong#123',
+                new_password: 'Updated#123',
+                new_password_confirm: 'Updated#123',
+            })
+        ).rejects.toThrow('Current password is incorrect.')
+    })
+
+    it('falls back to a generic error when no message is present', async () => {
+        mockFetch.mockResolvedValueOnce(mockResponse({}, 500))
+
+        await expect(
+            changePassword('access-token', {
+                current_password: 'Current#123',
+                new_password: 'Updated#123',
+                new_password_confirm: 'Updated#123',
+            })
+        ).rejects.toThrow('Failed to change password.')
     })
 })
