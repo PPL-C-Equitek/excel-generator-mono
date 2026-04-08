@@ -1,9 +1,16 @@
 import json
+from types import SimpleNamespace
 
-from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
 from unittest.mock import Mock, patch
 
+from llm.services.generation_service import (
+    CustomSchemaNotFoundError,
+    DjangoCustomSchemaPromptSource,
+    JsonGenerationService,
+    LlmGenerationService,
+    compose_system_prompt,
+)
 from llm.services.openai_client import OpenAIServiceError, OpenAIUpstreamError, generate_json, generate_text
 
 
@@ -34,10 +41,6 @@ class DummyAPIConnectionError(Exception):
 
 
 class OpenAIClientServiceTest(SimpleTestCase):
-    def setUp(self):
-        super().setUp()
-        cache.clear()
-
     @override_settings(
         OPENAI_API_KEY="test-key",
         OPENAI_MODEL="gpt-4.1-mini",
@@ -76,6 +79,45 @@ class OpenAIClientServiceTest(SimpleTestCase):
             model="gpt-4.1-mini",
             input='{"input":"data"}',
             instructions="Return strict JSON only.",
+        )
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_SYSTEM_PROMPT="Base instructions",
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_prefers_explicit_system_prompt_override(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.return_value = Mock(output_text='{"status":"ok"}')
+
+        result = generate_text('{"input":"data"}', system_prompt="Schema-specific prompt")
+
+        self.assertEqual(result, '{"status":"ok"}')
+        mock_client.responses.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            input='{"input":"data"}',
+            instructions="Schema-specific prompt",
+        )
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_SYSTEM_PROMPT=None,
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_omits_instructions_when_setting_is_not_string(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.return_value = Mock(output_text='{"status":"ok"}')
+
+        result = generate_text('{"input":"data"}')
+
+        self.assertEqual(result, '{"status":"ok"}')
+        mock_client.responses.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            input='{"input":"data"}',
         )
 
     @override_settings(OPENAI_API_KEY="", OPENAI_MODEL="gpt-4.1-mini")
@@ -223,7 +265,24 @@ class OpenAIClientServiceTest(SimpleTestCase):
         result = generate_json({"source": "upload"})
 
         self.assertEqual(result, {"status": "ok", "rows": [1, 2]})
-        mock_generate_text.assert_called_once_with(prompt='{"source": "upload"}')
+        mock_generate_text.assert_called_once_with(
+            prompt='{"source": "upload"}',
+            system_prompt=None,
+        )
+
+    @patch("llm.services.openai_client.generate_text")
+    def test_generate_json_passes_system_prompt_override(self, mock_generate_text):
+        mock_generate_text.return_value = '{"status":"ok","rows":[1,2]}'
+        result = generate_json(
+            {"source": "upload"},
+            system_prompt="Schema-specific prompt",
+        )
+
+        self.assertEqual(result, {"status": "ok", "rows": [1, 2]})
+        mock_generate_text.assert_called_once_with(
+            prompt='{"source": "upload"}',
+            system_prompt="Schema-specific prompt",
+        )
 
     @patch("llm.services.openai_client.generate_text")
     def test_generate_json_parses_array_response(self, mock_generate_text):
@@ -232,7 +291,10 @@ class OpenAIClientServiceTest(SimpleTestCase):
         result = generate_json([{"input": 1}])
 
         self.assertEqual(result, [{"a": 1}])
-        mock_generate_text.assert_called_once_with(prompt='[{"input": 1}]')
+        mock_generate_text.assert_called_once_with(
+            prompt='[{"input": 1}]',
+            system_prompt=None,
+        )
 
     def test_generate_json_rejects_non_json_object_or_array_input(self):
         with self.assertRaises(ValueError):
@@ -253,82 +315,172 @@ class OpenAIClientServiceTest(SimpleTestCase):
         with self.assertRaises(OpenAIServiceError):
             generate_json({"source": "upload"})
 
-    @override_settings(
-        OPENAI_MODEL="gpt-4.1-mini",
-        OPENAI_SYSTEM_PROMPT="",
-        LLM_CACHE_TTL_SECONDS=300,
-    )
     @patch("llm.services.openai_client.generate_text")
-    def test_generate_json_caches_identical_input(self, mock_generate_text):
-        mock_generate_text.return_value = '{"status":"ok"}'
+    def test_generate_json_does_not_cache_identical_input(self, mock_generate_text):
+        mock_generate_text.side_effect = ['{"status":"first"}', '{"status":"second"}']
 
         first_result = generate_json({"source": "upload"})
         second_result = generate_json({"source": "upload"})
 
-        self.assertEqual(first_result, {"status": "ok"})
-        self.assertEqual(second_result, {"status": "ok"})
-        mock_generate_text.assert_called_once_with(prompt='{"source": "upload"}')
-
-    @override_settings(
-        OPENAI_MODEL="gpt-4.1-mini",
-        OPENAI_SYSTEM_PROMPT="",
-        LLM_CACHE_TTL_SECONDS=300,
-    )
-    @patch("llm.services.openai_client.generate_text")
-    def test_generate_json_cache_key_is_order_independent_for_objects(self, mock_generate_text):
-        mock_generate_text.return_value = '{"status":"ok"}'
-
-        first_result = generate_json({"b": 2, "a": 1})
-        second_result = generate_json({"a": 1, "b": 2})
-
-        self.assertEqual(first_result, {"status": "ok"})
-        self.assertEqual(second_result, {"status": "ok"})
-        self.assertEqual(mock_generate_text.call_count, 1)
-
-    @override_settings(OPENAI_MODEL="gpt-4.1-mini", OPENAI_SYSTEM_PROMPT="", LLM_CACHE_TTL_SECONDS=300)
-    @patch("llm.services.openai_client.generate_text")
-    def test_generate_json_cache_key_includes_model_and_system_prompt(self, mock_generate_text):
-        mock_generate_text.side_effect = ['{"source":"model-1"}', '{"source":"model-2"}']
-
-        with override_settings(OPENAI_MODEL="gpt-4.1-mini", OPENAI_SYSTEM_PROMPT="prompt-a"):
-            first_result = generate_json({"source": "upload"})
-
-        with override_settings(OPENAI_MODEL="gpt-4.1", OPENAI_SYSTEM_PROMPT="prompt-b"):
-            second_result = generate_json({"source": "upload"})
-
-        self.assertEqual(first_result, {"source": "model-1"})
-        self.assertEqual(second_result, {"source": "model-2"})
+        self.assertEqual(first_result, {"status": "first"})
+        self.assertEqual(second_result, {"status": "second"})
         self.assertEqual(mock_generate_text.call_count, 2)
 
-    @override_settings(
-        OPENAI_MODEL="gpt-4.1-mini",
-        OPENAI_SYSTEM_PROMPT="",
-        LLM_CACHE_TTL_SECONDS=0,
-    )
-    @patch("llm.services.openai_client.generate_text")
-    def test_generate_json_does_not_cache_when_ttl_is_zero(self, mock_generate_text):
-        mock_generate_text.return_value = '{"status":"ok"}'
 
-        first_result = generate_json({"source": "upload"})
-        second_result = generate_json({"source": "upload"})
+class LlmGenerationServiceTest(SimpleTestCase):
+    @override_settings(OPENAI_SYSTEM_PROMPT="  Base instructions  ")
+    def test_get_base_system_prompt_strips_setting_value(self):
+        from llm.services.generation_service import get_base_system_prompt
 
-        self.assertEqual(first_result, {"status": "ok"})
-        self.assertEqual(second_result, {"status": "ok"})
-        self.assertEqual(mock_generate_text.call_count, 2)
+        result = get_base_system_prompt()
 
-    @override_settings(
-        OPENAI_MODEL="gpt-4.1-mini",
-        OPENAI_SYSTEM_PROMPT="",
-        LLM_CACHE_TTL_SECONDS="bad-value",
-    )
-    @patch("llm.services.openai_client.cache.set")
-    @patch("llm.services.openai_client.generate_text")
-    def test_generate_json_uses_default_cache_ttl_when_setting_invalid(self, mock_generate_text, mock_cache_set):
-        mock_generate_text.return_value = '{"status":"ok"}'
+        self.assertEqual(result, "Base instructions")
 
-        result = generate_json({"source": "upload"})
+    @override_settings(OPENAI_SYSTEM_PROMPT=None)
+    def test_get_base_system_prompt_returns_empty_string_for_non_string_setting(self):
+        from llm.services.generation_service import get_base_system_prompt
+
+        result = get_base_system_prompt()
+
+        self.assertEqual(result, "")
+
+    def test_compose_system_prompt_combines_base_and_schema_fragment(self):
+        result = compose_system_prompt(
+            "Base prompt.",
+            "Use only invoice_number and total_amount.",
+        )
+
+        self.assertEqual(
+            result,
+            "Base prompt.\n\nUse only invoice_number and total_amount.",
+        )
+
+    def test_compose_system_prompt_returns_none_for_blank_inputs(self):
+        result = compose_system_prompt("   ", "   ")
+
+        self.assertIsNone(result)
+
+    def test_json_generation_service_uses_injected_text_provider(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        result = service.generate({"source": "upload"})
 
         self.assertEqual(result, {"status": "ok"})
-        mock_cache_set.assert_called_once()
-        self.assertEqual(mock_cache_set.call_args.kwargs["timeout"], 300)
+        text_provider.generate_text.assert_called_once_with(
+            prompt='{"source": "upload"}'
+        )
+
+    def test_json_generation_service_passes_system_prompt_to_injected_provider(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        result = service.generate(
+            {"source": "upload"},
+            system_prompt="Schema-specific prompt",
+        )
+
+        self.assertEqual(result, {"status": "ok"})
+        text_provider.generate_text.assert_called_once_with(
+            prompt='{"source": "upload"}',
+            system_prompt="Schema-specific prompt",
+        )
+
+    def test_llm_generation_service_uses_base_prompt_when_no_schema_selected(self):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "Base prompt.",
+        )
+
+        result = service.generate({"sheet": "Sheet1"})
+
+        self.assertEqual(result, {"status": "ok"})
+        schema_prompt_source.get_prompt_fragment.assert_not_called()
+        json_generator.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            system_prompt="Base prompt.",
+        )
+
+    def test_llm_generation_service_combines_base_and_schema_prompts(self):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        schema_prompt_source.get_prompt_fragment.return_value = (
+            "Use only invoice_number and total_amount."
+        )
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "Base prompt.",
+        )
+
+        result = service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-1")
+
+        self.assertEqual(result, {"status": "ok"})
+        schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
+        json_generator.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            system_prompt="Base prompt.\n\nUse only invoice_number and total_amount.",
+        )
+
+    def test_llm_generation_service_passes_none_when_no_prompt_exists(self):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        schema_prompt_source.get_prompt_fragment.return_value = "   "
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "   ",
+        )
+
+        result = service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-1")
+
+        self.assertEqual(result, {"status": "ok"})
+        json_generator.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            system_prompt=None,
+        )
+
+    @patch("llm.services.generation_service.CustomSchema.objects.get")
+    def test_django_custom_schema_prompt_source_returns_schema_prompt_fragment(
+        self, mock_get
+    ):
+        owner_id = "owner-1"
+        mock_get.return_value = SimpleNamespace(prompt_fragment="Schema prompt.")
+        prompt_source = DjangoCustomSchemaPromptSource(owner_id=owner_id)
+
+        result = prompt_source.get_prompt_fragment("schema-1")
+
+        self.assertEqual(result, "Schema prompt.")
+        mock_get.assert_called_once_with(pk="schema-1", owner_id=owner_id)
+
+    @patch("llm.services.generation_service.CustomSchema.objects.get")
+    def test_django_custom_schema_prompt_source_raises_custom_not_found_error(
+        self, mock_get
+    ):
+        from custom_schemas.models import CustomSchema
+
+        mock_get.side_effect = CustomSchema.DoesNotExist
+        prompt_source = DjangoCustomSchemaPromptSource(owner_id="owner-1")
+
+        with self.assertRaises(CustomSchemaNotFoundError):
+            prompt_source.get_prompt_fragment("missing-schema")
+
+    @patch("llm.services.generation_service.CustomSchema.objects.get")
+    def test_django_custom_schema_prompt_source_rejects_anonymous_access(
+        self, mock_get
+    ):
+        prompt_source = DjangoCustomSchemaPromptSource(owner_id=None)
+
+        with self.assertRaises(CustomSchemaNotFoundError):
+            prompt_source.get_prompt_fragment("schema-1")
+
+        mock_get.assert_not_called()
 

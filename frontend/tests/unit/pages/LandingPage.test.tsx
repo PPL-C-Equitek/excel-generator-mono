@@ -1,7 +1,11 @@
 import { render, screen, fireEvent, within } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import LandingPage from '../../../src/app/landing/LandingPage'
 import { LANDING_FEATURES, LANDING_NAV_LINKS, LANDING_HERO_CONFIG } from '../../../src/constants/landing'
+
+vi.mock('@/components/LogoutButton', () => ({
+    default: () => <button type="button">Logout</button>,
+}))
 
 /**
  * LandingPage Integration Tests
@@ -25,6 +29,11 @@ import { LANDING_FEATURES, LANDING_NAV_LINKS, LANDING_HERO_CONFIG } from '../../
  *  - Not coupled to unnecessary data
  */
 describe('LandingPage', () => {
+    beforeEach(() => {
+        window.localStorage.clear()
+        window.sessionStorage.clear()
+    })
+
     // POSITIVE TESTS
     describe('positive', () => {
         // — Navbar —
@@ -45,7 +54,7 @@ describe('LandingPage', () => {
             render(<LandingPage />)
             const navbar = screen.getByTestId('navbar')
             const navLinks = within(navbar).getAllByRole('link')
-            expect(navLinks).toHaveLength(LANDING_NAV_LINKS.length)
+            expect(navLinks).toHaveLength(LANDING_NAV_LINKS.length + 1)
         })
 
         // — Hero —
@@ -179,6 +188,19 @@ describe('LandingPage', () => {
         it('wrapper has min-h-screen and flex flex-col classes', () => {
             const { container } = render(<LandingPage />)
             expect(container.firstChild).toHaveClass('min-h-screen', 'flex', 'flex-col')
+        })
+
+        it('hides Login and Register links when user is already logged in', () => {
+            window.localStorage.setItem('access_token', 'existing-token')
+
+            render(<LandingPage />)
+
+            expect(screen.queryByText('Login')).not.toBeInTheDocument()
+            expect(screen.queryByText('Register')).not.toBeInTheDocument()
+            expect(screen.getByText('Convert')).toBeInTheDocument()
+            expect(screen.getByText('Schema')).toBeInTheDocument()
+            expect(screen.getByText('History')).toBeInTheDocument()
+            expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
         })
     })
 

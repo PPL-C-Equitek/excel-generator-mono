@@ -10,7 +10,6 @@ function createSchemaRecord(overrides: Partial<CustomSchemaRecord> = {}): Custom
         owner_id: '11111111-1111-1111-1111-111111111111',
         name: 'Invoice Mapping',
         description: 'Maps invoice rows',
-        version: 1,
         is_active: false,
         definition: {
             columns: [
@@ -99,6 +98,36 @@ describe('customSchemaService', () => {
 
         const options = mockedFetch.mock.calls[0][1] as RequestInit
         expect(options.method).toBe('POST')
+        expect(options.body).toBe(JSON.stringify(createInput))
+        expect((options.headers as Headers).get('Authorization')).toBe('Bearer access-token')
+        expect((options.headers as Headers).get('Content-Type')).toBe('application/json')
+    })
+
+    it('updates schemas with PATCH and the serialized payload', async () => {
+        const updatedSchema = createSchemaRecord({
+            name: 'Updated Mapping',
+        })
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => updatedSchema,
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        const { customSchemaService } = await importFreshService('http://localhost:9999/')
+        const result = await customSchemaService.update(
+            '00000000-0000-0000-0000-000000000001',
+            createInput,
+            'access-token'
+        )
+
+        expect(result).toEqual(updatedSchema)
+        expect(mockedFetch.mock.calls[0][0]).toBe(
+            'http://localhost:9999/schemas/00000000-0000-0000-0000-000000000001/'
+        )
+
+        const options = mockedFetch.mock.calls[0][1] as RequestInit
+        expect(options.method).toBe('PATCH')
         expect(options.body).toBe(JSON.stringify(createInput))
         expect((options.headers as Headers).get('Authorization')).toBe('Bearer access-token')
         expect((options.headers as Headers).get('Content-Type')).toBe('application/json')

@@ -101,6 +101,16 @@ export const customSchemaService: ICustomSchemaService = {
             body: JSON.stringify(input),
         })
     },
+    update(schemaId, input, accessToken) {
+        return requestCustomSchemaApi<CustomSchemaRecord>(
+            `schemas/${schemaId}/`,
+            accessToken,
+            {
+                method: 'PATCH',
+                body: JSON.stringify(input),
+            }
+        )
+    },
     remove(schemaId, accessToken) {
         return requestCustomSchemaApi<void>(`schemas/${schemaId}/`, accessToken, {
             method: 'DELETE',

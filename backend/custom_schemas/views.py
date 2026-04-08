@@ -2,57 +2,52 @@ from rest_framework import generics
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 
-from .models import CustomSchema
+from authentication.permissions import IsVerifiedUser
 from .serializers import CustomSchemaSerializer
-
-
-MAX_CUSTOM_SCHEMAS_PER_USER = 5
+from .application_service import CustomSchemaApplicationService
+from .policy_service import CustomSchemaLimitExceededError
 
 
 class UserOwnedCustomSchemaMixin:
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsVerifiedUser]
+    application_service_class = CustomSchemaApplicationService
+
+    def get_application_service(self) -> CustomSchemaApplicationService:
+        return self.application_service_class()
 
     def get_current_user_id(self):
-        user_id = getattr(self.request.user, "id", None)
-        if user_id is None:
-            return None
-        return user_id
+        return self.get_application_service().get_owner_id(self.request.user)
 
     def get_base_queryset(self):
-        user = self.request.user
-        user_id = self.get_current_user_id()
-        if not getattr(user, "is_authenticated", False) or user_id is None:
-            return CustomSchema.objects.none()
-        return CustomSchema.objects.filter(owner_id=user_id)
+        return self.get_application_service().get_queryset_for_user(
+            self.request.user
+        )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["application_service"] = self.get_application_service()
+        return context
 
 
 class CustomSchemaListCreateView(UserOwnedCustomSchemaMixin, generics.ListCreateAPIView):
     serializer_class = CustomSchemaSerializer
 
     def get_queryset(self):
-        queryset = self.get_base_queryset()
-        active = self.request.query_params.get("active")
-        if active is None:
-            return queryset
-
-        normalized = active.strip().lower()
-        if normalized in {"true", "1", "yes"}:
-            return queryset.filter(is_active=True)
-        if normalized in {"false", "0", "no"}:
-            return queryset.filter(is_active=False)
-        return queryset
+        return self.get_application_service().get_filtered_queryset_for_user(
+            user=self.request.user,
+            active_value=self.request.query_params.get("active"),
+        )
 
     def perform_create(self, serializer):
-        owner_id = self.get_current_user_id()
-        existing_count = self.get_base_queryset().count()
-        if existing_count >= MAX_CUSTOM_SCHEMAS_PER_USER:
+        application_service = self.get_application_service()
+        try:
+            owner_id = application_service.get_create_owner_id(self.request.user)
+        except CustomSchemaLimitExceededError as exc:
             raise ValidationError(
                 {
-                    "message": (
-                        f"Maksimal {MAX_CUSTOM_SCHEMAS_PER_USER} custom schemas per user."
-                    )
+                    "message": application_service.get_limit_exceeded_message()
                 }
-            )
+            ) from exc
 
         serializer.save(owner_id=owner_id)
 

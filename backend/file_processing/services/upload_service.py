@@ -15,12 +15,16 @@ from file_processing.services import word_validation_service
 try:
     import magic
 except Exception:  # pragma: no cover - optional dependency in local envs
+
     class _MagicShim:
         @staticmethod
         def from_buffer(_buffer, mime=True):
             raise ImportError("python-magic unavailable")
 
     magic = _MagicShim()
+from file_processing.services.image_validation_service import validate_image
+from file_processing.extractors.image_extractor import ImageExtractor
+from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +39,29 @@ MIME_ZIP = "application/zip"
 
 EXT_TXT = ".txt"
 ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_DOCX, EXT_DOC, EXT_TXT]
+EXT_TXT = ".txt"
+EXT_CSV = ".csv"
+EXT_PNG = ".png"
+EXT_JPG = ".jpg"
+EXT_JPEG = ".jpeg"
+
+IMAGE_EXTENSIONS = {EXT_PNG, EXT_JPG, EXT_JPEG}
+ALLOWED_EXTENSIONS = [
+    EXT_PDF,
+    EXT_XLS,
+    EXT_XLSX,
+    EXT_PNG,
+    EXT_JPG,
+    EXT_JPEG,
+    EXT_TXT,
+    EXT_CSV,
+]
 ALLOWED_MIME_TYPES = {
     EXT_PDF: [
         "application/pdf",
         "application/x-pdf",
         "application/vnd.pdf",
     ],
-
     EXT_XLS: [
         "application/vnd.ms-excel",
         "application/msexcel",
@@ -55,7 +75,6 @@ ALLOWED_MIME_TYPES = {
         "application/CDFV2",
         "application/vnd.ms-office",
     ],
-
     EXT_XLSX: [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         MIME_ZIP,
@@ -63,7 +82,6 @@ ALLOWED_MIME_TYPES = {
         "application/x-zip-compressed",
         MIME_OCTET_STREAM,
     ],
-
     EXT_DOC: [
         "application/msword",
         "application/doc",
@@ -73,7 +91,6 @@ ALLOWED_MIME_TYPES = {
         MIME_OLE_STORAGE,
         "application/CDFV2",
     ],
-
     EXT_DOCX: [
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         MIME_ZIP,
@@ -82,21 +99,22 @@ ALLOWED_MIME_TYPES = {
         MIME_OCTET_STREAM,
         MIME_OLE_STORAGE,
     ],
-
     EXT_TXT: [
         "text/plain",
         "text/x-log",
     ],
+    EXT_CSV: [
+        "text/csv",
+        "text/plain",
+        "application/csv",
+        "application/vnd.ms-excel",
+    ],
 }
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-FILE_TOO_LARGE_ERROR = "File too large. Maximum allowed size is 10MB."
 MAX_PDF_PAGES = 100
 MAX_EXCEL_SHEETS = 100
 PDF_CORRUPT_ERROR = "PDF file is corrupt or has an invalid structure."
 EXCEL_CORRUPT_ERROR = "Invalid or corrupted Excel file."
-EXCEL_TOO_MANY_SHEETS_ERROR = (
-    f"Excel has too many sheets (maximum {MAX_EXCEL_SHEETS})."
-)
+EXCEL_TOO_MANY_SHEETS_ERROR = f"Excel has too many sheets (maximum {MAX_EXCEL_SHEETS})."
 EXCEL_PASSWORD_PROTECTED_ERROR = (
     "Excel file is password-protected. Please remove the password and try again."
 )
@@ -107,21 +125,27 @@ TXT_PROTECTED_ERROR = (
     "File terdeteksi sebagai format terproteksi atau terenkripsi. "
     "Pastikan file adalah teks biasa (.txt) yang tidak diproteksi."
 )
+CSV_CORRUPT_ERROR = "File CSV tidak dapat dibaca atau rusak (corrupt)."
+CSV_PROTECTED_ERROR = (
+    "File CSV terdeteksi sebagai format terproteksi atau terenkripsi. "
+    "Pastikan file adalah CSV biasa yang tidak diproteksi."
+)
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
-OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
+OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
 
 BINARY_SIGNATURES: list[tuple[bytes, str]] = [
-    (b"\x50\x4B\x03\x04", FILE_EXTENSION_MISMATCH_ERROR),
-    (b"\x50\x4B\x05\x06", FILE_EXTENSION_MISMATCH_ERROR),
-    (b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", TXT_PROTECTED_ERROR),
+    (b"\x50\x4b\x03\x04", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\x50\x4b\x05\x06", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", TXT_PROTECTED_ERROR),
     (b"\x7fELF", FILE_EXTENSION_MISMATCH_ERROR),
     (b"MZ", FILE_EXTENSION_MISMATCH_ERROR),
     (b"%PDF", FILE_EXTENSION_MISMATCH_ERROR),
     (b"\xff\xd8\xff", FILE_EXTENSION_MISMATCH_ERROR),
     (b"\x89PNG", FILE_EXTENSION_MISMATCH_ERROR),
 ]
+
 
 def _has_extracted_text(extracted_data):
     """Return True if any page contains extracted text."""
@@ -163,9 +187,7 @@ def _process_pdf(file_path, uploaded_file):
             if empty_pages:
                 ocr_data = OCRService.process_pdf_pages(file_path, empty_pages)
                 # Merge OCR results into the extracted data
-                ocr_by_page = {
-                    p["page"]: p for p in ocr_data.get("content", [])
-                }
+                ocr_by_page = {p["page"]: p for p in ocr_data.get("content", [])}
                 for page in extracted_data["content"]:
                     if page["page"] in ocr_by_page:
                         page["text"] = ocr_by_page[page["page"]]["text"]
@@ -188,6 +210,38 @@ def process_word(file_path, ext):
 
     return True, None, extracted_data
 
+
+def _process_image(file_path):
+    try:
+        extractor = ImageExtractor()
+        extracted_data = extractor.extract(file_path)
+        return True, None, extracted_data
+    except ValueError as exc:
+        return False, str(exc), None
+    except Exception:
+        logger.exception("Image extraction failed.")
+        return False, "Image OCR extraction failed.", None
+
+
+def _dispatch_upload_processing(ext, file_path, uploaded_file):
+    processors = {
+        EXT_PDF: lambda: _process_pdf(file_path, uploaded_file),
+        EXT_XLS: lambda: process_uploaded_excel(file_path),
+        EXT_XLSX: lambda: process_uploaded_excel(file_path),
+        EXT_TXT: lambda: process_uploaded_txt(file_path),
+        EXT_CSV: lambda: process_uploaded_txt(file_path),
+        EXT_PNG: lambda: _process_image(file_path),
+        EXT_JPG: lambda: _process_image(file_path),
+        EXT_JPEG: lambda: _process_image(file_path),
+    }
+
+    processor = processors.get(ext)
+    if processor is None:
+        return False, "Unsupported file type", None
+
+    return processor()
+
+
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
     if not is_valid:
@@ -196,7 +250,6 @@ def process_upload(uploaded_file):
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
     file_path = save_temp_file(uploaded_file)
-    extracted_data = None
 
     try:
         if ext == ".pdf":
@@ -225,6 +278,13 @@ def process_upload(uploaded_file):
 
         else:
             return False, "Unsupported file type", None, None
+        success, error, extracted_data = _dispatch_upload_processing(
+            ext,
+            file_path,
+            uploaded_file,
+        )
+        if not success:
+            return False, error, None, None
 
     finally:
         try:
@@ -244,8 +304,12 @@ def validate_file(uploaded_file):
     if ext not in ALLOWED_EXTENSIONS:
         return (
             False,
-            "Unsupported file type. Only PDF, XLS, XLSX, DOC, DOCX, and TXT are allowed.",
+            "Unsupported file type. Only PDF, XLS, XLSX, TXT, PNG, JPG, and JPEG are allowed.",
         )
+
+    # Image files have their own dedicated validation pipeline
+    if ext in IMAGE_EXTENSIONS:
+        return validate_image(uploaded_file)
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
@@ -262,11 +326,14 @@ def validate_file(uploaded_file):
             return False, excel_error
 
     if ext in {EXT_DOC, EXT_DOCX}:
-        is_valid_word, word_error = word_validation_service.validate_word(uploaded_file, ext)
+        is_valid_word, word_error = word_validation_service.validate_word(
+            uploaded_file, ext
+        )
         if not is_valid_word:
             return False, word_error
 
     return True, None
+
 
 def validate_pdf(uploaded_file):
     """Single-parse PDF validation: encryption, structure, and page count."""
@@ -375,6 +442,7 @@ def _get_xls_sheet_count(uploaded_file):
             release_resources()
         uploaded_file.seek(0)
 
+
 def validate_mime_type(uploaded_file, ext):
     try:
         head = _read_head(uploaded_file)
@@ -406,10 +474,16 @@ def validate_mime_type(uploaded_file, ext):
             request_mime = (getattr(uploaded_file, "content_type", "") or "").lower()
 
             # Some environments report plain text as octet-stream; prefer request MIME then.
-            if detected_mime in {MIME_OCTET_STREAM, MIME_ZIP, MIME_OLE_STORAGE} and request_mime:
+            if (
+                detected_mime in {MIME_OCTET_STREAM, MIME_ZIP, MIME_OLE_STORAGE}
+                and request_mime
+            ):
                 detected_mime = request_mime
 
             return _validate_txt_content(uploaded_file, detected_mime)
+
+        if ext == EXT_CSV:
+            return _validate_csv_content(uploaded_file, mime)
 
         if mime not in expected_mimes:
             return False, DOES_NOT_MATCH_EXTENSION_ERROR
@@ -418,6 +492,7 @@ def validate_mime_type(uploaded_file, ext):
 
     except Exception:
         return False, "Unable to determine file type."
+
 
 def _read_head(uploaded_file, size=2048):
     uploaded_file.seek(0)
@@ -443,6 +518,7 @@ def _fallback_mime(head, ext):
     if ext in {EXT_XLS, EXT_DOC}:
         return MIME_OCTET_STREAM
     return None
+
 
 def _is_ole_container(uploaded_file):
     """Return True if file starts with OLE Compound File signature."""
@@ -485,6 +561,7 @@ def _has_zip_signature(uploaded_file):
     except Exception:
         return False
 
+
 def _has_binary_signature(uploaded_file):
     try:
         max_prefix = max(len(sig) for sig, _ in BINARY_SIGNATURES)
@@ -500,6 +577,7 @@ def _has_binary_signature(uploaded_file):
     except Exception:
         return False, None
 
+
 def _validate_txt_content(uploaded_file, detected_mime: str):
     is_binary, binary_error = _has_binary_signature(uploaded_file)
     if is_binary:
@@ -513,6 +591,26 @@ def _validate_txt_content(uploaded_file, detected_mime: str):
         return True, None
 
     return False, TXT_CORRUPT_ERROR
+
+
+def _validate_csv_content(uploaded_file, detected_mime: str):
+    is_binary, binary_error = _has_binary_signature(uploaded_file)
+    if is_binary:
+        uploaded_file.seek(0)
+        header = uploaded_file.read(8)
+        uploaded_file.seek(0)
+        if header == OLE_SIGNATURE:
+            return False, CSV_PROTECTED_ERROR
+        return False, binary_error
+
+    if detected_mime and detected_mime.startswith("text/"):
+        return True, None
+
+    allowed = ALLOWED_MIME_TYPES.get(EXT_CSV, [])
+    if detected_mime in allowed:
+        return True, None
+
+    return False, CSV_CORRUPT_ERROR
 
 
 def save_temp_file(uploaded_file):
