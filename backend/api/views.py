@@ -313,6 +313,7 @@ def export_excel(request):
 
 @require_GET
 @api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
 def download_csv(request, file_id):
     try:
         artifact = resolve_csv_download_artifact(
