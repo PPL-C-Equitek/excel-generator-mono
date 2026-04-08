@@ -6,11 +6,13 @@ from django.core.exceptions import SuspiciousFileOperation
 from django.http import FileResponse
 from django.utils._os import safe_join
 from django.views.decorators.http import require_GET, require_POST
-from rest_framework.decorators import api_view, parser_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import MultiPartParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
+from authentication.permissions import IsVerifiedUser
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
     MAX_FILE_SIZE,
@@ -244,6 +246,7 @@ def export_csv(request):
 
 @require_POST
 @api_view(["POST"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
 def export_excel(request):
     serializer = ExcelExportRequestSerializer(data=request.data)
     if not serializer.is_valid():
