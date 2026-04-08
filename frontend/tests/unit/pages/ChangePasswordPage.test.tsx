@@ -169,6 +169,39 @@ describe('ChangePasswordPage', () => {
         expect(mockReplace).toHaveBeenCalledWith('/login')
     })
 
+    it('uses the fallback success message when the API returns no message', async () => {
+        vi.useFakeTimers()
+        mockChangePassword.mockResolvedValueOnce({})
+        render(<ChangePasswordPage />)
+
+        fireEvent.change(screen.getByLabelText(/current password/i), {
+            target: { value: 'Current#123' },
+        })
+        fireEvent.change(screen.getByLabelText(/^new password$/i), {
+            target: { value: 'Updated#123' },
+        })
+        fireEvent.change(screen.getByLabelText(/confirm new password/i), {
+            target: { value: 'Updated#123' },
+        })
+
+        fireEvent.click(screen.getByRole('button', { name: /change password/i }))
+
+        await act(async () => {
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(
+            screen.getByText('Password changed successfully. Redirecting to login...')
+        ).toBeInTheDocument()
+
+        await act(async () => {
+            vi.advanceTimersByTime(1500)
+        })
+
+        expect(mockReplace).toHaveBeenCalledWith('/login')
+    })
+
     it('redirects to login when no valid access token exists', async () => {
         mockGetValidAccessToken.mockResolvedValue(null)
         render(<ChangePasswordPage />)
