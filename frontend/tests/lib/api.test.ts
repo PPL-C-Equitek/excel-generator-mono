@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchAPI, login, uploadFile, loginWithGoogle, logout, changePassword } from "@/lib/api";
+import {
+    fetchAPI,
+    login,
+    uploadFile,
+    loginWithGoogle,
+    logout,
+    changePassword,
+    requestPasswordReset,
+    resendPasswordReset,
+} from "@/lib/api";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
@@ -724,5 +733,41 @@ describe('changePassword', () => {
                 new_password_confirm: 'Updated#123',
             })
         ).rejects.toThrow('Failed to change password.')
+    })
+})
+
+describe('password reset API helpers', () => {
+    beforeEach(() => {
+        mockFetch.mockClear()
+    })
+
+    it('requestPasswordReset posts the email to the forgot-password endpoint', async () => {
+        mockFetch.mockResolvedValueOnce(mockResponse({ message: 'ok' }))
+
+        await requestPasswordReset('user@example.com')
+
+        expect(mockFetch).toHaveBeenCalledWith(
+            expect.stringContaining('/auth/forgot-password/'),
+            expect.objectContaining({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: 'user@example.com' }),
+            })
+        )
+    })
+
+    it('resendPasswordReset posts the email to the resend-password-reset endpoint', async () => {
+        mockFetch.mockResolvedValueOnce(mockResponse({ message: 'ok' }))
+
+        await resendPasswordReset('user@example.com')
+
+        expect(mockFetch).toHaveBeenCalledWith(
+            expect.stringContaining('/auth/resend-password-reset/'),
+            expect.objectContaining({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: 'user@example.com' }),
+            })
+        )
     })
 })

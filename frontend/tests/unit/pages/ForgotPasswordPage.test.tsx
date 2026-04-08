@@ -138,6 +138,18 @@ describe('ForgotPasswordPage', () => {
     expect(await screen.findByText('Unable to send reset link.')).toBeInTheDocument();
   });
 
+  it('uses the fallback form error when the request rejects with a non-Error value', async () => {
+    const user = userEvent.setup();
+    vi.mocked(requestPasswordReset).mockRejectedValueOnce('unexpected');
+
+    render(<ForgotPasswordPage />);
+
+    await user.type(screen.getByLabelText(/email/i), 'user@example.com');
+    await user.click(screen.getByRole('button', { name: /send reset link/i }));
+
+    expect(await screen.findByText('Something went wrong.')).toBeInTheDocument();
+  });
+
   it('resends the password reset email and starts the cooldown', async () => {
     vi.mocked(requestPasswordReset).mockResolvedValueOnce({
       message: 'Password reset link sent.',

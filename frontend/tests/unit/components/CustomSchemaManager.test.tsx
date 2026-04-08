@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as customSchemaHook from '../../../src/hooks/useCustomSchemas'
 import CustomSchemaManager, {
     buildCustomSchemaInput,
+    getNextColumnsAfterRemoval,
     validateCustomSchemaDraft,
 } from '../../../src/components/CustomSchemaManager'
 import type {
@@ -10,6 +12,7 @@ import type {
     CustomSchemaRecord,
     ICustomSchemaService,
 } from '../../../src/lib/ICustomSchemaService'
+import type { UseCustomSchemasReturn } from '../../../src/hooks/useCustomSchemas'
 
 function createSchemaRecord(overrides: Partial<CustomSchemaRecord> = {}): CustomSchemaRecord {
     return {
@@ -43,6 +46,25 @@ function createService(overrides: Partial<ICustomSchemaService> = {}): ICustomSc
     }
 }
 
+function createHookState(
+    overrides: Partial<UseCustomSchemasReturn> = {}
+): UseCustomSchemasReturn {
+    return {
+        hasAccessToken: true,
+        isLoading: false,
+        isSaving: false,
+        deletingSchemaId: null,
+        schemas: [],
+        error: null,
+        message: null,
+        reloadSchemas: vi.fn().mockResolvedValue(undefined),
+        createSchema: vi.fn().mockResolvedValue(true),
+        updateSchema: vi.fn().mockResolvedValue(true),
+        deleteSchema: vi.fn().mockResolvedValue(true),
+        ...overrides,
+    }
+}
+
 describe('CustomSchemaManager', () => {
     beforeEach(() => {
         window.localStorage.clear()
@@ -51,6 +73,7 @@ describe('CustomSchemaManager', () => {
 
     afterEach(() => {
         vi.clearAllMocks()
+        vi.restoreAllMocks()
         window.localStorage.clear()
         window.sessionStorage.clear()
     })
@@ -332,6 +355,49 @@ describe('CustomSchemaManager', () => {
         expect(screen.getByTestId('add-schema-btn')).toBeDisabled()
     })
 
+    it('does not open the create modal when the add action is forced while disabled', async () => {
+        const service = createService({
+            list: vi.fn().mockResolvedValue([
+                createSchemaRecord({ id: '00000000-0000-0000-0000-000000000001', name: 'Schema 1' }),
+                createSchemaRecord({ id: '00000000-0000-0000-0000-000000000002', name: 'Schema 2' }),
+                createSchemaRecord({ id: '00000000-0000-0000-0000-000000000003', name: 'Schema 3' }),
+                createSchemaRecord({ id: '00000000-0000-0000-0000-000000000004', name: 'Schema 4' }),
+                createSchemaRecord({ id: '00000000-0000-0000-0000-000000000005', name: 'Schema 5' }),
+            ]),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await screen.findByText('Schema 5')
+
+        const addButton = screen.getByTestId('add-schema-btn') as HTMLButtonElement
+        addButton.removeAttribute('disabled')
+        fireEvent.click(addButton)
+
+        expect(screen.queryByRole('dialog', { name: /add schema/i })).not.toBeInTheDocument()
+    })
+
+    it('does not open the create modal when the add action is forced without access', () => {
+        vi.spyOn(customSchemaHook, 'useCustomSchemas').mockReturnValue(
+            createHookState({
+                hasAccessToken: false,
+            })
+        )
+
+        render(<CustomSchemaManager />)
+
+        const addButton = screen.getByTestId('add-schema-btn') as HTMLButtonElement
+        addButton.removeAttribute('disabled')
+        fireEvent.click(addButton)
+
+        expect(screen.queryByRole('dialog', { name: /add schema/i })).not.toBeInTheDocument()
+    })
+
     it('refreshes the list after an initial load error', async () => {
         const service = createService({
             list: vi
@@ -399,6 +465,127 @@ describe('CustomSchemaManager', () => {
         })
     })
 
+    it('does not switch to edit mode when the edit action is forced while saving', async () => {
+        const user = userEvent.setup()
+        let resolveCreate: ((value: CustomSchemaRecord) => void) | null = null
+        const service = createService({
+            list: vi.fn().mockResolvedValue([createSchemaRecord()]),
+            create: vi.fn().mockImplementation(
+                () =>
+                    new Promise<CustomSchemaRecord>((resolve) => {
+                        resolveCreate = resolve
+                    })
+            ),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await screen.findByText('Invoice Mapping')
+        await user.click(screen.getByTestId('add-schema-btn'))
+
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        await user.type(within(dialog).getByLabelText(/schema name/i), 'Pending Save')
+        await user.type(within(dialog).getByLabelText(/column name/i), 'invoice_number')
+        await user.type(
+            within(dialog).getByLabelText(/column description/i),
+            'Invoice identifier'
+        )
+        await user.click(within(dialog).getByTestId('schema-save-btn'))
+
+        const editButton = screen.getByRole('button', { name: /^edit$/i }) as HTMLButtonElement
+        editButton.disabled = false
+        fireEvent.click(editButton)
+
+        expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
+        expect(screen.queryByRole('dialog', { name: /edit schema/i })).not.toBeInTheDocument()
+
+        resolveCreate?.(
+            createSchemaRecord({
+                id: '00000000-0000-0000-0000-000000000099',
+                name: 'Pending Save',
+            })
+        )
+        await waitFor(() => {
+            expect(screen.queryByRole('dialog', { name: /add schema/i })).not.toBeInTheDocument()
+        })
+    })
+
+    it('does not switch to edit mode when the edit action is forced while loading', () => {
+        vi.spyOn(customSchemaHook, 'useCustomSchemas').mockReturnValue(
+            createHookState({
+                isLoading: true,
+                schemas: [createSchemaRecord()],
+            })
+        )
+
+        render(<CustomSchemaManager />)
+
+        fireEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+
+        expect(screen.queryByRole('dialog', { name: /edit schema/i })).not.toBeInTheDocument()
+    })
+
+    it('keeps the modal open when saving fails', async () => {
+        const user = userEvent.setup()
+        const service = createService({
+            create: vi.fn().mockRejectedValue(new Error('Save failed.')),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await user.click(screen.getByTestId('add-schema-btn'))
+
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        await user.type(within(dialog).getByLabelText(/schema name/i), 'Invoice Mapping')
+        await user.type(within(dialog).getByLabelText(/column name/i), 'invoice_number')
+        await user.type(
+            within(dialog).getByLabelText(/column description/i),
+            'Invoice identifier'
+        )
+        await user.click(within(dialog).getByTestId('schema-save-btn'))
+
+        expect(await screen.findByText('Save failed.')).toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
+    })
+
+    it('keeps the modal open when the save callback reports failure', async () => {
+        const user = userEvent.setup()
+        const createSchema = vi.fn().mockResolvedValue(false)
+        vi.spyOn(customSchemaHook, 'useCustomSchemas').mockReturnValue(
+            createHookState({
+                createSchema,
+            })
+        )
+
+        render(<CustomSchemaManager />)
+
+        await user.click(screen.getByTestId('add-schema-btn'))
+
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        await user.type(within(dialog).getByLabelText(/schema name/i), 'Invoice Mapping')
+        await user.type(within(dialog).getByLabelText(/column name/i), 'invoice_number')
+        await user.type(
+            within(dialog).getByLabelText(/column description/i),
+            'Invoice identifier'
+        )
+        await user.click(within(dialog).getByTestId('schema-save-btn'))
+
+        await waitFor(() => {
+            expect(createSchema).toHaveBeenCalled()
+        })
+        expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
+    })
+
     it('requires delete confirmation before removing a schema', async () => {
         const user = userEvent.setup()
         const service = createService({
@@ -425,6 +612,125 @@ describe('CustomSchemaManager', () => {
         expect(service.remove).not.toHaveBeenCalled()
     })
 
+    it('closes the delete dialog when the user clicks the backdrop or presses escape', async () => {
+        const user = userEvent.setup()
+        const service = createService({
+            list: vi.fn().mockResolvedValue([createSchemaRecord()]),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await screen.findByText('Invoice Mapping')
+        await user.click(screen.getByRole('button', { name: /delete/i }))
+        fireEvent.click(screen.getByTestId('delete-schema-backdrop-btn'))
+
+        await waitFor(() => {
+            expect(
+                screen.queryByRole('dialog', { name: /delete schema/i })
+            ).not.toBeInTheDocument()
+        })
+
+        await user.click(screen.getByRole('button', { name: /delete/i }))
+        fireEvent.keyDown(window, { key: 'Escape' })
+
+        await waitFor(() => {
+            expect(
+                screen.queryByRole('dialog', { name: /delete schema/i })
+            ).not.toBeInTheDocument()
+        })
+    })
+
+    it('keeps the delete dialog open when a non-escape key is pressed', async () => {
+        const user = userEvent.setup()
+        const service = createService({
+            list: vi.fn().mockResolvedValue([createSchemaRecord()]),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await screen.findByText('Invoice Mapping')
+        await user.click(screen.getByRole('button', { name: /delete/i }))
+        fireEvent.keyDown(window, { key: 'Enter' })
+
+        expect(screen.getByRole('dialog', { name: /delete schema/i })).toBeInTheDocument()
+    })
+
+    it('keeps the delete dialog open while deletion is in progress', async () => {
+        const user = userEvent.setup()
+        let resolveDelete: (() => void) | null = null
+        const service = createService({
+            list: vi.fn().mockResolvedValue([createSchemaRecord()]),
+            remove: vi.fn().mockImplementation(
+                () =>
+                    new Promise<void>((resolve) => {
+                        resolveDelete = resolve
+                    })
+            ),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await screen.findByText('Invoice Mapping')
+        await user.click(screen.getByRole('button', { name: /delete/i }))
+        await user.click(screen.getByTestId('confirm-delete-schema-btn'))
+
+        expect(screen.getByTestId('confirm-delete-schema-btn')).toHaveTextContent(
+            'Deleting...'
+        )
+
+        const cancelButton = screen.getByRole('button', { name: /^cancel$/i })
+        cancelButton.removeAttribute('disabled')
+        fireEvent.click(screen.getByTestId('delete-schema-backdrop-btn'))
+        await user.click(cancelButton)
+        fireEvent.keyDown(window, { key: 'Escape' })
+
+        expect(screen.getByRole('dialog', { name: /delete schema/i })).toBeInTheDocument()
+
+        resolveDelete?.()
+        await waitFor(() => {
+            expect(
+                screen.queryByRole('dialog', { name: /delete schema/i })
+            ).not.toBeInTheDocument()
+        })
+    })
+
+    it('keeps the delete dialog open when deletion fails', async () => {
+        const user = userEvent.setup()
+        const service = createService({
+            list: vi.fn().mockResolvedValue([createSchemaRecord()]),
+            remove: vi.fn().mockRejectedValue(new Error('Delete failed.')),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await screen.findByText('Invoice Mapping')
+        await user.click(screen.getByRole('button', { name: /delete/i }))
+        await user.click(screen.getByTestId('confirm-delete-schema-btn'))
+
+        expect(await screen.findByText('Delete failed.')).toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: /delete schema/i })).toBeInTheDocument()
+    })
+
     it('keeps a single column row when the forced remove action targets the last remaining column', async () => {
         const user = userEvent.setup()
 
@@ -437,7 +743,7 @@ describe('CustomSchemaManager', () => {
 
         await user.click(screen.getByTestId('add-schema-btn'))
 
-        const removeButton = screen.getByRole('button', { name: /^remove$/i })
+        const removeButton = screen.getByRole('button', { name: /^remove$/i }) as HTMLButtonElement
         removeButton.removeAttribute('disabled')
         fireEvent.click(removeButton)
 
@@ -531,6 +837,16 @@ describe('validateCustomSchemaDraft', () => {
         ).toBe('Column names must be unique.')
     })
 
+    it('requires a column name', () => {
+        expect(
+            validateCustomSchemaDraft({
+                name: 'Invoice Mapping',
+                description: '',
+                columns: [{ id: 1, name: '   ', description: 'Invoice identifier' }],
+            })
+        ).toBe('Column 1 name is required.')
+    })
+
     it('requires at least one column', () => {
         expect(
             validateCustomSchemaDraft({
@@ -549,6 +865,27 @@ describe('validateCustomSchemaDraft', () => {
                 columns: [{ id: 1, name: 'invoice_number', description: '   ' }],
             })
         ).toBe('Column 1 description is required.')
+    })
+})
+
+describe('getNextColumnsAfterRemoval', () => {
+    it('keeps the existing columns when removing the last remaining column', () => {
+        const columns = [
+            { id: 1, name: 'invoice_number', description: 'Invoice identifier' },
+        ]
+
+        expect(getNextColumnsAfterRemoval(columns, 1)).toEqual(columns)
+    })
+
+    it('removes the selected column when other columns remain', () => {
+        const columns = [
+            { id: 1, name: 'invoice_number', description: 'Invoice identifier' },
+            { id: 2, name: 'customer_name', description: 'Customer name' },
+        ]
+
+        expect(getNextColumnsAfterRemoval(columns, 2)).toEqual([
+            { id: 1, name: 'invoice_number', description: 'Invoice identifier' },
+        ])
     })
 })
 

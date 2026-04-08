@@ -117,6 +117,14 @@ export function buildCustomSchemaInput(
     }
 }
 
+export function getNextColumnsAfterRemoval(
+    columns: SchemaColumnDraft[],
+    columnId: number
+): SchemaColumnDraft[] {
+    const remainingColumns = columns.filter((column) => column.id !== columnId)
+    return remainingColumns.length === 0 ? columns : remainingColumns
+}
+
 export default function CustomSchemaManager({
     service = customSchemaService,
     accessTokenResolver = getValidAccessToken,
@@ -153,25 +161,19 @@ export default function CustomSchemaManager({
     }, [])
 
     const openCreateModal = () => {
-        if (isAddDisabled) {
-            return
-        }
-
         resetDraft()
         setIsModalOpen(true)
     }
 
     const openEditModal = (schema: CustomSchemaRecord) => {
-        if (!hasAccessToken || isLoading || isSaving) {
-            return
+        if (hasAccessToken && !isLoading && !isSaving) {
+            const nextDraft = buildDraftFromSchema(schema)
+            nextColumnIdRef.current = nextDraft.columns.length + 1
+            setDraft(nextDraft)
+            setEditingSchemaId(schema.id)
+            setFormError(null)
+            setIsModalOpen(true)
         }
-
-        const nextDraft = buildDraftFromSchema(schema)
-        nextColumnIdRef.current = nextDraft.columns.length + 1
-        setDraft(nextDraft)
-        setEditingSchemaId(schema.id)
-        setFormError(null)
-        setIsModalOpen(true)
     }
 
     const closeSchemaModal = useCallback(() => {
@@ -251,16 +253,10 @@ export default function CustomSchemaManager({
 
     const handleRemoveColumn = (columnId: number) => {
         setFormError(null)
-        setDraft((prev) => {
-            if (prev.columns.length === 1) {
-                return prev
-            }
-
-            return {
-                ...prev,
-                columns: prev.columns.filter((column) => column.id !== columnId),
-            }
-        })
+        setDraft((prev) => ({
+            ...prev,
+            columns: getNextColumnsAfterRemoval(prev.columns, columnId),
+        }))
     }
 
     const handleSubmit = async (event: FormSubmitEvent) => {
@@ -282,12 +278,8 @@ export default function CustomSchemaManager({
         }
     }
 
-    const handleConfirmDelete = async () => {
-        if (!schemaPendingDeletion) {
-            return
-        }
-
-        const wasDeleted = await deleteSchema(schemaPendingDeletion.id)
+    const handleConfirmDelete = async (schema: CustomSchemaRecord) => {
+        const wasDeleted = await deleteSchema(schema.id)
         if (wasDeleted) {
             setSchemaPendingDeletion(null)
         }
@@ -297,6 +289,7 @@ export default function CustomSchemaManager({
     const modalDescription = editingSchemaId
         ? 'Update the saved output columns for this schema.'
         : 'Define the output columns you want to reuse later.'
+    const handleAddSchemaClick = isAddDisabled ? undefined : openCreateModal
     let saveButtonLabel = 'Save schema'
     if (isSaving) {
         saveButtonLabel = 'Saving...'
@@ -336,7 +329,7 @@ export default function CustomSchemaManager({
                         <button
                             data-testid="add-schema-btn"
                             type="button"
-                            onClick={openCreateModal}
+                            onClick={handleAddSchemaClick}
                             disabled={isAddDisabled}
                             className="rounded-xl bg-red-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
                         >
@@ -677,7 +670,7 @@ export default function CustomSchemaManager({
                                 data-testid="confirm-delete-schema-btn"
                                 type="button"
                                 onClick={() => {
-                                    void handleConfirmDelete()
+                                    void handleConfirmDelete(schemaPendingDeletion)
                                 }}
                                 disabled={deletingSchemaId === schemaPendingDeletion.id}
                                 className="rounded-xl bg-red-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"

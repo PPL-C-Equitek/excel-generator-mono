@@ -350,8 +350,8 @@ def send_password_reset_email(email):
             )
         else:
             logger.info(
-                "Password reset link (RESEND_API_KEY not set): %s",
-                reset_url,
+                "Password reset requested for %s (RESEND_API_KEY not set; reset link not logged)",
+                email,
             )
     except Exception:
         logger.exception("Failed to send password reset email to %s", email)

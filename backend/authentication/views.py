@@ -322,4 +322,3 @@ class LogoutView(CleanLogoutView):
         return build_logout_user_use_case(
             token_blacklist_port=CallableTokenBlacklistRepository(blacklist_refresh_token)
         )
-

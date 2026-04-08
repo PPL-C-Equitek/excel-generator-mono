@@ -1025,7 +1025,7 @@ class ExportCSVToFilesystemTest(unittest.TestCase):
     def test_build_safe_file_path_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.assertRaises(export_service.OutputCSVGenerationError):
-                export_service._build_safe_file_path(temp_dir, "../evil.csv")
+                export_service._build_safe_file_path(temp_dir, "../evil.csv", export_service.OutputCSVGenerationError)
 
     def test_build_safe_file_path_raises_when_commonpath_fails(self):
         with patch(
@@ -1033,7 +1033,7 @@ class ExportCSVToFilesystemTest(unittest.TestCase):
             side_effect=ValueError("invalid path roots"),
         ):
             with self.assertRaises(export_service.OutputCSVGenerationError):
-                export_service._build_safe_file_path(r"C:\safe\storage", "export_abc123.csv")
+                export_service._build_safe_file_path(r"C:\safe\storage", "export_abc123.csv", export_service.OutputCSVGenerationError)
 
 
 class ExportExcelToFilesystemTest(unittest.TestCase):
@@ -1561,3 +1561,184 @@ class DiscoverDownloadArtifactsTest(unittest.TestCase):
         ):
             with self.assertRaises(export_service.OutputCSVDownloadLookupError):
                 export_service._discover_download_artifacts(r"C:\safe\storage")
+
+
+class ResolveExcelDownloadArtifactTest(unittest.TestCase):
+    def test_resolve_excel_download_artifact_exposes_expected_api(self):
+        self.assertTrue(
+            hasattr(export_service, "resolve_excel_download_artifact"),
+            "resolve_excel_download_artifact must be implemented in export_service.",
+        )
+        self.assertTrue(
+            hasattr(export_service, "OutputExcelDownloadLookupError"),
+            "OutputExcelDownloadLookupError must be implemented in export_service.",
+        )
+
+    def test_resolve_excel_download_artifact_returns_xlsx_metadata_for_existing_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token = "abc123"
+            file_name = f"export_{token}.xlsx"
+            file_path = os.path.join(temp_dir, file_name)
+            with open(file_path, "wb") as generated:
+                generated.write(b"fake xlsx bytes")
+
+            result = export_service.resolve_excel_download_artifact(
+                export_id=f"xlsx_{token}",
+                storage_dir=temp_dir,
+            )
+
+            self.assertEqual(result["artifact_type"], "xlsx")
+            self.assertEqual(result["file_name"], file_name)
+            self.assertEqual(result["file_path"], file_path)
+            self.assertEqual(
+                result["content_type"],
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+    def test_resolve_excel_download_artifact_rejects_invalid_export_id(self):
+        invalid_export_ids = [
+            "",
+            "xlsx_",
+            "xlsx_abc-123",
+            "../evil",
+            "C:\\evil",
+            "/tmp/evil",
+            "abc123",
+        ]
+
+        for export_id in invalid_export_ids:
+            with self.subTest(export_id=export_id):
+                with self.assertRaises(export_service.OutputExcelDownloadLookupError):
+                    export_service.resolve_excel_download_artifact(
+                        export_id=export_id,
+                        storage_dir="C:/safe/storage",
+                    )
+
+    def test_resolve_excel_download_artifact_raises_not_found_when_file_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(export_service.OutputExcelDownloadLookupError):
+                export_service.resolve_excel_download_artifact(
+                    export_id="xlsx_deadbeef",
+                    storage_dir=temp_dir,
+                )
+
+    def test_resolve_excel_download_artifact_rejects_invalid_storage_dir(self):
+        with self.assertRaises(export_service.OutputExcelDownloadLookupError):
+            export_service.resolve_excel_download_artifact(
+                export_id="xlsx_abc123",
+                storage_dir="",
+            )
+
+
+class DiscoverExcelDownloadArtifactsTest(unittest.TestCase):
+    def test_discover_excel_download_artifacts_skips_non_file_entries(self):
+        base_dir = r"C:\safe\storage"
+        entries = [
+            _FakeDirEntry("export_abc123.xlsx", r"C:\safe\storage\export_abc123.xlsx", False),
+            _FakeDirEntry("export_def456.xlsx", r"C:\safe\storage\export_def456.xlsx", True),
+        ]
+
+        with patch(
+            "file_processing.services.export_service.os.scandir",
+            return_value=_StaticScandir(entries),
+        ):
+            with patch(
+                "file_processing.services.export_service.os.path.realpath",
+                side_effect=lambda value: value,
+            ):
+                with patch(
+                    "file_processing.services.export_service.os.path.commonpath",
+                    side_effect=lambda paths: paths[0],
+                ):
+                    discovered = export_service._discover_excel_download_artifacts(
+                        base_dir
+                    )
+
+        self.assertNotIn("export_abc123.xlsx", discovered)
+        self.assertIn("export_def456.xlsx", discovered)
+
+    def test_discover_excel_download_artifacts_skips_non_matching_file_names(self):
+        base_dir = r"C:\safe\storage"
+        entries = [
+            _FakeDirEntry("notes.txt", r"C:\safe\storage\notes.txt", True),
+            _FakeDirEntry("export_bad.csv", r"C:\safe\storage\export_bad.csv", True),
+            _FakeDirEntry("export_def456.xlsx", r"C:\safe\storage\export_def456.xlsx", True),
+        ]
+
+        with patch(
+            "file_processing.services.export_service.os.scandir",
+            return_value=_StaticScandir(entries),
+        ):
+            with patch(
+                "file_processing.services.export_service.os.path.realpath",
+                side_effect=lambda value: value,
+            ):
+                with patch(
+                    "file_processing.services.export_service.os.path.commonpath",
+                    side_effect=lambda paths: paths[0],
+                ):
+                    discovered = export_service._discover_excel_download_artifacts(
+                        base_dir
+                    )
+
+        self.assertNotIn("notes.txt", discovered)
+        self.assertNotIn("export_bad.csv", discovered)
+        self.assertIn("export_def456.xlsx", discovered)
+
+    def test_discover_excel_download_artifacts_skips_entries_when_commonpath_raises(self):
+        base_dir = r"C:\safe\storage"
+        entries = [
+            _FakeDirEntry("export_abc123.xlsx", r"C:\safe\storage\export_abc123.xlsx", True),
+            _FakeDirEntry("export_def456.xlsx", r"C:\safe\storage\export_def456.xlsx", True),
+        ]
+
+        with patch(
+            "file_processing.services.export_service.os.scandir",
+            return_value=_StaticScandir(entries),
+        ):
+            with patch(
+                "file_processing.services.export_service.os.path.realpath",
+                side_effect=lambda value: value,
+            ):
+                with patch(
+                    "file_processing.services.export_service.os.path.commonpath",
+                    side_effect=[ValueError("invalid path"), base_dir],
+                ):
+                    discovered = export_service._discover_excel_download_artifacts(
+                        base_dir
+                    )
+
+        self.assertNotIn("export_abc123.xlsx", discovered)
+        self.assertIn("export_def456.xlsx", discovered)
+
+    def test_discover_excel_download_artifacts_skips_entries_outside_base_dir(self):
+        base_dir = r"C:\safe\storage"
+        entries = [
+            _FakeDirEntry("export_abc123.xlsx", r"C:\other\export_abc123.xlsx", True),
+        ]
+
+        with patch(
+            "file_processing.services.export_service.os.scandir",
+            return_value=_StaticScandir(entries),
+        ):
+            with patch(
+                "file_processing.services.export_service.os.path.realpath",
+                side_effect=lambda value: value,
+            ):
+                with patch(
+                    "file_processing.services.export_service.os.path.commonpath",
+                    return_value=r"C:\other",
+                ):
+                    discovered = export_service._discover_excel_download_artifacts(
+                        base_dir
+                    )
+
+        self.assertEqual(discovered, {})
+
+    def test_discover_excel_download_artifacts_raises_storage_error_when_scandir_fails(self):
+        with patch(
+            "file_processing.services.export_service.os.scandir",
+            side_effect=OSError("storage not readable"),
+        ):
+            with self.assertRaises(export_service.OutputExcelDownloadStorageError):
+                export_service._discover_excel_download_artifacts(r"C:\safe\storage")
