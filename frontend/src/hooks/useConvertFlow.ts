@@ -66,6 +66,13 @@ function getExcelDownloadFilename(baseFilename: string): string {
     return baseFilename.replace(/\.[^/.]+$/, '') + '.xlsx'
 }
 
+function isExportOutputEmpty(output: JsonValue | null): boolean {
+    const isStringEmpty = typeof output === 'string' && output.trim() === ''
+    return output === null || isStringEmpty ||
+        (Array.isArray(output) && output.length === 0) ||
+        (typeof output === 'object' && output !== null && Object.keys(output).length === 0)
+}
+
 export interface UseConvertFlowReturn {
     isConverting: boolean
     isExcelDownloading: boolean
@@ -129,6 +136,17 @@ export function useConvertFlow(
         }
     }
 
+    const resetConversionState = () => {
+        setError(null)
+        setExcelError(null)
+        setExcelSuccessMessage(null)
+        setOutputFile(null)
+        setCsvMetadata(null)
+        setExcelMetadata(null)
+        setGeneratedOutput(null)
+        setIsExcelDownloading(false)
+    }
+
     const processConversion = async (
         uploadResult: JsonObject,
         file: File,
@@ -160,14 +178,7 @@ export function useConvertFlow(
         conversionRequestIdRef.current += 1
         const signal = abortPreviousRequest()
 
-        setError(null)
-        setExcelError(null)
-        setExcelSuccessMessage(null)
-        setOutputFile(null)
-        setCsvMetadata(null)
-        setExcelMetadata(null)
-        setGeneratedOutput(null)
-        setIsExcelDownloading(false)
+        resetConversionState()
         setIsConverting(true)
 
         const uploadResult = await processUpload(file, signal)
@@ -187,12 +198,8 @@ export function useConvertFlow(
 
         const requestId = conversionRequestIdRef.current
         const csvOutput = generatedOutput
-        const isStringEmpty = typeof csvOutput === 'string' && csvOutput.trim() === ''
-        const isEmpty = csvOutput === null || isStringEmpty ||
-            (Array.isArray(csvOutput) && csvOutput.length === 0) ||
-            (typeof csvOutput === 'object' && csvOutput !== null && Object.keys(csvOutput).length === 0)
 
-        if (isEmpty) {
+        if (isExportOutputEmpty(csvOutput)) {
             setError("The converted data is empty or invalid, so it can't be exported.")
             return
         }
