@@ -1,9 +1,11 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from "react"
 import { getStoredUser } from "@/lib/auth"
+import LogoutButton from "@/components/LogoutButton"
 interface SidebarProps {
-    readonly activeMenu: 'convert' | 'schema' | 'history'
+    readonly activeMenu: 'home' | 'convert' | 'schema' | 'history'
     readonly onLogout?: () => void
 }
 
@@ -21,7 +23,12 @@ export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
     return (
         <aside className="fixed inset-y-0 left-0 w-56 overflow-y-auto bg-red-700 flex flex-col">
             <div className="px-6 py-5">
-                <h1 className="text-white font-extrabold text-xl tracking-widest">EQUITEK</h1>
+                <Link
+                    href="/"
+                    className="inline-flex rounded-xl px-2 py-1 text-white font-extrabold text-xl tracking-widest transition-all duration-150 hover:bg-red-600 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                    EQUITEK
+                </Link>
             </div>
 
             <nav className="flex flex-col gap-1 px-3">
@@ -39,9 +46,24 @@ export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
                 ))}
             </nav>
 
-            <div className="mt-auto px-4 py-4 flex items-center gap-2">
-                <span className="text-white font-bold text-sm">{username}</span>
-                <button onClick={onLogout} className="text-white hover:text-gray-200 ml-1">→</button>
+            <div className="mt-auto border-t border-white/20 px-4 py-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                    <span className="text-white font-bold text-sm">{username}</span>
+                </div>
+                {onLogout ? (
+                    <button
+                        type="button"
+                        onClick={onLogout}
+                        aria-label="Logout"
+                        className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-md transition-all duration-150 hover:bg-red-50 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                        Logout
+                    </button>
+                ) : (
+                    <div className="w-full">
+                        <LogoutButton />
+                    </div>
+                )}
             </div>
         </aside>
     )

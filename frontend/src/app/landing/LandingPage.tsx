@@ -20,6 +20,7 @@ export default function LandingPage() {
             <Navbar
                 links={LANDING_NAV_LINKS}
                 brandName="EQUITEK"
+                activePage="home"
             />
             <HeroSection
                 heading={LANDING_HERO_CONFIG.heading}
