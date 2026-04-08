@@ -82,6 +82,25 @@ describe('useCustomSchemas', () => {
         expect(result.current.error).toBeNull()
     })
 
+    it('loads schemas on mount when the access token resolver returns a promise', async () => {
+        const service = createService({
+            list: vi.fn().mockResolvedValue([createSchemaRecord()]),
+        })
+        const accessTokenResolver = vi.fn().mockResolvedValue('access-token')
+
+        const { result } = renderHook(() => useCustomSchemas(service, accessTokenResolver))
+
+        expect(result.current.hasAccessToken).toBe(false)
+        expect(result.current.isLoading).toBe(true)
+
+        await waitFor(() => {
+            expect(service.list).toHaveBeenCalledWith('access-token')
+        })
+
+        expect(result.current.hasAccessToken).toBe(true)
+        expect(result.current.schemas).toEqual([createSchemaRecord()])
+    })
+
     it('stays idle when no access token is available on mount', async () => {
         const service = createService()
         const accessTokenResolver = () => null

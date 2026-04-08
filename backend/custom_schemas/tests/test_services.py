@@ -252,6 +252,16 @@ class CustomSchemaApplicationServiceTest(SimpleTestCase):
             active_value="true",
         )
 
+    def test_get_owner_id_delegates_to_policy_service(self):
+        policy_service = Mock()
+        policy_service.get_owner_id.return_value = self.owner_id
+        service = CustomSchemaApplicationService(policy_service=policy_service)
+
+        result = service.get_owner_id(self.user)
+
+        self.assertEqual(result, self.owner_id)
+        policy_service.get_owner_id.assert_called_once_with(self.user)
+
     def test_has_name_conflict_delegates_to_policy_service(self):
         policy_service = Mock()
         policy_service.has_name_conflict.return_value = True

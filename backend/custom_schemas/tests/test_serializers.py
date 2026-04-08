@@ -115,3 +115,32 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
             name="Invoice Mapping",
             exclude_pk=existing_instance.pk,
         )
+
+    def test_get_application_service_returns_context_service_when_available(self):
+        application_service = Mock()
+        serializer = CustomSchemaSerializer(
+            context={"application_service": application_service}
+        )
+
+        result = serializer.get_application_service()
+
+        self.assertIs(result, application_service)
+
+    def test_validate_name_uses_default_application_service_when_not_in_context(self):
+        serializer = CustomSchemaSerializer(context={"request": self.request})
+        application_service = Mock()
+        application_service.has_name_conflict.return_value = False
+
+        with patch(
+            "custom_schemas.serializers.CustomSchemaApplicationService",
+            return_value=application_service,
+        ) as application_service_class:
+            result = serializer.validate_name("Invoice Mapping")
+
+        self.assertEqual(result, "Invoice Mapping")
+        application_service_class.assert_called_once_with()
+        application_service.has_name_conflict.assert_called_once_with(
+            user=self.request.user,
+            name="Invoice Mapping",
+            exclude_pk=None,
+        )
