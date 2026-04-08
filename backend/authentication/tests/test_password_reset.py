@@ -35,13 +35,13 @@ class GeneratePasswordResetTokenTest(SimpleTestCase):
 
 class SendPasswordResetEmailTest(SimpleTestCase):
     @override_settings(RESEND_API_KEY="", FRONTEND_URL="http://localhost:3000")
-    def test_logs_password_reset_link_when_no_api_key(self):
+    def test_logs_password_reset_request_without_exposing_reset_link_when_no_api_key(self):
         with self.assertLogs("authentication.services", level="INFO") as log:
             send_password_reset_email("user@example.com")
 
         log_text = "\n".join(log.output)
-        self.assertIn("Password reset link", log_text)
-        self.assertIn("reset-password?token=", log_text)
+        self.assertIn("Password reset requested for user@example.com", log_text)
+        self.assertNotIn("reset-password?token=", log_text)
 
     @override_settings(
         RESEND_API_KEY="re_test_key",
