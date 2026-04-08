@@ -175,6 +175,7 @@ def _dispatch_upload_processing(ext, file_path, uploaded_file):
         EXT_XLS: lambda: process_uploaded_excel(file_path),
         EXT_XLSX: lambda: process_uploaded_excel(file_path),
         EXT_TXT: lambda: process_uploaded_txt(file_path),
+        EXT_CSV: lambda: process_uploaded_txt(file_path),
         EXT_PNG: lambda: _process_image(file_path),
         EXT_JPG: lambda: _process_image(file_path),
         EXT_JPEG: lambda: _process_image(file_path),
@@ -193,15 +194,6 @@ def process_upload(uploaded_file):
         return False, error, None, None
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
-
-    file_path = save_temp_file(uploaded_file)
-
-    if ext in [EXT_TXT, EXT_CSV]:
-        uploaded_file.seek(0)
-        success, error, data = process_uploaded_txt(uploaded_file)
-        if not success:
-            return False, error, None, None
-        return True, None, None, data
 
     file_path = save_temp_file(uploaded_file)
 
