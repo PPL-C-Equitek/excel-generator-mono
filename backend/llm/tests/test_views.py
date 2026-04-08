@@ -1,10 +1,12 @@
 from types import SimpleNamespace
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 from unittest.mock import patch
 from uuid import uuid4
 
+from artifact_history.models import ArtifactHistory
+from authentication.models import User
 from llm.services.generation_service import CustomSchemaNotFoundError
 from llm.services.openai_client import OpenAITextGenerationProvider
 from llm.services.openai_client import (
@@ -310,3 +312,81 @@ class LlmGenerateEndpointTest(SimpleTestCase):
     #     self.assertIn("detail", blocked.data)
     #     self.assertEqual(blocked["X-RateLimit-Limit"], "5")
 
+
+class LlmGenerateHistoryIntegrationTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="history@example.com",
+            name="History User",
+            password="secret",
+            status="verified",
+        )
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_persists_history_for_authenticated_user(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        output_json = {
+            "document_info": {"filename": "invoice.pdf"},
+            "summary": {"table_count": 1},
+            "content_data": [{"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}],
+        }
+        mock_service.generate.return_value = output_json
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ArtifactHistory.objects.count(), 1)
+        history = ArtifactHistory.objects.get()
+        self.assertEqual(history.owner, self.user)
+        self.assertEqual(history.original_name, "invoice.pdf")
+        self.assertIsNone(history.custom_name)
+        self.assertEqual(history.status_processing, "completed")
+        self.assertEqual(history.output_json, output_json)
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_does_not_persist_history_when_generation_fails(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = RuntimeError("upstream error")
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(ArtifactHistory.objects.exists())
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_does_not_persist_history_for_anonymous_user(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "document_info": {"filename": "invoice.pdf"},
+            "summary": {"table_count": 1},
+            "content_data": [{"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}],
+        }
+
+        response = self.client.post(
+            "/llm/generate/",
+            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(ArtifactHistory.objects.exists())
