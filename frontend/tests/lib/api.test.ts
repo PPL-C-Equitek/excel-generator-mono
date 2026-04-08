@@ -734,6 +734,20 @@ describe('changePassword', () => {
             })
         ).rejects.toThrow('Failed to change password.')
     })
+
+    it('uses detail when change-password failure returns no string message', async () => {
+        mockFetch.mockResolvedValueOnce(
+            mockResponse({ message: ['bad'], detail: 'Token invalid' }, 401)
+        )
+
+        await expect(
+            changePassword('access-token', {
+                current_password: 'Current#123',
+                new_password: 'Updated#123',
+                new_password_confirm: 'Updated#123',
+            })
+        ).rejects.toThrow('Token invalid')
+    })
 })
 
 describe('password reset API helpers', () => {

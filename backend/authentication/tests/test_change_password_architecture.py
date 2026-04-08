@@ -152,6 +152,30 @@ class DefaultChangePasswordUseCaseTest(APISimpleTestCase):
         self.assertEqual(result.message, CHANGE_PASSWORD_SUCCESS_MESSAGE)
         account_port.set_password.assert_called_once()
 
+    def test_blacklists_refresh_token_when_provided(self):
+        account_port = MagicMock()
+        account_port.has_usable_password.return_value = False
+        account_port.check_password.return_value = False
+        notification_port = MagicMock()
+        blacklist_port = MagicMock()
+        use_case = DefaultChangePasswordUseCase(
+            account_port=account_port,
+            notification_port=notification_port,
+            token_blacklist_port=blacklist_port,
+        )
+
+        result = use_case.execute(
+            ChangePasswordCommand(
+                user=self.user,
+                current_password="",
+                new_password="Updated#123",
+                refresh_token="refresh-token",
+            )
+        )
+
+        self.assertEqual(result.message, CHANGE_PASSWORD_SUCCESS_MESSAGE)
+        blacklist_port.blacklist.assert_called_once_with("refresh-token")
+
     def test_wraps_unexpected_errors(self):
         account_port = MagicMock()
         account_port.has_usable_password.side_effect = RuntimeError("db down")
@@ -299,6 +323,33 @@ class ChangePasswordViewDependencyInjectionTest(APISimpleTestCase):
     def test_view_returns_500_when_use_case_raises_application_error(self):
         use_case = MagicMock()
         use_case.execute.side_effect = ChangePasswordServiceError("boom")
+
+        class TestableChangePasswordView(ChangePasswordView):
+            def get_change_password_use_case(self):  # type: ignore[override]
+                return use_case
+
+        request = self.factory.post(
+            "/auth/change-password/",
+            {
+                "current_password": "Current#123",
+                "new_password": "Updated#123",
+                "new_password_confirm": "Updated#123",
+            },
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = TestableChangePasswordView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data["message"],
+            CHANGE_PASSWORD_SERVER_ERROR_MESSAGE,
+        )
+
+    def test_view_returns_500_when_use_case_raises_unexpected_error(self):
+        use_case = MagicMock()
+        use_case.execute.side_effect = RuntimeError("boom")
 
         class TestableChangePasswordView(ChangePasswordView):
             def get_change_password_use_case(self):  # type: ignore[override]

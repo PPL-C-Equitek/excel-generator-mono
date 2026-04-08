@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ChangePasswordPage, {
     validateChangePasswordForm,
 } from '@/app/change-password/ChangePasswordPage'
+import { buildChangePasswordPayload } from '@/app/change-password/form'
 
 const mockReplace = vi.fn()
 const mockChangePassword = vi.fn()
@@ -73,6 +74,22 @@ describe('validateChangePasswordForm', () => {
         expect(result.errors.newPasswordConfirm).toBe(
             'Password confirmation does not match.'
         )
+    })
+
+    it('omits refresh_token when there is no stored refresh token', () => {
+        expect(
+            buildChangePasswordPayload({
+                currentPassword: '',
+                newPassword: 'Strong#123',
+                newPasswordConfirm: 'Strong#123',
+                refreshToken: null,
+            })
+        ).toEqual({
+            current_password: '',
+            new_password: 'Strong#123',
+            new_password_confirm: 'Strong#123',
+            refresh_token: undefined,
+        })
     })
 })
 
@@ -191,5 +208,25 @@ describe('ChangePasswordPage', () => {
             await screen.findByText('Current password is incorrect.')
         ).toBeInTheDocument()
         expect(mockClearAuthTokens).not.toHaveBeenCalled()
+    })
+
+    it('uses the fallback error when the API rejects with a non-Error value', async () => {
+        mockChangePassword.mockRejectedValueOnce('unexpected')
+        render(<ChangePasswordPage />)
+
+        fireEvent.change(screen.getByLabelText(/current password/i), {
+            target: { value: 'Wrong#123' },
+        })
+        fireEvent.change(screen.getByLabelText(/^new password$/i), {
+            target: { value: 'Updated#123' },
+        })
+        fireEvent.change(screen.getByLabelText(/confirm new password/i), {
+            target: { value: 'Updated#123' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: /change password/i }))
+
+        expect(
+            await screen.findByText('Failed to change password.')
+        ).toBeInTheDocument()
     })
 })
