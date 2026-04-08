@@ -185,6 +185,35 @@ class HistoryListViewTest(BaseApiViewTest):
         self.assertEqual(response.data["status"], "error")
         self.assertEqual(response.data["message"], "Invalid history pagination request.")
 
+    def test_history_list_accepts_custom_limit_and_offset(self):
+        older = self._create_history(
+            owner=self.verified_user,
+            original_name="older.pdf",
+            created_at=timezone.now() - timedelta(hours=3),
+        )
+        middle = self._create_history(
+            owner=self.verified_user,
+            original_name="middle.pdf",
+            created_at=timezone.now() - timedelta(hours=2),
+        )
+        newest = self._create_history(
+            owner=self.verified_user,
+            original_name="newest.pdf",
+            created_at=timezone.now() - timedelta(hours=1),
+        )
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/history/?limit=1&offset=1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 3)
+        self.assertEqual(response.data["limit"], 1)
+        self.assertEqual(response.data["offset"], 1)
+        self.assertEqual(
+            [item["id"] for item in response.data["results"]],
+            [str(middle.id)],
+        )
+
 
 class HistoryDownloadViewTest(BaseApiViewTest):
     def setUp(self):
@@ -343,6 +372,48 @@ class HistoryDownloadViewTest(BaseApiViewTest):
 
         response = self.client.get(
             f"/history/{self.history.id}/download/?file_format=csv"
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download history file due to internal error.",
+        )
+
+    @patch("api.views.export_csv_to_filesystem")
+    def test_history_download_returns_500_for_invalid_stored_output(self, mock_export_csv):
+        mock_export_csv.side_effect = OutputLLMValidationError("invalid stored output")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=csv"
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download history file due to internal error.",
+        )
+
+    @patch("api.views.open")
+    @patch("api.views.export_excel_to_filesystem")
+    def test_history_download_returns_500_for_unexpected_error(
+        self, mock_export_excel, mock_open_file
+    ):
+        mock_export_excel.return_value = {
+            "file_id": "xlsx_token",
+            "file_name": "export_token.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 12,
+            "created_at": "2026-04-08T10:00:00Z",
+        }
+        mock_open_file.side_effect = RuntimeError("unexpected read failure")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=xlsx"
         )
 
         self.assertEqual(response.status_code, 500)

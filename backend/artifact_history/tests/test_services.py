@@ -86,3 +86,7 @@ class ArtifactHistoryServiceTest(TestCase):
     def test_list_artifact_history_for_user_rejects_invalid_limit(self):
         with self.assertRaises(ValueError):
             list_artifact_history_for_user(self.owner, limit=0, offset=0)
+
+    def test_list_artifact_history_for_user_rejects_invalid_offset(self):
+        with self.assertRaises(ValueError):
+            list_artifact_history_for_user(self.owner, limit=10, offset=-1)

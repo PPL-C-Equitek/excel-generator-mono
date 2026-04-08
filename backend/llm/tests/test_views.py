@@ -14,7 +14,11 @@ from llm.services.openai_client import (
     OpenAIServiceError,
     OpenAIUpstreamError,
 )
-from llm.views import build_llm_generation_service, get_authenticated_user_id
+from llm.views import (
+    build_llm_generation_service,
+    extract_original_name,
+    get_authenticated_user_id,
+)
 
 
 class LlmGenerateEndpointTest(SimpleTestCase):
@@ -43,6 +47,43 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         result = get_authenticated_user_id(SimpleNamespace(is_authenticated=False))
 
         self.assertIsNone(result)
+
+    def test_extract_original_name_uses_input_document_info_filename(self):
+        result = extract_original_name(
+            {"document_info": {"filename": "input-doc.pdf"}},
+            {"document_info": {"filename": "output-doc.pdf"}},
+        )
+
+        self.assertEqual(result, "input-doc.pdf")
+
+    def test_extract_original_name_falls_back_to_output_document_info_filename(self):
+        result = extract_original_name(
+            {"document_info": {}},
+            {"document_info": {"filename": "output-doc.pdf"}},
+        )
+
+        self.assertEqual(result, "output-doc.pdf")
+
+    def test_extract_original_name_returns_generated_output_when_no_filename_available(self):
+        result = extract_original_name(
+            {"document_info": {}},
+            {"document_info": {}},
+        )
+
+        self.assertEqual(result, "generated-output")
+
+    def test_extract_original_name_returns_generated_output_when_input_and_output_are_not_objects(self):
+        result = extract_original_name([], [])
+
+        self.assertEqual(result, "generated-output")
+
+    def test_extract_original_name_returns_generated_output_when_document_info_values_are_not_objects(self):
+        result = extract_original_name(
+            {"document_info": "not-an-object"},
+            {"document_info": "not-an-object"},
+        )
+
+        self.assertEqual(result, "generated-output")
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):
