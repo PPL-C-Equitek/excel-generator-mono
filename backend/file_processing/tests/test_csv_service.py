@@ -1,7 +1,9 @@
 from unittest.mock import patch
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
-from io import BytesIO
+from io import BytesIO, StringIO
+import os
+import tempfile
 import json
 from file_processing.services.csv_service import parse_csv, process_uploaded_csv
 from file_processing.services.upload_service import (
@@ -834,3 +836,77 @@ class ProcessUploadCsvIntegrationTests(TestCase):
                     len(body["extracted"]), 5,
                     "Jumlah row di response harus sama dengan jumlah row di CSV",
                 )
+
+class CsvServiceCoverageTests(TestCase):
+
+    def test_parse_csv_with_string_path(self):
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".csv", encoding="utf-8") as f:
+            f.write("id,nama\n1,Alpha\n2,Beta\n")
+            temp_path = f.name
+        
+        try:
+            result = parse_csv(temp_path)
+            self.assertEqual(len(result), 2)
+            self.assertEqual(result[0]["nama"], "Alpha")
+        finally:
+            os.remove(temp_path)
+
+    def test_parse_csv_with_string_io(self):
+        sio = StringIO("col_a,col_b\nA1,B1\nA2,B2\n")
+        result = parse_csv(sio)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[1]["col_b"], "B2")
+
+    def test_parse_csv_with_empty_header_row(self):
+        from io import BytesIO
+        content = b"\n"
+        result = parse_csv(BytesIO(content))
+        self.assertEqual(result, [])
+
+    def test_parse_csv_with_attribute_error_on_seek(self):
+        class NoSeekFile:
+            def __init__(self, content):
+                self.lines = content.strip().split("\n")
+                self.idx = 0
+            def __iter__(self):
+                return self
+            def __next__(self):
+                if self.idx < len(self.lines):
+                    ret = self.lines[self.idx] + "\n"
+                    self.idx += 1
+                    return ret
+                raise StopIteration
+            
+        f = NoSeekFile("id,val\n1,one\n2,two")
+        result = parse_csv(f)
+        self.assertEqual(len(result), 2)
+
+    def test_process_uploaded_csv_with_oserror_on_seek(self):
+        class OSErrorSeekFile:
+            def __init__(self, content):
+                self.content = content
+                self.seek_called = False
+                
+            def seek(self, offset):
+                self.seek_called = True
+                raise OSError("Simulated OSError")
+                
+            def read(self, size=-1):
+                return self.content[:size] if size > 0 else self.content
+                
+            def __iter__(self):
+                for line in self.content.split(b'\n'):
+                    if line:
+                        yield line + b'\n'
+
+        f = OSErrorSeekFile(b"id,val\n1,error\n")
+        success, error, data = process_uploaded_csv(f)
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(len(data), 1)
+
+    def test_process_uploaded_csv_with_generic_exception(self):
+        success, error, _ = process_uploaded_csv(12345)
+        self.assertFalse(success)
+        self.assertIn("Invalid or unreadable CSV file", error)
+
