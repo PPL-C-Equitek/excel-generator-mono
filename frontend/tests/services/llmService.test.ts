@@ -332,6 +332,18 @@ describe("exportToExcel", () => {
     );
   });
 
+  it("passes through numeric status errors when no mapped user message exists", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
+    const unmappedStatusError = Object.assign(new Error("Teapot"), {
+      status: 418,
+    });
+    vi.spyOn(api, "fetchAPI").mockRejectedValue(unmappedStatusError);
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "Teapot"
+    );
+  });
+
   it("passes through non-Error rejections", async () => {
     vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     vi.spyOn(api, "fetchAPI").mockRejectedValue("String Failure");
@@ -557,12 +569,19 @@ describe("getDownloadUrl", () => {
   });
 
   it("falls back to localhost:8000 if URL parsing fails", () => {
-    // This requires manipulating process.env or mocking URL for the try-catch block inside getDownloadUrl
-    // We can simulate it by setting a malformed NEXT_PUBLIC_API_URL temporarily if doing so is simple:
     const original = process.env.NEXT_PUBLIC_API_URL;
-    process.env.NEXT_PUBLIC_API_URL = "htt   p://in^valid\nurl"; // triggers URL constructor error
+    process.env.NEXT_PUBLIC_API_URL = "htt   p://in^valid\nurl";
 
-    // Note: getDownloadUrl initializes NEXT_PUBLIC_API_URL locally in its body each call
+    const url = getDownloadUrl("csv_abc");
+    expect(url).toBe("http://localhost:8000/export/csv/csv_abc/download");
+
+    process.env.NEXT_PUBLIC_API_URL = original;
+  });
+
+  it("uses localhost:8000 when NEXT_PUBLIC_API_URL is unset", () => {
+    const original = process.env.NEXT_PUBLIC_API_URL;
+    delete process.env.NEXT_PUBLIC_API_URL;
+
     const url = getDownloadUrl("csv_abc");
     expect(url).toBe("http://localhost:8000/export/csv/csv_abc/download");
 
