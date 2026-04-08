@@ -25,6 +25,7 @@ import {
 
 vi.mock("@/lib/auth", () => ({
   getStoredAccessToken: vi.fn(),
+  getValidAccessToken: vi.fn(),
 }));
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -39,6 +40,7 @@ type ExcelServiceModule = typeof llmService & {
 };
 
 const excelService = llmService as ExcelServiceModule;
+const mockGetStoredAccessToken = vi.mocked(auth.getStoredAccessToken);
 
 describe("generateJson positive", () => {
   beforeEach(() => {

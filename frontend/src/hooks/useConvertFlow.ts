@@ -74,7 +74,7 @@ export interface UseConvertFlowReturn {
     excelSuccessMessage: string | null
     outputFile: OutputFile | null
     csvMetadata: CsvMetadata | null
-    handleFileSelect: (file: File) => Promise<void>
+    handleFileSelect: (file: File, customSchemaId?: string | null) => Promise<void>
     handleExcelDownload: () => Promise<void>
     llmService: ILLMService
 }
