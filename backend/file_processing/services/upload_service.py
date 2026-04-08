@@ -38,8 +38,6 @@ MIME_OLE_STORAGE = "application/x-ole-storage"
 MIME_ZIP = "application/zip"
 
 EXT_TXT = ".txt"
-ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_DOCX, EXT_DOC, EXT_TXT]
-EXT_TXT = ".txt"
 EXT_CSV = ".csv"
 EXT_PNG = ".png"
 EXT_JPG = ".jpg"
@@ -53,6 +51,8 @@ ALLOWED_EXTENSIONS = [
     EXT_PNG,
     EXT_JPG,
     EXT_JPEG,
+    EXT_DOCX,
+    EXT_DOC,
     EXT_TXT,
     EXT_CSV,
 ]
@@ -228,6 +228,8 @@ def _dispatch_upload_processing(ext, file_path, uploaded_file):
         EXT_PDF: lambda: _process_pdf(file_path, uploaded_file),
         EXT_XLS: lambda: process_uploaded_excel(file_path),
         EXT_XLSX: lambda: process_uploaded_excel(file_path),
+        EXT_DOC: lambda: process_word(file_path, EXT_DOC),
+        EXT_DOCX: lambda: process_word(file_path, EXT_DOCX),
         EXT_TXT: lambda: process_uploaded_txt(file_path),
         EXT_CSV: lambda: process_uploaded_txt(file_path),
         EXT_PNG: lambda: _process_image(file_path),
@@ -252,32 +254,6 @@ def process_upload(uploaded_file):
     file_path = save_temp_file(uploaded_file)
 
     try:
-        if ext == ".pdf":
-            success, error, data = _process_pdf(file_path, uploaded_file)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext in [".xlsx", ".xls"]:
-            success, error, data = process_uploaded_excel(file_path)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext == EXT_TXT:
-            success, error, data = process_uploaded_txt(file_path)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        elif ext in [EXT_DOC, EXT_DOCX]:
-            success, error, data = process_word(file_path, ext)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
-        else:
-            return False, "Unsupported file type", None, None
         success, error, extracted_data = _dispatch_upload_processing(
             ext,
             file_path,
@@ -304,7 +280,7 @@ def validate_file(uploaded_file):
     if ext not in ALLOWED_EXTENSIONS:
         return (
             False,
-            "Unsupported file type. Only PDF, XLS, XLSX, TXT, PNG, JPG, and JPEG are allowed.",
+            "Unsupported file type. Only PDF, XLS, XLSX, TXT, CSV, PNG, JPG, JPEG, DOC, and DOCX are allowed.",
         )
 
     # Image files have their own dedicated validation pipeline
