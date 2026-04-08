@@ -627,10 +627,44 @@ describe('useConvertFlow', () => {
                 await result.current.handleFileSelect(testFile)
             })
 
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
             expect(result.current.csvMetadata).toBeNull()
             expect(result.current.outputFile?.filename).toBe('report.pdf')
             
             vi.unstubAllEnvs()
+        })
+
+        it('uses the fallback csv error message for non-Error failures', async () => {
+            const service = makeMockService({
+                exportToCsv: vi.fn().mockRejectedValue('fatal')
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(result.current.error).toBe('CSV Export failed')
+            expect(result.current.csvMetadata).toBeNull()
+        })
+
+        it('does not export csv when output is not ready', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.exportToCsv).not.toHaveBeenCalled()
+            expect(result.current.csvMetadata).toBeNull()
         })
 
         it('ignores setting csvMetadata if request is aborted during manual exportToCsv', async () => {
@@ -829,6 +863,58 @@ describe('useConvertFlow', () => {
             expect(service.exportToCsv).toHaveBeenCalledTimes(1)
             expect(service.exportToCsv).toHaveBeenCalledWith({ status: 'ok' })
             expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
+        })
+
+        it('reuses cached csv metadata instead of exporting again', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.exportToCsv).toHaveBeenCalledTimes(1)
+            expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
+        })
+
+        it('ignores stale csv export failures after a newer conversion starts', async () => {
+            const firstExport = deferred<{ file_id: string }>()
+            const service = makeMockService({
+                exportToCsv: vi.fn()
+                    .mockImplementationOnce(() => firstExport.promise)
+                    .mockResolvedValueOnce({ file_id: 'csv_99999' })
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            act(() => {
+                void getDownloadState(result).handleCsvDownload()
+            })
+
+            await waitFor(() => expect(service.exportToCsv).toHaveBeenCalledTimes(1))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                firstExport.reject(new Error('stale csv export failure'))
+                await Promise.resolve()
+            })
+
+            expect(result.current.error).toBeNull()
+            expect(result.current.csvMetadata).toBeNull()
         })
     })
 
@@ -1082,6 +1168,28 @@ describe('useConvertFlow', () => {
                 'xlsx_12345',
                 'report.xlsx'
             )
+        })
+
+        it('keeps using cached excel metadata after the first successful export', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).toHaveBeenCalledTimes(1)
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).toHaveBeenCalledTimes(1)
+            expect(service.downloadExcelFile).toHaveBeenCalledTimes(2)
         })
 
         it('reuses cached excel metadata after a browser download failure', async () => {

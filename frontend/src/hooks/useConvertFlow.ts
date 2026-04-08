@@ -241,8 +241,9 @@ export function useConvertFlow(
         setIsExcelDownloading(true)
 
         try {
-            const excelResult = excelMetadata ?? await llmService.exportToExcel(generatedOutput)
-            if (!excelMetadata) {
+            let excelResult = excelMetadata
+            if (!excelResult) {
+                excelResult = await llmService.exportToExcel(generatedOutput)
                 setExcelMetadata(excelResult)
             }
             await llmService.downloadExcelFile(
