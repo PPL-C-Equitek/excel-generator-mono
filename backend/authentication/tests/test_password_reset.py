@@ -14,6 +14,9 @@ from authentication.services import (
     generate_password_reset_token,
     send_password_reset_email,
 )
+from authentication.password_reset.entities import CompletePasswordResetCommand
+from authentication.password_reset.exceptions import PasswordResetServiceError
+from authentication.password_reset.use_cases import DefaultCompletePasswordResetUseCase
 
 
 class GeneratePasswordResetTokenTest(SimpleTestCase):
@@ -61,6 +64,19 @@ class SendPasswordResetEmailTest(SimpleTestCase):
         self.assertEqual(call_kwargs["to"], "user@example.com")
         self.assertEqual(call_kwargs["subject"], "Reset Your Password")
         self.assertIn("reset-password?token=", call_kwargs["html"])
+
+    @override_settings(
+        RESEND_API_KEY="re_test_key",
+        FRONTEND_URL="https://app.example.com",
+        RESEND_FROM_EMAIL="noreply@app.example.com",
+    )
+    def test_raises_when_resend_email_send_fails(self):
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = RuntimeError("send failed")
+
+        with patch.dict(sys.modules, {"resend": mock_resend}):
+            with self.assertRaises(RuntimeError):
+                send_password_reset_email("user@example.com")
 
 
 class ForgotPasswordViewTest(APISimpleTestCase):
@@ -149,6 +165,42 @@ class ForgotPasswordViewTest(APISimpleTestCase):
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
+    @patch("authentication.password_reset.http.ForgotPasswordView.get_request_password_reset_use_case")
+    def test_service_error_returns_500(self, mock_get_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.side_effect = PasswordResetServiceError("boom")
+        mock_get_use_case.return_value = mock_use_case
+
+        response = self.client.post(
+            self.url,
+            {"email": "verified@example.com"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data["message"],
+            "An internal server error occurred. Please try again later.",
+        )
+
+    @patch("authentication.password_reset.http.ForgotPasswordView.get_request_password_reset_use_case")
+    def test_unhandled_error_returns_500(self, mock_get_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.side_effect = RuntimeError("boom")
+        mock_get_use_case.return_value = mock_use_case
+
+        response = self.client.post(
+            self.url,
+            {"email": "verified@example.com"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data["message"],
+            "An internal server error occurred. Please try again later.",
+        )
+
 
 class ResendPasswordResetViewTest(APISimpleTestCase):
     def setUp(self):
@@ -220,6 +272,42 @@ class ResendPasswordResetViewTest(APISimpleTestCase):
 
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    @patch("authentication.password_reset.http.ResendPasswordResetView.get_resend_password_reset_use_case")
+    def test_service_error_returns_500(self, mock_get_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.side_effect = PasswordResetServiceError("boom")
+        mock_get_use_case.return_value = mock_use_case
+
+        response = self.client.post(
+            self.url,
+            {"email": "verified@example.com"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data["message"],
+            "An internal server error occurred. Please try again later.",
+        )
+
+    @patch("authentication.password_reset.http.ResendPasswordResetView.get_resend_password_reset_use_case")
+    def test_unhandled_error_returns_500(self, mock_get_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.side_effect = RuntimeError("boom")
+        mock_get_use_case.return_value = mock_use_case
+
+        response = self.client.post(
+            self.url,
+            {"email": "verified@example.com"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data["message"],
+            "An internal server error occurred. Please try again later.",
+        )
 
 
 class ResetPasswordViewTest(APISimpleTestCase):
@@ -312,3 +400,47 @@ class ResetPasswordViewTest(APISimpleTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("errors", response.data)
+
+    @patch("authentication.password_reset.http.ResetPasswordView.get_complete_password_reset_use_case")
+    def test_service_error_returns_500(self, mock_get_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.side_effect = PasswordResetServiceError("boom")
+        mock_get_use_case.return_value = mock_use_case
+
+        response = self.client.post(self.url, self.valid_payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data["message"],
+            "An internal server error occurred. Please try again later.",
+        )
+
+    @patch("authentication.password_reset.http.ResetPasswordView.get_complete_password_reset_use_case")
+    def test_unhandled_error_returns_500(self, mock_get_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.side_effect = RuntimeError("boom")
+        mock_get_use_case.return_value = mock_use_case
+
+        response = self.client.post(self.url, self.valid_payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data["message"],
+            "An internal server error occurred. Please try again later.",
+        )
+
+
+class CompletePasswordResetUseCaseTest(SimpleTestCase):
+    def test_wraps_unexpected_decoder_errors_as_service_errors(self):
+        token_decoder_port = MagicMock()
+        token_decoder_port.decode.side_effect = RuntimeError("decoder exploded")
+        account_port = MagicMock()
+        use_case = DefaultCompletePasswordResetUseCase(token_decoder_port, account_port)
+
+        with self.assertRaises(PasswordResetServiceError):
+            use_case.execute(
+                CompletePasswordResetCommand(
+                    token="signed-reset-token",
+                    password="Strong#123",
+                )
+            )
