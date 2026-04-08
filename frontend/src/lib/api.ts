@@ -137,6 +137,17 @@ type AuthResponse = {
   }
 }
 
+type MessageResponse = {
+  message?: string
+}
+
+type ChangePasswordPayload = {
+  current_password?: string
+  new_password: string
+  new_password_confirm: string
+  refresh_token?: string
+}
+
 export async function login(email: string, password: string): Promise<AuthResponse> {
   return fetchAPI("auth/login/", {
     method: "POST",
@@ -179,4 +190,39 @@ export async function logout(accessToken: string, refreshToken: string): Promise
     error.status = res.status
     throw error
   }
+}
+
+export async function changePassword(
+  accessToken: string,
+  payload: ChangePasswordPayload
+): Promise<MessageResponse> {
+  const res = await fetch(`${API_URL}/auth/change-password/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    let message = "Failed to change password."
+
+    try {
+      const data = await res.json()
+      if (typeof data?.message === "string") {
+        message = data.message
+      } else if (typeof data?.detail === "string") {
+        message = data.detail
+      }
+    } catch {
+      // ignore JSON parse error
+    }
+
+    const error = new Error(message) as HTTPError
+    error.status = res.status
+    throw error
+  }
+
+  return res.json()
 }
