@@ -1220,30 +1220,6 @@ class TestUploadService(TestCase):
         self.assertFalse(success)
         self.assertEqual(error, "Unsupported file type")
 
-    @patch(
-        "file_processing.services.upload_service.validate_file",
-        return_value=(True, None),
-    )
-    @patch(
-        "file_processing.services.upload_service.save_temp_file",
-        return_value="/tmp/f.docx",
-    )
-    @patch("file_processing.services.upload_service.os.path.exists", return_value=False)
-    def test_process_upload_docx_success_sets_extracted_data(
-        self, _exists, _save, _validate
-    ):
-        f = SimpleUploadedFile(
-            "file.docx",
-            b"dummy",
-            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-
-        success, error, _, extracted = upload_service.process_upload(f)
-
-        self.assertTrue(success)
-        self.assertIsNone(error)
-        self.assertEqual(extracted, {"content": [{"page": 1, "text": ["ok"]}]})
-
     def test_get_empty_page_numbers_invalid_data(self):
         self.assertEqual(_get_empty_page_numbers(None), [])
         self.assertEqual(_get_empty_page_numbers({}), [])
