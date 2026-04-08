@@ -9,7 +9,6 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
-from file_processing.services.word_extraction_service import WordExtractionService
 from file_processing.services import word_validation_service
 
 try:
