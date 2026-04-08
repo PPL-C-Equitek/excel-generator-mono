@@ -199,18 +199,6 @@ def _process_pdf(file_path, uploaded_file):
     return True, None, extracted_data
 
 
-def process_word(file_path, ext):
-    try:
-        extracted_data = WordExtractionService.extract_word_to_json(file_path, ext)
-    except ValueError as exc:
-        return False, str(exc), None
-    except Exception:
-        logger.exception("Word extraction failed")
-        return False, WORD_CORRUPT_ERROR, None
-
-    return True, None, extracted_data
-
-
 def _process_image(file_path):
     try:
         extractor = ImageExtractor()
@@ -228,8 +216,6 @@ def _dispatch_upload_processing(ext, file_path, uploaded_file):
         EXT_PDF: lambda: _process_pdf(file_path, uploaded_file),
         EXT_XLS: lambda: process_uploaded_excel(file_path),
         EXT_XLSX: lambda: process_uploaded_excel(file_path),
-        EXT_DOC: lambda: process_word(file_path, EXT_DOC),
-        EXT_DOCX: lambda: process_word(file_path, EXT_DOCX),
         EXT_TXT: lambda: process_uploaded_txt(file_path),
         EXT_CSV: lambda: process_uploaded_txt(file_path),
         EXT_PNG: lambda: _process_image(file_path),
