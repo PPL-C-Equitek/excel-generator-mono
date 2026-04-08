@@ -1025,7 +1025,7 @@ class ExportCSVToFilesystemTest(unittest.TestCase):
     def test_build_safe_file_path_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.assertRaises(export_service.OutputCSVGenerationError):
-                export_service._build_safe_file_path(temp_dir, "../evil.csv")
+                export_service._build_safe_file_path(temp_dir, "../evil.csv", export_service.OutputCSVGenerationError)
 
     def test_build_safe_file_path_raises_when_commonpath_fails(self):
         with patch(
@@ -1033,7 +1033,7 @@ class ExportCSVToFilesystemTest(unittest.TestCase):
             side_effect=ValueError("invalid path roots"),
         ):
             with self.assertRaises(export_service.OutputCSVGenerationError):
-                export_service._build_safe_file_path(r"C:\safe\storage", "export_abc123.csv")
+                export_service._build_safe_file_path(r"C:\safe\storage", "export_abc123.csv", export_service.OutputCSVGenerationError)
 
 
 class ExportExcelToFilesystemTest(unittest.TestCase):
@@ -1735,10 +1735,10 @@ class DiscoverExcelDownloadArtifactsTest(unittest.TestCase):
 
         self.assertEqual(discovered, {})
 
-    def test_discover_excel_download_artifacts_raises_lookup_error_when_scandir_fails(self):
+    def test_discover_excel_download_artifacts_raises_storage_error_when_scandir_fails(self):
         with patch(
             "file_processing.services.export_service.os.scandir",
             side_effect=OSError("storage not readable"),
         ):
-            with self.assertRaises(export_service.OutputExcelDownloadLookupError):
+            with self.assertRaises(export_service.OutputExcelDownloadStorageError):
                 export_service._discover_excel_download_artifacts(r"C:\safe\storage")

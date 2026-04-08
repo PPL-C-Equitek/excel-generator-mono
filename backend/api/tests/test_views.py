@@ -1,7 +1,10 @@
 from PyPDF2 import PdfReader, PdfWriter
+from django.core.exceptions import SuspiciousFileOperation
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
+from PIL import Image
 
 from io import BytesIO
 from reportlab.pdfgen import canvas
@@ -16,6 +19,7 @@ from file_processing.services.export_service import (
     OutputCSVGenerationError,
     OutputCSVMappingError,
     OutputExcelDownloadLookupError,
+    OutputExcelDownloadStorageError,
     OutputExcelGenerationError,
     OutputLLMValidationError,
 )
@@ -133,6 +137,13 @@ class UploadEndpointTest(TestCase):
         ws = wb.add_sheet("Sheet1")
         ws.write(0, 0, "Hello XLS")
         wb.save(buffer)
+        buffer.seek(0)
+        return buffer.read()
+
+    def generate_valid_png_bytes(self):
+        buffer = BytesIO()
+        img = Image.new("RGB", (20, 20), color="red")
+        img.save(buffer, format="PNG")
         buffer.seek(0)
         return buffer.read()
 
@@ -262,6 +273,28 @@ class UploadEndpointTest(TestCase):
         )
 
         self.assertEqual(resp.status_code, 200)
+
+    @patch("file_processing.services.upload_service._process_image")
+    def test_upload_png_success_with_extracted_payload(self, mock_process_image):
+        mock_process_image.return_value = (
+            True,
+            None,
+            {"content": [{"page": 1, "text": ["OCR image text"]}]},
+        )
+
+        png_content = self.generate_valid_png_bytes()
+
+        resp = self._post_file(
+            "photo.png",
+            png_content,
+            "image/png",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "success")
+        self.assertEqual(resp.data["filename"], "photo.png")
+        self.assertIn("extracted", resp.data)
+        self.assertEqual(resp.data["extracted"]["content"][0]["text"], ["OCR image text"])
 
     def test_upload_unsupported_type(self):
         resp = self._post_file("note.html", b"<html></html>", "text/html")
@@ -745,18 +778,61 @@ class ExportExcelViewTest(APISimpleTestCase):
             ],
         }
 
+    def _verified_user(self):
+        return SimpleNamespace(
+            id="verified-user-id",
+            email="verified@example.com",
+            is_authenticated=True,
+            status="verified",
+        )
+
+    def _unverified_user(self):
+        return SimpleNamespace(
+            id="unverified-user-id",
+            email="unverified@example.com",
+            is_authenticated=True,
+            status="unverified",
+        )
+
     def test_export_excel_endpoint_rejects_get_method(self):
         response = self.client.get("/export/excel")
         self.assertEqual(response.status_code, 405)
 
     def test_export_excel_endpoint_returns_400_if_output_json_missing(self):
+        self.client.force_authenticate(user=self._verified_user())
         response = self.client.post("/export/excel", data={}, format="json")
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("output_json", response.data)
 
     @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_returns_403_for_unauthenticated_user(
+        self,
+        mocked_export,
+    ):
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_export.assert_not_called()
+
+    @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_returns_403_for_authenticated_unverified_user(
+        self,
+        mocked_export,
+    ):
+        self.client.force_authenticate(user=self._unverified_user())
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_export.assert_not_called()
+
+    @patch("api.views.export_excel_to_filesystem")
     def test_export_excel_endpoint_returns_200_with_metadata(self, mocked_export):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.return_value = {
             "file_id": "xlsx_abc123",
             "file_name": "export_abc123.xlsx",
@@ -779,6 +855,7 @@ class ExportExcelViewTest(APISimpleTestCase):
         self,
         mocked_export,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = OutputLLMValidationError("invalid schema")
         payload = {"output_json": self._valid_output_json()}
 
@@ -793,6 +870,7 @@ class ExportExcelViewTest(APISimpleTestCase):
         self,
         mocked_export,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = OutputCSVMappingError("invalid mapping")
         payload = {"output_json": self._valid_output_json()}
 
@@ -804,6 +882,7 @@ class ExportExcelViewTest(APISimpleTestCase):
 
     @patch("api.views.export_excel_to_filesystem")
     def test_export_excel_endpoint_returns_500_on_generation_error(self, mocked_export):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = OutputExcelGenerationError("storage failure")
         payload = {"output_json": self._valid_output_json()}
 
@@ -818,6 +897,7 @@ class ExportExcelViewTest(APISimpleTestCase):
 
     @patch("api.views.export_excel_to_filesystem")
     def test_export_excel_endpoint_returns_500_on_unexpected_error(self, mocked_export):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = RuntimeError("disk full")
         payload = {"output_json": self._valid_output_json()}
 
@@ -835,6 +915,7 @@ class ExportExcelViewTest(APISimpleTestCase):
         self,
         mocked_export,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.return_value = {
             "file_id": "xlsx_abc123",
             "file_name": "../unsafe.xlsx",
@@ -903,6 +984,31 @@ class DownloadCSVViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(
             'attachment; filename="laporan_tahunan.csv"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_uses_custom_filename_with_zip_artifact(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.zip",
+            "file_path": "/safe/storage/export_abc123.zip",
+            "artifact_type": "zip",
+            "content_type": "application/zip",
+        }
+        mocked_open.return_value.__enter__.return_value = b"fake zip content"
+
+        response = self.client.get(
+            "/export/csv/zip_abc123/download?filename=arsip_laporan"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="arsip_laporan.zip"',
             response["Content-Disposition"],
         )
 
@@ -1038,6 +1144,44 @@ class DownloadExcelViewTest(APISimpleTestCase):
             return response.data
         return {}
 
+    def _verified_user(self):
+        return SimpleNamespace(
+            id="verified-user-id",
+            email="verified@example.com",
+            is_authenticated=True,
+            status="verified",
+        )
+
+    def _unverified_user(self):
+        return SimpleNamespace(
+            id="unverified-user-id",
+            email="unverified@example.com",
+            is_authenticated=True,
+            status="unverified",
+        )
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
+    def test_download_excel_endpoint_returns_403_for_unauthenticated_user(
+        self,
+        mocked_resolver,
+    ):
+        response = self.client.get("/export/excel/xlsx_abc123/download")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_resolver.assert_not_called()
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
+    def test_download_excel_endpoint_returns_403_for_authenticated_unverified_user(
+        self,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._unverified_user())
+
+        response = self.client.get("/export/excel/xlsx_abc123/download")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_resolver.assert_not_called()
+
     @patch("api.views.resolve_excel_download_artifact", create=True)
     @patch("api.views.open", create=True)
     def test_download_excel_endpoint_returns_200_with_attachment_headers(
@@ -1045,6 +1189,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.xlsx",
             "file_path": "/safe/storage/export_abc123.xlsx",
@@ -1069,10 +1214,67 @@ class DownloadExcelViewTest(APISimpleTestCase):
         mocked_resolver.assert_called_once()
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_excel_endpoint_uses_custom_filename_from_query(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.xlsx",
+            "file_path": "/safe/storage/export_abc123.xlsx",
+            "artifact_type": "xlsx",
+            "content_type": (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        }
+        mocked_open.return_value = BytesIO(b"fake xlsx bytes")
+
+        response = self.client.get(
+            "/export/excel/xlsx_abc123/download?filename=laporan_tahunan"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="laporan_tahunan.xlsx"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_excel_endpoint_falls_back_to_default_filename_when_query_is_unsafe(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.xlsx",
+            "file_path": "/safe/storage/export_abc123.xlsx",
+            "artifact_type": "xlsx",
+            "content_type": (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        }
+        mocked_open.return_value = BytesIO(b"fake xlsx bytes")
+
+        response = self.client.get(
+            "/export/excel/xlsx_abc123/download?filename=..%2Fevil.xlsx"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="export_abc123.xlsx"',
+            response["Content-Disposition"],
+        )
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
     def test_download_excel_endpoint_returns_400_for_invalid_export_id(
         self,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.side_effect = OutputExcelDownloadLookupError(
             "export_id format is invalid."
         )
@@ -1090,6 +1292,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         self,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.side_effect = OutputExcelDownloadLookupError(
             "Excel artifact not found for given export_id."
         )
@@ -1102,15 +1305,17 @@ class DownloadExcelViewTest(APISimpleTestCase):
         self.assertEqual(response_data.get("message"), "Excel file not found.")
         mocked_resolver.assert_called_once()
 
+    @patch("api.views.safe_join", side_effect=SuspiciousFileOperation("path traversal attempt"), create=True)
     @patch("api.views.resolve_excel_download_artifact", create=True)
-    @patch("api.views.open", create=True)
     def test_download_excel_endpoint_returns_404_for_unsafe_artifact_filename(
         self,
-        mocked_open,
         mocked_resolver,
+        _mocked_safe_join,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "../evil.xlsx",
+            "file_path": "/safe/storage/../evil.xlsx",
             "artifact_type": "xlsx",
             "content_type": (
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -1123,7 +1328,6 @@ class DownloadExcelViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response_data.get("status"), "error")
         self.assertEqual(response_data.get("message"), "Excel file not found.")
-        mocked_open.assert_not_called()
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
     @patch("api.views.open", side_effect=OSError("disk read failed"), create=True)
@@ -1132,6 +1336,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         _mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.xlsx",
             "file_path": "/safe/storage/export_abc123.xlsx",
@@ -1157,6 +1362,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         _mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.xlsx",
             "file_path": "/safe/storage/export_abc123.xlsx",
@@ -1180,6 +1386,7 @@ class DownloadExcelViewTest(APISimpleTestCase):
         self,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.side_effect = RuntimeError("unexpected resolver failure")
 
         response = self.client.get("/export/excel/xlsx_abc123/download")
@@ -1190,6 +1397,26 @@ class DownloadExcelViewTest(APISimpleTestCase):
             response.data["message"],
             "Failed to download Excel due to internal error.",
         )
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
+    def test_download_excel_endpoint_returns_500_when_storage_is_unavailable(
+        self,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_resolver.side_effect = OutputExcelDownloadStorageError(
+            "Excel artifact storage is unavailable."
+        )
+
+        response = self.client.get("/export/excel/xlsx_abc123/download")
+        response_data = self._response_data(response)
+
+        self.assertEqual(response_data.get("status"), "error")
+        self.assertEqual(
+            response_data.get("message"),
+            "Failed to download Excel due to internal error.",
+        )
+        self.assertEqual(response.status_code, 500)
 
     def test_download_excel_endpoint_rejects_post_method(self):
         response = self.client.post("/export/excel/xlsx_abc123/download")

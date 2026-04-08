@@ -6,11 +6,13 @@ from django.core.exceptions import SuspiciousFileOperation
 from django.http import FileResponse
 from django.utils._os import safe_join
 from django.views.decorators.http import require_GET, require_POST
-from rest_framework.decorators import api_view, parser_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import MultiPartParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
+from authentication.permissions import IsVerifiedUser
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
     MAX_FILE_SIZE,
@@ -27,6 +29,7 @@ from file_processing.services.export_service import (
     OutputCSVGenerationError,
     OutputCSVMappingError,
     OutputExcelDownloadLookupError,
+    OutputExcelDownloadStorageError,
     OutputExcelGenerationError,
     OutputLLMValidationError,
     export_csv_to_filesystem,
@@ -63,7 +66,12 @@ def _resolve_download_filename(requested_name, default_name, artifact_type):
     if not safe_name:
         return default_name
 
-    expected_ext = ".zip" if artifact_type == "zip" else ".csv"
+    if artifact_type == "zip":
+        expected_ext = ".zip"
+    elif artifact_type == "xlsx":
+        expected_ext = ".xlsx"
+    else:
+        expected_ext = ".csv"
     root, ext = os.path.splitext(safe_name)
     if ext.lower() != expected_ext:
         if ext:
@@ -270,6 +278,7 @@ def export_csv(request):
 
 @require_POST
 @api_view(["POST"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
 def export_excel(request):
     serializer = ExcelExportRequestSerializer(data=request.data)
     if not serializer.is_valid():
@@ -366,6 +375,7 @@ def download_csv(request, file_id):
 
 @require_GET
 @api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
 def download_excel(request, export_id):
     try:
         artifact = resolve_excel_download_artifact(
@@ -385,6 +395,9 @@ def download_excel(request, export_id):
 
         logger.warning("Excel download file not found.", exc_info=True)
         return _excel_download_not_found_response()
+    except OutputExcelDownloadStorageError:
+        logger.exception("Excel download storage is unavailable.")
+        return _excel_download_internal_error_response()
     except Exception:
         logger.exception("Unexpected error while resolving Excel download artifact.")
         return _excel_download_internal_error_response()
@@ -401,10 +414,15 @@ def download_excel(request, export_id):
     except Exception:
         logger.exception("Unexpected error while preparing Excel download.")
         return _excel_download_internal_error_response()
+    download_name = _resolve_download_filename(
+        requested_name=request.query_params.get("filename"),
+        default_name=artifact["file_name"],
+        artifact_type=artifact["artifact_type"],
+    )
 
     return FileResponse(
         file_handle,
         as_attachment=True,
-        filename=artifact["file_name"],
+        filename=download_name,
         content_type=artifact["content_type"],
     )
