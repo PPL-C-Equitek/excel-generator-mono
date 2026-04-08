@@ -297,11 +297,12 @@ export default function CustomSchemaManager({
     const modalDescription = editingSchemaId
         ? 'Update the saved output columns for this schema.'
         : 'Define the output columns you want to reuse later.'
-    const saveButtonLabel = isSaving
-        ? 'Saving...'
-        : editingSchemaId
-          ? 'Save changes'
-          : 'Save schema'
+    let saveButtonLabel = 'Save schema'
+    if (isSaving) {
+        saveButtonLabel = 'Saving...'
+    } else if (editingSchemaId) {
+        saveButtonLabel = 'Save changes'
+    }
 
     return (
         <>
