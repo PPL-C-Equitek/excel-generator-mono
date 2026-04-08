@@ -42,10 +42,12 @@ vi.mock('../../../src/components/UploadZone', () => ({
 
 // Centralized mock return value — set per describe block
 const mockHandleFileSelect = vi.fn()
+const mockHandleCsvDownload = vi.fn()
 const mockHandleExcelDownload = vi.fn()
 const mockHookReturn = {
     isConverting: false,
     isExcelDownloading: false,
+    canDownloadCsv: false,
     canDownloadExcel: false,
     error: null as string | null,
     excelError: null as string | null,
@@ -53,6 +55,7 @@ const mockHookReturn = {
     outputFile: null as OutputFile | null,
     csvMetadata: null as { file_id: string } | null,
     handleFileSelect: mockHandleFileSelect,
+    handleCsvDownload: mockHandleCsvDownload,
     handleExcelDownload: mockHandleExcelDownload,
     llmService: { getDownloadUrl: vi.fn() }
 }
@@ -81,12 +84,14 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
         // Reset hook state to idle
         mockHookReturn.isConverting = false
         mockHookReturn.isExcelDownloading = false
+        mockHookReturn.canDownloadCsv = false
         mockHookReturn.canDownloadExcel = false
         mockHookReturn.error = null
         mockHookReturn.excelError = null
         mockHookReturn.excelSuccessMessage = null
         mockHookReturn.outputFile = null
         mockHookReturn.csvMetadata = null
+        mockHookReturn.handleCsvDownload = mockHandleCsvDownload
         mockHookReturn.handleExcelDownload = mockHandleExcelDownload
         mockHookReturn.llmService = { getDownloadUrl: vi.fn() }
     })
@@ -217,8 +222,20 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
 
         it('shows Download CSV label', () => {
             mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.canDownloadCsv = true
             render(<ConvertPage />)
             expect(screen.getByText('Download CSV')).toBeInTheDocument()
+        })
+
+        it('shows Download CSV button when csv download is available even before metadata exists', () => {
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.canDownloadCsv = true
+            mockHookReturn.csvMetadata = null
+
+            render(<ConvertPage />)
+
+            expect(screen.getByTestId('download-csv-btn')).toBeInTheDocument()
+            expect(screen.getByTestId('download-csv-btn')).toBeEnabled()
         })
 
         it('shows Download Excel button when excel is available', () => {
@@ -312,24 +329,18 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(mockHandleExcelDownload).toHaveBeenCalledTimes(1)
         })
 
-        it('triggers output download using .csv filename and service URL', async () => {
+        it('delegates CSV download to the hook instead of constructing the URL in the page', async () => {
             const user = userEvent.setup()
-            const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-            const mockGetDownloadUrl = vi.fn().mockReturnValue('/export/csv/csv_123/download?filename=report.csv')
 
             mockHookReturn.outputFile = { filename: 'report.pdf', format: 'pdf', size: 20480 }
-            mockHookReturn.csvMetadata = { file_id: 'csv_123' }
-            mockHookReturn.llmService = { getDownloadUrl: mockGetDownloadUrl }
+            mockHookReturn.canDownloadCsv = true
+            mockHookReturn.csvMetadata = null
 
             render(<ConvertPage />)
             await user.click(screen.getByTestId('download-csv-btn'))
 
-            expect(mockGetDownloadUrl).toHaveBeenCalledWith('csv_123', 'report.csv')
-            expect(clickSpy).toHaveBeenCalled()
-
-            clickSpy.mockRestore()
-            mockHookReturn.csvMetadata = null
-            mockHookReturn.llmService = { getDownloadUrl: vi.fn() }
+            expect(mockHandleCsvDownload).toHaveBeenCalledTimes(1)
+            expect(mockHookReturn.llmService.getDownloadUrl).not.toHaveBeenCalled()
         })
     })
 
