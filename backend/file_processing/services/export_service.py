@@ -27,6 +27,14 @@ class OutputCSVDownloadLookupError(Exception):
     """Raised when generated CSV artifact cannot be resolved for download."""
 
 
+class OutputExcelDownloadLookupError(Exception):
+    """Raised when generated Excel artifact cannot be resolved for download."""
+
+
+class OutputExcelDownloadStorageError(Exception):
+    """Raised when the Excel artifact storage directory is unavailable."""
+
+
 class CSVSanitizationPolicy:
     """Strategy extension point for CSV header/value sanitization."""
 
@@ -53,6 +61,8 @@ _EXCEL_ARTIFACT_TYPE = "xlsx"
 _EXCEL_FILE_ID_PREFIX = "xlsx_"
 _EXCEL_FILE_NAME_PREFIX = "export_"
 _EXCEL_FILE_EXTENSION = "xlsx"
+_EXCEL_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_EXCEL_DOWNLOAD_FILE_NAME_PATTERN = r"export_[a-z0-9]+\.xlsx"
 _EXCEL_MAX_SHEET_NAME_LENGTH = 31
 _EXCEL_DEFAULT_EMPTY_SHEET_NAME = "Sheet1"
 _DEFAULT_CSV_SANITIZATION_POLICY = CSVSanitizationPolicy()
@@ -324,8 +334,12 @@ def generate_csv(mapped_output, sanitization_policy=None, filename_policy=None):
     if not isinstance(sheets, list):
         raise OutputCSVGenerationError("mapped_output.sheets must be a list.")
 
-    sanitization_policy = _resolve_sanitization_policy(sanitization_policy)
-    filename_policy = _resolve_filename_policy(filename_policy)
+    sanitization_policy = _resolve_sanitization_policy(
+        sanitization_policy, OutputCSVGenerationError
+    )
+    filename_policy = _resolve_filename_policy(
+        filename_policy, OutputCSVGenerationError
+    )
 
     files = []
     for sheet_index, sheet in enumerate(sheets):
@@ -342,15 +356,18 @@ def generate_csv(mapped_output, sanitization_policy=None, filename_policy=None):
 
 
 def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
-    sheet_name, headers, rows = _validate_generate_csv_sheet(sheet, sheet_index)
+    sheet_name, headers, rows = _validate_sheet_structure(
+        sheet, sheet_index, OutputCSVGenerationError
+    )
 
-    _validate_csv_headers(headers, sheet_index)
+    _validate_sheet_headers(headers, sheet_index, OutputCSVGenerationError)
     normalized_headers = [sanitization_policy.sanitize_header(header) for header in headers]
-    normalized_rows = _validate_csv_rows(
+    normalized_rows = _validate_sheet_rows(
         rows=rows,
         headers=headers,
         sheet_index=sheet_index,
         sanitization_policy=sanitization_policy,
+        error_class=OutputCSVGenerationError,
     )
     filename = filename_policy.build_filename(sheet_name)
     if not isinstance(filename, str) or not filename.strip():
@@ -364,13 +381,13 @@ def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
     }
 
 
-def _validate_generate_csv_sheet(sheet, sheet_index):
+def _validate_sheet_structure(sheet, sheet_index, error_class):
     if not isinstance(sheet, dict):
-        raise OutputCSVGenerationError(f"Sheet {sheet_index} must be an object.")
+        raise error_class(f"Sheet {sheet_index} must be an object.")
 
     for required_key in ("name", "headers", "rows"):
         if required_key not in sheet:
-            raise OutputCSVGenerationError(
+            raise error_class(
                 f"Sheet {sheet_index} is missing required key '{required_key}'."
             )
 
@@ -379,7 +396,7 @@ def _validate_generate_csv_sheet(sheet, sheet_index):
     rows = sheet["rows"]
 
     if not isinstance(sheet_name, str) or not sheet_name.strip():
-        raise OutputCSVGenerationError(
+        raise error_class(
             f"Sheet {sheet_index} name must be a non-empty string."
         )
 
@@ -434,11 +451,11 @@ def export_csv_to_filesystem(
         filename_policy=filename_policy,
     )
 
-    base_dir = _resolve_storage_dir(storage_dir)
-    token = _resolve_export_token(token_generator)
+    base_dir = _resolve_storage_dir(storage_dir, OutputCSVGenerationError)
+    token = _resolve_export_token(token_generator, OutputCSVGenerationError)
     extension = "zip" if artifact["type"] == "zip" else "csv"
     file_name = f"export_{token}.{extension}"
-    file_path = _build_safe_file_path(base_dir, file_name)
+    file_path = _build_safe_file_path(base_dir, file_name, OutputCSVGenerationError)
 
     try:
         with open(file_path, "wb") as destination:
@@ -451,7 +468,7 @@ def export_csv_to_filesystem(
         "file_name": file_name,
         "artifact_type": artifact["type"],
         "size_bytes": len(artifact["content"]),
-        "created_at": _resolve_created_at(now_provider),
+        "created_at": _resolve_created_at(now_provider, OutputCSVGenerationError),
     }
 
 
@@ -520,26 +537,18 @@ def _validate_excel_mapped_output(mapped_output):
     return sheets
 
 
-def _convert_csv_generation_error(func, *args, **kwargs):
-    try:
-        return func(*args, **kwargs)
-    except OutputCSVGenerationError as exc:
-        raise OutputExcelGenerationError(str(exc)) from exc
-
-
 def _resolve_excel_sanitization_policy(sanitization_policy):
-    return _convert_csv_generation_error(
-        _resolve_sanitization_policy,
-        sanitization_policy,
+    return _resolve_sanitization_policy(
+        sanitization_policy, OutputExcelGenerationError
     )
 
 
 def _resolve_excel_export_context(storage_dir, token_generator, now_provider):
-    base_dir = _convert_csv_generation_error(_resolve_storage_dir, storage_dir)
-    token = _convert_csv_generation_error(_resolve_export_token, token_generator)
+    base_dir = _resolve_storage_dir(storage_dir, OutputExcelGenerationError)
+    token = _resolve_export_token(token_generator, OutputExcelGenerationError)
     file_name = f"{_EXCEL_FILE_NAME_PREFIX}{token}.{_EXCEL_FILE_EXTENSION}"
-    file_path = _convert_csv_generation_error(_build_safe_file_path, base_dir, file_name)
-    created_at = _convert_csv_generation_error(_resolve_created_at, now_provider)
+    file_path = _build_safe_file_path(base_dir, file_name, OutputExcelGenerationError)
+    created_at = _resolve_created_at(now_provider, OutputExcelGenerationError)
 
     return token, file_name, file_path, created_at
 
@@ -608,18 +617,18 @@ def _write_excel_worksheet_rows(worksheet, headers, rows):
 
 
 def _validate_excel_sheet(sheet, sheet_index, sanitization_policy):
-    sheet_name, headers, rows = _convert_csv_generation_error(
-        _validate_generate_csv_sheet,
+    sheet_name, headers, rows = _validate_sheet_structure(
         sheet,
         sheet_index,
+        OutputExcelGenerationError,
     )
-    _convert_csv_generation_error(_validate_csv_headers, headers, sheet_index)
-    normalized_rows = _convert_csv_generation_error(
-        _validate_csv_rows,
+    _validate_sheet_headers(headers, sheet_index, OutputExcelGenerationError)
+    normalized_rows = _validate_sheet_rows(
         rows=rows,
         headers=headers,
         sheet_index=sheet_index,
         sanitization_policy=sanitization_policy,
+        error_class=OutputExcelGenerationError,
     )
 
     normalized_headers = [
@@ -671,6 +680,26 @@ def resolve_csv_download_artifact(file_id, storage_dir):
     raise OutputCSVDownloadLookupError("CSV artifact not found for given file_id.")
 
 
+def resolve_excel_download_artifact(export_id, storage_dir):
+    token = _resolve_excel_download_token(export_id)
+    base_dir = _resolve_lookup_storage_dir(
+        storage_dir, OutputExcelDownloadLookupError
+    )
+    discovered_artifacts = _discover_excel_download_artifacts(base_dir)
+
+    file_name = f"{_EXCEL_FILE_NAME_PREFIX}{token}.{_EXCEL_FILE_EXTENSION}"
+    file_path = discovered_artifacts.get(file_name)
+    if file_path:
+        return {
+            "file_name": file_name,
+            "file_path": file_path,
+            "artifact_type": _EXCEL_ARTIFACT_TYPE,
+            "content_type": _EXCEL_CONTENT_TYPE,
+        }
+
+    raise OutputExcelDownloadLookupError("Excel artifact not found for given export_id.")
+
+
 def _discover_download_artifacts(base_dir):
     discovered = {}
     try:
@@ -700,57 +729,87 @@ def _discover_download_artifacts(base_dir):
     return discovered
 
 
-def _validate_csv_headers(headers, sheet_index):
+def _discover_excel_download_artifacts(base_dir):
+    discovered = {}
+    try:
+        with os.scandir(base_dir) as entries:
+            for entry in entries:
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+
+                entry_name = entry.name.lower()
+                if not re.fullmatch(_EXCEL_DOWNLOAD_FILE_NAME_PATTERN, entry_name):
+                    continue
+
+                entry_path = os.path.realpath(entry.path)
+                try:
+                    common_path = os.path.commonpath([base_dir, entry_path])
+                except ValueError:
+                    continue
+
+                if common_path != base_dir:
+                    continue
+
+                discovered[entry_name] = entry_path
+    except OSError as exc:
+        raise OutputExcelDownloadStorageError(
+            "Excel artifact storage is unavailable."
+        ) from exc
+
+    return discovered
+
+
+def _validate_sheet_headers(headers, sheet_index, error_class):
     if not isinstance(headers, list):
-        raise OutputCSVGenerationError(f"Sheet {sheet_index} headers must be a list.")
+        raise error_class(f"Sheet {sheet_index} headers must be a list.")
     if not headers:
-        raise OutputCSVGenerationError(
+        raise error_class(
             f"Sheet {sheet_index} headers must be a non-empty list."
         )
 
     seen_headers = set()
     for header in headers:
         if not isinstance(header, str):
-            raise OutputCSVGenerationError(
+            raise error_class(
                 f"Sheet {sheet_index} header names must be strings."
             )
         normalized_header = header.strip()
         if not normalized_header:
-            raise OutputCSVGenerationError(
+            raise error_class(
                 f"Sheet {sheet_index} contains blank header name."
             )
 
         dedupe_key = normalized_header.lower()
         if dedupe_key in seen_headers:
-            raise OutputCSVGenerationError(
+            raise error_class(
                 f"Sheet {sheet_index} headers must be unique (case-insensitive)."
             )
         seen_headers.add(dedupe_key)
 
 
-def _validate_csv_rows(rows, headers, sheet_index, sanitization_policy):
+def _validate_sheet_rows(rows, headers, sheet_index, sanitization_policy, error_class):
     if not isinstance(rows, list):
-        raise OutputCSVGenerationError(f"Sheet {sheet_index} rows must be a list.")
+        raise error_class(f"Sheet {sheet_index} rows must be a list.")
 
     normalized_rows = []
     for row_index, row in enumerate(rows):
         if not isinstance(row, list):
-            raise OutputCSVGenerationError(
+            raise error_class(
                 f"Sheet {sheet_index}, row {row_index} must be a list."
             )
         if len(row) != len(headers):
-            raise OutputCSVGenerationError(
+            raise error_class(
                 f"Sheet {sheet_index}, row {row_index} must have {len(headers)} values."
             )
 
         normalized_row = []
         for value in row:
             if isinstance(value, (dict, list)):
-                raise OutputCSVGenerationError(
+                raise error_class(
                     f"Sheet {sheet_index}, row {row_index} contains unsupported nested value."
                 )
             if not isinstance(value, _SCALAR_TYPES):
-                raise OutputCSVGenerationError(
+                raise error_class(
                     f"Sheet {sheet_index}, row {row_index} contains unsupported value type."
                 )
             normalized_row.append(sanitization_policy.sanitize_value(value))
@@ -759,7 +818,7 @@ def _validate_csv_rows(rows, headers, sheet_index, sanitization_policy):
     return normalized_rows
 
 
-def _resolve_sanitization_policy(sanitization_policy):
+def _resolve_sanitization_policy(sanitization_policy, error_class):
     return _resolve_policy_with_methods(
         policy=sanitization_policy,
         default_policy=_DEFAULT_CSV_SANITIZATION_POLICY,
@@ -768,15 +827,17 @@ def _resolve_sanitization_policy(sanitization_policy):
             "sanitization_policy must implement callable sanitize_header and "
             "sanitize_value methods."
         ),
+        error_class=error_class,
     )
 
 
-def _resolve_filename_policy(filename_policy):
+def _resolve_filename_policy(filename_policy, error_class):
     return _resolve_policy_with_methods(
         policy=filename_policy,
         default_policy=_DEFAULT_CSV_FILENAME_POLICY,
         required_methods=("build_filename",),
         error_message="filename_policy must implement callable build_filename method.",
+        error_class=error_class,
     )
 
 
@@ -785,51 +846,56 @@ def _resolve_policy_with_methods(
     default_policy,
     required_methods,
     error_message,
+    error_class,
 ):
     if policy is None:
         return default_policy
 
     for method_name in required_methods:
         if not callable(getattr(policy, method_name, None)):
-            raise OutputCSVGenerationError(error_message)
+            raise error_class(error_message)
 
     return policy
 
 
-def _resolve_storage_dir(storage_dir):
+def _resolve_storage_dir(storage_dir, error_class):
     if not isinstance(storage_dir, str) or not storage_dir.strip():
-        raise OutputCSVGenerationError("storage_dir must be a non-empty string.")
+        raise error_class("storage_dir must be a non-empty string.")
 
     base_dir = os.path.abspath(storage_dir)
     try:
         os.makedirs(base_dir, exist_ok=True)
     except OSError as exc:
-        raise OutputCSVGenerationError("storage_dir cannot be created.") from exc
+        raise error_class("storage_dir cannot be created.") from exc
 
     return base_dir
 
 
 def _resolve_download_storage_dir(storage_dir):
+    return _resolve_lookup_storage_dir(storage_dir, OutputCSVDownloadLookupError)
+
+
+def _resolve_lookup_storage_dir(storage_dir, error_class):
     if not isinstance(storage_dir, str) or not storage_dir.strip():
-        raise OutputCSVDownloadLookupError("storage_dir must be a non-empty string.")
+        raise error_class("storage_dir must be a non-empty string.")
 
     return os.path.realpath(os.path.abspath(storage_dir))
 
 
-def _resolve_export_token(token_generator):
+def _resolve_export_token(token_generator, error_class):
     if token_generator is None:
         token = uuid.uuid4().hex
     else:
         token = token_generator()
 
     if not isinstance(token, str) or not token.strip():
-        raise OutputCSVGenerationError(
+        raise error_class(
             "token_generator must return a non-empty string token."
         )
 
     normalized_token = token.strip().lower()
     if not re.fullmatch(r"[a-z0-9]+", normalized_token):
-        raise OutputCSVGenerationError(
+        raise error_class(
             "token_generator returned an unsafe token format."
         )
 
@@ -848,22 +914,34 @@ def _resolve_download_token(file_id):
     return match.group(1)
 
 
-def _build_safe_file_path(base_dir, file_name):
+def _resolve_excel_download_token(export_id):
+    if not isinstance(export_id, str) or not export_id.strip():
+        raise OutputExcelDownloadLookupError("export_id must be a non-empty string.")
+
+    normalized_export_id = export_id.strip().lower()
+    match = re.fullmatch(r"xlsx_([a-z0-9]+)", normalized_export_id)
+    if not match:
+        raise OutputExcelDownloadLookupError("export_id format is invalid.")
+
+    return match.group(1)
+
+
+def _build_safe_file_path(base_dir, file_name, error_class):
     base_dir_real = os.path.realpath(os.path.abspath(base_dir))
     candidate = os.path.realpath(os.path.join(base_dir_real, file_name))
 
     try:
         common_path = os.path.commonpath([base_dir_real, candidate])
     except ValueError as exc:
-        raise OutputCSVGenerationError("Invalid storage path detected.") from exc
+        raise error_class("Invalid storage path detected.") from exc
 
     if common_path != base_dir_real:
-        raise OutputCSVGenerationError("Invalid storage path detected.")
+        raise error_class("Invalid storage path detected.")
 
     return candidate
 
 
-def _resolve_created_at(now_provider):
+def _resolve_created_at(now_provider, error_class):
     if now_provider is None:
         now_value = datetime.now(timezone.utc)
     else:
@@ -875,7 +953,7 @@ def _resolve_created_at(now_provider):
     if isinstance(now_value, str) and now_value.strip():
         return now_value
 
-    raise OutputCSVGenerationError(
+    raise error_class(
         "now_provider must return datetime or non-empty string."
     )
 

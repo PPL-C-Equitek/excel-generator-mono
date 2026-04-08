@@ -318,7 +318,41 @@ class TestTesseractEngine(TestCase):
         self.assertEqual(text, "Hello world")
         self.assertEqual(conf, 85.0)  # (90 + 80) / 2
         mock_preprocess.assert_called_once_with("raw_image")
-        # Multi-PSM strategy calls image_to_data for each PSM mode [3, 6, 4]
+        # Early-exit at confidence threshold (85.0) on the first PSM.
+        self.assertEqual(mock_pytesseract.image_to_data.call_count, 1)
+
+    @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
+    def test_tesseract_confidence_no_early_exit_when_below_threshold(self, mock_pytesseract):
+        mock_pytesseract.Output.DICT = "dict"
+        mock_pytesseract.image_to_data.side_effect = [
+            {
+                "text": ["Low"],
+                "conf": [60.0],
+                "block_num": [1],
+                "par_num": [1],
+                "line_num": [1],
+            },
+            {
+                "text": ["Better"],
+                "conf": [70.0],
+                "block_num": [1],
+                "par_num": [1],
+                "line_num": [1],
+            },
+            {
+                "text": ["Best"],
+                "conf": [80.0],
+                "block_num": [1],
+                "par_num": [1],
+                "line_num": [1],
+            },
+        ]
+
+        engine = TesseractEngine(apply_preprocessing=False)
+        text, conf = engine.extract_text_with_confidence("img")
+
+        self.assertEqual(text, "Best")
+        self.assertEqual(conf, 80.0)
         self.assertEqual(mock_pytesseract.image_to_data.call_count, 3)
 
     @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
