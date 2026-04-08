@@ -986,6 +986,44 @@ class DownloadCSVViewTest(APISimpleTestCase):
             return response.data
         return {}
 
+    def _verified_user(self):
+        return SimpleNamespace(
+            id="verified-user-id",
+            email="verified@example.com",
+            is_authenticated=True,
+            status="verified",
+        )
+
+    def _unverified_user(self):
+        return SimpleNamespace(
+            id="unverified-user-id",
+            email="unverified@example.com",
+            is_authenticated=True,
+            status="unverified",
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    def test_download_csv_endpoint_returns_403_for_unauthenticated_user(
+        self,
+        mocked_resolver,
+    ):
+        response = self.client.get("/export/csv/csv_abc123/download")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_resolver.assert_not_called()
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    def test_download_csv_endpoint_returns_403_for_authenticated_unverified_user(
+        self,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._unverified_user())
+
+        response = self.client.get("/export/csv/csv_abc123/download")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_resolver.assert_not_called()
+
     @patch("api.views.resolve_csv_download_artifact", create=True)
     @patch("api.views.open", create=True)
     def test_download_csv_endpoint_returns_200_with_attachment_headers(
@@ -993,6 +1031,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
         mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.csv",
             "file_path": "/safe/storage/export_abc123.csv",
@@ -1017,6 +1056,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
         mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.csv",
             "file_path": "/safe/storage/export_abc123.csv",
@@ -1042,6 +1082,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
         mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.zip",
             "file_path": "/safe/storage/export_abc123.zip",
@@ -1067,6 +1108,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
         mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.csv",
             "file_path": "/safe/storage/export_abc123.csv",
@@ -1090,6 +1132,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
         self,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.side_effect = OutputCSVDownloadLookupError("invalid file id")
 
         response = self.client.get("/export/csv/csv_bad-token/download")
@@ -1104,6 +1147,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
         self,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.side_effect = OutputCSVDownloadLookupError("missing file")
 
         response = self.client.get("/export/csv/csv_deadbeef/download")
@@ -1120,6 +1164,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
         mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "../evil.csv",
             "artifact_type": "csv",
@@ -1141,6 +1186,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
         _mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.csv",
             "file_path": "/safe/storage/export_abc123.csv",
@@ -1164,6 +1210,7 @@ class DownloadCSVViewTest(APISimpleTestCase):
         _mocked_open,
         mocked_resolver,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_resolver.return_value = {
             "file_name": "export_abc123.csv",
             "file_path": "/safe/storage/export_abc123.csv",
