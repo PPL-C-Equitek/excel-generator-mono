@@ -28,11 +28,14 @@ from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
     OutputCSVMappingError,
+    OutputExcelDownloadLookupError,
+    OutputExcelDownloadStorageError,
     OutputExcelGenerationError,
     OutputLLMValidationError,
     export_csv_to_filesystem,
     export_excel_to_filesystem,
     resolve_csv_download_artifact,
+    resolve_excel_download_artifact,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,7 +66,12 @@ def _resolve_download_filename(requested_name, default_name, artifact_type):
     if not safe_name:
         return default_name
 
-    expected_ext = ".zip" if artifact_type == "zip" else ".csv"
+    if artifact_type == "zip":
+        expected_ext = ".zip"
+    elif artifact_type == "xlsx":
+        expected_ext = ".xlsx"
+    else:
+        expected_ext = ".csv"
     root, ext = os.path.splitext(safe_name)
     if ext.lower() != expected_ext:
         if ext:
@@ -71,6 +79,30 @@ def _resolve_download_filename(requested_name, default_name, artifact_type):
         return f"{safe_name}{expected_ext}"
 
     return safe_name
+
+
+def _is_invalid_excel_download_id_error(error):
+    return "format is invalid" in str(error).lower()
+
+
+def _excel_download_not_found_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "Excel file not found.",
+        },
+        status=status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _excel_download_internal_error_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "Failed to download Excel due to internal error.",
+        },
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
 
 
 def _build_export_success_response(
@@ -327,6 +359,61 @@ def download_csv(request, file_id):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
+    download_name = _resolve_download_filename(
+        requested_name=request.query_params.get("filename"),
+        default_name=artifact["file_name"],
+        artifact_type=artifact["artifact_type"],
+    )
+
+    return FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=download_name,
+        content_type=artifact["content_type"],
+    )
+
+
+@require_GET
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def download_excel(request, export_id):
+    try:
+        artifact = resolve_excel_download_artifact(
+            export_id=export_id,
+            storage_dir=settings.EXCEL_EXPORT_DIR,
+        )
+    except OutputExcelDownloadLookupError as exc:
+        if _is_invalid_excel_download_id_error(exc):
+            logger.warning("Excel download received invalid export_id.", exc_info=True)
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Invalid Excel export id.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        logger.warning("Excel download file not found.", exc_info=True)
+        return _excel_download_not_found_response()
+    except OutputExcelDownloadStorageError:
+        logger.exception("Excel download storage is unavailable.")
+        return _excel_download_internal_error_response()
+    except Exception:
+        logger.exception("Unexpected error while resolving Excel download artifact.")
+        return _excel_download_internal_error_response()
+
+    try:
+        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+        file_handle = open(safe_file_path, "rb")
+    except (KeyError, SuspiciousFileOperation, ValueError):
+        logger.warning("Excel download resolved unsafe artifact metadata.", exc_info=True)
+        return _excel_download_not_found_response()
+    except OSError:
+        logger.exception("Excel download failed while reading generated artifact.")
+        return _excel_download_internal_error_response()
+    except Exception:
+        logger.exception("Unexpected error while preparing Excel download.")
+        return _excel_download_internal_error_response()
     download_name = _resolve_download_filename(
         requested_name=request.query_params.get("filename"),
         default_name=artifact["file_name"],
