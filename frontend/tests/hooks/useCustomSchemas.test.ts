@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as auth from '../../src/lib/auth'
 import { useCustomSchemas } from '../../src/hooks/useCustomSchemas'
 import type {
     CreateCustomSchemaInput,
@@ -60,6 +61,26 @@ describe('useCustomSchemas', () => {
 
     afterEach(() => {
         vi.restoreAllMocks()
+    })
+
+    it('uses stored auth state when the default access token resolver is used', async () => {
+        const service = createService({
+            list: vi.fn().mockResolvedValue([createSchemaRecord()]),
+        })
+        vi.spyOn(auth, 'getStoredAccessToken').mockReturnValue('stored-access-token')
+        vi.spyOn(auth, 'getValidAccessToken').mockResolvedValue('stored-access-token')
+
+        const { result } = renderHook(() => useCustomSchemas(service))
+
+        expect(result.current.hasAccessToken).toBe(true)
+        expect(result.current.isLoading).toBe(true)
+
+        await waitFor(() => {
+            expect(service.list).toHaveBeenCalledWith('stored-access-token')
+        })
+
+        expect(result.current.schemas).toEqual([createSchemaRecord()])
+        expect(result.current.isLoading).toBe(false)
     })
 
     it('loads schemas on mount when an access token is available', async () => {

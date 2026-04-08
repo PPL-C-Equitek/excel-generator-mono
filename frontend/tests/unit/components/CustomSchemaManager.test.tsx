@@ -333,7 +333,6 @@ describe('CustomSchemaManager', () => {
     })
 
     it('does not open the create modal when the add action is forced while disabled', async () => {
-        const user = userEvent.setup()
         const service = createService({
             list: vi.fn().mockResolvedValue([
                 createSchemaRecord({ id: '00000000-0000-0000-0000-000000000001', name: 'Schema 1' }),
@@ -353,9 +352,9 @@ describe('CustomSchemaManager', () => {
 
         await screen.findByText('Schema 5')
 
-        const addButton = screen.getByTestId('add-schema-btn')
-        addButton.removeAttribute('disabled')
-        await user.click(addButton)
+        const addButton = screen.getByTestId('add-schema-btn') as HTMLButtonElement
+        addButton.disabled = false
+        fireEvent.click(addButton)
 
         expect(screen.queryByRole('dialog', { name: /add schema/i })).not.toBeInTheDocument()
     })
@@ -459,9 +458,9 @@ describe('CustomSchemaManager', () => {
         )
         await user.click(within(dialog).getByTestId('schema-save-btn'))
 
-        const editButton = screen.getByRole('button', { name: /^edit$/i })
-        editButton.removeAttribute('disabled')
-        await user.click(editButton)
+        const editButton = screen.getByRole('button', { name: /^edit$/i }) as HTMLButtonElement
+        editButton.disabled = false
+        fireEvent.click(editButton)
 
         expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
         expect(screen.queryByRole('dialog', { name: /edit schema/i })).not.toBeInTheDocument()
@@ -642,8 +641,8 @@ describe('CustomSchemaManager', () => {
 
         await user.click(screen.getByTestId('add-schema-btn'))
 
-        const removeButton = screen.getByRole('button', { name: /^remove$/i })
-        removeButton.removeAttribute('disabled')
+        const removeButton = screen.getByRole('button', { name: /^remove$/i }) as HTMLButtonElement
+        removeButton.disabled = false
         fireEvent.click(removeButton)
 
         expect(screen.getAllByText(/column 1/i)).toHaveLength(1)
