@@ -5,11 +5,17 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from .serializers import LlmGenerateRequestSerializer, LlmGenerateResponseSerializer
+from .services.generation_service import (
+    CustomSchemaNotFoundError,
+    DjangoCustomSchemaPromptSource,
+    JsonGenerationService,
+    LlmGenerationService,
+)
 from .services.openai_client import (
+    OpenAITextGenerationProvider,
     OpenAIConfigurationError,
     OpenAIServiceError,
     OpenAIUpstreamError,
-    generate_json,
 )
 
 logger = logging.getLogger(__name__)
@@ -20,6 +26,24 @@ SERVICE_UNAVAILABLE_DETAIL = "Service unavailable. Please try again later."
 UPSTREAM_FAILURE_DETAIL = "Failed to generate response from LLM provider."
 INTERNAL_FAILURE_DETAIL = "Internal server error."
 INVALID_INPUT_JSON_DETAIL = "Invalid input_json payload."
+CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
+
+
+def get_authenticated_user_id(user) -> object | None:
+    if user is None or not getattr(user, "is_authenticated", False):
+        return None
+    return getattr(user, "id", None)
+
+
+def build_llm_generation_service(user=None) -> LlmGenerationService:
+    return LlmGenerationService(
+        json_generator=JsonGenerationService(
+            text_provider=OpenAITextGenerationProvider()
+        ),
+        schema_prompt_source=DjangoCustomSchemaPromptSource(
+            owner_id=get_authenticated_user_id(user)
+        ),
+    )
 
 
 @api_view(["POST"])
@@ -37,8 +61,16 @@ def llm_generate(request):
         )
 
     input_json = request_serializer.validated_data["input_json"]
+    custom_schema_id = request_serializer.validated_data.get("custom_schema_id")
+    llm_generation_service = build_llm_generation_service(request.user)
+
     try:
-        output_json = generate_json(input_json=input_json)
+        output_json = llm_generation_service.generate(
+            input_json=input_json,
+            custom_schema_id=custom_schema_id,
+        )
+    except CustomSchemaNotFoundError:
+        return Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     except OpenAIUpstreamError as exc:

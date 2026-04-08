@@ -1,6 +1,12 @@
 "use client"
 
 import ConvertPage from './ConvertPage'
-import { withProtectedPage } from '@/lib/withProtectedPage'
+import AuthGuard from '@/components/AuthGuard'
 
-export default withProtectedPage(ConvertPage)
+export default function Page() {
+    return (
+        <AuthGuard>
+            <ConvertPage />
+        </AuthGuard>
+    )
+}

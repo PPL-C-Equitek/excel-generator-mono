@@ -9,7 +9,7 @@ from rest_framework.test import APISimpleTestCase, APIRequestFactory
 
 from authentication.register.adapters import DefaultRegistrationStrategyFactory
 from authentication.register.entities import RegisterCommand, RegistrationResult, RegistrationUser
-from authentication.register.exceptions import RegistrationServiceError
+from authentication.register.exceptions import RegistrationConflictError, RegistrationServiceError
 from authentication.register.http import RegisterView
 from authentication.register.strategies import (
     ExistingUnverifiedUserRegistrationStrategy,
@@ -64,25 +64,23 @@ class DefaultRegisterUserUseCaseTest(APISimpleTestCase):
         self.assertEqual(strategy.received_command, RegisterCommand(name="John", email="john@example.com"))
         self.assertIsNone(strategy.received_user)
 
-    def test_passes_existing_user_to_selected_strategy(self) -> None:
+    def test_raises_registration_conflict_error_when_existing_user_is_found(self) -> None:
         existing_user = RegistrationUser(email="john@example.com", status="unverified")
         lookup = MagicMock()
         lookup.find_by_email.return_value = existing_user
-        strategy = SpyRegistrationStrategy()
         strategy_factory = MagicMock()
-        strategy_factory.create.return_value = strategy
         use_case = DefaultRegisterUserUseCase(
             lookup_port=lookup,
             strategy_factory=strategy_factory,
         )
 
-        result = use_case.execute(RegisterCommand(name="John", email="john@example.com"))
+        with self.assertRaises(RegistrationConflictError):
+            use_case.execute(RegisterCommand(name="John", email="john@example.com"))
 
-        self.assertEqual(result.message, REGISTER_SUCCESS_MESSAGE)
-        strategy_factory.create.assert_called_once_with(existing_user)
-        self.assertEqual(strategy.received_user, existing_user)
+        lookup.find_by_email.assert_called_once_with("john@example.com")
+        strategy_factory.create.assert_not_called()
 
-    def test_returns_generic_success_when_duplicate_race_raises_integrity_error(self) -> None:
+    def test_raises_registration_conflict_error_when_duplicate_race_raises_integrity_error(self) -> None:
         lookup = MagicMock()
         lookup.find_by_email.return_value = None
         strategy = MagicMock()
@@ -94,9 +92,8 @@ class DefaultRegisterUserUseCaseTest(APISimpleTestCase):
             strategy_factory=strategy_factory,
         )
 
-        result = use_case.execute(RegisterCommand(name="John", email="john@example.com"))
-
-        self.assertEqual(result.message, REGISTER_SUCCESS_MESSAGE)
+        with self.assertRaises(RegistrationConflictError):
+            use_case.execute(RegisterCommand(name="John", email="john@example.com"))
 
     def test_wraps_unexpected_errors_in_application_specific_exception(self) -> None:
         lookup = MagicMock()
@@ -225,7 +222,7 @@ class RegisterViewDependencyInjectionTest(APISimpleTestCase):
 
         response = TestableRegisterView.as_view()(request)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         use_case.execute.assert_called_once_with(
             RegisterCommand(name="John", email="john@example.com")
         )

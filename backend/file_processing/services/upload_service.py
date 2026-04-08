@@ -9,6 +9,9 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+from file_processing.services.image_validation_service import validate_image
+from file_processing.extractors.image_extractor import ImageExtractor
+from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 from file_processing.services.upload_processing_strategy import (
     CallableUploadProcessingStrategy,
     UploadProcessingStrategy,
@@ -36,11 +39,27 @@ EXT_PDF = ".pdf"
 EXT_DOCX = ".docx"
 EXT_DOC = ".doc"
 EXT_TXT = ".txt"
+EXT_CSV = ".csv"
+EXT_PNG = ".png"
+EXT_JPG = ".jpg"
+EXT_JPEG = ".jpeg"
 MIME_OCTET_STREAM = "application/octet-stream"
 MIME_OLE_STORAGE = "application/x-ole-storage"
 MIME_ZIP = "application/zip"
 
-ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_DOCX, EXT_DOC, EXT_TXT]
+IMAGE_EXTENSIONS = {EXT_PNG, EXT_JPG, EXT_JPEG}
+ALLOWED_EXTENSIONS = [
+    EXT_PDF,
+    EXT_XLS,
+    EXT_XLSX,
+    EXT_PNG,
+    EXT_JPG,
+    EXT_JPEG,
+    EXT_DOCX,
+    EXT_DOC,
+    EXT_TXT,
+    EXT_CSV,
+]
 ALLOWED_MIME_TYPES = {
     EXT_PDF: [
         "application/pdf",
@@ -88,9 +107,13 @@ ALLOWED_MIME_TYPES = {
         "text/plain",
         "text/x-log",
     ],
+    EXT_CSV: [
+        "text/csv",
+        "text/plain",
+        "application/csv",
+        "application/vnd.ms-excel",
+    ],
 }
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-FILE_TOO_LARGE_ERROR = "File too large. Maximum allowed size is 10MB."
 MAX_PDF_PAGES = 100
 MAX_EXCEL_SHEETS = 100
 PDF_CORRUPT_ERROR = "PDF file is corrupt or has an invalid structure."
@@ -106,6 +129,11 @@ TXT_CORRUPT_ERROR = "File teks tidak dapat dibaca atau rusak (corrupt)."
 TXT_PROTECTED_ERROR = (
     "File terdeteksi sebagai format terproteksi atau terenkripsi. "
     "Pastikan file adalah teks biasa (.txt) yang tidak diproteksi."
+)
+CSV_CORRUPT_ERROR = "File CSV tidak dapat dibaca atau rusak (corrupt)."
+CSV_PROTECTED_ERROR = (
+    "File CSV terdeteksi sebagai format terproteksi atau terenkripsi. "
+    "Pastikan file adalah CSV biasa yang tidak diproteksi."
 )
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
 ZIP_SIGNATURE_PREFIX = b"PK"
@@ -176,6 +204,37 @@ def _process_pdf(file_path, uploaded_file):
     return True, None, extracted_data
 
 
+def _process_image(file_path):
+    try:
+        extractor = ImageExtractor()
+        extracted_data = extractor.extract(file_path)
+        return True, None, extracted_data
+    except ValueError as exc:
+        return False, str(exc), None
+    except Exception:
+        logger.exception("Image extraction failed.")
+        return False, "Image OCR extraction failed.", None
+
+
+def _dispatch_upload_processing(ext, file_path, uploaded_file):
+    processors = {
+        EXT_PDF: lambda: _process_pdf(file_path, uploaded_file),
+        EXT_XLS: lambda: process_uploaded_excel(file_path),
+        EXT_XLSX: lambda: process_uploaded_excel(file_path),
+        EXT_TXT: lambda: process_uploaded_txt(file_path),
+        EXT_CSV: lambda: process_uploaded_txt(file_path),
+        EXT_PNG: lambda: _process_image(file_path),
+        EXT_JPG: lambda: _process_image(file_path),
+        EXT_JPEG: lambda: _process_image(file_path),
+    }
+
+    processor = processors.get(ext)
+    if processor is None:
+        return False, "Unsupported file type", None
+
+    return processor()
+
+
 def process_word(file_path, ext):
     try:
         extracted_data = WordExtractionService.extract_word_to_json(file_path, ext)
@@ -232,11 +291,15 @@ def process_upload(uploaded_file):
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
     file_path = save_temp_file(uploaded_file)
+
     try:
-        registry = _build_upload_strategy_registry(file_path, uploaded_file)
-        strategy = registry.resolve(ext)
-        if strategy is None:
-            return False, "Unsupported file type", None, None
+        success, error, extracted_data = _dispatch_upload_processing(
+            ext,
+            file_path,
+            uploaded_file,
+        )
+        if not success:
+            return False, error, None, None
 
         return _run_upload_strategy(strategy)
 
@@ -256,8 +319,12 @@ def validate_file(uploaded_file):
     if ext not in ALLOWED_EXTENSIONS:
         return (
             False,
-            "Unsupported file type. Only PDF, XLS, XLSX, DOC, DOCX, and TXT are allowed.",
+            "Unsupported file type. Only PDF, XLS, XLSX, TXT, PNG, JPG, and JPEG are allowed.",
         )
+
+    # Image files have their own dedicated validation pipeline
+    if ext in IMAGE_EXTENSIONS:
+        return validate_image(uploaded_file)
 
     # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
@@ -423,6 +490,9 @@ def validate_mime_type(uploaded_file, ext):
         if ext == EXT_TXT:
             return _validate_txt_content(uploaded_file, mime)
 
+        if ext == EXT_CSV:
+            return _validate_csv_content(uploaded_file, mime)
+
         if mime not in expected_mimes:
             return False, FILE_EXTENSION_MISMATCH_ERROR
 
@@ -529,6 +599,26 @@ def _validate_txt_content(uploaded_file, detected_mime: str):
         return True, None
 
     return False, TXT_CORRUPT_ERROR
+
+
+def _validate_csv_content(uploaded_file, detected_mime: str):
+    is_binary, binary_error = _has_binary_signature(uploaded_file)
+    if is_binary:
+        uploaded_file.seek(0)
+        header = uploaded_file.read(8)
+        uploaded_file.seek(0)
+        if header == OLE_SIGNATURE:
+            return False, CSV_PROTECTED_ERROR
+        return False, binary_error
+
+    if detected_mime and detected_mime.startswith("text/"):
+        return True, None
+
+    allowed = ALLOWED_MIME_TYPES.get(EXT_CSV, [])
+    if detected_mime in allowed:
+        return True, None
+
+    return False, CSV_CORRUPT_ERROR
 
 
 def save_temp_file(uploaded_file):
