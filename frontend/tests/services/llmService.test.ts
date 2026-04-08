@@ -1,7 +1,7 @@
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "@/lib/api";
-import * as llmService from "@/services/llm";
+import { getStoredAccessToken } from "@/lib/auth";
 import { generateJson, exportToCsv, getDownloadUrl } from "@/services/llm";
 import { server } from "../mocks/server";
 import {
@@ -22,22 +22,17 @@ import {
   exportExcelInvalidFileNameHandler,
 } from "../mocks/handlers";
 
+vi.mock("@/lib/auth", () => ({
+  getStoredAccessToken: vi.fn(),
+}));
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-type ExcelServiceModule = typeof llmService & {
-  exportToExcel: (outputJson: unknown) => Promise<{
-    file_id: string;
-    file_name: string;
-    artifact_type: string;
-  }>;
-  downloadExcelFile: (fileId: string, filename?: string) => Promise<void>;
-};
-
-const excelService = llmService as ExcelServiceModule;
+const mockGetStoredAccessToken = vi.mocked(getStoredAccessToken);
 
 describe("generateJson positive", () => {
   beforeEach(() => {
     server.use(successHandler);
+    mockGetStoredAccessToken.mockReturnValue(null);
   });
 
   it("returns output_json for valid payload", async () => {
@@ -49,9 +44,83 @@ describe("generateJson positive", () => {
       rows: [{ id: 1, value: "test" }],
     });
   });
+
+  it("sends custom_schema_id when one is selected", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+    });
+
+    await generateJson(
+      { key: "value" },
+      "11111111-1111-1111-1111-111111111111"
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "llm/generate/",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          input_json: { key: "value" },
+          custom_schema_id: "11111111-1111-1111-1111-111111111111",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it("does not add authorization when no custom schema is selected", async () => {
+    mockGetStoredAccessToken.mockReturnValue("access-token");
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+    });
+
+    await generateJson({ key: "value" });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "llm/generate/",
+      expect.objectContaining({
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+    );
+
+    fetchSpy.mockRestore();
+  });
+
+  it("adds bearer authorization when an access token exists and a custom schema is selected", async () => {
+    mockGetStoredAccessToken.mockReturnValue("access-token");
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+    });
+
+    await generateJson(
+      { key: "value" },
+      "11111111-1111-1111-1111-111111111111"
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "llm/generate/",
+      expect.objectContaining({
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer access-token",
+        },
+      })
+    );
+
+    fetchSpy.mockRestore();
+  });
 });
 
 describe("generateJson negative (HTTP errors)", () => {
+  beforeEach(() => {
+    mockGetStoredAccessToken.mockReturnValue(null);
+  });
+
   it("maps 401 to user-friendly message", async () => {
     server.use(handler401);
     await expect(generateJson({ key: "value" })).rejects.toThrow("Invalid API key.");
@@ -110,6 +179,10 @@ describe("generateJson edge cases", () => {
     vi.restoreAllMocks();
   });
 
+  beforeEach(() => {
+    mockGetStoredAccessToken.mockReturnValue(null);
+  });
+
   it("throws validation error for empty input", async () => {
     await expect(generateJson({})).rejects.toThrow("Input cannot be empty.");
   });
@@ -137,6 +210,10 @@ describe("generateJson edge cases", () => {
 describe("generateJson array input & schema type validation", () => {
   afterEach(() => {
     server.resetHandlers();
+  });
+
+  beforeEach(() => {
+    mockGetStoredAccessToken.mockReturnValue(null);
   });
 
   it("throws schema error when output_json is an array", async () => {

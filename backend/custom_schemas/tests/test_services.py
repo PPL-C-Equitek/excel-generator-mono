@@ -1,10 +1,16 @@
+import uuid
+
 from django.core.exceptions import ValidationError
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from custom_schemas.services import (
+    CustomSchemaLimitExceededError,
+    CustomSchemaPolicyService,
+    DjangoCustomSchemaQueryRepository,
     build_schema_prompt_fragment,
     validate_schema_definition,
 )
+from custom_schemas.models import CustomSchema
 
 
 def make_definition():
@@ -106,3 +112,162 @@ class CustomSchemaServiceTest(SimpleTestCase):
             validate_schema_definition(definition)
 
         self.assertIn("description is required", str(context.exception))
+
+
+class CustomSchemaPolicyServiceTest(SimpleTestCase):
+    def setUp(self):
+        self.owner_id = "owner-1"
+        self.user = type(
+            "User",
+            (),
+            {"id": self.owner_id, "is_authenticated": True},
+        )()
+
+    def test_get_owner_id_returns_none_for_unauthenticated_user(self):
+        service = CustomSchemaPolicyService(repository=SimpleRepository())
+        user = type("User", (), {"id": None, "is_authenticated": False})()
+
+        result = service.get_owner_id(user)
+
+        self.assertIsNone(result)
+
+    def test_get_queryset_for_user_returns_none_queryset_when_user_missing(self):
+        repository = SimpleRepository(empty_queryset="empty-queryset")
+        service = CustomSchemaPolicyService(repository=repository)
+        user = type("User", (), {"id": None, "is_authenticated": False})()
+
+        result = service.get_queryset_for_user(user)
+
+        self.assertEqual(result, "empty-queryset")
+
+    def test_filter_queryset_by_active_applies_true_filter(self):
+        repository = SimpleRepository()
+        service = CustomSchemaPolicyService(repository=repository)
+        queryset = DummyQueryset()
+
+        result = service.filter_queryset_by_active(queryset, "YES")
+
+        self.assertEqual(result, queryset.filtered_result)
+        self.assertEqual(queryset.filter_kwargs, {"is_active": True})
+
+    def test_filter_queryset_by_active_applies_false_filter(self):
+        repository = SimpleRepository()
+        service = CustomSchemaPolicyService(repository=repository)
+        queryset = DummyQueryset()
+
+        result = service.filter_queryset_by_active(queryset, "0")
+
+        self.assertEqual(result, queryset.filtered_result)
+        self.assertEqual(queryset.filter_kwargs, {"is_active": False})
+
+    def test_has_name_conflict_uses_repository(self):
+        repository = SimpleRepository(name_exists=True)
+        service = CustomSchemaPolicyService(repository=repository)
+
+        result = service.has_name_conflict(self.user, "Invoice Mapping", exclude_pk="schema-1")
+
+        self.assertTrue(result)
+        self.assertEqual(
+            repository.name_exists_calls,
+            [("owner-1", "Invoice Mapping", "schema-1")],
+        )
+
+    def test_has_name_conflict_returns_false_for_blank_name(self):
+        repository = SimpleRepository(name_exists=True)
+        service = CustomSchemaPolicyService(repository=repository)
+
+        result = service.has_name_conflict(self.user, "", exclude_pk="schema-1")
+
+        self.assertFalse(result)
+        self.assertEqual(repository.name_exists_calls, [])
+
+    def test_has_name_conflict_returns_false_when_user_has_no_owner_id(self):
+        repository = SimpleRepository(name_exists=True)
+        service = CustomSchemaPolicyService(repository=repository)
+        unauthenticated_user = type("User", (), {"id": None, "is_authenticated": False})()
+
+        result = service.has_name_conflict(unauthenticated_user, "Invoice Mapping")
+
+        self.assertFalse(result)
+        self.assertEqual(repository.name_exists_calls, [])
+
+    def test_ensure_can_create_for_user_raises_when_limit_reached(self):
+        repository = SimpleRepository(count=5)
+        service = CustomSchemaPolicyService(repository=repository, max_custom_schemas_per_user=5)
+
+        with self.assertRaises(CustomSchemaLimitExceededError):
+            service.ensure_can_create_for_user(self.user)
+
+    def test_ensure_can_create_for_user_returns_owner_id_when_under_limit(self):
+        repository = SimpleRepository(count=4)
+        service = CustomSchemaPolicyService(repository=repository, max_custom_schemas_per_user=5)
+
+        result = service.ensure_can_create_for_user(self.user)
+
+        self.assertEqual(result, "owner-1")
+
+    def test_ensure_can_create_for_user_returns_none_for_missing_owner(self):
+        repository = SimpleRepository(count=4)
+        service = CustomSchemaPolicyService(repository=repository, max_custom_schemas_per_user=5)
+        unauthenticated_user = type("User", (), {"id": None, "is_authenticated": False})()
+
+        result = service.ensure_can_create_for_user(unauthenticated_user)
+
+        self.assertIsNone(result)
+
+
+class DjangoCustomSchemaQueryRepositoryTest(TestCase):
+    def setUp(self):
+        self.repository = DjangoCustomSchemaQueryRepository()
+        self.owner_id = uuid.uuid4()
+
+    def test_none_returns_empty_queryset(self):
+        result = self.repository.none()
+
+        self.assertEqual(result.count(), 0)
+
+    def test_name_exists_for_owner_excludes_current_schema_when_requested(self):
+        schema = CustomSchema.objects.create(
+            owner_id=self.owner_id,
+            name="Invoice Mapping",
+            definition=make_definition(),
+        )
+
+        result = self.repository.name_exists_for_owner(
+            owner_id=self.owner_id,
+            name="Invoice Mapping",
+            exclude_pk=schema.pk,
+        )
+
+        self.assertFalse(result)
+
+
+class DummyQueryset:
+    def __init__(self):
+        self.filter_kwargs = None
+        self.filtered_result = "filtered-queryset"
+
+    def filter(self, **kwargs):
+        self.filter_kwargs = kwargs
+        return self.filtered_result
+
+
+class SimpleRepository:
+    def __init__(self, empty_queryset=None, count=0, name_exists=False):
+        self.empty_queryset = empty_queryset or "empty"
+        self.count = count
+        self.name_exists = name_exists
+        self.name_exists_calls = []
+
+    def none(self):
+        return self.empty_queryset
+
+    def for_owner(self, owner_id):
+        return f"queryset-for-{owner_id}"
+
+    def count_for_owner(self, owner_id):
+        return self.count
+
+    def name_exists_for_owner(self, owner_id, name, exclude_pk=None):
+        self.name_exists_calls.append((owner_id, name, exclude_pk))
+        return self.name_exists

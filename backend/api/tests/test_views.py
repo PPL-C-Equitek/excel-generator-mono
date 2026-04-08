@@ -11,7 +11,6 @@ from reportlab.pdfgen import canvas
 from openpyxl import Workbook
 
 from rest_framework.test import APIClient, APIRequestFactory, APISimpleTestCase
-from types import SimpleNamespace
 
 from api.models import GroupMember
 from api.views import _resolve_download_filename, _sanitize_download_filename, upload
