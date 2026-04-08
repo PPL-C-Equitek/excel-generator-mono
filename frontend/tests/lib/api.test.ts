@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchAPI, login, uploadFile, loginWithGoogle } from "@/lib/api";
+import { fetchAPI, login, uploadFile, loginWithGoogle, logout } from "@/lib/api";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
@@ -556,5 +556,96 @@ describe('loginWithGoogle', () => {
 
             await expect(loginWithGoogle('mock-google-token')).rejects.toThrow('Request failed. Please try again.')
         })
+    })
+})
+
+describe('logout', () => {
+    beforeEach(() => {
+        mockFetch.mockClear()
+        vi.stubGlobal('fetch', mockFetch)
+    })
+
+    it('calls the logout endpoint with bearer access token and refresh token payload', async () => {
+        mockFetch.mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: vi.fn(),
+        } as unknown as Response)
+
+        await logout('access-token', 'refresh-token')
+
+        expect(mockFetch).toHaveBeenCalledWith(
+            expect.stringContaining('/auth/logout/'),
+            expect.objectContaining({
+                method: 'POST',
+                headers: {
+                    Authorization: 'Bearer access-token',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ refresh_token: 'refresh-token' }),
+            })
+        )
+    })
+
+    it('strips trailing slash from NEXT_PUBLIC_API_URL before building logout URL', async () => {
+        vi.resetModules()
+        vi.stubEnv('NEXT_PUBLIC_API_URL', 'http://localhost:9999/')
+
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: vi.fn(),
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        const { logout: freshLogout } = await import('@/lib/api')
+        await freshLogout('access-token', 'refresh-token')
+
+        expect(mockedFetch).toHaveBeenCalledWith(
+            'http://localhost:9999/auth/logout/',
+            expect.objectContaining({ method: 'POST' })
+        )
+    })
+
+    it('throws message from response body when logout fails', async () => {
+        mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Unauthorized' }, 401))
+
+        await expect(logout('access-token', 'refresh-token')).rejects.toThrow('Unauthorized')
+    })
+
+    it('throws detail from response body when logout fails', async () => {
+        mockFetch.mockResolvedValueOnce(mockResponse({ detail: 'Token invalid' }, 401))
+
+        await expect(logout('access-token', 'refresh-token')).rejects.toThrow('Token invalid')
+    })
+
+    it('prefers detail when logout message field is present but not a string', async () => {
+        mockFetch.mockResolvedValueOnce(
+            mockResponse({ message: ['bad'], detail: 'Token invalid' }, 401)
+        )
+
+        await expect(logout('access-token', 'refresh-token')).rejects.toThrow('Token invalid')
+    })
+
+    it('falls back to the generic error when logout response JSON has no string message or detail', async () => {
+        mockFetch.mockResolvedValueOnce(
+            mockResponse({ message: ['bad'], detail: ['still-bad'] }, 401)
+        )
+
+        await expect(logout('access-token', 'refresh-token')).rejects.toThrow(
+            'Logout gagal. Silakan coba lagi.'
+        )
+    })
+
+    it('falls back to a generic error when logout response body cannot be parsed', async () => {
+        mockFetch.mockResolvedValueOnce({
+            ok: false,
+            status: 500,
+            json: vi.fn().mockRejectedValue(new SyntaxError('Invalid JSON')),
+        } as unknown as Response)
+
+        await expect(logout('access-token', 'refresh-token')).rejects.toThrow(
+            'Logout gagal. Silakan coba lagi.'
+        )
     })
 })
