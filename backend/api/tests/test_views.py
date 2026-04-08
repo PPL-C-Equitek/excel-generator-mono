@@ -690,6 +690,7 @@ class ExportCSVViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 405)
 
     def test_export_csv_endpoint_returns_400_if_output_json_missing(self):
+        self.client.force_authenticate(user=self._verified_user())
         response = self.client.post("/export/csv", data={}, format="json")
 
         self.assertEqual(response.status_code, 400)

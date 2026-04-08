@@ -245,6 +245,7 @@ def upload(request):
 
 @require_POST
 @api_view(["POST"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
 def export_csv(request):
     serializer = CsvExportRequestSerializer(data=request.data)
     if not serializer.is_valid():
