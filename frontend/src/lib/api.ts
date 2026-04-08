@@ -168,3 +168,33 @@ export async function resendPasswordReset(email: string): Promise<MessageRespons
     body: JSON.stringify({ email }),
   }) as Promise<MessageResponse>
 }
+
+export async function logout(accessToken: string, refreshToken: string): Promise<void> {
+  const res = await fetch(`${API_URL}/auth/logout/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+
+  if (!res.ok) {
+    let message = "Logout gagal. Silakan coba lagi."
+
+    try {
+      const data = await res.json()
+      if (typeof data?.message === "string") {
+        message = data.message
+      } else if (typeof data?.detail === "string") {
+        message = data.detail
+      }
+    } catch {
+      // ignore JSON parse error
+    }
+
+    const error = new Error(message) as HTTPError
+    error.status = res.status
+    throw error
+  }
+}

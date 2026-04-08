@@ -1,6 +1,10 @@
-"use client"
-
+import AuthGuard from '@/components/AuthGuard'
 import SchemaPage from './SchemaPage'
-import { withProtectedPage } from '@/lib/withProtectedPage'
 
-export default withProtectedPage(SchemaPage)
+export default function Page() {
+    return (
+        <AuthGuard>
+            <SchemaPage />
+        </AuthGuard>
+    )
+}

@@ -3,17 +3,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Page from '../../../src/app/convert/page'
 
 const mockConvertPageRender = vi.fn()
-const mockReplace = vi.fn()
-const mockGetValidAccessToken = vi.fn<() => Promise<string | null>>()
+const mockAuthGuardRender = vi.fn()
+const mockAuthGuardProps = vi.fn()
 
-vi.mock('next/navigation', () => ({
-    useRouter: () => ({
-        replace: mockReplace,
-    }),
-}))
-
-vi.mock('@/lib/auth', () => ({
-    getValidAccessToken: () => mockGetValidAccessToken(),
+vi.mock('@/components/AuthGuard', () => ({
+    default: ({ children }: { children: React.ReactNode }) => {
+        mockAuthGuardRender()
+        mockAuthGuardProps(children)
+        return <div data-testid="auth-guard">{children}</div>
+    },
 }))
 
 vi.mock('../../../src/app/convert/ConvertPage', () => ({
@@ -26,48 +24,32 @@ vi.mock('../../../src/app/convert/ConvertPage', () => ({
 describe('Convert Page Route Guard', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        mockGetValidAccessToken.mockResolvedValue('mock-token')
     })
 
-    it('renders ConvertPage when access token exists', async () => {
+    it('renders ConvertPage inside AuthGuard', async () => {
         render(<Page />)
 
         await waitFor(() => {
             expect(screen.getByTestId('convert-page')).toBeInTheDocument()
         })
 
-        expect(mockReplace).not.toHaveBeenCalled()
+        expect(screen.getByTestId('auth-guard')).toBeInTheDocument()
+        expect(mockAuthGuardRender).toHaveBeenCalledTimes(1)
         expect(mockConvertPageRender).toHaveBeenCalledTimes(1)
     })
 
-    it('redirects to login when access token is missing', async () => {
-        mockGetValidAccessToken.mockResolvedValue(null)
+    it('passes ConvertPage as AuthGuard children', () => {
+        render(<Page />)
 
-        const { container } = render(<Page />)
-
-        await waitFor(() => {
-            expect(mockReplace).toHaveBeenCalledWith('/login')
-        })
-
-        expect(screen.queryByTestId('convert-page')).not.toBeInTheDocument()
-        expect(container.firstChild).toBeNull()
-        expect(mockConvertPageRender).not.toHaveBeenCalled()
+        expect(mockAuthGuardProps).toHaveBeenCalled()
+        expect(screen.getByTestId('convert-page')).toBeInTheDocument()
     })
 
-    it('does not redirect after unmount when async auth check resolves late', async () => {
-        let resolveToken: ((value: string | null) => void) | null = null
-        const pendingToken = new Promise<string | null>((resolve) => {
-            resolveToken = resolve
-        })
-        mockGetValidAccessToken.mockReturnValue(pendingToken)
+    it('renders AuthGuard exactly once per render', () => {
+        const { rerender } = render(<Page />)
+        expect(mockAuthGuardRender).toHaveBeenCalledTimes(1)
 
-        const { unmount } = render(<Page />)
-        unmount()
-
-        resolveToken?.(null)
-        await Promise.resolve()
-
-        expect(mockReplace).not.toHaveBeenCalled()
-        expect(mockConvertPageRender).not.toHaveBeenCalled()
+        rerender(<Page />)
+        expect(mockAuthGuardRender).toHaveBeenCalledTimes(2)
     })
 })

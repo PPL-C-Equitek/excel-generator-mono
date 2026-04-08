@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import type { AxiosError } from 'axios';
 import AuthEmailSuccessCard from '@/components/AuthEmailSuccessCard';
@@ -116,6 +117,7 @@ export async function resendVerificationFlow({
 }
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [formData, setFormData] = useState<RegisterFormData>({
     name: '',
     email: '',
@@ -137,6 +139,14 @@ export default function RegisterPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+
+    if (name === 'email') {
+      const trimmedEmail = value.trim();
+      setErrors((prev) => ({
+        ...prev,
+        email: trimmedEmail && !EMAIL_REGEX.test(trimmedEmail) ? 'Format email tidak valid' : '',
+      }));
+    }
   };
 
   const handleSubmit = async (e: FormSubmitEvent) => {
@@ -152,18 +162,30 @@ export default function RegisterPage() {
     setResendStatusMessage('');
 
     try {
+      const trimmedEmail = formData.email.trim();
       const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL || ''}/auth/register/`, {
         name: formData.name,
-        email: formData.email,
+        email: trimmedEmail,
       });
 
       setSuccessMessage(response.data?.message || 'Registrasi berhasil. Cek email Anda.');
+      if (response.status === 201) {
+        router.push('/login');
+      }
     } catch (error: unknown) {
       const axiosError = error as AxiosError<RegisterErrorResponse>;
       const responseData = axiosError.response?.data;
       const message = responseData?.message;
       const status = axiosError.response?.status;
       const backendErrors = responseData?.errors;
+
+      if (status === 409) {
+        setErrors((prev) => ({
+          ...prev,
+          form: 'Email ini sudah terdaftar, silakan login',
+        }));
+        return;
+      }
 
       if (status === 429) {
         setErrors((prev) => ({

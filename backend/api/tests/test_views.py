@@ -2,6 +2,7 @@ from PyPDF2 import PdfReader, PdfWriter
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch, MagicMock
+from PIL import Image
 
 from io import BytesIO
 from reportlab.pdfgen import canvas
@@ -135,6 +136,13 @@ class UploadEndpointTest(TestCase):
         buffer.seek(0)
         return buffer.read()
 
+    def generate_valid_png_bytes(self):
+        buffer = BytesIO()
+        img = Image.new("RGB", (20, 20), color="red")
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+        return buffer.read()
+
     def test_upload_with_invalid_content_length_header_returns_no_file_error(self):
         request = self.factory.post("/upload/", data={}, format="multipart")
         request.META["CONTENT_LENGTH"] = "not-a-number"
@@ -261,6 +269,20 @@ class UploadEndpointTest(TestCase):
         )
 
         self.assertEqual(resp.status_code, 200)
+
+    def test_upload_png_success_without_extracted_payload(self):
+        png_content = self.generate_valid_png_bytes()
+
+        resp = self._post_file(
+            "photo.png",
+            png_content,
+            "image/png",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "success")
+        self.assertEqual(resp.data["filename"], "photo.png")
+        self.assertNotIn("extracted", resp.data)
 
     def test_upload_unsupported_type(self):
         resp = self._post_file("note.html", b"<html></html>", "text/html")
