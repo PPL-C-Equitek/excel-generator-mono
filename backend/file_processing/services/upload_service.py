@@ -20,6 +20,7 @@ from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE
 try:
     import magic
 except Exception:  # pragma: no cover - optional dependency in local envs
+
     class _MagicShim:
         @staticmethod
         def from_buffer(_buffer, mime=True):
@@ -125,13 +126,13 @@ CSV_PROTECTED_ERROR = (
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
 
-OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
+OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 ZIP_SIGNATURE_PREFIX = b"PK"
 
 BINARY_SIGNATURES: list[tuple[bytes, str]] = [
-    (b"\x50\x4B\x03\x04", FILE_EXTENSION_MISMATCH_ERROR),
-    (b"\x50\x4B\x05\x06", FILE_EXTENSION_MISMATCH_ERROR),
-    (b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", TXT_PROTECTED_ERROR),
+    (b"\x50\x4b\x03\x04", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\x50\x4b\x05\x06", FILE_EXTENSION_MISMATCH_ERROR),
+    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", TXT_PROTECTED_ERROR),
     (b"\x7fELF", FILE_EXTENSION_MISMATCH_ERROR),
     (b"MZ", FILE_EXTENSION_MISMATCH_ERROR),
     (b"%PDF", FILE_EXTENSION_MISMATCH_ERROR),
@@ -281,7 +282,9 @@ def validate_file(uploaded_file):
             return False, excel_error
 
     if ext in {EXT_DOC, EXT_DOCX}:
-        is_valid_word, word_error = word_validation_service.validate_word(uploaded_file, ext)
+        is_valid_word, word_error = word_validation_service.validate_word(
+            uploaded_file, ext
+        )
         if not is_valid_word:
             return False, word_error
 
@@ -393,13 +396,13 @@ def _get_xls_sheet_count(uploaded_file):
 def _validate_xlsx_mime_structure(uploaded_file):
     if _is_ole_container(uploaded_file):
         if _is_legacy_xls_content(uploaded_file):
-            return True, None
-        return False, EXCEL_PASSWORD_PROTECTED_ERROR
+            return True, None, True
+        return False, EXCEL_PASSWORD_PROTECTED_ERROR, False
 
     if not _has_zip_signature(uploaded_file):
-        return False, FILE_EXTENSION_MISMATCH_ERROR
+        return False, FILE_EXTENSION_MISMATCH_ERROR, False
 
-    return True, None
+    return True, None, False
 
 
 def _validate_word_mime_structure(uploaded_file, ext):
@@ -414,7 +417,10 @@ def _validate_word_mime_structure(uploaded_file, ext):
 
 def _resolve_txt_detected_mime(uploaded_file, detected_mime):
     request_mime = (getattr(uploaded_file, "content_type", "") or "").lower()
-    if detected_mime in {MIME_OCTET_STREAM, MIME_ZIP, MIME_OLE_STORAGE} and request_mime:
+    if (
+        detected_mime in {MIME_OCTET_STREAM, MIME_ZIP, MIME_OLE_STORAGE}
+        and request_mime
+    ):
         return request_mime
     return detected_mime
 
@@ -430,9 +436,14 @@ def validate_mime_type(uploaded_file, ext):
         expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
 
         if ext == EXT_XLSX:
-            is_valid, structure_error = _validate_xlsx_mime_structure(uploaded_file)
+            is_valid, structure_error, skip_mime_check = _validate_xlsx_mime_structure(
+                uploaded_file
+            )
             if not is_valid:
                 return False, structure_error
+            if skip_mime_check:
+                # Legacy .xls content uploaded as .xlsx is accepted.
+                return True, None
 
         if ext == EXT_TXT:
             detected_mime = _resolve_txt_detected_mime(uploaded_file, mime)
@@ -442,7 +453,9 @@ def validate_mime_type(uploaded_file, ext):
             return _validate_csv_content(uploaded_file, mime)
 
         if ext in {EXT_DOC, EXT_DOCX}:
-            is_valid, structure_error = _validate_word_mime_structure(uploaded_file, ext)
+            is_valid, structure_error = _validate_word_mime_structure(
+                uploaded_file, ext
+            )
             if not is_valid:
                 return False, structure_error
 
