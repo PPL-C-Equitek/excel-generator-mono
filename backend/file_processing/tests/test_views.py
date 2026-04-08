@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from types import SimpleNamespace
 from django.test import SimpleTestCase
 from rest_framework.test import APIClient
 
@@ -11,6 +12,15 @@ from file_processing.services.export_service import (
 class ExportCsvEndpointTest(SimpleTestCase):
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=self._verified_user())
+
+    def _verified_user(self):
+        return SimpleNamespace(
+            id="verified-user-id",
+            email="verified@example.com",
+            is_authenticated=True,
+            status="verified",
+        )
 
     def _valid_output_json(self):
         return {
