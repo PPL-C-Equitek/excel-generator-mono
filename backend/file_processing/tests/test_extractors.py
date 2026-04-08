@@ -1,7 +1,5 @@
 from unittest import TestCase
 from unittest.mock import patch, MagicMock
-import numpy as np
-from PIL import Image
 
 from file_processing.extractors.ocr.base_ocr_engine import BaseOCREngine
 from file_processing.extractors.pdf_ocr_extractor import PdfOcrExtractor
