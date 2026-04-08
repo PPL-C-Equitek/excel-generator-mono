@@ -390,6 +390,35 @@ def _get_xls_sheet_count(uploaded_file):
         uploaded_file.seek(0)
 
 
+def _validate_xlsx_mime_structure(uploaded_file):
+    if _is_ole_container(uploaded_file):
+        if _is_legacy_xls_content(uploaded_file):
+            return True, None
+        return False, EXCEL_PASSWORD_PROTECTED_ERROR
+
+    if not _has_zip_signature(uploaded_file):
+        return False, FILE_EXTENSION_MISMATCH_ERROR
+
+    return True, None
+
+
+def _validate_word_mime_structure(uploaded_file, ext):
+    if ext == EXT_DOC and not _is_ole_container(uploaded_file):
+        return False, DOES_NOT_MATCH_EXTENSION_ERROR
+
+    if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
+        return False, DOES_NOT_MATCH_EXTENSION_ERROR
+
+    return True, None
+
+
+def _resolve_txt_detected_mime(uploaded_file, detected_mime):
+    request_mime = (getattr(uploaded_file, "content_type", "") or "").lower()
+    if detected_mime in {MIME_OCTET_STREAM, MIME_ZIP, MIME_OLE_STORAGE} and request_mime:
+        return request_mime
+    return detected_mime
+
+
 def validate_mime_type(uploaded_file, ext):
     try:
         head = _read_head(uploaded_file)
@@ -400,29 +429,22 @@ def validate_mime_type(uploaded_file, ext):
 
         expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
 
-        if ext == EXT_XLSX and _is_ole_container(uploaded_file):
-            if _is_legacy_xls_content(uploaded_file):
-                return True, None
-            return False, EXCEL_PASSWORD_PROTECTED_ERROR
-
-        if ext == EXT_XLSX and not _has_zip_signature(uploaded_file):
-            return False, FILE_EXTENSION_MISMATCH_ERROR
-
-        if ext == EXT_DOC and not _is_ole_container(uploaded_file):
-            return False, DOES_NOT_MATCH_EXTENSION_ERROR
-
-        if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
-            return False, DOES_NOT_MATCH_EXTENSION_ERROR
+        if ext == EXT_XLSX:
+            is_valid, structure_error = _validate_xlsx_mime_structure(uploaded_file)
+            if not is_valid:
+                return False, structure_error
 
         if ext == EXT_TXT:
-            detected_mime = mime
-            request_mime = (getattr(uploaded_file, "content_type", "") or "").lower()
-            if detected_mime in {MIME_OCTET_STREAM, MIME_ZIP, MIME_OLE_STORAGE} and request_mime:
-                detected_mime = request_mime
+            detected_mime = _resolve_txt_detected_mime(uploaded_file, mime)
             return _validate_txt_content(uploaded_file, detected_mime)
 
         if ext == EXT_CSV:
             return _validate_csv_content(uploaded_file, mime)
+
+        if ext in {EXT_DOC, EXT_DOCX}:
+            is_valid, structure_error = _validate_word_mime_structure(uploaded_file, ext)
+            if not is_valid:
+                return False, structure_error
 
         if mime not in expected_mimes:
             return False, FILE_EXTENSION_MISMATCH_ERROR
