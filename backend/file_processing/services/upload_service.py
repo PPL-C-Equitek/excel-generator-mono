@@ -6,6 +6,7 @@ from django.conf import settings
 from django.utils.text import get_valid_filename
 from .excel_service import process_uploaded_excel
 from .txt_service import process_uploaded_txt
+from .csv_service import process_uploaded_csv
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
@@ -171,7 +172,9 @@ def process_upload(uploaded_file):
 
     if ext in [EXT_TXT, EXT_CSV]:
         uploaded_file.seek(0)
-        success, error, data = process_uploaded_txt(uploaded_file)
+        processor = process_uploaded_txt if ext == EXT_TXT else process_uploaded_csv
+        success, error, data = processor(uploaded_file)
+        
         if not success:
             return False, error, None, None
         return True, None, None, data
@@ -181,18 +184,15 @@ def process_upload(uploaded_file):
     try:
         if ext == ".pdf":
             success, error, data = _process_pdf(file_path, uploaded_file)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
         elif ext in [".xlsx", ".xls"]:
             success, error, data = process_uploaded_excel(file_path)
-            if not success:
-                return False, error, None, None
-            extracted_data = data
-
         else:
             return False, "Unsupported file type", None, None
+
+        if not success:
+            return False, error, None, None
+            
+        extracted_data = data
 
     finally:
         try:
