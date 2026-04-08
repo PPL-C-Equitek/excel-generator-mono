@@ -669,6 +669,22 @@ class ExportCSVViewTest(APISimpleTestCase):
             ],
         }
 
+    def _verified_user(self):
+        return SimpleNamespace(
+            id="verified-user-id",
+            email="verified@example.com",
+            is_authenticated=True,
+            status="verified",
+        )
+
+    def _unverified_user(self):
+        return SimpleNamespace(
+            id="unverified-user-id",
+            email="unverified@example.com",
+            is_authenticated=True,
+            status="unverified",
+        )
+
     def test_export_csv_endpoint_rejects_get_method(self):
         response = self.client.get("/export/csv")
         self.assertEqual(response.status_code, 405)
@@ -680,7 +696,33 @@ class ExportCSVViewTest(APISimpleTestCase):
         self.assertIn("output_json", response.data)
 
     @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_returns_403_for_unauthenticated_user(
+        self,
+        mocked_export,
+    ):
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_export.assert_not_called()
+
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_returns_403_for_authenticated_unverified_user(
+        self,
+        mocked_export,
+    ):
+        self.client.force_authenticate(user=self._unverified_user())
+        payload = {"output_json": self._valid_output_json()}
+
+        response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        mocked_export.assert_not_called()
+
+    @patch("api.views.export_csv_to_filesystem")
     def test_export_csv_endpoint_returns_200_with_metadata(self, mocked_export):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.return_value = {
             "file_id": "csv_abc123",
             "file_name": "export_abc123.csv",
@@ -702,6 +744,7 @@ class ExportCSVViewTest(APISimpleTestCase):
         self,
         mocked_export,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = OutputLLMValidationError("invalid schema")
         payload = {"output_json": self._valid_output_json()}
 
@@ -713,6 +756,7 @@ class ExportCSVViewTest(APISimpleTestCase):
 
     @patch("api.views.export_csv_to_filesystem")
     def test_export_csv_endpoint_returns_500_on_internal_error(self, mocked_export):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = RuntimeError("disk full")
         payload = {"output_json": self._valid_output_json()}
 
@@ -724,6 +768,7 @@ class ExportCSVViewTest(APISimpleTestCase):
 
     @patch("api.views.export_csv_to_filesystem")
     def test_export_csv_endpoint_returns_500_on_generation_error(self, mocked_export):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.side_effect = OutputCSVGenerationError("storage failure")
         payload = {"output_json": self._valid_output_json()}
 
@@ -741,6 +786,7 @@ class ExportCSVViewTest(APISimpleTestCase):
         self,
         mocked_export,
     ):
+        self.client.force_authenticate(user=self._verified_user())
         mocked_export.return_value = {
             "file_id": "csv_abc123",
             "file_name": "../unsafe.csv",
