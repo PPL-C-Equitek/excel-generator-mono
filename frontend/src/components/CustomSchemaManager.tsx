@@ -117,6 +117,14 @@ export function buildCustomSchemaInput(
     }
 }
 
+export function getNextColumnsAfterRemoval(
+    columns: SchemaColumnDraft[],
+    columnId: number
+): SchemaColumnDraft[] {
+    const remainingColumns = columns.filter((column) => column.id !== columnId)
+    return remainingColumns.length === 0 ? columns : remainingColumns
+}
+
 export default function CustomSchemaManager({
     service = customSchemaService,
     accessTokenResolver = getValidAccessToken,
@@ -153,10 +161,8 @@ export default function CustomSchemaManager({
     }, [])
 
     const openCreateModal = () => {
-        if (!isAddDisabled) {
-            resetDraft()
-            setIsModalOpen(true)
-        }
+        resetDraft()
+        setIsModalOpen(true)
     }
 
     const openEditModal = (schema: CustomSchemaRecord) => {
@@ -247,14 +253,10 @@ export default function CustomSchemaManager({
 
     const handleRemoveColumn = (columnId: number) => {
         setFormError(null)
-        setDraft((prev) =>
-            prev.columns.length === 1
-                ? prev
-                : {
-                ...prev,
-                columns: prev.columns.filter((column) => column.id !== columnId),
-            }
-        )
+        setDraft((prev) => ({
+            ...prev,
+            columns: getNextColumnsAfterRemoval(prev.columns, columnId),
+        }))
     }
 
     const handleSubmit = async (event: FormSubmitEvent) => {
@@ -287,6 +289,7 @@ export default function CustomSchemaManager({
     const modalDescription = editingSchemaId
         ? 'Update the saved output columns for this schema.'
         : 'Define the output columns you want to reuse later.'
+    const handleAddSchemaClick = isAddDisabled ? undefined : openCreateModal
     let saveButtonLabel = 'Save schema'
     if (isSaving) {
         saveButtonLabel = 'Saving...'
@@ -326,7 +329,7 @@ export default function CustomSchemaManager({
                         <button
                             data-testid="add-schema-btn"
                             type="button"
-                            onClick={openCreateModal}
+                            onClick={handleAddSchemaClick}
                             disabled={isAddDisabled}
                             className="rounded-xl bg-red-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
                         >

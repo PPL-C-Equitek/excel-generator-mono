@@ -54,6 +54,21 @@ function createService(overrides: Partial<ICustomSchemaService> = {}): ICustomSc
     }
 }
 
+function createDeferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((nextResolve, nextReject) => {
+        resolve = nextResolve
+        reject = nextReject
+    })
+
+    return {
+        promise,
+        resolve,
+        reject,
+    }
+}
+
 describe('useCustomSchemas', () => {
     beforeEach(() => {
         vi.clearAllMocks()
@@ -138,6 +153,39 @@ describe('useCustomSchemas', () => {
         expect(result.current.error).toBeNull()
     })
 
+    it('clears cached schemas when authentication becomes unavailable after an initial load', async () => {
+        const service = createService({
+            list: vi.fn().mockResolvedValue([createSchemaRecord()]),
+        })
+        let accessToken: string | null = 'access-token'
+
+        const { result, rerender } = renderHook(
+            ({ resolver }) => useCustomSchemas(service, resolver),
+            {
+                initialProps: {
+                    resolver: () => accessToken,
+                },
+            }
+        )
+
+        await waitFor(() => {
+            expect(result.current.schemas).toHaveLength(1)
+        })
+
+        accessToken = null
+
+        rerender({
+            resolver: () => accessToken,
+        })
+
+        await waitFor(() => {
+            expect(result.current.hasAccessToken).toBe(false)
+        })
+
+        expect(result.current.schemas).toEqual([])
+        expect(result.current.error).toBeNull()
+    })
+
     it('stores an initial load error message from Error instances', async () => {
         const service = createService({
             list: vi.fn().mockRejectedValue(new Error('Unable to load schemas.')),
@@ -166,6 +214,46 @@ describe('useCustomSchemas', () => {
         })
     })
 
+    it('does not update schemas after a successful load resolves post-unmount', async () => {
+        const deferred = createDeferred<CustomSchemaRecord[]>()
+        const service = createService({
+            list: vi.fn().mockReturnValue(deferred.promise),
+        })
+
+        const { unmount } = renderHook(() => useCustomSchemas(service, () => 'access-token'))
+
+        unmount()
+
+        await act(async () => {
+            deferred.resolve([createSchemaRecord()])
+            await deferred.promise
+        })
+
+        expect(service.list).toHaveBeenCalledWith('access-token')
+    })
+
+    it('does not update error state after a failed load resolves post-unmount', async () => {
+        const deferred = createDeferred<CustomSchemaRecord[]>()
+        const service = createService({
+            list: vi.fn().mockReturnValue(deferred.promise),
+        })
+
+        const { unmount } = renderHook(() => useCustomSchemas(service, () => 'access-token'))
+
+        unmount()
+
+        await act(async () => {
+            deferred.reject(new Error('Late load failure.'))
+            try {
+                await deferred.promise
+            } catch {
+                // The hook swallows this failure after unmount; the rejection is only for coverage.
+            }
+        })
+
+        expect(service.list).toHaveBeenCalledWith('access-token')
+    })
+
     it('reloadSchemas clears cached data when the token disappears', async () => {
         let token: string | null = 'access-token'
         const accessTokenResolver = () => token
@@ -186,6 +274,25 @@ describe('useCustomSchemas', () => {
         })
 
         expect(result.current.hasAccessToken).toBe(false)
+        expect(result.current.schemas).toEqual([])
+        expect(result.current.error).toBeNull()
+        expect(result.current.isLoading).toBe(false)
+    })
+
+    it('reloadSchemas keeps the schema list empty when no token is available and no schemas are cached', async () => {
+        const service = createService()
+        const accessTokenResolver = () => null
+
+        const { result } = renderHook(() => useCustomSchemas(service, accessTokenResolver))
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        await act(async () => {
+            await result.current.reloadSchemas()
+        })
+
         expect(result.current.schemas).toEqual([])
         expect(result.current.error).toBeNull()
         expect(result.current.isLoading).toBe(false)
@@ -244,6 +351,28 @@ describe('useCustomSchemas', () => {
         })
 
         expect(result.current.error).toBe('Failed to load custom schemas.')
+    })
+
+    it('reloadSchemas stores the message from Error instances', async () => {
+        const service = createService({
+            list: vi
+                .fn()
+                .mockResolvedValueOnce([createSchemaRecord()])
+                .mockRejectedValueOnce(new Error('Reload failed.')),
+        })
+        const accessTokenResolver = () => 'access-token'
+
+        const { result } = renderHook(() => useCustomSchemas(service, accessTokenResolver))
+
+        await waitFor(() => {
+            expect(result.current.schemas).toHaveLength(1)
+        })
+
+        await act(async () => {
+            await result.current.reloadSchemas()
+        })
+
+        expect(result.current.error).toBe('Reload failed.')
     })
 
     it('createSchema rejects when there is no access token', async () => {
@@ -431,6 +560,31 @@ describe('useCustomSchemas', () => {
 
         expect(wasUpdated).toBe(false)
         expect(result.current.error).toBe('Failed to update custom schema.')
+        expect(result.current.isSaving).toBe(false)
+    })
+
+    it('updateSchema stores the message from Error instances', async () => {
+        const service = createService({
+            update: vi.fn().mockRejectedValue(new Error('Update failed.')),
+        })
+        const accessTokenResolver = () => 'access-token'
+
+        const { result } = renderHook(() => useCustomSchemas(service, accessTokenResolver))
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        let wasUpdated = true
+        await act(async () => {
+            wasUpdated = await result.current.updateSchema(
+                '00000000-0000-0000-0000-000000000001',
+                createInput
+            )
+        })
+
+        expect(wasUpdated).toBe(false)
+        expect(result.current.error).toBe('Update failed.')
         expect(result.current.isSaving).toBe(false)
     })
 
