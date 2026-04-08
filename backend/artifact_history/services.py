@@ -3,24 +3,18 @@ from artifact_history.models import ArtifactHistory
 
 def create_artifact_history(
     owner,
-    file_id,
     original_name,
     custom_name,
-    file_name,
-    file_type,
+    output_json,
     status_processing,
-    size_bytes,
     created_at,
 ):
     return ArtifactHistory.objects.create(
         owner=owner,
-        file_id=file_id,
         original_name=original_name,
         custom_name=custom_name,
-        file_name=file_name,
-        file_type=file_type,
+        output_json=output_json,
         status_processing=status_processing,
-        size_bytes=size_bytes,
         created_at=created_at,
     )
 
