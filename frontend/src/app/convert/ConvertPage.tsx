@@ -12,24 +12,20 @@ interface ConvertPageProps {
     readonly llmService?: ILLMService
 }
 
-function getDownloadFilename(baseFilename: string): string {
-    return baseFilename.replace(/\.[^/.]+$/, '') + '.csv'
-}
-
 export default function ConvertPage({ llmService: injectedService }: ConvertPageProps) {
     const [selectedSchema, setSelectedSchema] = useState<CustomSchemaRecord | null>(null)
     const {
         isConverting,
         isExcelDownloading,
+        canDownloadCsv,
         canDownloadExcel,
         error,
         excelError,
         excelSuccessMessage,
         outputFile,
-        csvMetadata,
         handleFileSelect,
+        handleCsvDownload,
         handleExcelDownload,
-        llmService,
     } = useConvertFlow(injectedService)
 
     return (
@@ -79,23 +75,13 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                             </p>
 
                             <div className="mt-4 flex flex-wrap items-center gap-3">
-                                {llmService.getDownloadUrl && (
+                                {canDownloadCsv && (
                                     <button
                                         data-testid="download-csv-btn"
                                         onClick={() => {
-                                            const outputFilename = getDownloadFilename(outputFile.filename)
-                                            const url = llmService.getDownloadUrl!(
-                                                csvMetadata!.file_id,
-                                                outputFilename
-                                            )
-                                            const anchor = document.createElement('a')
-                                            anchor.href = url
-                                            anchor.download = outputFilename
-                                            document.body.appendChild(anchor)
-                                            anchor.click()
-                                            anchor.remove()
+                                            void handleCsvDownload()
                                         }}
-                                        disabled={isConverting || !csvMetadata}
+                                        disabled={isConverting}
                                         className="rounded-xl bg-green-700 px-6 py-2 font-bold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         Download CSV
