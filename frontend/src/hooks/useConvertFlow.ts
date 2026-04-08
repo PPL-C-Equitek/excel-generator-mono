@@ -2,7 +2,13 @@
 
 import { useState, useRef } from 'react'
 import { uploadFile } from '@/lib/api'
-import { generateJson, exportToCsv, getDownloadUrl } from '@/services/llm'
+import {
+    downloadExcelFile,
+    exportToCsv,
+    exportToExcel,
+    generateJson,
+    getDownloadUrl,
+} from '@/services/llm'
 import { isJsonObject } from '@/utils/schemaValidator'
 import { sanitizeCSVCell } from '@/utils/csvSanitizer'
 import type { ILLMService } from '@/lib/ILLMService'
@@ -11,6 +17,8 @@ import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
 const defaultService: ILLMService = { 
     generate: generateJson, 
     exportToCsv,
+    exportToExcel,
+    downloadExcelFile,
     getDownloadUrl
 }
 
@@ -53,12 +61,21 @@ export interface CsvMetadata {
     file_id: string;
 }
 
+function getExcelDownloadFilename(baseFilename: string): string {
+    return baseFilename.replace(/\.[^/.]+$/, '') + '.xlsx'
+}
+
 export interface UseConvertFlowReturn {
     isConverting: boolean
+    isExcelDownloading: boolean
+    canDownloadExcel: boolean
     error: string | null
+    excelError: string | null
+    excelSuccessMessage: string | null
     outputFile: OutputFile | null
     csvMetadata: CsvMetadata | null
     handleFileSelect: (file: File) => Promise<void>
+    handleExcelDownload: () => Promise<void>
     llmService: ILLMService
 }
 
@@ -66,9 +83,13 @@ export function useConvertFlow(
     llmService: ILLMService = defaultService
 ): UseConvertFlowReturn {
     const [isConverting, setIsConverting] = useState(false)
+    const [isExcelDownloading, setIsExcelDownloading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [excelError, setExcelError] = useState<string | null>(null)
+    const [excelSuccessMessage, setExcelSuccessMessage] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
+    const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
 
     const abortPreviousRequest = (): AbortSignal => {
@@ -136,6 +157,7 @@ export function useConvertFlow(
             const llmResult = await llmService.generate(uploadResult)
             if (signal.aborted) return
 
+            setGeneratedOutput(llmResult.output_json)
             setOutputFile(parseOutputFile(uploadResult, file))
 
             await processCsvExport(llmResult.output_json, signal)
@@ -152,8 +174,12 @@ export function useConvertFlow(
         const signal = abortPreviousRequest()
 
         setError(null)
+        setExcelError(null)
+        setExcelSuccessMessage(null)
         setOutputFile(null)
         setCsvMetadata(null)
+        setGeneratedOutput(null)
+        setIsExcelDownloading(false)
         setIsConverting(true)
 
         const uploadResult = await processUpload(file, signal)
@@ -162,5 +188,54 @@ export function useConvertFlow(
         await processConversion(uploadResult, file, signal)
     }
 
-    return { isConverting, error, outputFile, csvMetadata, handleFileSelect, llmService }
+    const handleExcelDownload = async (): Promise<void> => {
+        if (
+            !generatedOutput ||
+            !outputFile ||
+            isExcelDownloading ||
+            !llmService.exportToExcel ||
+            !llmService.downloadExcelFile
+        ) {
+            return
+        }
+
+        setExcelError(null)
+        setExcelSuccessMessage(null)
+        setIsExcelDownloading(true)
+
+        try {
+            const excelResult = await llmService.exportToExcel(generatedOutput)
+            await llmService.downloadExcelFile(
+                excelResult.file_id,
+                getExcelDownloadFilename(outputFile.filename)
+            )
+            setExcelError(null)
+            setExcelSuccessMessage('Successfully downloaded')
+        } catch (err: unknown) {
+            setExcelSuccessMessage(null)
+            setExcelError(err instanceof Error ? err.message : 'Failed to export')
+        } finally {
+            setIsExcelDownloading(false)
+        }
+    }
+
+    const canDownloadExcel = (
+        generatedOutput !== null &&
+        !!llmService.exportToExcel &&
+        !!llmService.downloadExcelFile
+    )
+
+    return {
+        isConverting,
+        isExcelDownloading,
+        canDownloadExcel,
+        error,
+        excelError,
+        excelSuccessMessage,
+        outputFile,
+        csvMetadata,
+        handleFileSelect,
+        handleExcelDownload,
+        llmService
+    }
 }

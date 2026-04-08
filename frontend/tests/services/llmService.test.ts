@@ -1,6 +1,7 @@
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "@/lib/api";
+import * as llmService from "@/services/llm";
 import { generateJson, exportToCsv, getDownloadUrl } from "@/services/llm";
 import { server } from "../mocks/server";
 import {
@@ -14,9 +15,25 @@ import {
   exportCsvSuccessHandler,
   exportCsvInvalidPrefixHandler,
   exportCsvInvalidSchemaHandler,
+  exportExcelSuccessHandler,
+  exportExcelInvalidSchemaHandler,
+  exportExcelInvalidPrefixHandler,
+  exportExcelInvalidArtifactTypeHandler,
+  exportExcelInvalidFileNameHandler,
 } from "../mocks/handlers";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+type ExcelServiceModule = typeof llmService & {
+  exportToExcel: (outputJson: unknown) => Promise<{
+    file_id: string;
+    file_name: string;
+    artifact_type: string;
+  }>;
+  downloadExcelFile: (fileId: string, filename?: string) => Promise<void>;
+};
+
+const excelService = llmService as ExcelServiceModule;
 
 describe("generateJson positive", () => {
   beforeEach(() => {
@@ -205,6 +222,263 @@ describe("exportToCsv", () => {
   });
 });
 
+describe("exportToExcel", () => {
+  const mockJson = { status: "ok" };
+
+  afterEach(() => {
+    server.resetHandlers();
+    vi.restoreAllMocks();
+  });
+
+  it("returns trusted excel metadata on successful export", async () => {
+    server.use(exportExcelSuccessHandler);
+
+    const result = await excelService.exportToExcel(mockJson);
+
+    expect(result).toEqual({
+      file_id: "xlsx_12345",
+      file_name: "export_12345.xlsx",
+      artifact_type: "xlsx",
+    });
+  });
+
+  it("throws error if response does not contain required excel metadata", async () => {
+    server.use(exportExcelInvalidSchemaHandler);
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "The Excel export response is invalid."
+    );
+  });
+
+  it("throws error if the excel export response is null", async () => {
+    vi.spyOn(api, "fetchAPI").mockResolvedValue(null);
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "The Excel export response is invalid."
+    );
+  });
+
+  it("throws error if file_id does not have 'xlsx_' prefix", async () => {
+    server.use(exportExcelInvalidPrefixHandler);
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "The Excel export response is invalid."
+    );
+  });
+
+  it("throws error if artifact_type is not xlsx", async () => {
+    server.use(exportExcelInvalidArtifactTypeHandler);
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "The Excel export response is invalid."
+    );
+  });
+
+  it("throws error if file_name is not an xlsx filename", async () => {
+    server.use(exportExcelInvalidFileNameHandler);
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "The Excel export response is invalid."
+    );
+  });
+
+  it("maps HTTP errors properly using existing ERROR_MESSAGES", async () => {
+    server.use(
+      http.post(`${API_BASE}/export/excel`, () =>
+        HttpResponse.json({ detail: "Service Unavailable" }, { status: 503 })
+      )
+    );
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "Service is currently unavailable. Please try again later."
+    );
+  });
+
+  it("maps API errors that expose a numeric status property", async () => {
+    const errorWithStatus = Object.assign(new Error("Service Unavailable"), {
+      status: 503,
+    });
+    vi.spyOn(api, "fetchAPI").mockRejectedValue(errorWithStatus);
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "Service is currently unavailable. Please try again later."
+    );
+  });
+
+  it("supports legacy message-based API errors without a status property", async () => {
+    vi.spyOn(api, "fetchAPI").mockRejectedValue(new Error("API error: 503"));
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "Service is currently unavailable. Please try again later."
+    );
+  });
+
+  it("passes through unknown errors from fetchAPI", async () => {
+    vi.spyOn(api, "fetchAPI").mockRejectedValue(new Error("Unknown Failure"));
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "Unknown Failure"
+    );
+  });
+
+  it("passes through non-Error rejections", async () => {
+    vi.spyOn(api, "fetchAPI").mockRejectedValue("String Failure");
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toBe(
+      "String Failure"
+    );
+  });
+});
+
+describe("downloadExcelFile", () => {
+  const originalCreateElement = document.createElement.bind(document);
+  const createSuccessfulDownloadResponse = () =>
+    ({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+      blob: vi.fn().mockResolvedValue(new Blob(["excel-bytes"])),
+    }) as unknown as Response;
+
+  const createFailedDownloadResponse = (status: number) =>
+    ({
+      ok: false,
+      status,
+      headers: new Headers(),
+      blob: vi.fn(),
+    }) as unknown as Response;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("downloads the excel file from the excel download endpoint", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(createSuccessfulDownloadResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const createObjectURL = vi.fn().mockReturnValue("blob:excel-file");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: revokeObjectURL,
+    });
+
+    const anchor = originalCreateElement("a");
+    const clickSpy = vi.spyOn(anchor, "click").mockImplementation(() => { });
+    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+      if (tagName.toLowerCase() === "a") {
+        return anchor;
+      }
+
+      return originalCreateElement(tagName);
+    });
+
+    const appendSpy = vi
+      .spyOn(document.body, "appendChild")
+      .mockImplementation((node: Node) => node);
+    const removeSpy = vi
+      .spyOn(anchor, "remove")
+      .mockImplementation(() => { });
+
+    await excelService.downloadExcelFile("xlsx_12345", "report.xlsx");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/export/excel/xlsx_12345/download`,
+      expect.any(Object)
+    );
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(anchor.download).toBe("report.xlsx");
+    expect(anchor.href).toBe("blob:excel-file");
+    expect(appendSpy).toHaveBeenCalledWith(anchor);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:excel-file");
+  });
+
+  it("rejects invalid excel file ids before requesting download", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      excelService.downloadExcelFile("csv_12345", "report.xlsx")
+    ).rejects.toThrow("The Excel download request is invalid.");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws a normalized error when the download response is not ok", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(createFailedDownloadResponse(500));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      excelService.downloadExcelFile("xlsx_12345", "report.xlsx")
+    ).rejects.toThrow("Failed to export");
+  });
+
+  it("throws a normalized error when the network request fails", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("Network down"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      excelService.downloadExcelFile("xlsx_12345", "report.xlsx")
+    ).rejects.toThrow("Failed to export");
+  });
+
+  it("rethrows invalid download request errors without normalizing them", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValue(new Error("The Excel download request is invalid."));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      excelService.downloadExcelFile("xlsx_12345", "report.xlsx")
+    ).rejects.toThrow("The Excel download request is invalid.");
+  });
+
+  it("cleans up object urls if browser download setup fails unexpectedly", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(createSuccessfulDownloadResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const createObjectURL = vi.fn().mockReturnValue("blob:excel-file");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: revokeObjectURL,
+    });
+
+    vi.spyOn(document, "createElement").mockImplementation(() => {
+      throw new Error("Anchor creation failed");
+    });
+
+    await expect(
+      excelService.downloadExcelFile("xlsx_12345", "report.xlsx")
+    ).rejects.toThrow("Failed to export");
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:excel-file");
+  });
+});
+
 describe("getDownloadUrl", () => {
   it("returns a valid download URL without filename", () => {
     const url = getDownloadUrl("csv_abc");
@@ -221,11 +495,11 @@ describe("getDownloadUrl", () => {
     // We can simulate it by setting a malformed NEXT_PUBLIC_API_URL temporarily if doing so is simple:
     const original = process.env.NEXT_PUBLIC_API_URL;
     process.env.NEXT_PUBLIC_API_URL = "htt   p://in^valid\nurl"; // triggers URL constructor error
-    
+
     // Note: getDownloadUrl initializes NEXT_PUBLIC_API_URL locally in its body each call
     const url = getDownloadUrl("csv_abc");
     expect(url).toBe("http://localhost:8000/export/csv/csv_abc/download");
-    
+
     process.env.NEXT_PUBLIC_API_URL = original;
   });
 });

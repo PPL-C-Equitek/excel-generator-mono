@@ -1,8 +1,10 @@
 import type { JsonValue } from "@/utils/schemaValidator";
-import type { LLMResponse } from "@/services/llm";
+import type { ExcelExportResponse, LLMResponse } from "@/services/llm";
 
 export interface ILLMService {
     generate: (inputJson: JsonValue) => Promise<LLMResponse>;
     exportToCsv?: (outputJson: JsonValue) => Promise<{ file_id: string }>;
+    exportToExcel?: (outputJson: JsonValue) => Promise<ExcelExportResponse>;
+    downloadExcelFile?: (fileId: string, filename?: string) => Promise<void>;
     getDownloadUrl?: (fileId: string, filename?: string) => string;
 }
