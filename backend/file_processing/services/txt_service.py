@@ -8,27 +8,40 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ENCODING = "utf-8"
 
+def _read_lines_from_path(file_path: str) -> Iterator[str]:
+    safe_path = os.path.abspath(file_path)
+
+    if file_path != safe_path:
+        raise ValueError("Path file tidak valid (Potensi Path Traversal terdeteksi).")
+
+    if not os.path.exists(safe_path):
+        raise FileNotFoundError(f"File tidak ditemukan: {safe_path}")
+
+    with open(safe_path, "r", encoding=DEFAULT_ENCODING, errors="strict") as fh:
+        for line in fh:
+            yield line.rstrip('\r\n')
+
+
+def _read_lines_from_stream(stream: IO[bytes] | IO[str] | Any) -> Iterator[str]:
+    try:
+        stream.seek(0)
+    except (AttributeError, OSError):
+        pass
+
+    for line in stream:
+        if isinstance(line, bytes):
+            line_str = line.decode(DEFAULT_ENCODING, errors="strict")
+        else:
+            line_str = line
+        
+        yield line_str.rstrip('\r\n')
+
+
 def _read_lines(file_or_path: str | IO[bytes] | IO[str] | Any) -> Iterator[str]:
     if isinstance(file_or_path, str):
-        if not os.path.exists(file_or_path):
-            raise FileNotFoundError(f"File tidak ditemukan: {file_or_path}")
-
-        with open(file_or_path, "r", encoding=DEFAULT_ENCODING, errors="strict") as fh:
-            for line in fh:
-                yield line.rstrip('\r\n')
+        yield from _read_lines_from_path(file_or_path)
     else:
-        try:
-            file_or_path.seek(0)
-        except (AttributeError, OSError):
-            pass
-
-        for line in file_or_path:
-            if isinstance(line, bytes):
-                line_str = line.decode(DEFAULT_ENCODING, errors="strict")
-            else:
-                line_str = line
-            
-            yield line_str.rstrip('\r\n')
+        yield from _read_lines_from_stream(file_or_path)
 
 def parse_txt(
     file_or_path: str | IO[bytes] | IO[str] | Any) -> list[list[str]]:

@@ -179,10 +179,6 @@ class NegativeTxtExtractionTests(TestCase):
             os.remove(path)
 
     def test_read_lines_invalid_raw_type(self):
-        # _read_lines is a generator — iterate over a MagicMock whose
-        # __iter__ yields a single raw bytes-like item and verify that
-        # the service processes it without crashing (MagicMock is iterable
-        # by default; the old .read()-based ValueError path no longer exists).
         mock_file = MagicMock()
         mock_file.__iter__ = MagicMock(return_value=iter([b"line one"]))
         mock_file.seek = MagicMock()
@@ -193,13 +189,11 @@ class NegativeTxtExtractionTests(TestCase):
     @patch('file_processing.services.txt_service.parse_txt')
     def test_process_uploaded_txt_unknown_exception(self, mock_parse):
         mock_parse.side_effect = Exception("System meltdown")
-        success, error, data = process_uploaded_txt("dummy.txt")
+        success, error, _ = process_uploaded_txt("dummy.txt")
         self.assertFalse(success)
         self.assertEqual(error, "Invalid or unreadable TXT file.")
 
     def test_read_lines_seek_attribute_error_handled(self):
-        # seek raises AttributeError — the service catches it and falls
-        # through to iterate the file object line by line.
         mock_file = MagicMock()
         mock_file.seek.side_effect = AttributeError
         mock_file.__iter__ = MagicMock(return_value=iter([b"content"]))
@@ -217,11 +211,13 @@ class NegativeTxtExtractionTests(TestCase):
             os.remove(path)
 
     def test_nonexistent_file_raises_file_not_found(self):
+        abs_path = os.path.abspath("nonexistent_test_file_xyz.txt")
         with self.assertRaises(FileNotFoundError):
-            parse_txt("/tmp/__nonexistent_test_file_xyz__.txt")
+            parse_txt(abs_path)
 
     def test_process_uploaded_txt_nonexistent_file_returns_error(self):
-        success, error, data = process_uploaded_txt("/tmp/__nonexistent_txt_file__.txt")
+        abs_path = os.path.abspath("nonexistent_txt_file.txt")
+        success, error, data = process_uploaded_txt(abs_path)
 
         self.assertFalse(success)
         self.assertIsNotNone(error)
@@ -229,12 +225,18 @@ class NegativeTxtExtractionTests(TestCase):
         self.assertIn("File tidak ditemukan", error)
 
     def test_process_uploaded_txt_error_message_is_user_friendly(self):
-        success, error, data = process_uploaded_txt("/no/such/file.txt")
+        abs_path = os.path.abspath("no_such_file.txt")
+        success, error, _ = process_uploaded_txt(abs_path)
 
         self.assertFalse(success)
         self.assertNotIn("Traceback", error)
         self.assertNotIn("raise ", error)
         self.assertTrue(len(error) > 0)
+
+    def test_path_traversal_raises_value_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_txt("../../../etc/passwd")
+        self.assertEqual(str(ctx.exception), "Path file tidak valid (Potensi Path Traversal terdeteksi).")
 
     def test_parse_txt_with_delimiter_on_empty_file_returns_empty_list(self):
         path = _make_txt_file("")
@@ -354,7 +356,6 @@ class EdgeCaseTxtExtractionTests(TestCase):
 
     def test_read_lines_from_bytes_io_returns_list_of_strings(self):
         buf = _make_bytes_io("Baris 1\nBaris 2")
-        # _read_lines is a generator — materialise it before asserting type
         lines = list(_read_lines(buf))
         self.assertIsInstance(lines, list)
         self.assertTrue(all(isinstance(line, str) for line in lines))
