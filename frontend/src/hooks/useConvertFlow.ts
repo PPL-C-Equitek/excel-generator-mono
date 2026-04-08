@@ -66,7 +66,7 @@ function getExcelDownloadFilename(baseFilename: string): string {
     return baseFilename.replace(/\.[^/.]+$/, '') + '.xlsx'
 }
 
-function isExportOutputEmpty(output: JsonValue | null): boolean {
+function isExportOutputEmpty(output: unknown): boolean {
     const isStringEmpty = typeof output === 'string' && output.trim() === ''
     return output === null || isStringEmpty ||
         (Array.isArray(output) && output.length === 0) ||
