@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "@/lib/api";
 import * as auth from "@/lib/auth";
 import * as llmService from "@/services/llm";
-import { generateJson, exportToCsv, getDownloadUrl } from "@/services/llm";
+import { downloadCsvFile, generateJson, exportToCsv, getDownloadUrl } from "@/services/llm";
 import { server } from "../mocks/server";
 import {
   handler401,
@@ -41,6 +41,7 @@ type ExcelServiceModule = typeof llmService & {
 
 const excelService = llmService as ExcelServiceModule;
 const mockGetStoredAccessToken = vi.mocked(auth.getStoredAccessToken);
+const mockGetValidAccessToken = vi.mocked(auth.getValidAccessToken);
 
 describe("generateJson positive", () => {
   beforeEach(() => {
@@ -257,6 +258,10 @@ describe("exportToCsv", () => {
     vi.restoreAllMocks();
   });
 
+  beforeEach(() => {
+    mockGetValidAccessToken.mockResolvedValue("access-token");
+  });
+
   it("returns file_id on successful export", async () => {
     server.use(exportCsvSuccessHandler);
     const result = await exportToCsv(mockJson);
@@ -309,6 +314,34 @@ describe("exportToCsv", () => {
   it("passes through non-Error rejections", async () => {
     vi.spyOn(api, "fetchAPI").mockRejectedValue("String Failure");
     await expect(exportToCsv(mockJson)).rejects.toBe("String Failure");
+  });
+
+  it("sends bearer authorization for csv export", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      file_id: "csv_12345",
+    });
+
+    await exportToCsv(mockJson);
+
+    expect(fetchSpy).toHaveBeenCalledWith("export/csv", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer access-token",
+      },
+      body: JSON.stringify({ output_json: mockJson }),
+    });
+  });
+
+  it("fails before export request when no access token is available", async () => {
+    mockGetValidAccessToken.mockResolvedValue(null);
+    const fetchSpy = vi.spyOn(api, "fetchAPI");
+
+    await expect(exportToCsv(mockJson)).rejects.toThrow(
+      "Authentication credentials were not provided."
+    );
+
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -641,6 +674,107 @@ describe("downloadExcelFile", () => {
     await expect(
       excelService.downloadExcelFile("xlsx_12345", "report.xlsx")
     ).rejects.toThrow("Authentication credentials were not provided.");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("downloadCsvFile", () => {
+  const originalCreateElement = document.createElement.bind(document);
+  const createSuccessfulDownloadResponse = () =>
+    ({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        "Content-Type": "text/csv",
+      }),
+      blob: vi.fn().mockResolvedValue(new Blob(["csv-bytes"])),
+    }) as unknown as Response;
+
+  const createFailedDownloadResponse = (status: number) =>
+    ({
+      ok: false,
+      status,
+      headers: new Headers(),
+      blob: vi.fn(),
+    }) as unknown as Response;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("downloads the csv file from the csv download endpoint with bearer auth", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
+    const fetchMock = vi.fn().mockResolvedValue(createSuccessfulDownloadResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const createObjectURL = vi.fn().mockReturnValue("blob:csv-file");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: revokeObjectURL,
+    });
+
+    const anchor = originalCreateElement("a");
+    const clickSpy = vi.spyOn(anchor, "click").mockImplementation(() => {});
+    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+      if (tagName.toLowerCase() === "a") {
+        return anchor;
+      }
+
+      return originalCreateElement(tagName);
+    });
+
+    const appendSpy = vi
+      .spyOn(document.body, "appendChild")
+      .mockImplementation((node: Node) => node);
+    const removeSpy = vi.spyOn(anchor, "remove").mockImplementation(() => {});
+
+    await downloadCsvFile("csv_12345", "report.csv");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/export/csv/csv_12345/download?filename=report.csv`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: "Bearer access-token",
+        },
+      }
+    );
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(anchor.download).toBe("report.csv");
+    expect(anchor.href).toBe("blob:csv-file");
+    expect(appendSpy).toHaveBeenCalledWith(anchor);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:csv-file");
+  });
+
+  it("throws a normalized error when the csv download response is not ok", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
+    const fetchMock = vi.fn().mockResolvedValue(createFailedDownloadResponse(500));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(downloadCsvFile("csv_12345", "report.csv")).rejects.toThrow(
+      "Failed to export"
+    );
+  });
+
+  it("fails before csv download request when no access token is available", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue(null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(downloadCsvFile("csv_12345", "report.csv")).rejects.toThrow(
+      "Authentication credentials were not provided."
+    );
 
     expect(fetchMock).not.toHaveBeenCalled();
   });

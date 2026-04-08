@@ -25,6 +25,7 @@ export interface ExcelExportResponse {
 
 const EXCEL_EXPORT_ERROR_MESSAGE = "The Excel export response is invalid.";
 const EXCEL_DOWNLOAD_ERROR_MESSAGE = "Failed to export";
+const CSV_DOWNLOAD_ERROR_MESSAGE = "Failed to export";
 
 function buildJsonRequestHeaders(customSchemaId?: string | null): HeadersInit {
     const shouldAuthorize =
@@ -168,10 +169,19 @@ export async function exportToCsv(
     outputJson: JsonValue
 ): Promise<{ file_id: string }> {
     let data: unknown;
+    const accessToken = await getValidAccessToken();
+
+    if (!accessToken) {
+        throw new Error("Authentication credentials were not provided.");
+    }
 
     try {
         data = await fetchAPI("export/csv", {
             method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${accessToken}`,
+            },
             body: JSON.stringify({ output_json: outputJson }),
         });
     } catch (err: unknown) {
@@ -199,6 +209,49 @@ export async function exportToCsv(
     }
 
     return { file_id: (data as Record<string, string>).file_id };
+}
+
+export async function downloadCsvFile(
+    fileId: string,
+    filename = "export.csv"
+): Promise<void> {
+    const accessToken = await getValidAccessToken();
+
+    if (!accessToken) {
+        throw new Error("Authentication credentials were not provided.");
+    }
+
+    let objectUrl: string | null = null;
+    let downloadAnchor: HTMLAnchorElement | null = null;
+    let appendedToBody = false;
+
+    try {
+        const requestUrl = getDownloadUrl(fileId, filename);
+        const response = await fetch(requestUrl, {
+            method: "GET",
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error(CSV_DOWNLOAD_ERROR_MESSAGE);
+        }
+
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+
+        downloadAnchor = document.createElement("a");
+        downloadAnchor.href = objectUrl;
+        downloadAnchor.download = filename;
+        document.body.appendChild(downloadAnchor);
+        appendedToBody = true;
+        downloadAnchor.click();
+    } catch {
+        throw new Error(CSV_DOWNLOAD_ERROR_MESSAGE);
+    } finally {
+        cleanupExcelDownloadResources(downloadAnchor, objectUrl, appendedToBody);
+    }
 }
 
 export async function exportToExcel(
