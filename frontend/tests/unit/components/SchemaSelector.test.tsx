@@ -13,7 +13,6 @@ function createSchemaRecord(overrides: Partial<CustomSchemaRecord> = {}): Custom
         owner_id: '11111111-1111-1111-1111-111111111111',
         name: 'Invoice Mapping',
         description: 'Maps invoice rows',
-        version: 1,
         is_active: true,
         definition: {
             columns: [
@@ -34,6 +33,7 @@ function createService(overrides: Partial<ICustomSchemaService> = {}): ICustomSc
     return {
         list: vi.fn().mockResolvedValue([]),
         create: vi.fn(),
+        update: vi.fn(),
         remove: vi.fn(),
         ...overrides,
     }
@@ -100,7 +100,7 @@ describe('SchemaSelector', () => {
         expect(screen.queryByRole('heading', { name: 'Receipt Mapping' })).not.toBeInTheDocument()
     })
 
-    it('updates the selected schema preview when the user chooses one', async () => {
+    it('passes the selected schema without expanding its details', async () => {
         const user = userEvent.setup()
         const onSchemaChange = vi.fn()
         const service = createService({
@@ -138,20 +138,20 @@ describe('SchemaSelector', () => {
         await user.selectOptions(select, '00000000-0000-0000-0000-000000000002')
 
         await waitFor(() => {
-            expect(
-                screen.getByRole('heading', { name: 'Receipt Mapping' })
-            ).toBeInTheDocument()
+            expect(onSchemaChange).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    id: '00000000-0000-0000-0000-000000000002',
+                    name: 'Receipt Mapping',
+                })
+            )
         })
 
-        expect(screen.getByText('receipt_number')).toBeInTheDocument()
+        expect(
+            screen.queryByRole('heading', { name: 'Receipt Mapping' })
+        ).not.toBeInTheDocument()
+        expect(screen.queryByText('receipt_number')).not.toBeInTheDocument()
         expect(screen.queryByText(/^Active$/i)).not.toBeInTheDocument()
         expect(screen.queryByText(/^Inactive$/i)).not.toBeInTheDocument()
-        expect(onSchemaChange).toHaveBeenLastCalledWith(
-            expect.objectContaining({
-                id: '00000000-0000-0000-0000-000000000002',
-                name: 'Receipt Mapping',
-            })
-        )
     })
 
     it('shows loading first and then the empty state when no schemas are returned', async () => {
@@ -173,6 +173,10 @@ describe('SchemaSelector', () => {
         )
 
         expect(screen.getByText('Loading available schemas...')).toBeInTheDocument()
+
+        await waitFor(() => {
+            expect(service.list).toHaveBeenCalledWith('access-token')
+        })
 
         resolveList?.([])
 
@@ -230,9 +234,12 @@ describe('SchemaSelector', () => {
         await user.selectOptions(select, '00000000-0000-0000-0000-000000000002')
 
         await waitFor(() => {
-            expect(
-                screen.getByRole('heading', { name: 'Receipt Mapping' })
-            ).toBeInTheDocument()
+            expect(onSchemaChange).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    id: '00000000-0000-0000-0000-000000000002',
+                    name: 'Receipt Mapping',
+                })
+            )
         })
 
         rerender(
@@ -247,9 +254,8 @@ describe('SchemaSelector', () => {
             expect(screen.getByTestId('schema-select')).toHaveValue('none')
         })
 
-        expect(
-            screen.queryByRole('heading', { name: 'Receipt Mapping' })
-        ).not.toBeInTheDocument()
-        expect(onSchemaChange).toHaveBeenLastCalledWith(null)
+        await waitFor(() => {
+            expect(onSchemaChange).toHaveBeenLastCalledWith(null)
+        })
     })
 })
