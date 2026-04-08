@@ -7,13 +7,17 @@ from unittest.mock import patch, MagicMock
 from PIL import Image
 
 from io import BytesIO
+from datetime import timedelta
 from reportlab.pdfgen import canvas
 from openpyxl import Workbook
+from django.utils import timezone
 
 from rest_framework.test import APIClient, APIRequestFactory, APISimpleTestCase
 
 from api.models import GroupMember
 from api.views import _resolve_download_filename, _sanitize_download_filename, upload
+from artifact_history.models import ArtifactHistory
+from authentication.models import User
 from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
     OutputCSVGenerationError,
@@ -61,6 +65,273 @@ class AboutViewTest(BaseApiViewTest):
     def test_about_endpoint_rejects_post(self):
         response = self.client.post("/about/")
         self.assertEqual(response.status_code, 405)
+
+
+class HistoryListViewTest(BaseApiViewTest):
+    def setUp(self):
+        super().setUp()
+        self.verified_user = User.objects.create_user(
+            email="verified-history@example.com",
+            name="Verified History",
+            password="secret",
+            status="verified",
+        )
+        self.unverified_user = User.objects.create_user(
+            email="unverified-history@example.com",
+            name="Unverified History",
+            password="secret",
+            status="unverified",
+        )
+        self.other_user = User.objects.create_user(
+            email="other-history@example.com",
+            name="Other History",
+            password="secret",
+            status="verified",
+        )
+
+    def _create_history(self, owner, original_name, created_at):
+        return ArtifactHistory.objects.create(
+            owner=owner,
+            original_name=original_name,
+            custom_name=None,
+            output_json={
+                "document_info": {"filename": original_name},
+                "summary": {"table_count": 1},
+                "content_data": [
+                    {"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}
+                ],
+            },
+            status_processing="completed",
+            created_at=created_at,
+        )
+
+    def test_history_list_returns_403_for_anonymous_user(self):
+        response = self.client.get("/history/")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_history_list_returns_403_for_authenticated_unverified_user(self):
+        self.client.force_authenticate(user=self.unverified_user)
+
+        response = self.client.get("/history/")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_history_list_returns_only_owned_records_in_newest_first_order(self):
+        from django.utils import timezone
+        from datetime import timedelta
+
+        older = self._create_history(
+            owner=self.verified_user,
+            original_name="older.pdf",
+            created_at=timezone.now() - timedelta(hours=2),
+        )
+        newer = self._create_history(
+            owner=self.verified_user,
+            original_name="newer.pdf",
+            created_at=timezone.now() - timedelta(hours=1),
+        )
+        self._create_history(
+            owner=self.other_user,
+            original_name="other.pdf",
+            created_at=timezone.now(),
+        )
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/history/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(response.data["limit"], 10)
+        self.assertEqual(response.data["offset"], 0)
+        self.assertEqual(
+            [item["id"] for item in response.data["results"]],
+            [str(newer.id), str(older.id)],
+        )
+        self.assertEqual(
+            response.data["results"][0]["original_name"],
+            "newer.pdf",
+        )
+        self.assertIn("created_at", response.data["results"][0])
+        self.assertEqual(
+            set(response.data["results"][0].keys()),
+            {"id", "original_name", "custom_name", "status_processing", "created_at"},
+        )
+
+    def test_history_list_returns_empty_results_when_user_has_no_history(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/history/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
+
+    def test_history_list_rejects_invalid_limit(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/history/?limit=0")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(response.data["message"], "Invalid history pagination request.")
+
+
+class HistoryDownloadViewTest(BaseApiViewTest):
+    def setUp(self):
+        super().setUp()
+        self.verified_user = User.objects.create_user(
+            email="verified-download@example.com",
+            name="Verified Download",
+            password="secret",
+            status="verified",
+        )
+        self.unverified_user = User.objects.create_user(
+            email="unverified-download@example.com",
+            name="Unverified Download",
+            password="secret",
+            status="unverified",
+        )
+        self.other_user = User.objects.create_user(
+            email="other-download@example.com",
+            name="Other Download",
+            password="secret",
+            status="verified",
+        )
+        self.history = ArtifactHistory.objects.create(
+            owner=self.verified_user,
+            original_name="invoice.pdf",
+            custom_name=None,
+            output_json={
+                "document_info": {"source_type": "PDF", "filename": "invoice.pdf"},
+                "summary": {"table_count": 1},
+                "content_data": [
+                    {"table_name": "Sheet1", "headers": ["A"], "rows": [{"A": "1"}]}
+                ],
+            },
+            status_processing="completed",
+            created_at=timezone.now() - timedelta(minutes=1),
+        )
+
+    def test_history_download_returns_403_for_anonymous_user(self):
+        response = self.client.get(f"/history/{self.history.id}/download?format=csv")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_history_download_returns_403_for_authenticated_unverified_user(self):
+        self.client.force_authenticate(user=self.unverified_user)
+
+        response = self.client.get(f"/history/{self.history.id}/download?format=csv")
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch("api.views.open")
+    @patch("api.views.export_csv_to_filesystem")
+    def test_history_download_returns_csv_file_for_owner(
+        self, mock_export_csv, mock_open_file
+    ):
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-08T10:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"col\n1\n")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(f"/history/{self.history.id}/download?format=csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn('attachment; filename="export_token.csv"', response["Content-Disposition"])
+        mock_export_csv.assert_called_once()
+        self.assertEqual(
+            mock_export_csv.call_args.kwargs["output_json"],
+            self.history.output_json,
+        )
+
+    @patch("api.views.open")
+    @patch("api.views.export_excel_to_filesystem")
+    def test_history_download_returns_excel_file_for_owner(
+        self, mock_export_excel, mock_open_file
+    ):
+        mock_export_excel.return_value = {
+            "file_id": "xlsx_token",
+            "file_name": "export_token.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 12,
+            "created_at": "2026-04-08T10:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"xlsx")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(f"/history/{self.history.id}/download?format=excel")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn(
+            'attachment; filename="export_token.xlsx"',
+            response["Content-Disposition"],
+        )
+        mock_export_excel.assert_called_once()
+        self.assertEqual(
+            mock_export_excel.call_args.kwargs["output_json"],
+            self.history.output_json,
+        )
+
+    def test_history_download_returns_404_for_non_owner(self):
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.get(f"/history/{self.history.id}/download?format=csv")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(response.data["message"], "History item not found.")
+
+    def test_history_download_returns_404_for_missing_history_item(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/history/00000000-0000-0000-0000-000000000000/download?format=csv")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(response.data["message"], "History item not found.")
+
+    def test_history_download_rejects_invalid_format(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(f"/history/{self.history.id}/download?format=pdf")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(response.data["message"], "Invalid history download format.")
+
+    @patch("api.views.export_csv_to_filesystem")
+    def test_history_download_returns_500_when_csv_generation_fails(self, mock_export_csv):
+        mock_export_csv.side_effect = OutputCSVGenerationError("failed")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(f"/history/{self.history.id}/download?format=csv")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download history file due to internal error.",
+        )
+
+    def test_history_list_rejects_invalid_offset(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/history/?offset=-1")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(response.data["message"], "Invalid history pagination request.")
 
 
 class MembersViewTest(BaseApiViewTest):
