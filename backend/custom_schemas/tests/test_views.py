@@ -72,7 +72,7 @@ class CustomSchemaApiViewTest(TestCase):
 
         response = self.list_view(request)
 
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertEqual(CustomSchema.objects.count(), 0)
 
     def test_create_schema_requires_verified_user(self):
