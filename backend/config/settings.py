@@ -54,7 +54,8 @@ INSTALLED_APPS = [
     "custom_schemas",
     "llm",
     "file_processing",
-    "authentication"
+    "authentication",
+    "artifact_history",
 ]
 
 MIDDLEWARE = [

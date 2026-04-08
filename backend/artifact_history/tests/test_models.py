@@ -6,6 +6,27 @@ from authentication.models import User
 from artifact_history.models import ArtifactHistory
 
 
+def make_output_json(table_name="Sheet1", value="hello"):
+    return {
+        "document_info": {
+            "source_type": "PDF",
+            "filename": "report.pdf",
+        },
+        "summary": {
+            "total_rows": 1,
+        },
+        "content_data": [
+            {
+                "table_name": table_name,
+                "headers": ["text"],
+                "rows": [
+                    {"text": value},
+                ],
+            }
+        ],
+    }
+
+
 class ArtifactHistoryModelTest(TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
@@ -24,56 +45,34 @@ class ArtifactHistoryModelTest(TestCase):
     def test_primary_key_defaults_to_uuid(self):
         artifact = ArtifactHistory.objects.create(
             owner=self.owner,
-            file_id="csv_abc123",
             original_name="report.pdf",
             custom_name=None,
-            file_name="export_abc123.csv",
-            file_type="csv",
+            output_json=make_output_json(),
             status_processing="completed",
-            size_bytes=128,
             created_at="2026-04-08T10:00:00Z",
         )
 
         self.assertIsInstance(artifact.id, uuid.UUID)
 
-    def test_duplicate_file_id_is_rejected(self):
-        ArtifactHistory.objects.create(
+    def test_custom_name_is_optional(self):
+        artifact = ArtifactHistory.objects.create(
             owner=self.owner,
-            file_id="xlsx_abc123",
             original_name="report.pdf",
             custom_name=None,
-            file_name="export_abc123.xlsx",
-            file_type="xlsx",
+            output_json=make_output_json(),
             status_processing="completed",
-            size_bytes=256,
             created_at="2026-04-08T10:00:00Z",
         )
 
-        duplicate = ArtifactHistory(
-            owner=self.other_owner,
-            file_id="xlsx_abc123",
-            original_name="other.pdf",
-            custom_name=None,
-            file_name="export_abc123.xlsx",
-            file_type="xlsx",
-            status_processing="completed",
-            size_bytes=512,
-            created_at="2026-04-08T10:05:00Z",
-        )
+        self.assertIsNone(artifact.custom_name)
 
-        with self.assertRaises(ValidationError):
-            duplicate.save()
-
-    def test_invalid_file_type_is_rejected(self):
+    def test_invalid_output_json_is_rejected(self):
         artifact = ArtifactHistory(
             owner=self.owner,
-            file_id="bad_abc123",
             original_name="report.pdf",
             custom_name=None,
-            file_name="export_abc123.bin",
-            file_type="bin",
+            output_json=[],
             status_processing="completed",
-            size_bytes=64,
             created_at="2026-04-08T10:00:00Z",
         )
 
@@ -83,28 +82,21 @@ class ArtifactHistoryModelTest(TestCase):
     def test_ordering_returns_newest_records_first(self):
         older = ArtifactHistory.objects.create(
             owner=self.owner,
-            file_id="csv_old123",
             original_name="older.pdf",
             custom_name=None,
-            file_name="export_old123.csv",
-            file_type="csv",
+            output_json=make_output_json("OlderSheet", "old"),
             status_processing="completed",
-            size_bytes=64,
             created_at="2026-04-08T10:00:00Z",
         )
         newer = ArtifactHistory.objects.create(
             owner=self.owner,
-            file_id="csv_new123",
             original_name="newer.pdf",
             custom_name="Quarterly Export",
-            file_name="export_new123.csv",
-            file_type="csv",
+            output_json=make_output_json("NewerSheet", "new"),
             status_processing="completed",
-            size_bytes=96,
             created_at="2026-04-08T10:10:00Z",
         )
 
         records = list(ArtifactHistory.objects.all())
 
         self.assertEqual(records, [newer, older])
-
