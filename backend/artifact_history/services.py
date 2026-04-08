@@ -7,15 +7,20 @@ def create_artifact_history(
     custom_name,
     output_json,
     status_processing,
-    created_at,
+    created_at=None,
 ):
+    create_kwargs = {
+        "owner": owner,
+        "original_name": original_name,
+        "custom_name": custom_name,
+        "output_json": output_json,
+        "status_processing": status_processing,
+    }
+    if created_at is not None:
+        create_kwargs["created_at"] = created_at
+
     return ArtifactHistory.objects.create(
-        owner=owner,
-        original_name=original_name,
-        custom_name=custom_name,
-        output_json=output_json,
-        status_processing=status_processing,
-        created_at=created_at,
+        **create_kwargs,
     )
 
 

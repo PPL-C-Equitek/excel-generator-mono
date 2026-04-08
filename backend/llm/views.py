@@ -4,6 +4,7 @@ from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from artifact_history.services import create_artifact_history
 from .serializers import LlmGenerateRequestSerializer, LlmGenerateResponseSerializer
 from .services.generation_service import (
     CustomSchemaNotFoundError,
@@ -44,6 +45,28 @@ def build_llm_generation_service(user=None) -> LlmGenerationService:
             owner_id=get_authenticated_user_id(user)
         ),
     )
+
+
+def extract_original_name(input_json, output_json) -> str:
+    if isinstance(input_json, dict):
+        input_filename = input_json.get("filename")
+        if isinstance(input_filename, str) and input_filename.strip():
+            return input_filename.strip()
+
+        document_info = input_json.get("document_info")
+        if isinstance(document_info, dict):
+            document_filename = document_info.get("filename")
+            if isinstance(document_filename, str) and document_filename.strip():
+                return document_filename.strip()
+
+    if isinstance(output_json, dict):
+        document_info = output_json.get("document_info")
+        if isinstance(document_info, dict):
+            document_filename = document_info.get("filename")
+            if isinstance(document_filename, str) and document_filename.strip():
+                return document_filename.strip()
+
+    return "generated-output"
 
 
 @api_view(["POST"])
@@ -94,4 +117,13 @@ def llm_generate(request):
     response_serializer = LlmGenerateResponseSerializer(data={"output_json": output_json})
     if not response_serializer.is_valid():
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+
+    if getattr(request.user, "is_authenticated", False):
+        create_artifact_history(
+            owner=request.user,
+            original_name=extract_original_name(input_json, output_json),
+            custom_name=None,
+            output_json=output_json,
+            status_processing="completed",
+        )
     return Response(response_serializer.data)

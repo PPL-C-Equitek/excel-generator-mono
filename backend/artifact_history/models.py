@@ -2,6 +2,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 class ArtifactHistory(models.Model):
@@ -16,7 +17,7 @@ class ArtifactHistory(models.Model):
     custom_name = models.CharField(max_length=255, blank=True, null=True)
     output_json = models.JSONField()
     status_processing = models.CharField(max_length=50)
-    created_at = models.DateTimeField()
+    created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ("-created_at", "-id")

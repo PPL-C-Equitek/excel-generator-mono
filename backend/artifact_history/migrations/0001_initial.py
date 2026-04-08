@@ -3,6 +3,7 @@
 import django.db.models.deletion
 import uuid
 from django.db import migrations, models
+import django.utils.timezone
 
 
 class Migration(migrations.Migration):
@@ -22,7 +23,7 @@ class Migration(migrations.Migration):
                 ('custom_name', models.CharField(blank=True, max_length=255, null=True)),
                 ('output_json', models.JSONField()),
                 ('status_processing', models.CharField(max_length=50)),
-                ('created_at', models.DateTimeField()),
+                ('created_at', models.DateTimeField(default=django.utils.timezone.now)),
                 ('owner', models.ForeignKey(db_column='owner_id', on_delete=django.db.models.deletion.CASCADE, related_name='artifact_histories', to='authentication.user')),
             ],
             options={
