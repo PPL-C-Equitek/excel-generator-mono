@@ -186,7 +186,7 @@ class HistoryListViewTest(BaseApiViewTest):
         self.assertEqual(response.data["message"], "Invalid history pagination request.")
 
     def test_history_list_accepts_custom_limit_and_offset(self):
-        older = self._create_history(
+        self._create_history(
             owner=self.verified_user,
             original_name="older.pdf",
             created_at=timezone.now() - timedelta(hours=3),
@@ -196,7 +196,7 @@ class HistoryListViewTest(BaseApiViewTest):
             original_name="middle.pdf",
             created_at=timezone.now() - timedelta(hours=2),
         )
-        newest = self._create_history(
+        self._create_history(
             owner=self.verified_user,
             original_name="newest.pdf",
             created_at=timezone.now() - timedelta(hours=1),
