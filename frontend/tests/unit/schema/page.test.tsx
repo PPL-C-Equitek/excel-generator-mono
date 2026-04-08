@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Page from '../../../src/app/schema/page'
 
 const mockSchemaPageRender = vi.fn()
@@ -26,17 +26,12 @@ vi.mock('../../../src/app/schema/SchemaPage', () => ({
     }
 }))
 
-describe('Schema Page Wrapper', () => {
+describe('Schema Page Route Guard', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        mockSchemaPageRender.mockClear()
     })
 
-    afterEach(() => {
-        vi.resetAllMocks()
-    })
-
-    it('renders SchemaPage component', () => {
+    it('renders SchemaPage when access token exists', async () => {
         render(<Page />)
         expect(screen.getByTestId('auth-guard')).toBeInTheDocument()
         expect(screen.getByTestId('schema-page')).toBeInTheDocument()

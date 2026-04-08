@@ -59,55 +59,88 @@ class CustomSchemaSerializerUnitTest(SimpleTestCase):
                 )
             }
         )
+        application_service = Mock()
+        application_service.has_name_conflict.return_value = False
+        serializer.context["application_service"] = application_service
 
-        with patch("custom_schemas.serializers.CustomSchema.objects.filter") as filter_mock:
-            result = serializer.validate_name("Invoice Mapping")
+        result = serializer.validate_name("Invoice Mapping")
 
         self.assertEqual(result, "Invoice Mapping")
-        filter_mock.assert_not_called()
+        application_service.has_name_conflict.assert_called_once_with(
+            user=serializer.context["request"].user,
+            name="Invoice Mapping",
+            exclude_pk=None,
+        )
 
     def test_validate_name_rejects_duplicate_name_for_current_owner(self):
-        serializer = CustomSchemaSerializer(context={"request": self.request})
-        duplicate_queryset = Mock()
-        duplicate_queryset.exists.return_value = True
+        application_service = Mock()
+        application_service.has_name_conflict.return_value = True
+        serializer = CustomSchemaSerializer(
+            context={
+                "request": self.request,
+                "application_service": application_service,
+            }
+        )
 
-        with patch(
-            "custom_schemas.serializers.CustomSchema.objects.filter",
-            return_value=duplicate_queryset,
-        ) as filter_mock:
-            with self.assertRaises(serializers.ValidationError) as context:
-                serializer.validate_name("Invoice Mapping")
+        with self.assertRaises(serializers.ValidationError) as context:
+            serializer.validate_name("Invoice Mapping")
 
         self.assertIn(
-            "Anda sudah memiliki custom schema dengan nama ini.",
+            "You already have a custom schema with this name.",
             context.exception.detail,
         )
-        filter_mock.assert_called_once_with(
-            owner_id=self.owner_id,
+        application_service.has_name_conflict.assert_called_once_with(
+            user=self.request.user,
             name="Invoice Mapping",
+            exclude_pk=None,
         )
-        duplicate_queryset.exists.assert_called_once_with()
 
     def test_validate_name_excludes_current_instance_from_duplicate_check(self):
         existing_instance = SimpleNamespace(pk=uuid.uuid4(), name="Invoice Mapping")
+        application_service = Mock()
+        application_service.has_name_conflict.return_value = False
         serializer = CustomSchemaSerializer(
             instance=existing_instance,
-            context={"request": self.request},
+            context={
+                "request": self.request,
+                "application_service": application_service,
+            },
         )
-        queryset = Mock()
-        queryset.exclude.return_value = queryset
-        queryset.exists.return_value = False
+
+        result = serializer.validate_name("Invoice Mapping")
+
+        self.assertEqual(result, "Invoice Mapping")
+        application_service.has_name_conflict.assert_called_once_with(
+            user=self.request.user,
+            name="Invoice Mapping",
+            exclude_pk=existing_instance.pk,
+        )
+
+    def test_get_application_service_returns_context_service_when_available(self):
+        application_service = Mock()
+        serializer = CustomSchemaSerializer(
+            context={"application_service": application_service}
+        )
+
+        result = serializer.get_application_service()
+
+        self.assertIs(result, application_service)
+
+    def test_validate_name_uses_default_application_service_when_not_in_context(self):
+        serializer = CustomSchemaSerializer(context={"request": self.request})
+        application_service = Mock()
+        application_service.has_name_conflict.return_value = False
 
         with patch(
-            "custom_schemas.serializers.CustomSchema.objects.filter",
-            return_value=queryset,
-        ) as filter_mock:
+            "custom_schemas.serializers.CustomSchemaApplicationService",
+            return_value=application_service,
+        ) as application_service_class:
             result = serializer.validate_name("Invoice Mapping")
 
         self.assertEqual(result, "Invoice Mapping")
-        filter_mock.assert_called_once_with(
-            owner_id=self.owner_id,
+        application_service_class.assert_called_once_with()
+        application_service.has_name_conflict.assert_called_once_with(
+            user=self.request.user,
             name="Invoice Mapping",
+            exclude_pk=None,
         )
-        queryset.exclude.assert_called_once_with(pk=existing_instance.pk)
-        queryset.exists.assert_called_once_with()

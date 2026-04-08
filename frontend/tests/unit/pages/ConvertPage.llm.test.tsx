@@ -342,7 +342,7 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             render(<ConvertPage />)
             await user.click(screen.getByTestId('upload-btn'))
             expect(mockHandleFileSelect).toHaveBeenCalledTimes(1)
-            expect(mockHandleFileSelect).toHaveBeenCalledWith(expect.any(File))
+            expect(mockHandleFileSelect).toHaveBeenCalledWith(expect.any(File), null)
         })
     })
 })

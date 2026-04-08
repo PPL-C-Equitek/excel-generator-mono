@@ -138,6 +138,23 @@ describe('useConvertFlow', () => {
             )
         })
 
+        it('passes the selected custom schema id into llmService.generate when provided', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(
+                    testFile,
+                    '11111111-1111-1111-1111-111111111111'
+                )
+            })
+
+            expect(service.generate).toHaveBeenCalledWith(
+                expect.objectContaining(validUploadResponse),
+                '11111111-1111-1111-1111-111111111111'
+            )
+        })
+
         it('does not call generate if uploadFile throws', async () => {
             mockUploadFile.mockRejectedValue(new Error('Network error'))
             const service = makeMockService()

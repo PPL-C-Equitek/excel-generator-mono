@@ -14,8 +14,8 @@ import { sanitizeCSVCell } from '@/utils/csvSanitizer'
 import type { ILLMService } from '@/lib/ILLMService'
 import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
 
-const defaultService: ILLMService = { 
-    generate: generateJson, 
+const defaultService: ILLMService = {
+    generate: generateJson,
     exportToCsv,
     exportToExcel,
     downloadExcelFile,
@@ -129,17 +129,17 @@ export function useConvertFlow(
 
         try {
             const isStringEmpty = typeof out === 'string' && out.trim() === ''
-            const isEmpty = out === null || isStringEmpty || 
-                (Array.isArray(out) && out.length === 0) || 
+            const isEmpty = out === null || isStringEmpty ||
+                (Array.isArray(out) && out.length === 0) ||
                 (typeof out === 'object' && out !== null && Object.keys(out).length === 0)
-                
+
             if (isEmpty) {
                 throw new Error("The converted data is empty or invalid, so it can't be exported.")
             }
 
             const sanitizedJSON = sanitizeCSVCell(out) as JsonValue
             const csvResult = await llmService.exportToCsv(sanitizedJSON)
-            
+
             if (!signal.aborted) {
                 if (csvResult.file_id?.startsWith('csv_')) {
                     setCsvMetadata({ file_id: csvResult.file_id })
@@ -152,9 +152,17 @@ export function useConvertFlow(
         }
     }
 
-    const processConversion = async (uploadResult: JsonObject, file: File, signal: AbortSignal) => {
+    const processConversion = async (
+        uploadResult: JsonObject,
+        file: File,
+        signal: AbortSignal,
+        customSchemaId?: string | null
+    ) => {
         try {
-            const llmResult = await llmService.generate(uploadResult)
+            const llmResult =
+                typeof customSchemaId === 'string' && customSchemaId.length > 0
+                    ? await llmService.generate(uploadResult, customSchemaId)
+                    : await llmService.generate(uploadResult)
             if (signal.aborted) return
 
             setGeneratedOutput(llmResult.output_json)
@@ -170,7 +178,10 @@ export function useConvertFlow(
         }
     }
 
-    const handleFileSelect = async (file: File): Promise<void> => {
+    const handleFileSelect = async (
+        file: File,
+        customSchemaId?: string | null
+    ): Promise<void> => {
         const signal = abortPreviousRequest()
 
         setError(null)
@@ -185,7 +196,7 @@ export function useConvertFlow(
         const uploadResult = await processUpload(file, signal)
         if (!uploadResult) return
 
-        await processConversion(uploadResult, file, signal)
+        await processConversion(uploadResult, file, signal, customSchemaId)
     }
 
     const handleExcelDownload = async (): Promise<void> => {

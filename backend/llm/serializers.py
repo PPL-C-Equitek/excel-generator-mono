@@ -3,6 +3,7 @@ from rest_framework import serializers
 
 class LlmGenerateRequestSerializer(serializers.Serializer):
     input_json = serializers.JSONField()
+    custom_schema_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate_input_json(self, value):
         if not isinstance(value, (dict, list)):
