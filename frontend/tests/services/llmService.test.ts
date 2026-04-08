@@ -1,7 +1,8 @@
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "@/lib/api";
-import { getStoredAccessToken } from "@/lib/auth";
+import * as auth from "@/lib/auth";
+import * as llmService from "@/services/llm";
 import { generateJson, exportToCsv, getDownloadUrl } from "@/services/llm";
 import { server } from "../mocks/server";
 import {
@@ -309,6 +310,7 @@ describe("exportToExcel", () => {
 
   it("returns trusted excel metadata on successful export", async () => {
     server.use(exportExcelSuccessHandler);
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
 
     const result = await excelService.exportToExcel(mockJson);
 
@@ -321,6 +323,7 @@ describe("exportToExcel", () => {
 
   it("throws error if response does not contain required excel metadata", async () => {
     server.use(exportExcelInvalidSchemaHandler);
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
 
     await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
       "The Excel export response is invalid."
@@ -328,6 +331,7 @@ describe("exportToExcel", () => {
   });
 
   it("throws error if the excel export response is null", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     vi.spyOn(api, "fetchAPI").mockResolvedValue(null);
 
     await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
@@ -337,6 +341,7 @@ describe("exportToExcel", () => {
 
   it("throws error if file_id does not have 'xlsx_' prefix", async () => {
     server.use(exportExcelInvalidPrefixHandler);
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
 
     await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
       "The Excel export response is invalid."
@@ -345,6 +350,7 @@ describe("exportToExcel", () => {
 
   it("throws error if artifact_type is not xlsx", async () => {
     server.use(exportExcelInvalidArtifactTypeHandler);
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
 
     await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
       "The Excel export response is invalid."
@@ -353,6 +359,7 @@ describe("exportToExcel", () => {
 
   it("throws error if file_name is not an xlsx filename", async () => {
     server.use(exportExcelInvalidFileNameHandler);
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
 
     await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
       "The Excel export response is invalid."
@@ -360,6 +367,7 @@ describe("exportToExcel", () => {
   });
 
   it("maps HTTP errors properly using existing ERROR_MESSAGES", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     server.use(
       http.post(`${API_BASE}/export/excel`, () =>
         HttpResponse.json({ detail: "Service Unavailable" }, { status: 503 })
@@ -372,6 +380,7 @@ describe("exportToExcel", () => {
   });
 
   it("maps API errors that expose a numeric status property", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     const errorWithStatus = Object.assign(new Error("Service Unavailable"), {
       status: 503,
     });
@@ -383,6 +392,7 @@ describe("exportToExcel", () => {
   });
 
   it("supports legacy message-based API errors without a status property", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     vi.spyOn(api, "fetchAPI").mockRejectedValue(new Error("API error: 503"));
 
     await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
@@ -391,6 +401,7 @@ describe("exportToExcel", () => {
   });
 
   it("passes through unknown errors from fetchAPI", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     vi.spyOn(api, "fetchAPI").mockRejectedValue(new Error("Unknown Failure"));
 
     await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
@@ -398,12 +409,56 @@ describe("exportToExcel", () => {
     );
   });
 
+  it("passes through numeric status errors when no mapped user message exists", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
+    const unmappedStatusError = Object.assign(new Error("Teapot"), {
+      status: 418,
+    });
+    vi.spyOn(api, "fetchAPI").mockRejectedValue(unmappedStatusError);
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "Teapot"
+    );
+  });
+
   it("passes through non-Error rejections", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     vi.spyOn(api, "fetchAPI").mockRejectedValue("String Failure");
 
     await expect(excelService.exportToExcel(mockJson)).rejects.toBe(
       "String Failure"
     );
+  });
+
+  it("sends bearer authorization for excel export", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      file_id: "xlsx_12345",
+      file_name: "export_12345.xlsx",
+      artifact_type: "xlsx",
+    });
+
+    await excelService.exportToExcel(mockJson);
+
+    expect(fetchSpy).toHaveBeenCalledWith("export/excel", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer access-token",
+      },
+      body: JSON.stringify({ output_json: mockJson }),
+    });
+  });
+
+  it("fails before export request when no access token is available", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue(null);
+    const fetchSpy = vi.spyOn(api, "fetchAPI");
+
+    await expect(excelService.exportToExcel(mockJson)).rejects.toThrow(
+      "Authentication credentials were not provided."
+    );
+
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -434,6 +489,7 @@ describe("downloadExcelFile", () => {
   });
 
   it("downloads the excel file from the excel download endpoint", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     const fetchMock = vi
       .fn()
       .mockResolvedValue(createSuccessfulDownloadResponse());
@@ -473,7 +529,12 @@ describe("downloadExcelFile", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/export/excel/xlsx_12345/download`,
-      expect.any(Object)
+      {
+        method: "GET",
+        headers: {
+          Authorization: "Bearer access-token",
+        },
+      }
     );
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(anchor.download).toBe("report.xlsx");
@@ -485,6 +546,7 @@ describe("downloadExcelFile", () => {
   });
 
   it("rejects invalid excel file ids before requesting download", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -496,6 +558,7 @@ describe("downloadExcelFile", () => {
   });
 
   it("throws a normalized error when the download response is not ok", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     const fetchMock = vi.fn().mockResolvedValue(createFailedDownloadResponse(500));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -505,6 +568,7 @@ describe("downloadExcelFile", () => {
   });
 
   it("throws a normalized error when the network request fails", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     const fetchMock = vi.fn().mockRejectedValue(new Error("Network down"));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -514,6 +578,7 @@ describe("downloadExcelFile", () => {
   });
 
   it("rethrows invalid download request errors without normalizing them", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     const fetchMock = vi
       .fn()
       .mockRejectedValue(new Error("The Excel download request is invalid."));
@@ -525,6 +590,7 @@ describe("downloadExcelFile", () => {
   });
 
   it("cleans up object urls if browser download setup fails unexpectedly", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
     const fetchMock = vi
       .fn()
       .mockResolvedValue(createSuccessfulDownloadResponse());
@@ -554,6 +620,18 @@ describe("downloadExcelFile", () => {
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:excel-file");
   });
+
+  it("fails before download request when no access token is available", async () => {
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue(null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      excelService.downloadExcelFile("xlsx_12345", "report.xlsx")
+    ).rejects.toThrow("Authentication credentials were not provided.");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("getDownloadUrl", () => {
@@ -568,12 +646,19 @@ describe("getDownloadUrl", () => {
   });
 
   it("falls back to localhost:8000 if URL parsing fails", () => {
-    // This requires manipulating process.env or mocking URL for the try-catch block inside getDownloadUrl
-    // We can simulate it by setting a malformed NEXT_PUBLIC_API_URL temporarily if doing so is simple:
     const original = process.env.NEXT_PUBLIC_API_URL;
-    process.env.NEXT_PUBLIC_API_URL = "htt   p://in^valid\nurl"; // triggers URL constructor error
+    process.env.NEXT_PUBLIC_API_URL = "htt   p://in^valid\nurl";
 
-    // Note: getDownloadUrl initializes NEXT_PUBLIC_API_URL locally in its body each call
+    const url = getDownloadUrl("csv_abc");
+    expect(url).toBe("http://localhost:8000/export/csv/csv_abc/download");
+
+    process.env.NEXT_PUBLIC_API_URL = original;
+  });
+
+  it("uses localhost:8000 when NEXT_PUBLIC_API_URL is unset", () => {
+    const original = process.env.NEXT_PUBLIC_API_URL;
+    delete process.env.NEXT_PUBLIC_API_URL;
+
     const url = getDownloadUrl("csv_abc");
     expect(url).toBe("http://localhost:8000/export/csv/csv_abc/download");
 

@@ -1,5 +1,5 @@
 import { fetchAPI } from "@/lib/api";
-import { getStoredAccessToken } from "@/lib/auth";
+import { getValidAccessToken } from "@/lib/auth";
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { isJsonObject } from "@/utils/schemaValidator";
 import type { JsonValue } from "@/utils/schemaValidator";
@@ -196,10 +196,19 @@ export async function exportToExcel(
     outputJson: JsonValue
 ): Promise<ExcelExportResponse> {
     let data: unknown;
+    const accessToken = await getValidAccessToken();
+
+    if (!accessToken) {
+        throw new Error("Authentication credentials were not provided.");
+    }
 
     try {
         data = await fetchAPI("export/excel", {
             method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${accessToken}`,
+            },
             body: JSON.stringify({ output_json: outputJson }),
         });
     } catch (err: unknown) {
@@ -222,6 +231,11 @@ export async function downloadExcelFile(
     filename = "export.xlsx"
 ): Promise<void> {
     assertValidExcelDownloadFileId(fileId);
+    const accessToken = await getValidAccessToken();
+
+    if (!accessToken) {
+        throw new Error("Authentication credentials were not provided.");
+    }
 
     let objectUrl: string | null = null;
     let downloadAnchor: HTMLAnchorElement | null = null;
@@ -230,7 +244,12 @@ export async function downloadExcelFile(
     try {
         const response = await fetch(
             `${getApiBaseOrigin()}/export/excel/${fileId}/download`,
-            { method: "GET" }
+            {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                },
+            }
         );
 
         if (!response.ok) {
