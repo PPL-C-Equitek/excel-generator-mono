@@ -618,12 +618,19 @@ class TestUploadService(TestCase):
         with self.assertRaises(Exception):
             process_upload(f)
 
+    @patch("file_processing.services.upload_service._process_image")
     @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_image_success_without_extraction(self, mock_validate, mock_save):
+    def test_process_upload_image_success_with_extraction(self, mock_validate, mock_save, mock_process_image):
         from file_processing.services.upload_service import process_upload
 
         mock_validate.return_value = (True, None)
+        mock_save.return_value = "/tmp/photo.png"
+        mock_process_image.return_value = (
+            True,
+            None,
+            {"content": [{"page": 1, "text": ["hello from image"]}]},
+        )
 
         f = SimpleUploadedFile(
             "photo.png",
@@ -636,8 +643,9 @@ class TestUploadService(TestCase):
         self.assertTrue(success)
         self.assertIsNone(error)
         self.assertIsNone(file_path)
-        self.assertIsNone(extracted)
-        mock_save.assert_not_called()
+        self.assertEqual(extracted["content"][0]["text"], ["hello from image"])
+        mock_save.assert_called_once()
+        mock_process_image.assert_called_once_with("/tmp/photo.png")
 
     @patch("file_processing.services.upload_service.validate_file")
     def test_process_upload_image_validation_failure(self, mock_validate):
@@ -655,6 +663,29 @@ class TestUploadService(TestCase):
 
         self.assertFalse(success)
         self.assertEqual(error, "File content does not match its extension.")
+        self.assertIsNone(file_path)
+        self.assertIsNone(extracted)
+
+    @patch("file_processing.services.upload_service._process_image")
+    @patch("file_processing.services.upload_service.save_temp_file")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_image_extraction_failure(self, mock_validate, mock_save, mock_process_image):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (True, None)
+        mock_save.return_value = "/tmp/bad.png"
+        mock_process_image.return_value = (False, "Image file is corrupted or unreadable.", None)
+
+        f = SimpleUploadedFile(
+            "bad.png",
+            b"dummy-image-content",
+            content_type="image/png",
+        )
+
+        success, error, file_path, extracted = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "Image file is corrupted or unreadable.")
         self.assertIsNone(file_path)
         self.assertIsNone(extracted)
 

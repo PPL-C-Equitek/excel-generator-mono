@@ -275,7 +275,14 @@ class UploadEndpointTest(TestCase):
 
         self.assertEqual(resp.status_code, 200)
 
-    def test_upload_png_success_without_extracted_payload(self):
+    @patch("file_processing.services.upload_service._process_image")
+    def test_upload_png_success_with_extracted_payload(self, mock_process_image):
+        mock_process_image.return_value = (
+            True,
+            None,
+            {"content": [{"page": 1, "text": ["OCR image text"]}]},
+        )
+
         png_content = self.generate_valid_png_bytes()
 
         resp = self._post_file(
@@ -287,7 +294,8 @@ class UploadEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["status"], "success")
         self.assertEqual(resp.data["filename"], "photo.png")
-        self.assertNotIn("extracted", resp.data)
+        self.assertIn("extracted", resp.data)
+        self.assertEqual(resp.data["extracted"]["content"][0]["text"], ["OCR image text"])
 
     def test_upload_unsupported_type(self):
         resp = self._post_file("note.html", b"<html></html>", "text/html")
