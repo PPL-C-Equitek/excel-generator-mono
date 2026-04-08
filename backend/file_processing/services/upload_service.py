@@ -28,10 +28,6 @@ except Exception:  # pragma: no cover - optional dependency in local envs
 
     magic = _MagicShim()
 
-from file_processing.services.image_validation_service import validate_image
-from file_processing.extractors.image_extractor import ImageExtractor
-from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
-
 logger = logging.getLogger(__name__)
 
 EXT_XLSX = ".xlsx"
