@@ -19,6 +19,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import upload_service
+from file_processing.services.word_extraction_service import WordExtractionService
 
 from file_processing.services import word_validation_service
 
@@ -1244,6 +1245,102 @@ class TestUploadService(TestCase):
         self.assertEqual(_get_empty_page_numbers(None), [])
         self.assertEqual(_get_empty_page_numbers({}), [])
         self.assertEqual(_get_empty_page_numbers({"other_key": "val"}), [])
+
+
+class TestWordExtractionService(TestCase):
+    def _create_docx_file(self, xml_content: str) -> str:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        tmp.close()
+        with zipfile.ZipFile(tmp.name, "w") as archive:
+            archive.writestr("word/document.xml", xml_content)
+        return tmp.name
+
+    def test_extract_word_to_json_docx_success(self):
+        file_path = self._create_docx_file(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Hello</w:t></w:r></w:p>
+                <w:p><w:r><w:t>World</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        try:
+            result = WordExtractionService.extract_word_to_json(file_path, ".docx")
+            self.assertEqual(result["content"][0]["page"], 1)
+            self.assertEqual(result["content"][0]["text"], ["Hello", "World"])
+        finally:
+            os.unlink(file_path)
+
+    def test_extract_word_to_json_doc_success(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
+        try:
+            tmp.write(b"Hello legacy doc\nSecond line")
+            tmp.close()
+
+            result = WordExtractionService.extract_word_to_json(tmp.name, ".doc")
+            extracted = " ".join(result["content"][0]["text"])
+            self.assertIn("Hello legacy doc", extracted)
+            self.assertIn("Second line", extracted)
+        finally:
+            os.unlink(tmp.name)
+
+    def test_extract_word_to_json_unsupported_extension_raises(self):
+        with self.assertRaises(ValueError):
+            WordExtractionService.extract_word_to_json("/tmp/file.txt", ".txt")
+
+    def test_extract_docx_to_json_invalid_structure_raises(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        tmp.close()
+        with zipfile.ZipFile(tmp.name, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types></Types>")
+
+        try:
+            with self.assertRaises(ValueError):
+                WordExtractionService._extract_docx_to_json(tmp.name)
+        finally:
+            os.unlink(tmp.name)
+
+    @patch(
+        "file_processing.services.upload_service.WordExtractionService.extract_word_to_json"
+    )
+    def test_process_word_success(self, mock_extract):
+        mock_extract.return_value = {"content": [{"page": 1, "text": ["ok"]}]}
+
+        success, error, data = upload_service.process_word("/tmp/f.docx", ".docx")
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(data, {"content": [{"page": 1, "text": ["ok"]}]})
+
+    @patch(
+        "file_processing.services.upload_service.WordExtractionService.extract_word_to_json"
+    )
+    def test_process_word_value_error_propagates_message(self, mock_extract):
+        mock_extract.side_effect = ValueError("bad word")
+
+        success, error, data = upload_service.process_word("/tmp/f.docx", ".docx")
+
+        self.assertFalse(success)
+        self.assertEqual(error, "bad word")
+        self.assertIsNone(data)
+
+    @patch("file_processing.services.upload_service.logger.exception")
+    @patch(
+        "file_processing.services.upload_service.WordExtractionService.extract_word_to_json"
+    )
+    def test_process_word_generic_exception_returns_word_corrupt_error(
+        self, mock_extract, mock_logger
+    ):
+        mock_extract.side_effect = RuntimeError("boom")
+
+        success, error, data = upload_service.process_word("/tmp/f.doc", ".doc")
+
+        self.assertFalse(success)
+        self.assertEqual(error, upload_service.WORD_CORRUPT_ERROR)
+        self.assertIsNone(data)
+        mock_logger.assert_called_once()
 
 
 class TestUploadServiceCoverageGaps(TestCase):
