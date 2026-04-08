@@ -12,7 +12,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
-from artifact_history.models import ArtifactHistory
 from artifact_history.services import list_artifact_history_for_user
 from authentication.permissions import IsVerifiedUser
 from file_processing.services.upload_service import (
@@ -102,26 +101,6 @@ def _excel_download_internal_error_response():
         {
             "status": "error",
             "message": "Failed to download Excel due to internal error.",
-        },
-        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-    )
-
-
-def _history_not_found_response():
-    return Response(
-        {
-            "status": "error",
-            "message": "History item not found.",
-        },
-        status=status.HTTP_404_NOT_FOUND,
-    )
-
-
-def _history_download_internal_error_response():
-    return Response(
-        {
-            "status": "error",
-            "message": "Failed to download history file due to internal error.",
         },
         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
@@ -256,72 +235,6 @@ def history_list(request):
             "results": results,
         },
         status=status.HTTP_200_OK,
-    )
-
-
-@require_GET
-@api_view(["GET"])
-@permission_classes([IsAuthenticated, IsVerifiedUser])
-def history_download(request, history_id):
-    download_format = (request.query_params.get("format") or "").strip().lower()
-    if download_format not in {"csv", "excel"}:
-        return Response(
-            {
-                "status": "error",
-                "message": "Invalid history download format.",
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    history = ArtifactHistory.objects.filter(owner=request.user, id=history_id).first()
-    if history is None:
-        return _history_not_found_response()
-
-    try:
-        if download_format == "csv":
-            artifact = export_csv_to_filesystem(
-                output_json=history.output_json,
-                storage_dir=settings.CSV_EXPORT_DIR,
-            )
-            content_type = "application/zip" if artifact["artifact_type"] == "zip" else "text/csv"
-            safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
-        else:
-            artifact = export_excel_to_filesystem(
-                output_json=history.output_json,
-                storage_dir=settings.EXCEL_EXPORT_DIR,
-            )
-            content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
-
-        file_handle = open(safe_file_path, "rb")
-    except (OutputLLMValidationError, OutputCSVMappingError):
-        logger.exception("History download failed due to invalid stored output.")
-        return _history_download_internal_error_response()
-    except (
-        OutputCSVGenerationError,
-        OutputExcelGenerationError,
-        SuspiciousFileOperation,
-        ValueError,
-        OSError,
-        KeyError,
-    ):
-        logger.exception("History download failed while generating artifact.")
-        return _history_download_internal_error_response()
-    except Exception:
-        logger.exception("Unexpected error while preparing history download.")
-        return _history_download_internal_error_response()
-
-    download_name = _resolve_download_filename(
-        requested_name=request.query_params.get("filename"),
-        default_name=artifact["file_name"],
-        artifact_type=artifact["artifact_type"],
-    )
-
-    return FileResponse(
-        file_handle,
-        as_attachment=True,
-        filename=download_name,
-        content_type=content_type,
     )
 
 
