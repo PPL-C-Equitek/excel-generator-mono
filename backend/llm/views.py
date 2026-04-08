@@ -47,26 +47,34 @@ def build_llm_generation_service(user=None) -> LlmGenerationService:
     )
 
 
+def _normalize_filename_candidate(value):
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _extract_document_info_filename(payload):
+    if not isinstance(payload, dict):
+        return None
+
+    document_info = payload.get("document_info")
+    if not isinstance(document_info, dict):
+        return None
+
+    return _normalize_filename_candidate(document_info.get("filename"))
+
+
 def extract_original_name(input_json, output_json) -> str:
     if isinstance(input_json, dict):
-        input_filename = input_json.get("filename")
-        if isinstance(input_filename, str) and input_filename.strip():
-            return input_filename.strip()
+        input_filename = _normalize_filename_candidate(input_json.get("filename"))
+        if input_filename:
+            return input_filename
 
-        document_info = input_json.get("document_info")
-        if isinstance(document_info, dict):
-            document_filename = document_info.get("filename")
-            if isinstance(document_filename, str) and document_filename.strip():
-                return document_filename.strip()
-
-    if isinstance(output_json, dict):
-        document_info = output_json.get("document_info")
-        if isinstance(document_info, dict):
-            document_filename = document_info.get("filename")
-            if isinstance(document_filename, str) and document_filename.strip():
-                return document_filename.strip()
-
-    return "generated-output"
+    return (
+        _extract_document_info_filename(input_json)
+        or _extract_document_info_filename(output_json)
+        or "generated-output"
+    )
 
 
 @api_view(["POST"])

@@ -391,7 +391,7 @@ class LlmGenerateHistoryIntegrationTest(TestCase):
         history = ArtifactHistory.objects.get()
         self.assertEqual(history.owner, self.user)
         self.assertEqual(history.original_name, "invoice.pdf")
-        self.assertIsNone(history.custom_name)
+        self.assertEqual(history.custom_name, "")
         self.assertEqual(history.status_processing, "completed")
         self.assertEqual(history.output_json, output_json)
 

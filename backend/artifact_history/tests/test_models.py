@@ -64,7 +64,7 @@ class ArtifactHistoryModelTest(TestCase):
             created_at="2026-04-08T10:00:00Z",
         )
 
-        self.assertIsNone(artifact.custom_name)
+        self.assertEqual(artifact.custom_name, "")
 
     def test_invalid_output_json_is_rejected(self):
         artifact = ArtifactHistory(

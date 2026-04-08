@@ -14,7 +14,7 @@ class ArtifactHistory(models.Model):
         related_name="artifact_histories",
     )
     original_name = models.CharField(max_length=255)
-    custom_name = models.CharField(max_length=255, blank=True, null=True)
+    custom_name = models.CharField(max_length=255, blank=True, default="")
     output_json = models.JSONField()
     status_processing = models.CharField(max_length=50)
     created_at = models.DateTimeField(default=timezone.now)
@@ -24,6 +24,8 @@ class ArtifactHistory(models.Model):
 
     def clean(self):
         super().clean()
+        if self.custom_name is None:
+            self.custom_name = ""
         if not isinstance(self.output_json, dict):
             raise ValidationError({"output_json": "output_json must be an object."})
 

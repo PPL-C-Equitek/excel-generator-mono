@@ -20,7 +20,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('original_name', models.CharField(max_length=255)),
-                ('custom_name', models.CharField(blank=True, max_length=255, null=True)),
+                ('custom_name', models.CharField(blank=True, default='', max_length=255)),
                 ('output_json', models.JSONField()),
                 ('status_processing', models.CharField(max_length=50)),
                 ('created_at', models.DateTimeField(default=django.utils.timezone.now)),

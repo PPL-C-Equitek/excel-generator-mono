@@ -12,7 +12,7 @@ def create_artifact_history(
     create_kwargs = {
         "owner": owner,
         "original_name": original_name,
-        "custom_name": custom_name,
+        "custom_name": custom_name or "",
         "output_json": output_json,
         "status_processing": status_processing,
     }
