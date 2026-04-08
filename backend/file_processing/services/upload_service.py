@@ -181,6 +181,11 @@ def process_upload(uploaded_file):
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
+    # Temporary image path: validation has passed, but extraction is not implemented yet.
+    # Return upload success without extracted payload.
+    if ext in IMAGE_EXTENSIONS:
+        return True, None, None, None
+
     file_path = save_temp_file(uploaded_file)
 
     try:

@@ -71,9 +71,22 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
   });
 
   if (!res.ok) {
-    const error = new Error("Request failed. Please try again.") as HTTPError;
-    error.status = res.status;
-    throw error;
+    let message = "Request failed. Please try again."
+
+    try {
+      const data = await res.json()
+      if (typeof data?.message === "string") {
+        message = data.message
+      } else if (typeof data?.detail === "string") {
+        message = data.detail
+      }
+    } catch {
+      // ignore JSON parse error
+    }
+
+    const error = new Error(message) as HTTPError
+    error.status = res.status
+    throw error
   }
 
   return res.json();
@@ -113,3 +126,27 @@ export async function uploadFile(file: File, options?: RequestInit) {
 type HTTPError = Error & {
   status?: number;
 };
+
+type AuthResponse = {
+  access_token: string
+  refresh_token: string
+  user: {
+    id: number
+    email: string
+    name: string
+  }
+}
+
+export async function login(email: string, password: string): Promise<AuthResponse> {
+  return fetchAPI("auth/login/", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  }) as Promise<AuthResponse>
+}
+
+export async function loginWithGoogle(token: string): Promise<AuthResponse> {
+  return fetchAPI("auth/google-oauth/", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  }) as Promise<AuthResponse>
+}

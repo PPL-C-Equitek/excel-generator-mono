@@ -57,3 +57,7 @@ class LoginSerializer(serializers.Serializer):
         required=True,
         write_only=True,
     )
+
+
+class RefreshTokenSerializer(serializers.Serializer):
+    refresh_token = serializers.CharField(required=True, write_only=True)

@@ -370,6 +370,34 @@ class TestValidateImageIntegrity(SimpleTestCase):
         self.assertFalse(is_valid)
         self.assertIn("dimensions exceed", err.lower())
 
+    def test_image_exceeding_max_pixel_count_rejected(self):
+        """Image with total pixels over MAX_IMAGE_PIXELS should be rejected."""
+
+        class _HugePixelImage:
+            def __init__(self):
+                self.size = (9000, 9000)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def verify(self):
+                raise AssertionError("verify() should not be called for over-pixel image")
+
+        class _FakeFile:
+            def seek(self, *_args):
+                pass
+
+        f = _FakeFile()
+
+        with patch("file_processing.utils.image_validators.Image.open", return_value=_HugePixelImage()):
+            is_valid, err = validate_image_integrity(f)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(err, "Image pixel count exceeds maximum allowed limit.")
+
     def test_decompression_bomb_warning_treated_as_error(self):
         """PIL's DecompressionBombWarning should cause validation to fail."""
 

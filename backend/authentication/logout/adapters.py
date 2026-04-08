@@ -42,6 +42,14 @@ class DjangoTokenBlacklistRepository(TokenBlacklistPort):
         if not was_added:
             raise ValueError("Token already blacklisted")
 
+    def is_blacklisted(self, refresh_token: str) -> bool:
+        if not refresh_token:
+            return False
+
+        token_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
+        cache_key = f"blacklisted_refresh_token:{token_hash}"
+        return bool(cache.get(cache_key, False))
+
 
 class CallableTokenBlacklistRepository(TokenBlacklistPort):
     def __init__(self, blacklister) -> None:
@@ -49,6 +57,9 @@ class CallableTokenBlacklistRepository(TokenBlacklistPort):
 
     def blacklist(self, refresh_token: str) -> None:
         self._blacklister(refresh_token)
+
+    def is_blacklisted(self, refresh_token: str) -> bool:
+        return False
 
 
 def build_logout_user_use_case(

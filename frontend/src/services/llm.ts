@@ -55,6 +55,7 @@ export async function generateJson(
                 if (userMessage) {
                     throw new Error(userMessage);
                 }
+                throw new Error("Request failed. Please try again.");
             }
         }
         throw err;
@@ -98,6 +99,7 @@ export async function exportToCsv(
                 if (userMessage) {
                     throw new Error(userMessage);
                 }
+                throw new Error("Request failed. Please try again.");
             }
         }
         throw err;

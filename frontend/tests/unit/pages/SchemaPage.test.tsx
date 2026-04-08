@@ -3,10 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 import SchemaPage from '../../../src/app/schema/SchemaPage'
 
 vi.mock('../../../src/components/Sidebar', () => ({
-    default: ({ activeMenu, username }: { activeMenu: string; username: string }) => (
+    default: ({ activeMenu }: { activeMenu: string }) => (
         <div data-testid="sidebar">
             <div data-testid="active-menu">{activeMenu}</div>
-            <div data-testid="username">{username}</div>
         </div>
     ),
 }))
@@ -27,6 +26,5 @@ describe('SchemaPage', () => {
         render(<SchemaPage />)
 
         expect(screen.getByTestId('active-menu')).toHaveTextContent('schema')
-        expect(screen.getByTestId('username')).toHaveTextContent('Username')
     })
 })
