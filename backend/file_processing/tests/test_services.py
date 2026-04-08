@@ -618,6 +618,46 @@ class TestUploadService(TestCase):
         with self.assertRaises(Exception):
             process_upload(f)
 
+    @patch("file_processing.services.upload_service.save_temp_file")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_image_success_without_extraction(self, mock_validate, mock_save):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (True, None)
+
+        f = SimpleUploadedFile(
+            "photo.png",
+            b"dummy-image-content",
+            content_type="image/png",
+        )
+
+        success, error, file_path, extracted = process_upload(f)
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertIsNone(file_path)
+        self.assertIsNone(extracted)
+        mock_save.assert_not_called()
+
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_image_validation_failure(self, mock_validate):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (False, "File content does not match its extension.")
+
+        f = SimpleUploadedFile(
+            "photo.png",
+            b"not-an-image",
+            content_type="image/png",
+        )
+
+        success, error, file_path, extracted = process_upload(f)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "File content does not match its extension.")
+        self.assertIsNone(file_path)
+        self.assertIsNone(extracted)
+
     @patch("file_processing.services.upload_service.OCRService.process_pdf")
     @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
     def test_process_pdf_ocr_fallback_called(self, mock_non_ocr, mock_ocr):

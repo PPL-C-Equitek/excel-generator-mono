@@ -6,7 +6,7 @@ import Sidebar from '@/components/Sidebar'
 export default function SchemaPage() {
     return (
         <div className="flex min-h-screen">
-            <Sidebar activeMenu="schema" username="Username" />
+            <Sidebar activeMenu="schema" />
             <main className="ml-56 flex flex-1 flex-col items-center justify-start bg-gray-50 px-16 py-12">
                 <h1 className="mb-3 text-2xl font-bold text-gray-900">
                     Manage Your Custom Schemas

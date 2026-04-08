@@ -4,9 +4,12 @@ export interface Feature {
     readonly icon?: React.ReactNode;
 }
 
+type Page = 'login' | 'register'
+
 export interface NavLink {
     readonly label: string;
     readonly href: string;
+    readonly key: Page
 }
 
 export const LANDING_FEATURES: readonly Feature[] = [
@@ -38,8 +41,8 @@ export const LANDING_FEATURES: readonly Feature[] = [
 
 /* Navigation links untuk navbar. */
 export const LANDING_NAV_LINKS: readonly NavLink[] = [
-    { label: 'Login', href: '/login' },
-    { label: 'Register', href: '/register' },
+    { label: 'Login', href: '/login', key: 'login' },
+    { label: 'Register', href: '/register', key: 'register' },
 ] as const;
 
 /* Hero section config. */
