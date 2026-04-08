@@ -744,6 +744,26 @@ class TestUploadService(TestCase):
         self.assertFalse(is_valid)
         self.assertEqual(error, "Unsupported file type.")
 
+    def test_estimate_doc_page_count_returns_zero_for_empty_content(self):
+        page_count = upload_service.word_validation_service.estimate_doc_page_count(b"")
+        self.assertEqual(page_count, 0)
+
+    def test_estimate_doc_page_count_handles_decode_exception(self):
+        class _DecodeErrorContent:
+            def __bool__(self):
+                return True
+
+            def count(self, _marker):
+                return 0
+
+            def decode(self, *_args, **_kwargs):
+                raise ValueError("decode failed")
+
+        page_count = upload_service.word_validation_service.estimate_doc_page_count(
+            _DecodeErrorContent()
+        )
+        self.assertEqual(page_count, 0)
+
     @patch("file_processing.services.word_validation_service.is_ole_container")
     def test_check_docx_encrypted_rejects_ole_container(self, mock_is_ole):
         mock_is_ole.return_value = True
@@ -1242,6 +1262,10 @@ class TestUploadServiceCoverageGaps(TestCase):
     def test_has_extracted_text_true_and_false(self):
         self.assertFalse(_has_extracted_text({"content": [{"page": 1, "text": []}]}))
         self.assertTrue(_has_extracted_text({"content": [{"page": 1, "text": ["ok"]}]}))
+
+    def test_fallback_mime_returns_zip_for_zip_signature(self):
+        mime = upload_service._fallback_mime(b"PK\x03\x04dummy", ".xlsx")
+        self.assertEqual(mime, upload_service.MIME_ZIP)
 
     @patch(
         "file_processing.services.upload_service.validate_pdf",
