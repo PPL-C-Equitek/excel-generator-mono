@@ -19,6 +19,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import upload_service
+from file_processing.services.upload_validation_strategy import WordValidationStrategy
 
 from file_processing.services import word_validation_service
 
@@ -1266,6 +1267,30 @@ class TestUploadServiceCoverageGaps(TestCase):
     def test_fallback_mime_returns_zip_for_zip_signature(self):
         mime = upload_service._fallback_mime(b"PK\x03\x04dummy", ".xlsx")
         self.assertEqual(mime, upload_service.MIME_ZIP)
+
+
+class TestFileValidationStrategy(TestCase):
+    def test_word_strategy_skips_non_word_extensions(self):
+        fake_service = MagicMock()
+        strategy = WordValidationStrategy(fake_service, {".doc", ".docx"})
+
+        is_valid, error = strategy.validate(MagicMock(), ".pdf")
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+        fake_service.validate_word.assert_not_called()
+
+    def test_word_strategy_uses_service_for_word_extensions(self):
+        fake_service = MagicMock()
+        fake_service.validate_word.return_value = (False, "bad word")
+        strategy = WordValidationStrategy(fake_service, {".doc", ".docx"})
+
+        uploaded = MagicMock()
+        is_valid, error = strategy.validate(uploaded, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "bad word")
+        fake_service.validate_word.assert_called_once_with(uploaded, ".docx")
 
     @patch(
         "file_processing.services.upload_service.validate_pdf",

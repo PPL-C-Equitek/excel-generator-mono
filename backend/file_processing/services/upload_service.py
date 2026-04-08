@@ -5,6 +5,7 @@ from django.conf import settings
 from django.utils.text import get_valid_filename
 from .excel_service import process_uploaded_excel
 from .txt_service import process_uploaded_txt
+from .upload_validation_strategy import WordValidationStrategy
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from file_processing.services.ocr_service import OCRService
@@ -43,6 +44,10 @@ EXT_JPG = ".jpg"
 EXT_JPEG = ".jpeg"
 
 IMAGE_EXTENSIONS = {EXT_PNG, EXT_JPG, EXT_JPEG}
+FILE_VALIDATION_STRATEGIES = [
+    WordValidationStrategy(word_validation_service, {EXT_DOC, EXT_DOCX}),
+]
+
 ALLOWED_EXTENSIONS = [
     EXT_PDF,
     EXT_XLS,
@@ -286,12 +291,10 @@ def validate_file(uploaded_file):
         if not is_valid_excel:
             return False, excel_error
 
-    if ext in {EXT_DOC, EXT_DOCX}:
-        is_valid_word, word_error = word_validation_service.validate_word(
-            uploaded_file, ext
-        )
-        if not is_valid_word:
-            return False, word_error
+    for strategy in FILE_VALIDATION_STRATEGIES:
+        is_valid, error = strategy.validate(uploaded_file, ext)
+        if not is_valid:
+            return False, error
 
     return True, None
 
