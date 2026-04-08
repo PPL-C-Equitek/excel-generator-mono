@@ -20,12 +20,13 @@ EXT_XLSX = ".xlsx"
 EXT_XLS = ".xls"
 EXT_PDF = ".pdf"
 EXT_TXT = ".txt"
+EXT_CSV = ".csv"
 EXT_PNG = ".png"
 EXT_JPG = ".jpg"
 EXT_JPEG = ".jpeg"
 
 IMAGE_EXTENSIONS = {EXT_PNG, EXT_JPG, EXT_JPEG}
-ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_PNG, EXT_JPG, EXT_JPEG, EXT_TXT]
+ALLOWED_EXTENSIONS = [EXT_PDF, EXT_XLS, EXT_XLSX, EXT_PNG, EXT_JPG, EXT_JPEG, EXT_TXT, EXT_CSV]
 ALLOWED_MIME_TYPES = {
     EXT_PDF: [
         "application/pdf",
@@ -59,6 +60,13 @@ ALLOWED_MIME_TYPES = {
         "text/plain",
         "text/x-log",
     ],
+
+    EXT_CSV: [
+        "text/csv",
+        "text/plain",
+        "application/csv",
+        "application/vnd.ms-excel",
+    ],
 }
 MAX_PDF_PAGES = 100
 MAX_EXCEL_SHEETS = 100
@@ -74,6 +82,11 @@ TXT_CORRUPT_ERROR = "File teks tidak dapat dibaca atau rusak (corrupt)."
 TXT_PROTECTED_ERROR = (
     "File terdeteksi sebagai format terproteksi atau terenkripsi. "
     "Pastikan file adalah teks biasa (.txt) yang tidak diproteksi."
+)
+CSV_CORRUPT_ERROR = "File CSV tidak dapat dibaca atau rusak (corrupt)."
+CSV_PROTECTED_ERROR = (
+    "File CSV terdeteksi sebagai format terproteksi atau terenkripsi. "
+    "Pastikan file adalah CSV biasa yang tidak diproteksi."
 )
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
 OLE_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
@@ -180,6 +193,15 @@ def process_upload(uploaded_file):
         return False, error, None, None
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+    file_path = save_temp_file(uploaded_file)
+
+    if ext in [EXT_TXT, EXT_CSV]:
+        uploaded_file.seek(0)
+        success, error, data = process_uploaded_txt(uploaded_file)
+        if not success:
+            return False, error, None, None
+        return True, None, None, data
 
     file_path = save_temp_file(uploaded_file)
 
@@ -359,6 +381,9 @@ def validate_mime_type(uploaded_file, ext):
         if ext == EXT_TXT:
             return _validate_txt_content(uploaded_file, mime)
 
+        if ext == EXT_CSV:
+            return _validate_csv_content(uploaded_file, mime)
+
         if mime not in expected_mimes:
             return False, FILE_EXTENSION_MISMATCH_ERROR
 
@@ -437,6 +462,26 @@ def _validate_txt_content(uploaded_file, detected_mime: str):
         return True, None
 
     return False, TXT_CORRUPT_ERROR
+
+
+def _validate_csv_content(uploaded_file, detected_mime: str):
+    is_binary, binary_error = _has_binary_signature(uploaded_file)
+    if is_binary:
+        uploaded_file.seek(0)
+        header = uploaded_file.read(8)
+        uploaded_file.seek(0)
+        if header == OLE_SIGNATURE:
+            return False, CSV_PROTECTED_ERROR
+        return False, binary_error
+
+    if detected_mime and detected_mime.startswith("text/"):
+        return True, None
+
+    allowed = ALLOWED_MIME_TYPES.get(EXT_CSV, [])
+    if detected_mime in allowed:
+        return True, None
+
+    return False, CSV_CORRUPT_ERROR
 
 
 def save_temp_file(uploaded_file):

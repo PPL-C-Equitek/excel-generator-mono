@@ -8,7 +8,17 @@ vi.mock('@react-oauth/google', () => ({
     useGoogleLogin: vi.fn(() => vi.fn()),
 }))
 
+vi.mock('@/components/LogoutButton', () => ({
+    default: () => <button type="button">Logout</button>,
+}))
+
 describe('LoginPage', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        window.localStorage.clear()
+        window.sessionStorage.clear()
+    })
+
     describe('positive', () => {
         it('renders Navbar', () => {
             render(<LoginPage />)
@@ -18,7 +28,8 @@ describe('LoginPage', () => {
         it('renders Login as active in Navbar', () => {
             render(<LoginPage />)
             const loginLink = screen.getAllByText('Login')[0]
-            expect(loginLink).toHaveClass('font-bold')
+            expect(loginLink).toHaveClass('bg-white')
+            expect(loginLink).toHaveClass('text-red-700')
         })
 
         it('renders LoginForm inside page', () => {
@@ -127,6 +138,7 @@ describe('LoginPage', () => {
         beforeEach(() => {
             vi.clearAllMocks()
             localStorage.clear()
+            sessionStorage.clear()
             vi.spyOn(window, 'alert').mockImplementation(() => { })
             Object.defineProperty(globalThis, 'location', {
                 value: { href: '' },
@@ -225,6 +237,7 @@ describe('handleLogin', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         localStorage.clear()
+        sessionStorage.clear()
 
         // Spy alert & location
         vi.spyOn(window, 'alert').mockImplementation(() => { })
