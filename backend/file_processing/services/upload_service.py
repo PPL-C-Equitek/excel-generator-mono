@@ -139,7 +139,6 @@ CSV_PROTECTED_ERROR = (
     "Pastikan file adalah CSV biasa yang tidak diproteksi."
 )
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
-OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
 
@@ -149,7 +148,7 @@ ZIP_SIGNATURE_PREFIX = b"PK"
 BINARY_SIGNATURES: list[tuple[bytes, str]] = [
     (b"\x50\x4b\x03\x04", FILE_EXTENSION_MISMATCH_ERROR),
     (b"\x50\x4b\x05\x06", FILE_EXTENSION_MISMATCH_ERROR),
-    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", TXT_PROTECTED_ERROR),
+    (OLE_SIGNATURE, TXT_PROTECTED_ERROR),
     (b"\x7fELF", FILE_EXTENSION_MISMATCH_ERROR),
     (b"MZ", FILE_EXTENSION_MISMATCH_ERROR),
     (b"%PDF", FILE_EXTENSION_MISMATCH_ERROR),
