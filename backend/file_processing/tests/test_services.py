@@ -2038,6 +2038,68 @@ class TestUploadServiceCoverageGaps(TestCase):
         self.assertIsNone(error)
 
 
+class TestWordValidationServiceCoverage(TestCase):
+    class _StubFile:
+        def __init__(self, payload=b""):
+            self._payload = payload
+
+        def seek(self, *_args, **_kwargs):
+            return None
+
+        def read(self, *_args, **_kwargs):
+            return self._payload
+
+    def test_validate_word_returns_unsupported_for_unknown_extension(self):
+        is_valid, error = word_validation_service.validate_word(
+            self._StubFile(), ".txt"
+        )
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Unsupported file type.")
+
+    @patch(
+        "file_processing.services.word_validation_service.is_ole_container",
+        return_value=True,
+    )
+    def test_docx_encrypted_handler_blocks_ole_using_stub(self, _mock_is_ole):
+        context = word_validation_service.WordValidationContext(
+            uploaded_file=self._StubFile(),
+            ext=".docx",
+        )
+        handler = word_validation_service.DocxEncryptedValidationHandler()
+
+        is_valid, error = handler.handle(context)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, word_validation_service.WORD_PROTECTED_ERROR)
+
+    @patch(
+        "file_processing.services.word_validation_service.is_ole_container",
+        return_value=True,
+    )
+    def test_doc_structure_handler_stream_failure_returns_corrupt(self, _mock_is_ole):
+        class _BrokenStubFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("seek failed")
+
+            def read(self, *_args, **_kwargs):
+                return b""
+
+        context = word_validation_service.WordValidationContext(
+            uploaded_file=_BrokenStubFile(),
+            ext=".doc",
+        )
+
+        handler = word_validation_service.DocStructureValidationHandler()
+        is_valid, error = handler.handle(context)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, word_validation_service.WORD_CORRUPT_ERROR)
+
+    def test_build_word_validation_chain_returns_none_for_unknown_extension(self):
+        chain = word_validation_service._build_word_validation_chain(".bin")
+        self.assertIsNone(chain)
+
+
 class TestWordValidationService(unittest.TestCase):
     def _build_valid_docx(self, pages=1):
         content = BytesIO()
