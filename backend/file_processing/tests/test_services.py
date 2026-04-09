@@ -1325,6 +1325,23 @@ class TestWordExtractionService(TestCase):
         finally:
             os.unlink(file_path)
 
+    def test_extract_docx_to_json_appends_only_non_empty_paragraph_text(self):
+        file_path = self._create_docx_file(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>   </w:t></w:r></w:p>
+                <w:p><w:r><w:t>Alpha</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        try:
+            result = WordExtractionService._extract_docx_to_json(file_path)
+            self.assertEqual(result["content"][0]["text"], ["Alpha"])
+        finally:
+            os.unlink(file_path)
+
     def test_extract_doc_to_json_skips_non_alpha_and_duplicates(self):
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
         try:
