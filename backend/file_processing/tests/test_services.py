@@ -1302,6 +1302,55 @@ class TestWordExtractionService(TestCase):
         finally:
             os.unlink(tmp.name)
 
+    def test_extract_docx_to_json_handles_tab_br_cr_nodes(self):
+        file_path = self._create_docx_file(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:r><w:t>Hello</w:t></w:r>
+                  <w:r><w:tab/></w:r>
+                  <w:r><w:t>Word</w:t></w:r>
+                  <w:r><w:br/></w:r>
+                  <w:r><w:t>Line</w:t></w:r>
+                  <w:r><w:cr/></w:r>
+                </w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        try:
+            result = WordExtractionService._extract_docx_to_json(file_path)
+            self.assertEqual(result["content"][0]["text"], ["Hello Word Line"])
+        finally:
+            os.unlink(file_path)
+
+    def test_extract_doc_to_json_skips_non_alpha_and_duplicates(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
+        try:
+            tmp.write(b"Hello\nHello\n12345\nWorld\n")
+            tmp.close()
+
+            result = WordExtractionService._extract_doc_to_json(tmp.name)
+            lines = result["content"][0]["text"]
+            self.assertEqual(lines.count("Hello"), 1)
+            self.assertIn("World", lines)
+            self.assertNotIn("12345", lines)
+        finally:
+            os.unlink(tmp.name)
+
+    @patch(
+        "file_processing.services.word_extraction_service.open",
+        side_effect=OSError("boom"),
+    )
+    def test_extract_doc_to_json_open_error_raises_value_error(self, _mock_open):
+        with self.assertRaises(ValueError):
+            WordExtractionService._extract_doc_to_json("/tmp/missing.doc")
+
+    def test_local_name_handles_namespaced_and_plain_tags(self):
+        self.assertEqual(WordExtractionService._local_name("{ns}p"), "p")
+        self.assertEqual(WordExtractionService._local_name("p"), "p")
+
     @patch(
         "file_processing.services.upload_service.WordExtractionService.extract_word_to_json"
     )
@@ -1359,6 +1408,10 @@ class TestUploadServiceCoverageGaps(TestCase):
     def test_has_extracted_text_true_and_false(self):
         self.assertFalse(_has_extracted_text({"content": [{"page": 1, "text": []}]}))
         self.assertTrue(_has_extracted_text({"content": [{"page": 1, "text": ["ok"]}]}))
+
+    def test_fallback_mime_returns_zip_for_zip_signature(self):
+        mime = upload_service._fallback_mime(b"PK\x03\x04dummy", ".xlsx")
+        self.assertEqual(mime, upload_service.MIME_ZIP)
 
     @patch(
         "file_processing.services.upload_service.validate_pdf",
