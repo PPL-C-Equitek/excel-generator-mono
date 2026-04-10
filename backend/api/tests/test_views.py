@@ -16,7 +16,7 @@ from rest_framework.test import APIClient, APIRequestFactory, APISimpleTestCase
 
 from api.models import GroupMember
 from api.views import _resolve_download_filename, _sanitize_download_filename, upload
-from artifact_history.models import ArtifactHistory
+from artifact_history.models import ArtifactHistory, HistoryExportArtifact
 from authentication.models import User
 from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
@@ -297,6 +297,130 @@ class HistoryDownloadViewTest(BaseApiViewTest):
             mock_export_csv.call_args.kwargs["output_json"],
             self.history.output_json,
         )
+
+    @patch("api.views.open")
+    @patch("api.views.create_history_export_artifact")
+    @patch("api.views.get_history_export_artifact")
+    @patch("api.views.export_excel_to_filesystem")
+    def test_history_download_creates_cache_record_after_excel_cache_miss(
+        self,
+        mock_export_excel,
+        mock_get_cached_artifact,
+        mock_create_cached_artifact,
+        mock_open_file,
+    ):
+        mock_get_cached_artifact.return_value = None
+        mock_export_excel.return_value = {
+            "file_id": "xlsx_token",
+            "file_name": "export_token.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 12,
+            "created_at": "2026-04-08T10:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"xlsx")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=xlsx"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_get_cached_artifact.assert_called_once_with(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="xlsx",
+        )
+        mock_export_excel.assert_called_once()
+        mock_create_cached_artifact.assert_called_once_with(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_token",
+            file_name="export_token.xlsx",
+            created_at="2026-04-08T10:00:00Z",
+        )
+
+    @patch("api.views.open")
+    @patch("api.views.get_history_export_artifact")
+    @patch("api.views.export_csv_to_filesystem")
+    def test_history_download_reuses_cached_csv_artifact_without_regenerating(
+        self,
+        mock_export_csv,
+        mock_get_cached_artifact,
+        mock_open_file,
+    ):
+        cached_artifact = HistoryExportArtifact(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="csv",
+            artifact_type="zip",
+            file_id="csv_token",
+            file_name="export_token.zip",
+            created_at=timezone.now(),
+        )
+        mock_get_cached_artifact.return_value = cached_artifact
+        mock_open_file.return_value = BytesIO(b"zip-bytes")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=csv"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        self.assertIn(
+            'attachment; filename="export_token.zip"',
+            response["Content-Disposition"],
+        )
+        mock_get_cached_artifact.assert_called_once_with(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="csv",
+        )
+        mock_export_csv.assert_not_called()
+
+    @patch("api.views.open")
+    @patch("api.views.get_history_export_artifact")
+    @patch("api.views.export_excel_to_filesystem")
+    def test_history_download_reuses_cached_xlsx_artifact_without_regenerating(
+        self,
+        mock_export_excel,
+        mock_get_cached_artifact,
+        mock_open_file,
+    ):
+        cached_artifact = HistoryExportArtifact(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_token",
+            file_name="export_token.xlsx",
+            created_at=timezone.now(),
+        )
+        mock_get_cached_artifact.return_value = cached_artifact
+        mock_open_file.return_value = BytesIO(b"xlsx-bytes")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=xlsx"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn(
+            'attachment; filename="export_token.xlsx"',
+            response["Content-Disposition"],
+        )
+        mock_get_cached_artifact.assert_called_once_with(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="xlsx",
+        )
+        mock_export_excel.assert_not_called()
 
     @patch("api.views.open")
     @patch("api.views.export_excel_to_filesystem")
