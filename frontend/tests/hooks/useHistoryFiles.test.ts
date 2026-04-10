@@ -154,8 +154,54 @@ describe('useHistoryFiles', () => {
         expect(result.current.downloadError).toBe('Download failed.')
     })
 
+    it('uses the fallback download error message for non-Error failures', async () => {
+        const service = makeServiceMock({
+            downloadHistoryFile: vi.fn().mockRejectedValue('fatal'),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.downloadExcel(historyItems[1].id, 'report-b.xlsx')
+        })
+
+        expect(result.current.downloadError).toBe('Failed to download history file.')
+    })
+
+    it('reloads the current page of history items', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi
+                .fn()
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({ count: 25, limit: 10, offset: 0 })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({ count: 25, limit: 10, offset: 0 })
+                ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.reloadHistory()
+        })
+
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(2, 10, 0)
+    })
+
     it('reloads the next page of history items', async () => {
-        const service = makeServiceMock()
+        const service = makeServiceMock({
+            getHistoryFiles: vi
+                .fn()
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({ count: 25, limit: 10, offset: 0 })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({ count: 25, limit: 10, offset: 10 })
+                ),
+        })
         const { result } = renderHook(() => useHistoryFiles(service))
 
         await waitFor(() => expect(result.current.isLoading).toBe(false))
