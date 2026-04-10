@@ -128,6 +128,21 @@ describe('HistoryPage', () => {
         expect(reloadHistory).toHaveBeenCalledTimes(1)
     })
 
+    it('renders a download error banner when a download fails', () => {
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                downloadError: 'Failed to download history file.',
+                error: 'Failed to download history file.',
+            })
+        )
+
+        render(<HistoryPage />)
+
+        expect(
+            screen.getByText('Failed to download history file.')
+        ).toBeInTheDocument()
+    })
+
     it('calls the csv download action for an item', () => {
         const downloadCsv = vi.fn().mockResolvedValue(undefined)
         mockUseHistoryFiles.mockReturnValue(makeHookState({ downloadCsv }))
@@ -156,6 +171,41 @@ describe('HistoryPage', () => {
         )
     })
 
+    it('uses default download filenames when the original name has no extension', () => {
+        const downloadCsv = vi.fn().mockResolvedValue(undefined)
+        const downloadExcel = vi.fn().mockResolvedValue(undefined)
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                items: [
+                    {
+                        id: '33333333-3333-3333-3333-333333333333',
+                        original_name: 'report',
+                        custom_name: '',
+                        status_processing: 'completed',
+                        created_at: '2026-04-08T10:00:00Z',
+                    },
+                ],
+                count: 1,
+                downloadCsv,
+                downloadExcel,
+            })
+        )
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Download CSV' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Download Excel' }))
+
+        expect(downloadCsv).toHaveBeenCalledWith(
+            '33333333-3333-3333-3333-333333333333',
+            'report.csv'
+        )
+        expect(downloadExcel).toHaveBeenCalledWith(
+            '33333333-3333-3333-3333-333333333333',
+            'report.xlsx'
+        )
+    })
+
     it('shows pagination controls when more history items are available', () => {
         render(<HistoryPage />)
 
@@ -178,5 +228,22 @@ describe('HistoryPage', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Next' }))
 
         expect(goToNextPage).toHaveBeenCalledTimes(1)
+    })
+
+    it('calls the previous page action when pagination is enabled', () => {
+        const goToPreviousPage = vi.fn().mockResolvedValue(undefined)
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                count: 25,
+                offset: 10,
+                goToPreviousPage,
+            })
+        )
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Previous' }))
+
+        expect(goToPreviousPage).toHaveBeenCalledTimes(1)
     })
 })
