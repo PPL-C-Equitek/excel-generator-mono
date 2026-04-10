@@ -12,7 +12,6 @@ import {
 import { isJsonObject } from '@/utils/schemaValidator'
 import { sanitizeCSVCell } from '@/utils/csvSanitizer'
 import type { ILLMService } from '@/lib/ILLMService'
-import type { ExcelExportResponse } from '@/services/llm'
 import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
 
 const defaultService: ILLMService = {
@@ -99,7 +98,6 @@ export function useConvertFlow(
     const [excelSuccessMessage, setExcelSuccessMessage] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
-    const [excelMetadata, setExcelMetadata] = useState<ExcelExportResponse | null>(null)
     const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
     const conversionRequestIdRef = useRef(0)
@@ -142,7 +140,6 @@ export function useConvertFlow(
         setExcelSuccessMessage(null)
         setOutputFile(null)
         setCsvMetadata(null)
-        setExcelMetadata(null)
         setGeneratedOutput(null)
         setIsExcelDownloading(false)
     }
@@ -241,11 +238,7 @@ export function useConvertFlow(
         setIsExcelDownloading(true)
 
         try {
-            let excelResult = excelMetadata
-            if (!excelResult) {
-                excelResult = await llmService.exportToExcel(generatedOutput)
-                setExcelMetadata(excelResult)
-            }
+            const excelResult = await llmService.exportToExcel(generatedOutput)
             await llmService.downloadExcelFile(
                 excelResult.file_id,
                 getExcelDownloadFilename(outputFile.filename)

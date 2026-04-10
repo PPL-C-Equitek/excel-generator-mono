@@ -1141,7 +1141,7 @@ describe('useConvertFlow', () => {
             expect(getExcelState(result).canDownloadExcel).toBe(true)
         })
 
-        it('reuses cached excel metadata on repeated download clicks', async () => {
+        it('re-exports excel on repeated download clicks', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
 
@@ -1157,7 +1157,7 @@ describe('useConvertFlow', () => {
                 await getExcelState(result).handleExcelDownload()
             })
 
-            expect(service.exportToExcel).toHaveBeenCalledTimes(1)
+            expect(service.exportToExcel).toHaveBeenCalledTimes(2)
             expect(service.downloadExcelFile).toHaveBeenNthCalledWith(
                 1,
                 'xlsx_12345',
@@ -1170,7 +1170,7 @@ describe('useConvertFlow', () => {
             )
         })
 
-        it('keeps using cached excel metadata after the first successful export', async () => {
+        it('exports excel again after the first successful download', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
 
@@ -1188,11 +1188,11 @@ describe('useConvertFlow', () => {
                 await getExcelState(result).handleExcelDownload()
             })
 
-            expect(service.exportToExcel).toHaveBeenCalledTimes(1)
+            expect(service.exportToExcel).toHaveBeenCalledTimes(2)
             expect(service.downloadExcelFile).toHaveBeenCalledTimes(2)
         })
 
-        it('reuses cached excel metadata after a browser download failure', async () => {
+        it('re-exports excel after a browser download failure', async () => {
             const service = makeMockService({
                 downloadExcelFile: vi.fn()
                     .mockRejectedValueOnce(new Error('Failed to export'))
@@ -1212,7 +1212,7 @@ describe('useConvertFlow', () => {
                 await getExcelState(result).handleExcelDownload()
             })
 
-            expect(service.exportToExcel).toHaveBeenCalledTimes(1)
+            expect(service.exportToExcel).toHaveBeenCalledTimes(2)
             expect(service.downloadExcelFile).toHaveBeenCalledTimes(2)
             expect(getExcelState(result).excelSuccessMessage).toBe('Successfully downloaded')
         })
