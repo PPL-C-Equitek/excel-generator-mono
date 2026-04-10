@@ -103,6 +103,17 @@ describe("history service", () => {
       );
     });
 
+    it("throws an error when the history list response is null", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      vi.spyOn(api, "fetchAPI").mockResolvedValue(null);
+
+      const historyService = await import("@/services/history");
+
+      await expect(historyService.getHistoryFiles(10, 0)).rejects.toThrow(
+        "The history response is invalid."
+      );
+    });
+
     it("throws an error when pagination input is invalid", async () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchSpy = vi.spyOn(api, "fetchAPI");
@@ -110,6 +121,18 @@ describe("history service", () => {
       const historyService = await import("@/services/history");
 
       await expect(historyService.getHistoryFiles(0, -1)).rejects.toThrow(
+        "The history request is invalid."
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("throws an error when offset is invalid even if limit is valid", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchSpy = vi.spyOn(api, "fetchAPI");
+
+      const historyService = await import("@/services/history");
+
+      await expect(historyService.getHistoryFiles(10, -1)).rejects.toThrow(
         "The history request is invalid."
       );
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -185,7 +208,7 @@ describe("history service", () => {
 
     it("downloads an xlsx history file successfully", async () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
-      const fetchMock = vi.mockResolvedValue(
+      const fetchMock = vi.fn().mockResolvedValue(
         createSuccessfulDownloadResponse(
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
@@ -279,6 +302,95 @@ describe("history service", () => {
         )
       ).rejects.toThrow("The history download request is invalid.");
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("uses the default filename when no filename is provided", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(createSuccessfulDownloadResponse("text/csv"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const createObjectURL = vi.fn().mockReturnValue("blob:history-csv");
+      const revokeObjectURL = vi.fn();
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        writable: true,
+        value: createObjectURL,
+      });
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        writable: true,
+        value: revokeObjectURL,
+      });
+
+      const anchor = originalCreateElement("a");
+      vi.spyOn(anchor, "click").mockImplementation(() => {});
+      vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+        if (tagName.toLowerCase() === "a") {
+          return anchor;
+        }
+
+        return originalCreateElement(tagName);
+      });
+      vi.spyOn(document.body, "appendChild").mockImplementation((node: Node) => node);
+      vi.spyOn(anchor, "remove").mockImplementation(() => {});
+
+      const historyService = await import("@/services/history");
+      await historyService.downloadHistoryFile("history-1", "csv");
+
+      expect(anchor.download).toBe("history-export.csv");
+    });
+
+    it("falls back to localhost:8000 when NEXT_PUBLIC_API_URL is invalid", async () => {
+      const original = process.env.NEXT_PUBLIC_API_URL;
+      process.env.NEXT_PUBLIC_API_URL = "htt   p://in^valid\nurl";
+
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(createSuccessfulDownloadResponse("text/csv"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const createObjectURL = vi.fn().mockReturnValue("blob:history-csv");
+      const revokeObjectURL = vi.fn();
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        writable: true,
+        value: createObjectURL,
+      });
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        writable: true,
+        value: revokeObjectURL,
+      });
+
+      const anchor = originalCreateElement("a");
+      vi.spyOn(anchor, "click").mockImplementation(() => {});
+      vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+        if (tagName.toLowerCase() === "a") {
+          return anchor;
+        }
+
+        return originalCreateElement(tagName);
+      });
+      vi.spyOn(document.body, "appendChild").mockImplementation((node: Node) => node);
+      vi.spyOn(anchor, "remove").mockImplementation(() => {});
+
+      const historyService = await import("@/services/history");
+      await historyService.downloadHistoryFile("history-1", "csv", "invoice.csv");
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://localhost:8000/history/history-1/download/?file_format=csv",
+        {
+          method: "GET",
+          headers: {
+            Authorization: "Bearer access-token",
+          },
+        }
+      );
+
+      process.env.NEXT_PUBLIC_API_URL = original;
     });
   });
 });
