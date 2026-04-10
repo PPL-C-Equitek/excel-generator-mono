@@ -3,6 +3,8 @@
 import Sidebar from '@/components/Sidebar'
 import { useHistoryFiles } from '@/hooks/useHistoryFiles'
 
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
 function getDisplayName(customName: string, originalName: string): string {
     return customName.trim() || originalName
 }
@@ -13,6 +15,21 @@ function getCsvFilename(originalName: string): string {
 
 function getXlsxFilename(originalName: string): string {
     return `${originalName.replace(/\.[^.]+$/, '')}.xlsx`
+}
+
+function formatCreatedAt(value: string): string {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) {
+        return value
+    }
+
+    const day = String(date.getUTCDate()).padStart(2, '0')
+    const month = MONTH_LABELS[date.getUTCMonth()]
+    const year = date.getUTCFullYear()
+    const hours = String(date.getUTCHours()).padStart(2, '0')
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0')
+
+    return `${day} ${month} ${year}, ${hours}:${minutes} UTC`
 }
 
 export default function HistoryPage() {
@@ -57,7 +74,7 @@ export default function HistoryPage() {
                             <p className="text-sm text-red-700">{loadError}</p>
                             <button
                                 type="button"
-                                className="mt-4 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white"
+                                className="mt-4 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300"
                                 onClick={() => {
                                     void reloadHistory()
                                 }}
@@ -91,7 +108,7 @@ export default function HistoryPage() {
                                 <div className="flex items-center gap-3">
                                     <button
                                         type="button"
-                                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                                         onClick={() => {
                                             void goToPreviousPage()
                                         }}
@@ -101,7 +118,7 @@ export default function HistoryPage() {
                                     </button>
                                     <button
                                         type="button"
-                                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                                         onClick={() => {
                                             void goToNextPage()
                                         }}
@@ -129,14 +146,14 @@ export default function HistoryPage() {
                                                 Status: {item.status_processing}
                                             </p>
                                             <p className="text-sm text-gray-500">
-                                                Created at: {item.created_at}
+                                                Created at: {formatCreatedAt(item.created_at)}
                                             </p>
                                         </div>
 
                                         <div className="flex flex-col gap-3 sm:flex-row">
                                             <button
                                                 type="button"
-                                                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white"
+                                                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300"
                                                 onClick={() => {
                                                     void downloadCsv(
                                                         item.id,
@@ -148,7 +165,7 @@ export default function HistoryPage() {
                                             </button>
                                             <button
                                                 type="button"
-                                                className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700"
+                                                className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300"
                                                 onClick={() => {
                                                     void downloadExcel(
                                                         item.id,

@@ -75,6 +75,13 @@ describe('HistoryPage', () => {
         expect(screen.getAllByRole('button', { name: 'Download Excel' })).toHaveLength(2)
     })
 
+    it('formats created_at into a readable UTC timestamp', () => {
+        render(<HistoryPage />)
+
+        expect(screen.getByText('Created at: 10 Apr 2026, 10:00 UTC')).toBeInTheDocument()
+        expect(screen.getByText('Created at: 09 Apr 2026, 10:00 UTC')).toBeInTheDocument()
+    })
+
     it('falls back to the original name when custom_name is empty', () => {
         render(<HistoryPage />)
 
@@ -149,7 +156,9 @@ describe('HistoryPage', () => {
 
         render(<HistoryPage />)
 
-        fireEvent.click(screen.getAllByRole('button', { name: 'Download CSV' })[0])
+        const csvButton = screen.getAllByRole('button', { name: 'Download CSV' })[0]
+        expect(csvButton).toHaveClass('hover:bg-red-800')
+        fireEvent.click(csvButton)
 
         expect(downloadCsv).toHaveBeenCalledWith(
             historyItems[0].id,
@@ -163,7 +172,9 @@ describe('HistoryPage', () => {
 
         render(<HistoryPage />)
 
-        fireEvent.click(screen.getAllByRole('button', { name: 'Download Excel' })[1])
+        const excelButton = screen.getAllByRole('button', { name: 'Download Excel' })[1]
+        expect(excelButton).toHaveClass('hover:bg-red-50')
+        fireEvent.click(excelButton)
 
         expect(downloadExcel).toHaveBeenCalledWith(
             historyItems[1].id,
@@ -206,11 +217,33 @@ describe('HistoryPage', () => {
         )
     })
 
+    it('falls back to the raw created_at value when the timestamp is invalid', () => {
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                items: [
+                    {
+                        id: '44444444-4444-4444-4444-444444444444',
+                        original_name: 'broken-date.pdf',
+                        custom_name: '',
+                        status_processing: 'completed',
+                        created_at: 'not-a-date',
+                    },
+                ],
+                count: 1,
+            })
+        )
+
+        render(<HistoryPage />)
+
+        expect(screen.getByText('Created at: not-a-date')).toBeInTheDocument()
+    })
+
     it('shows pagination controls when more history items are available', () => {
         render(<HistoryPage />)
 
         expect(screen.getByRole('button', { name: 'Previous' })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Next' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Next' })).toHaveClass('hover:bg-gray-100')
     })
 
     it('disables previous pagination on the first page', () => {
