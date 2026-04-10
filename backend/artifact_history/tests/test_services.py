@@ -96,6 +96,17 @@ class ArtifactHistoryServiceTest(TestCase):
         with self.assertRaises(ValueError):
             list_artifact_history_for_user(self.owner, limit=10, offset=-1)
 
+    def test_create_artifact_history_uses_default_created_at_when_omitted(self):
+        record = create_artifact_history(
+            owner=self.owner,
+            original_name="report.pdf",
+            custom_name=None,
+            output_json=make_output_json(),
+            status_processing="completed",
+        )
+
+        self.assertIsNotNone(record.created_at)
+
 
 class HistoryExportArtifactServiceTest(TestCase):
     def setUp(self):
@@ -181,3 +192,15 @@ class HistoryExportArtifactServiceTest(TestCase):
         )
 
         self.assertIsNone(result)
+
+    def test_create_history_export_artifact_uses_default_created_at_when_omitted(self):
+        artifact = create_history_export_artifact(
+            history=self.history,
+            owner=self.owner,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_abc123",
+            file_name="export_abc123.xlsx",
+        )
+
+        self.assertIsNotNone(artifact.created_at)

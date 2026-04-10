@@ -174,3 +174,23 @@ class HistoryExportArtifactModelTest(TestCase):
 
         with self.assertRaises(ValidationError):
             artifact.save()
+
+    def test_owner_must_match_the_related_history_owner(self):
+        other_owner = User.objects.create_user(
+            email="other@example.com",
+            name="Other",
+            password="Test12345",
+            status="verified",
+        )
+        artifact = HistoryExportArtifact(
+            history=self.history,
+            owner=other_owner,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_abc123",
+            file_name="export_abc123.xlsx",
+            created_at="2026-04-08T10:05:00Z",
+        )
+
+        with self.assertRaises(ValidationError):
+            artifact.save()
