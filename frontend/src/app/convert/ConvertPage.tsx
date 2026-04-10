@@ -82,7 +82,7 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                                             void handleCsvDownload()
                                         }}
                                         disabled={isConverting}
-                                        className="rounded-xl bg-green-700 px-6 py-2 font-bold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-xl bg-red-700 px-6 py-2 font-bold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         Download CSV
                                     </button>
@@ -95,7 +95,7 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                                             void handleExcelDownload()
                                         }}
                                         disabled={isConverting || isExcelDownloading}
-                                        className="rounded-xl bg-emerald-700 px-6 py-2 font-bold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-xl border border-red-700 bg-white px-6 py-2 font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
                                     </button>

@@ -78,8 +78,8 @@ describe('HistoryPage', () => {
     it('formats created_at into a readable UTC timestamp', () => {
         render(<HistoryPage />)
 
-        expect(screen.getByText('Created at: 10 Apr 2026, 10:00 UTC')).toBeInTheDocument()
-        expect(screen.getByText('Created at: 09 Apr 2026, 10:00 UTC')).toBeInTheDocument()
+        expect(screen.getByText('Created at: 10 Apr 2026, 17:00 UTC+7')).toBeInTheDocument()
+        expect(screen.getByText('Created at: 09 Apr 2026, 17:00 UTC+7')).toBeInTheDocument()
     })
 
     it('falls back to the original name when custom_name is empty', () => {

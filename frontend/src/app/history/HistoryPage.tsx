@@ -4,6 +4,7 @@ import Sidebar from '@/components/Sidebar'
 import { useHistoryFiles } from '@/hooks/useHistoryFiles'
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const UTC_PLUS_SEVEN_OFFSET_HOURS = 7
 
 function getDisplayName(customName: string, originalName: string): string {
     return customName.trim() || originalName
@@ -23,13 +24,17 @@ function formatCreatedAt(value: string): string {
         return value
     }
 
-    const day = String(date.getUTCDate()).padStart(2, '0')
-    const month = MONTH_LABELS[date.getUTCMonth()]
-    const year = date.getUTCFullYear()
-    const hours = String(date.getUTCHours()).padStart(2, '0')
-    const minutes = String(date.getUTCMinutes()).padStart(2, '0')
+    const utcPlusSevenDate = new Date(
+        date.getTime() + UTC_PLUS_SEVEN_OFFSET_HOURS * 60 * 60 * 1000
+    )
 
-    return `${day} ${month} ${year}, ${hours}:${minutes} UTC`
+    const day = String(utcPlusSevenDate.getUTCDate()).padStart(2, '0')
+    const month = MONTH_LABELS[utcPlusSevenDate.getUTCMonth()]
+    const year = utcPlusSevenDate.getUTCFullYear()
+    const hours = String(utcPlusSevenDate.getUTCHours()).padStart(2, '0')
+    const minutes = String(utcPlusSevenDate.getUTCMinutes()).padStart(2, '0')
+
+    return `${day} ${month} ${year}, ${hours}:${minutes} UTC+7`
 }
 
 export default function HistoryPage() {
