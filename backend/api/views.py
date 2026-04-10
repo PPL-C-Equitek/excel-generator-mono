@@ -145,6 +145,51 @@ def _get_history_download_content_type(artifact_type):
     return "text/csv"
 
 
+def _generate_history_download_artifact(history, owner, file_format):
+    if file_format == "csv":
+        artifact = export_csv_to_filesystem(
+            output_json=history.output_json,
+            storage_dir=settings.CSV_EXPORT_DIR,
+        )
+        safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
+    else:
+        artifact = export_excel_to_filesystem(
+            output_json=history.output_json,
+            storage_dir=settings.EXCEL_EXPORT_DIR,
+        )
+        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+
+    create_history_export_artifact(
+        history=history,
+        owner=owner,
+        requested_format=file_format,
+        artifact_type=artifact["artifact_type"],
+        file_id=artifact["file_id"],
+        file_name=artifact["file_name"],
+        created_at=artifact.get("created_at"),
+    )
+
+    return artifact["file_name"], artifact["artifact_type"], safe_file_path
+
+
+def _resolve_history_download_artifact(history, owner, file_format):
+    cached_artifact = get_history_export_artifact(
+        history=history,
+        owner=owner,
+        requested_format=file_format,
+    )
+    if cached_artifact is not None:
+        file_name = cached_artifact.file_name
+        artifact_type = cached_artifact.artifact_type
+        safe_file_path = safe_join(
+            _get_history_download_storage_dir(artifact_type),
+            file_name,
+        )
+        return file_name, artifact_type, safe_file_path
+
+    return _generate_history_download_artifact(history, owner, file_format)
+
+
 def _build_export_success_response(
     metadata,
     response_serializer_class,
@@ -296,54 +341,11 @@ def history_download(request, history_id):
         return _history_not_found_response()
 
     try:
-        cached_artifact = get_history_export_artifact(
+        file_name, artifact_type, safe_file_path = _resolve_history_download_artifact(
             history=history,
             owner=request.user,
-            requested_format=file_format,
+            file_format=file_format,
         )
-
-        if cached_artifact is not None:
-            file_name = cached_artifact.file_name
-            artifact_type = cached_artifact.artifact_type
-            safe_file_path = safe_join(
-                _get_history_download_storage_dir(artifact_type),
-                file_name,
-            )
-        elif file_format == "csv":
-            artifact = export_csv_to_filesystem(
-                output_json=history.output_json,
-                storage_dir=settings.CSV_EXPORT_DIR,
-            )
-            file_name = artifact["file_name"]
-            artifact_type = artifact["artifact_type"]
-            safe_file_path = safe_join(settings.CSV_EXPORT_DIR, file_name)
-            create_history_export_artifact(
-                history=history,
-                owner=request.user,
-                requested_format=file_format,
-                artifact_type=artifact_type,
-                file_id=artifact["file_id"],
-                file_name=file_name,
-                created_at=artifact.get("created_at"),
-            )
-        else:
-            artifact = export_excel_to_filesystem(
-                output_json=history.output_json,
-                storage_dir=settings.EXCEL_EXPORT_DIR,
-            )
-            file_name = artifact["file_name"]
-            artifact_type = artifact["artifact_type"]
-            safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, file_name)
-            create_history_export_artifact(
-                history=history,
-                owner=request.user,
-                requested_format=file_format,
-                artifact_type=artifact_type,
-                file_id=artifact["file_id"],
-                file_name=file_name,
-                created_at=artifact.get("created_at"),
-            )
-
         file_handle = open(safe_file_path, "rb")
     except (OutputLLMValidationError, OutputCSVMappingError):
         logger.exception("History download failed due to invalid stored output.")
