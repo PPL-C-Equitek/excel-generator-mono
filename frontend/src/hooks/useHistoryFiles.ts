@@ -23,6 +23,7 @@ interface UseHistoryFilesReturn {
     limit: number
     offset: number
     isLoading: boolean
+    isDownloading: (historyId: string, fileFormat: 'csv' | 'xlsx') => boolean
     downloadError: string | null
     loadError: string | null
     error: string | null
@@ -44,6 +45,10 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return error instanceof Error ? error.message : fallback
 }
 
+function getDownloadKey(historyId: string, fileFormat: 'csv' | 'xlsx'): string {
+    return `${historyId}:${fileFormat}`
+}
+
 export function useHistoryFiles(
     service: HistoryService = historyService
 ): UseHistoryFilesReturn {
@@ -54,6 +59,7 @@ export function useHistoryFiles(
     const [isLoading, setIsLoading] = useState(true)
     const [loadError, setLoadError] = useState<string | null>(null)
     const [downloadError, setDownloadError] = useState<string | null>(null)
+    const [activeDownloads, setActiveDownloads] = useState<Record<string, boolean>>({})
 
     const loadHistory = async (nextLimit = limit, nextOffset = offset) => {
         setIsLoading(true)
@@ -104,12 +110,27 @@ export function useHistoryFiles(
         fileFormat: 'csv' | 'xlsx',
         filename?: string
     ) => {
+        const downloadKey = getDownloadKey(historyId, fileFormat)
+        if (activeDownloads[downloadKey]) {
+            return
+        }
+
         setDownloadError(null)
+        setActiveDownloads((current) => ({
+            ...current,
+            [downloadKey]: true,
+        }))
 
         try {
             await service.downloadHistoryFile(historyId, fileFormat, filename)
         } catch (error: unknown) {
             setDownloadError(getErrorMessage(error, 'Failed to download history file.'))
+        } finally {
+            setActiveDownloads((current) => {
+                const next = { ...current }
+                delete next[downloadKey]
+                return next
+            })
         }
     }
 
@@ -121,12 +142,16 @@ export function useHistoryFiles(
         await downloadFile(historyId, 'xlsx', filename)
     }
 
+    const isDownloading = (historyId: string, fileFormat: 'csv' | 'xlsx') =>
+        !!activeDownloads[getDownloadKey(historyId, fileFormat)]
+
     return {
         items,
         count,
         limit,
         offset,
         isLoading,
+        isDownloading,
         downloadError,
         loadError,
         error: loadError ?? downloadError,
