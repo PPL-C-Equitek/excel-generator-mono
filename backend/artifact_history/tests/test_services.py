@@ -1,7 +1,9 @@
 from django.test import TestCase
+from django.db import IntegrityError
+from unittest.mock import patch
 
 from authentication.models import User
-from artifact_history.models import ArtifactHistory
+from artifact_history.models import ArtifactHistory, HistoryExportArtifact
 from artifact_history.services import (
     create_artifact_history,
     create_history_export_artifact,
@@ -204,3 +206,32 @@ class HistoryExportArtifactServiceTest(TestCase):
         )
 
         self.assertIsNotNone(artifact.created_at)
+
+    @patch("artifact_history.services.HistoryExportArtifact.objects.create")
+    def test_create_history_export_artifact_returns_existing_record_when_create_hits_unique_race(
+        self,
+        mock_create,
+    ):
+        existing_artifact = HistoryExportArtifact.objects.create(
+            history=self.history,
+            owner=self.owner,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_existing",
+            file_name="export_existing.xlsx",
+            created_at="2026-04-08T10:05:00Z",
+        )
+        mock_create.side_effect = IntegrityError("duplicate key value violates unique constraint")
+
+        artifact = create_history_export_artifact(
+            history=self.history,
+            owner=self.owner,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_new",
+            file_name="export_new.xlsx",
+            created_at="2026-04-08T10:06:00Z",
+        )
+
+        self.assertEqual(artifact.id, existing_artifact.id)
+        self.assertEqual(artifact.file_id, "xlsx_existing")
