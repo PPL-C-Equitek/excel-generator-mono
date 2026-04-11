@@ -1,27 +1,31 @@
 'use client'
 
+import { useState } from 'react'
 import SchemaSelector from '@/components/SchemaSelector'
 import Sidebar from '@/components/Sidebar'
 import UploadZone from '@/components/UploadZone'
 import { useConvertFlow } from '@/hooks/useConvertFlow'
 import type { ILLMService } from '@/lib/ILLMService'
+import type { CustomSchemaRecord } from '@/lib/ICustomSchemaService'
 
 interface ConvertPageProps {
     readonly llmService?: ILLMService
 }
 
-function getDownloadFilename(baseFilename: string): string {
-    return baseFilename.replace(/\.[^/.]+$/, '') + '.csv'
-}
-
 export default function ConvertPage({ llmService: injectedService }: ConvertPageProps) {
+    const [selectedSchema, setSelectedSchema] = useState<CustomSchemaRecord | null>(null)
     const {
         isConverting,
+        isExcelDownloading,
+        canDownloadCsv,
+        canDownloadExcel,
         error,
+        excelError,
+        excelSuccessMessage,
         outputFile,
-        csvMetadata,
         handleFileSelect,
-        llmService,
+        handleCsvDownload,
+        handleExcelDownload,
     } = useConvertFlow(injectedService)
 
     return (
@@ -35,7 +39,12 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                     Replace manual entry with AI-driven extraction and seamless Excel template mapping.
                 </p>
                 <div className="w-full max-w-3xl">
-                    <UploadZone onFileSelect={handleFileSelect} disabled={isConverting} />
+                    <UploadZone
+                        onFileSelect={(file) => {
+                            void handleFileSelect(file, selectedSchema?.id ?? null)
+                        }}
+                        disabled={isConverting}
+                    />
 
                     {isConverting && (
                         <output
@@ -65,32 +74,57 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                                 Size: {Math.round(outputFile.size / 1024)} KB
                             </p>
 
-                            {llmService.getDownloadUrl && (
-                                <button
-                                    data-testid="download-csv-btn"
-                                    onClick={() => {
-                                        const outputFilename = getDownloadFilename(outputFile.filename)
-                                        const url = llmService.getDownloadUrl!(
-                                            csvMetadata!.file_id,
-                                            outputFilename
-                                        )
-                                        const anchor = document.createElement('a')
-                                        anchor.href = url
-                                        anchor.download = outputFilename
-                                        document.body.appendChild(anchor)
-                                        anchor.click()
-                                        anchor.remove()
-                                    }}
-                                    disabled={isConverting || !csvMetadata}
-                                    className="mt-4 ml-4 rounded-xl bg-green-700 px-6 py-2 font-bold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                    Download Output
-                                </button>
+                            <div className="mt-4 flex flex-wrap items-center gap-3">
+                                {canDownloadCsv && (
+                                    <button
+                                        data-testid="download-csv-btn"
+                                        onClick={() => {
+                                            void handleCsvDownload()
+                                        }}
+                                        disabled={isConverting}
+                                        className="rounded-xl bg-red-700 px-6 py-2 font-bold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Download CSV
+                                    </button>
+                                )}
+
+                                {canDownloadExcel && (
+                                    <button
+                                        data-testid="download-excel-btn"
+                                        onClick={() => {
+                                            void handleExcelDownload()
+                                        }}
+                                        disabled={isConverting || isExcelDownloading}
+                                        className="rounded-xl border border-red-700 bg-white px-6 py-2 font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
+                                    </button>
+                                )}
+                            </div>
+
+                            {excelSuccessMessage && (
+                                <p className="mt-3 text-sm text-green-700">{excelSuccessMessage}</p>
+                            )}
+
+                            {excelError && (
+                                <div className="mt-3 flex items-center gap-3">
+                                    <p className="text-sm text-red-700">{excelError}</p>
+                                    <button
+                                        data-testid="retry-excel-btn"
+                                        onClick={() => {
+                                            void handleExcelDownload()
+                                        }}
+                                        disabled={isConverting || isExcelDownloading}
+                                        className="text-sm font-semibold text-emerald-700 transition hover:text-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Retry
+                                    </button>
+                                </div>
                             )}
                         </div>
                     )}
 
-                    <SchemaSelector />
+                    <SchemaSelector onSchemaChange={setSelectedSchema} />
                 </div>
             </main>
         </div>

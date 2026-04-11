@@ -12,8 +12,9 @@ import pytesseract
 
 from .base_ocr_engine import BaseOCREngine
 from file_processing.services.ocr_config import (
-    TESSERACT_LANG,
+    TESSERACT_CONFIDENCE_EARLY_EXIT,
     TESSERACT_PSM_MODES,
+    get_tesseract_lang,
     get_tesseract_config,
 )
 from file_processing.services.image_preprocessing import preprocess_image
@@ -40,7 +41,7 @@ class TesseractEngine(BaseOCREngine):
                        Falls back to ``TESSERACT_PSM_MODES`` from config.
                        Ignored when *custom_config* is provided.
         """
-        self.lang = lang or TESSERACT_LANG
+        self.lang = lang or get_tesseract_lang()
         self._custom_config = custom_config
         self.apply_preprocessing = apply_preprocessing
         self.psm_modes = psm_modes or TESSERACT_PSM_MODES
@@ -160,6 +161,14 @@ class TesseractEngine(BaseOCREngine):
                 best_text = text
                 best_conf = avg_conf
                 best_psm = psm
+
+            if best_conf >= TESSERACT_CONFIDENCE_EARLY_EXIT:
+                logger.debug(
+                    "Tesseract early exit at PSM %d (confidence %.1f%%)",
+                    psm,
+                    best_conf,
+                )
+                break
 
         logger.info(
             "Tesseract multi-PSM winner: PSM %d — %d chars, confidence %.1f%%",

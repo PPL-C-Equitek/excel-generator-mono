@@ -12,7 +12,6 @@ export interface CustomSchemaRecord {
     owner_id: string;
     name: string;
     description: string;
-    version: number;
     is_active: boolean;
     definition: CustomSchemaDefinition;
     prompt_fragment: string;
@@ -30,6 +29,11 @@ export interface CreateCustomSchemaInput {
 export interface ICustomSchemaService {
     list: (accessToken: string) => Promise<CustomSchemaRecord[]>;
     create: (
+        input: CreateCustomSchemaInput,
+        accessToken: string
+    ) => Promise<CustomSchemaRecord>;
+    update: (
+        schemaId: string,
         input: CreateCustomSchemaInput,
         accessToken: string
     ) => Promise<CustomSchemaRecord>;

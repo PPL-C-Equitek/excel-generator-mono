@@ -81,23 +81,28 @@ def parse_csv(file_or_path: str | IO[bytes] | IO[str] | Any, delimiter: str = ",
         logger.exception("Failed to parse CSV")
         raise
 
-def process_uploaded_csv(file_or_path: str | IO[bytes] | IO[str] | Any) -> tuple[bool, str | None, list[dict] | None]:
+def process_uploaded_csv(file_or_path):
     try:
         try:
-            file_or_path.seek(0)
-            content = file_or_path.read(1)
-            if not content:
-                return False, "File CSV kosong atau tidak memiliki data yang valid.", None
             file_or_path.seek(0)
         except (AttributeError, OSError):
             pass
 
         data = parse_csv(file_or_path)
-        
-        if not data:
-            return True, None, []
+
+        if data is None or (isinstance(data, list) and len(data) == 0):
+            try:
+                file_or_path.seek(0)
+                raw = file_or_path.read()
+            except (AttributeError, OSError):
+                raw = b""
             
+            if not raw or raw.strip() in (b"", b"\n", b"\r\n"):
+                return False, "File CSV kosong atau tidak memiliki data yang valid.", None
+            return True, None, []
+
         return True, None, data
+
     except UnicodeDecodeError:
         return False, "File CSV rusak atau format karakter tidak didukung.", None
     except Exception as e:
