@@ -111,6 +111,9 @@ export function useConvertFlow(
         return controller.signal
     }
 
+    const getActiveSignal = (): AbortSignal | undefined =>
+        abortControllerRef.current?.signal
+
     const handleProcessError = (err: unknown, defaultMsg: string, signal: AbortSignal) => {
         if (signal.aborted) return
         if (err instanceof DOMException && err.name === 'AbortError') return
@@ -205,7 +208,7 @@ export function useConvertFlow(
             const sanitizedJSON = sanitizeCSVCell(csvOutput) as JsonValue
             const csvResult = await llmService.exportToCsv(
                 sanitizedJSON,
-                abortControllerRef.current?.signal
+                getActiveSignal()
             )
 
             if (requestId !== conversionRequestIdRef.current) {
@@ -243,7 +246,7 @@ export function useConvertFlow(
         try {
             const excelResult = await llmService.exportToExcel(
                 generatedOutput,
-                abortControllerRef.current?.signal
+                getActiveSignal()
             )
             await llmService.downloadExcelFile(
                 excelResult.file_id,
