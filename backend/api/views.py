@@ -12,6 +12,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
+from artifact_history.models import ArtifactHistory
+from artifact_history.services import list_artifact_history_for_user
 from authentication.permissions import IsVerifiedUser
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
@@ -105,6 +107,26 @@ def _excel_download_internal_error_response():
     )
 
 
+def _history_not_found_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "History item not found.",
+        },
+        status=status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _history_download_internal_error_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "Failed to download history file due to internal error.",
+        },
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
+
 def _build_export_success_response(
     metadata,
     response_serializer_class,
@@ -179,6 +201,136 @@ def members(request):
     return Response({"group": "Kelompok 7", "members": data})
 
 
+def _parse_history_pagination(value, default, minimum=0):
+    if value is None:
+        return default
+
+    parsed = int(value)
+    if parsed < minimum:
+        raise ValueError
+    return parsed
+
+
+@require_GET
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def history_list(request):
+    try:
+        limit = _parse_history_pagination(
+            request.query_params.get("limit"),
+            default=10,
+            minimum=1,
+        )
+        offset = _parse_history_pagination(
+            request.query_params.get("offset"),
+            default=0,
+            minimum=0,
+        )
+        records = list_artifact_history_for_user(request.user, limit=limit, offset=offset)
+    except (TypeError, ValueError):
+        return Response(
+            {
+                "status": "error",
+                "message": "Invalid history pagination request.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    total_count = request.user.artifact_histories.count()
+    results = [
+        {
+            "id": str(record.id),
+            "original_name": record.original_name,
+            "custom_name": record.custom_name,
+            "status_processing": record.status_processing,
+            "created_at": record.created_at,
+        }
+        for record in records
+    ]
+
+    return Response(
+        {
+            "count": total_count,
+            "limit": limit,
+            "offset": offset,
+            "results": results,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@require_GET
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def history_download(request, history_id):
+    file_format = (request.query_params.get("file_format") or "").strip().lower()
+    if file_format not in {"csv", "xlsx"}:
+        return Response(
+            {
+                "status": "error",
+                "message": "Invalid history download format.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    history = ArtifactHistory.objects.filter(owner=request.user, id=history_id).first()
+    if history is None:
+        return _history_not_found_response()
+
+    try:
+        if file_format == "csv":
+            artifact = export_csv_to_filesystem(
+                output_json=history.output_json,
+                storage_dir=settings.CSV_EXPORT_DIR,
+            )
+            content_type = (
+                "application/zip"
+                if artifact["artifact_type"] == "zip"
+                else "text/csv"
+            )
+            safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
+        else:
+            artifact = export_excel_to_filesystem(
+                output_json=history.output_json,
+                storage_dir=settings.EXCEL_EXPORT_DIR,
+            )
+            content_type = (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+
+        file_handle = open(safe_file_path, "rb")
+    except (OutputLLMValidationError, OutputCSVMappingError):
+        logger.exception("History download failed due to invalid stored output.")
+        return _history_download_internal_error_response()
+    except (
+        OutputCSVGenerationError,
+        OutputExcelGenerationError,
+        SuspiciousFileOperation,
+        ValueError,
+        OSError,
+        KeyError,
+    ):
+        logger.exception("History download failed while generating artifact.")
+        return _history_download_internal_error_response()
+    except Exception:
+        logger.exception("Unexpected error while preparing history download.")
+        return _history_download_internal_error_response()
+
+    download_name = _resolve_download_filename(
+        requested_name=request.query_params.get("filename"),
+        default_name=artifact["file_name"],
+        artifact_type=artifact["artifact_type"],
+    )
+
+    return FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=download_name,
+        content_type=content_type,
+    )
+
+
 @api_view(["POST"])
 @parser_classes([MultiPartParser])
 def upload(request):
@@ -245,6 +397,7 @@ def upload(request):
 
 @require_POST
 @api_view(["POST"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
 def export_csv(request):
     serializer = CsvExportRequestSerializer(data=request.data)
     if not serializer.is_valid():
@@ -312,6 +465,7 @@ def export_excel(request):
 
 @require_GET
 @api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
 def download_csv(request, file_id):
     try:
         artifact = resolve_csv_download_artifact(
