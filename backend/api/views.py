@@ -13,7 +13,11 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
 from artifact_history.models import ArtifactHistory
-from artifact_history.services import list_artifact_history_for_user
+from artifact_history.services import (
+    create_history_export_artifact,
+    get_history_export_artifact,
+    list_artifact_history_for_user,
+)
 from authentication.permissions import IsVerifiedUser
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
@@ -125,6 +129,85 @@ def _history_download_internal_error_response():
         },
         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
+
+
+def _get_history_download_storage_dir(artifact_type):
+    if artifact_type == "xlsx":
+        return settings.EXCEL_EXPORT_DIR
+    return settings.CSV_EXPORT_DIR
+
+
+def _get_history_download_content_type(artifact_type):
+    if artifact_type == "zip":
+        return "application/zip"
+    if artifact_type == "xlsx":
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return "text/csv"
+
+
+def _generate_history_download_artifact(history, owner, file_format):
+    if file_format == "csv":
+        artifact = export_csv_to_filesystem(
+            output_json=history.output_json,
+            storage_dir=settings.CSV_EXPORT_DIR,
+        )
+        safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
+    else:
+        artifact = export_excel_to_filesystem(
+            output_json=history.output_json,
+            storage_dir=settings.EXCEL_EXPORT_DIR,
+        )
+        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+
+    create_history_export_artifact(
+        history=history,
+        owner=owner,
+        requested_format=file_format,
+        artifact_type=artifact["artifact_type"],
+        file_id=artifact["file_id"],
+        file_name=artifact["file_name"],
+        created_at=artifact.get("created_at"),
+    )
+
+    return artifact["file_name"], artifact["artifact_type"], safe_file_path
+
+
+def _resolve_history_download_artifact(history, owner, file_format):
+    cached_artifact = get_history_export_artifact(
+        history=history,
+        owner=owner,
+        requested_format=file_format,
+    )
+    if cached_artifact is not None:
+        file_name = cached_artifact.file_name
+        artifact_type = cached_artifact.artifact_type
+        safe_file_path = safe_join(
+            _get_history_download_storage_dir(artifact_type),
+            file_name,
+        )
+        return file_name, artifact_type, safe_file_path, True
+
+    file_name, artifact_type, safe_file_path = _generate_history_download_artifact(
+        history,
+        owner,
+        file_format,
+    )
+    return file_name, artifact_type, safe_file_path, False
+
+
+def _regenerate_history_download_artifact_after_stale_cache(history, owner, file_format):
+    history_export_artifact_model = history.export_artifacts.model
+    history_export_artifact_model.objects.filter(
+        history=history,
+        owner=owner,
+        requested_format=file_format,
+    ).delete()
+    file_name, artifact_type, safe_file_path = _generate_history_download_artifact(
+        history,
+        owner,
+        file_format,
+    )
+    return file_name, artifact_type, safe_file_path
 
 
 def _build_export_success_response(
@@ -278,28 +361,28 @@ def history_download(request, history_id):
         return _history_not_found_response()
 
     try:
-        if file_format == "csv":
-            artifact = export_csv_to_filesystem(
-                output_json=history.output_json,
-                storage_dir=settings.CSV_EXPORT_DIR,
-            )
-            content_type = (
-                "application/zip"
-                if artifact["artifact_type"] == "zip"
-                else "text/csv"
-            )
-            safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
-        else:
-            artifact = export_excel_to_filesystem(
-                output_json=history.output_json,
-                storage_dir=settings.EXCEL_EXPORT_DIR,
-            )
-            content_type = (
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+        file_name, artifact_type, safe_file_path, used_cached_artifact = _resolve_history_download_artifact(
+            history=history,
+            owner=request.user,
+            file_format=file_format,
+        )
+        try:
+            file_handle = open(safe_file_path, "rb")
+        except OSError:
+            if not used_cached_artifact:
+                raise
 
-        file_handle = open(safe_file_path, "rb")
+            logger.warning(
+                "History download cache artifact missing on disk; regenerating."
+            )
+            file_name, artifact_type, safe_file_path = (
+                _regenerate_history_download_artifact_after_stale_cache(
+                    history=history,
+                    owner=request.user,
+                    file_format=file_format,
+                )
+            )
+            file_handle = open(safe_file_path, "rb")
     except (OutputLLMValidationError, OutputCSVMappingError):
         logger.exception("History download failed due to invalid stored output.")
         return _history_download_internal_error_response()
@@ -319,15 +402,15 @@ def history_download(request, history_id):
 
     download_name = _resolve_download_filename(
         requested_name=request.query_params.get("filename"),
-        default_name=artifact["file_name"],
-        artifact_type=artifact["artifact_type"],
+        default_name=file_name,
+        artifact_type=artifact_type,
     )
 
     return FileResponse(
         file_handle,
         as_attachment=True,
         filename=download_name,
-        content_type=content_type,
+        content_type=_get_history_download_content_type(artifact_type),
     )
 
 
