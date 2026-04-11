@@ -135,12 +135,16 @@ describe('auth token refresh helpers', () => {
 
     it('clears stored auth tokens from both storages', () => {
         storeAuthTokens('access-token', 'refresh-token')
+        window.localStorage.setItem('user_name', 'Stored Name')
+        window.localStorage.setItem('user_email', 'stored@example.com')
 
         clearAuthTokens()
 
         expect(window.localStorage.getItem('access_token')).toBeNull()
         expect(window.localStorage.getItem('refresh_token')).toBeNull()
         expect(window.sessionStorage.getItem('access_token')).toBeNull()
+        expect(window.localStorage.getItem('user_name')).toBeNull()
+        expect(window.localStorage.getItem('user_email')).toBeNull()
     })
 
     it('returns current access token when it is still valid', async () => {

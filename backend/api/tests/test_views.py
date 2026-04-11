@@ -1214,7 +1214,7 @@ class ExportExcelViewTest(APISimpleTestCase):
         self.assertIn("output_json", response.data)
 
     @patch("api.views.export_excel_to_filesystem")
-    def test_export_excel_endpoint_returns_403_for_unauthenticated_user(
+    def test_export_excel_endpoint_returns_401_for_unauthenticated_user(
         self,
         mocked_export,
     ):
@@ -1222,7 +1222,7 @@ class ExportExcelViewTest(APISimpleTestCase):
 
         response = self.client.post("/export/excel", data=payload, format="json")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
         mocked_export.assert_not_called()
 
     @patch("api.views.export_excel_to_filesystem")
@@ -1616,13 +1616,13 @@ class DownloadExcelViewTest(APISimpleTestCase):
         )
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
-    def test_download_excel_endpoint_returns_403_for_unauthenticated_user(
+    def test_download_excel_endpoint_returns_401_for_unauthenticated_user(
         self,
         mocked_resolver,
     ):
         response = self.client.get("/export/excel/xlsx_abc123/download")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
         mocked_resolver.assert_not_called()
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
