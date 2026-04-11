@@ -11,6 +11,7 @@ export interface ILLMService {
         outputJson: JsonValue,
         signal?: AbortSignal
     ) => Promise<{ file_id: string }>;
+    downloadCsvFile?: (fileId: string, filename?: string) => Promise<void>;
     exportToExcel?: (
         outputJson: JsonValue,
         signal?: AbortSignal

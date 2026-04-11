@@ -10,6 +10,7 @@ vi.mock('../../../src/lib/api', () => ({
 vi.mock('../../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
     exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_777' }),
+    downloadCsvFile: vi.fn().mockResolvedValue(undefined),
     exportToExcel: vi.fn().mockResolvedValue({
         file_id: 'xlsx_777',
         file_name: 'export_777.xlsx',
@@ -324,6 +325,7 @@ describe('ConvertPage', () => {
                     () => new Promise(() => {})
                 ),
                 exportToCsv: vi.fn(),
+                downloadCsvFile: vi.fn(),
                 getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_pending/download?filename=test.csv')
             }
 
@@ -342,6 +344,7 @@ describe('ConvertPage', () => {
             const mockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
+                downloadCsvFile: vi.fn().mockResolvedValue(undefined),
                 getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_999/download?filename=test.csv')
             }
 
@@ -362,6 +365,7 @@ describe('ConvertPage', () => {
             const mockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
+                downloadCsvFile: vi.fn().mockResolvedValue(undefined),
                 getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_999/download?filename=test.csv')
             }
 
@@ -388,6 +392,7 @@ describe('ConvertPage', () => {
             const delayedMockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
+                downloadCsvFile: vi.fn().mockResolvedValue(undefined),
                 getDownloadUrl: vi.fn()
             }
 
@@ -409,6 +414,7 @@ describe('ConvertPage', () => {
             const mockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockRejectedValue(new Error('CSV Export Error')),
+                downloadCsvFile: vi.fn().mockResolvedValue(undefined),
                 getDownloadUrl: vi.fn()
             }
 

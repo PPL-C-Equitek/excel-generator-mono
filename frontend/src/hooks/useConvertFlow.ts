@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react'
 import { uploadFile } from '@/lib/api'
 import {
+    downloadCsvFile,
     downloadExcelFile,
     exportToCsv,
     exportToExcel,
@@ -17,6 +18,7 @@ import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
 const defaultService: ILLMService = {
     generate: generateJson,
     exportToCsv,
+    downloadCsvFile,
     exportToExcel,
     downloadExcelFile,
     getDownloadUrl
@@ -188,16 +190,13 @@ export function useConvertFlow(
     }
 
     const handleCsvDownload = async (): Promise<void> => {
-        if (!outputFile || !llmService.exportToCsv) {
-            return
-        }
-
-        if (csvMetadata) {
+        if (!outputFile || !llmService.exportToCsv || !llmService.downloadCsvFile) {
             return
         }
 
         const requestId = conversionRequestIdRef.current
         const csvOutput = generatedOutput
+        const csvFilename = outputFile.filename.replace(/\.[^/.]+$/, '') + '.csv'
 
         if (isExportOutputEmpty(csvOutput)) {
             setError("The converted data is empty or invalid, so it can't be exported.")
@@ -205,21 +204,27 @@ export function useConvertFlow(
         }
 
         try {
-            const sanitizedJSON = sanitizeCSVCell(csvOutput) as JsonValue
-            const csvResult = await llmService.exportToCsv(
-                sanitizedJSON,
-                getActiveSignal()
-            )
+            let csvResult = csvMetadata
 
-            if (requestId !== conversionRequestIdRef.current) {
-                return
+            if (!csvResult) {
+                const sanitizedJSON = sanitizeCSVCell(csvOutput) as JsonValue
+                csvResult = await llmService.exportToCsv(
+                    sanitizedJSON,
+                    getActiveSignal()
+                )
+
+                if (requestId !== conversionRequestIdRef.current) {
+                    return
+                }
+
+                if (csvResult.file_id?.startsWith('csv_')) {
+                    setCsvMetadata({ file_id: csvResult.file_id })
+                } else {
+                    throw new Error('The export result is invalid. Please try again.')
+                }
             }
 
-            if (csvResult.file_id?.startsWith('csv_')) {
-                setCsvMetadata({ file_id: csvResult.file_id })
-            } else {
-                throw new Error('The export result is invalid. Please try again.')
-            }
+            await llmService.downloadCsvFile(csvResult.file_id, csvFilename)
         } catch (csvErr: unknown) {
             if (requestId !== conversionRequestIdRef.current) {
                 return
@@ -264,7 +269,8 @@ export function useConvertFlow(
 
     const canDownloadCsv = (
         generatedOutput !== null &&
-        !!llmService.exportToCsv
+        !!llmService.exportToCsv &&
+        !!llmService.downloadCsvFile
     )
 
     const canDownloadExcel = (

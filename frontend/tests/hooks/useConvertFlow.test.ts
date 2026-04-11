@@ -15,6 +15,7 @@ vi.mock('../../src/lib/api', () => ({
 vi.mock('../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: {} }),
     exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_123' }),
+    downloadCsvFile: vi.fn().mockResolvedValue(undefined),
     exportToExcel: vi.fn().mockResolvedValue({
         file_id: 'xlsx_123',
         file_name: 'export_123.xlsx',
@@ -74,6 +75,7 @@ function makeMockService(overrides?: Partial<ILLMService>): ILLMService {
     return {
         generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
         exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_12345' }),
+        downloadCsvFile: vi.fn().mockResolvedValue(undefined),
         exportToExcel: vi.fn().mockResolvedValue(validExcelExportResponse),
         downloadExcelFile: vi.fn().mockResolvedValue(undefined),
         getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_12345/download'),
@@ -626,7 +628,7 @@ describe('useConvertFlow', () => {
             vi.unstubAllEnvs()
         })
 
-        it('exports csv on explicit request and sets csvMetadata', async () => {
+        it('exports and downloads csv on explicit request and sets csvMetadata', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
 
@@ -642,6 +644,7 @@ describe('useConvertFlow', () => {
                 { status: 'ok' },
                 expect.any(AbortSignal)
             )
+            expect(service.downloadCsvFile).toHaveBeenCalledWith('csv_12345', 'report.csv')
             expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
             expect(result.current.outputFile?.filename).toBe('report.pdf')
             
@@ -685,6 +688,29 @@ describe('useConvertFlow', () => {
             expect(result.current.outputFile?.filename).toBe('report.pdf')
             
             vi.unstubAllEnvs()
+        })
+
+        it('stores csv error when the download step fails', async () => {
+            const service = makeMockService({
+                downloadCsvFile: vi.fn().mockRejectedValue(new Error('Failed to export'))
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.exportToCsv).toHaveBeenCalledWith(
+                { status: 'ok' },
+                expect.any(AbortSignal)
+            )
+            expect(service.downloadCsvFile).toHaveBeenCalledWith('csv_12345', 'report.csv')
+            expect(result.current.error).toBe('Failed to export')
+            expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
         })
 
         it('uses the fallback csv error message for non-Error failures', async () => {
@@ -924,6 +950,8 @@ describe('useConvertFlow', () => {
                 { status: 'ok' },
                 expect.any(AbortSignal)
             )
+            expect(service.downloadCsvFile).toHaveBeenCalledTimes(1)
+            expect(service.downloadCsvFile).toHaveBeenCalledWith('csv_12345', 'report.csv')
             expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
         })
 
@@ -945,7 +973,7 @@ describe('useConvertFlow', () => {
             )
         })
 
-        it('reuses cached csv metadata instead of exporting again', async () => {
+        it('reuses cached csv metadata and downloads again without exporting again', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
 
@@ -962,6 +990,7 @@ describe('useConvertFlow', () => {
             })
 
             expect(service.exportToCsv).toHaveBeenCalledTimes(1)
+            expect(service.downloadCsvFile).toHaveBeenCalledTimes(2)
             expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
         })
 
