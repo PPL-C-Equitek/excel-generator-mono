@@ -44,6 +44,7 @@ export default function HistoryPage() {
         limit,
         offset,
         isLoading,
+        isDownloading,
         loadError,
         downloadError,
         reloadHistory,
@@ -140,6 +141,12 @@ export default function HistoryPage() {
                                     className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm"
                                 >
                                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                                        {(() => {
+                                            const isCsvDownloading = isDownloading(item.id, 'csv')
+                                            const isExcelDownloading = isDownloading(item.id, 'xlsx')
+
+                                            return (
+                                                <>
                                         <div className="space-y-2">
                                             <h2 className="text-lg font-semibold text-gray-900">
                                                 {getDisplayName(item.custom_name, item.original_name)}
@@ -158,29 +165,34 @@ export default function HistoryPage() {
                                         <div className="flex flex-col gap-3 sm:flex-row">
                                             <button
                                                 type="button"
-                                                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300"
+                                                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-red-700"
                                                 onClick={() => {
                                                     void downloadCsv(
                                                         item.id,
                                                         getCsvFilename(item.original_name)
                                                     )
                                                 }}
+                                                disabled={isCsvDownloading}
                                             >
-                                                Download CSV
+                                                {isCsvDownloading ? 'Downloading CSV...' : 'Download CSV'}
                                             </button>
                                             <button
                                                 type="button"
-                                                className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300"
+                                                className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                                                 onClick={() => {
                                                     void downloadExcel(
                                                         item.id,
                                                         getXlsxFilename(item.original_name)
                                                     )
                                                 }}
+                                                disabled={isExcelDownloading}
                                             >
-                                                Download Excel
+                                                {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
                                             </button>
                                         </div>
+                                                </>
+                                            )
+                                        })()}
                                     </div>
                                 </section>
                             ))}
