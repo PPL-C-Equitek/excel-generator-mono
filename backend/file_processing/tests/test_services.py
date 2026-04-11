@@ -1419,6 +1419,54 @@ class TestWordExtractionService(TestCase):
         finally:
             os.unlink(tmp.name)
 
+    @patch("file_processing.services.word_extraction_service.olefile", None)
+    def test_extract_doc_to_json_raises_when_olefile_unavailable(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
+        try:
+            tmp.write(b"placeholder")
+            tmp.close()
+
+            with self.assertRaises(ValueError) as exc:
+                WordExtractionService._extract_doc_to_json(tmp.name)
+
+            self.assertEqual(
+                str(exc.exception),
+                "Word file is corrupt or has an invalid structure.",
+            )
+        finally:
+            os.unlink(tmp.name)
+
+    @patch("file_processing.services.word_extraction_service.olefile")
+    def test_extract_doc_to_json_raises_when_worddocument_stream_missing(
+        self, mock_olefile
+    ):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
+        try:
+            tmp.write(b"placeholder")
+            tmp.close()
+
+            mock_ole = MagicMock()
+            mock_ole.exists.return_value = False
+            mock_olefile.OleFileIO.return_value.__enter__.return_value = mock_ole
+
+            with self.assertRaises(ValueError) as exc:
+                WordExtractionService._extract_doc_to_json(tmp.name)
+
+            self.assertEqual(
+                str(exc.exception),
+                "Word file is corrupt or has an invalid structure.",
+            )
+        finally:
+            os.unlink(tmp.name)
+
+    def test_extract_printable_lines_skips_low_density_rows(self):
+        payload = b"abc1234567890\nHello World\n"
+
+        lines = WordExtractionService._extract_printable_lines(payload)
+
+        self.assertIn("Hello World", lines)
+        self.assertNotIn("abc1234567890", lines)
+
     @patch(
         "file_processing.services.word_extraction_service.open",
         side_effect=OSError("boom"),
