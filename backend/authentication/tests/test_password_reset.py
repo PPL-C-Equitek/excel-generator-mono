@@ -312,6 +312,7 @@ class ResendPasswordResetViewTest(APISimpleTestCase):
 
 class ResetPasswordViewTest(APISimpleTestCase):
     def setUp(self):
+        cache.clear()
         self.url = "/auth/reset-password/"
         self.valid_payload = {
             "token": "signed-reset-token",
@@ -400,6 +401,19 @@ class ResetPasswordViewTest(APISimpleTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("errors", response.data)
+
+    @patch("authentication.password_reset.http.ResetPasswordView.get_complete_password_reset_use_case")
+    def test_rate_limit_returns_429_on_6th_request(self, mock_get_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.return_value = MagicMock(message="Password reset successfully")
+        mock_get_use_case.return_value = mock_use_case
+
+        for _ in range(5):
+            response = self.client.post(self.url, self.valid_payload, format="json")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response = self.client.post(self.url, self.valid_payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
     @patch("authentication.password_reset.http.ResetPasswordView.get_complete_password_reset_use_case")
     def test_service_error_returns_500(self, mock_get_use_case):
