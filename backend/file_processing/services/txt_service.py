@@ -9,10 +9,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_ENCODING = "utf-8"
 
 def _read_lines_from_path(file_path: str) -> Iterator[str]:
-    safe_path = os.path.abspath(file_path)
-
-    if file_path != safe_path:
+    if ".." in os.path.normpath(file_path).split(os.sep):
         raise ValueError("Path file tidak valid (Potensi Path Traversal terdeteksi).")
+
+    safe_path = os.path.abspath(file_path)
 
     if not os.path.exists(safe_path):
         raise FileNotFoundError(f"File tidak ditemukan: {safe_path}")

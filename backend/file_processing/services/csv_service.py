@@ -105,5 +105,7 @@ def process_uploaded_csv(file_or_path):
 
     except UnicodeDecodeError:
         return False, "File CSV rusak atau format karakter tidak didukung.", None
-    except Exception as e:
-        return False, f"Invalid or unreadable CSV file: {e}", None
+        
+    except Exception:
+        logger.exception("CSV parsing failed")
+        return False, "Invalid or unreadable CSV file.", None
