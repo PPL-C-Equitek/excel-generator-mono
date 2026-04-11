@@ -45,8 +45,13 @@ const mockGetValidAccessToken = vi.mocked(auth.getValidAccessToken);
 
 describe("generateJson positive", () => {
   beforeEach(() => {
+    server.resetHandlers();
     server.use(successHandler);
     mockGetStoredAccessToken.mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("returns output_json for valid payload", async () => {
@@ -129,11 +134,34 @@ describe("generateJson positive", () => {
 
     fetchSpy.mockRestore();
   });
+
+  it("passes AbortSignal to fetchAPI when provided", async () => {
+    const signal = new AbortController().signal;
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+    });
+
+    await generateJson({ key: "value" }, undefined, signal);
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "llm/generate/",
+      expect.objectContaining({
+        signal,
+      })
+    );
+
+    fetchSpy.mockRestore();
+  });
 });
 
 describe("generateJson negative (HTTP errors)", () => {
   beforeEach(() => {
+    server.resetHandlers();
     mockGetStoredAccessToken.mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("maps 401 to user-friendly message", async () => {
@@ -269,6 +297,20 @@ describe("exportToCsv", () => {
     expect(result).toEqual({ file_id: "csv_12345" });
   });
 
+  it("passes AbortSignal to fetchAPI when provided", async () => {
+    const signal = new AbortController().signal;
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({ file_id: "csv_12345" });
+
+    await exportToCsv(mockJson, signal);
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "export/csv",
+      expect.objectContaining({
+        signal,
+      })
+    );
+  });
+
   it("throws error if response does not contain file_id", async () => {
     server.use(exportCsvInvalidSchemaHandler);
     await expect(exportToCsv(mockJson)).rejects.toThrow("The CSV export response is invalid.");
@@ -343,6 +385,14 @@ describe("exportToCsv", () => {
     );
 
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rethrows AbortError from fetchAPI when export is aborted", async () => {
+    vi.spyOn(api, "fetchAPI").mockRejectedValue(new DOMException("Aborted", "AbortError"));
+
+    await expect(exportToCsv(mockJson, new AbortController().signal)).rejects.toThrow(
+      /Aborted/
+    );
   });
 });
 
@@ -494,6 +544,25 @@ describe("exportToExcel", () => {
       },
       body: JSON.stringify({ output_json: mockJson }),
     });
+  });
+
+  it("passes AbortSignal to fetchAPI when provided", async () => {
+    const signal = new AbortController().signal;
+    vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      file_id: "xlsx_12345",
+      file_name: "export_12345.xlsx",
+      artifact_type: "xlsx",
+    });
+
+    await excelService.exportToExcel(mockJson, signal);
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "export/excel",
+      expect.objectContaining({
+        signal,
+      })
+    );
   });
 
   it("fails before export request when no access token is available", async () => {

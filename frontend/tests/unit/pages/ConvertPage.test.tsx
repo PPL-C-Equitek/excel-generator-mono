@@ -380,7 +380,10 @@ describe('ConvertPage', () => {
             await user.click(csvBtn)
 
             expect(mockService.exportToCsv).toHaveBeenCalledTimes(1)
-            expect(mockService.exportToCsv).toHaveBeenCalledWith({ status: 'ok' })
+            expect(mockService.exportToCsv).toHaveBeenCalledWith(
+                { status: 'ok' },
+                expect.any(AbortSignal)
+            )
             expect(mockService.getDownloadUrl).not.toHaveBeenCalled()
         })
 

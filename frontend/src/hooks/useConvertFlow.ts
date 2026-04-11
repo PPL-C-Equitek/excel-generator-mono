@@ -13,7 +13,6 @@ import {
 import { isJsonObject } from '@/utils/schemaValidator'
 import { sanitizeCSVCell } from '@/utils/csvSanitizer'
 import type { ILLMService } from '@/lib/ILLMService'
-import type { ExcelExportResponse } from '@/services/llm'
 import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
 
 const defaultService: ILLMService = {
@@ -101,7 +100,6 @@ export function useConvertFlow(
     const [excelSuccessMessage, setExcelSuccessMessage] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
-    const [excelMetadata, setExcelMetadata] = useState<ExcelExportResponse | null>(null)
     const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
     const conversionRequestIdRef = useRef(0)
@@ -114,6 +112,9 @@ export function useConvertFlow(
         abortControllerRef.current = controller
         return controller.signal
     }
+
+    const getActiveSignal = (): AbortSignal | undefined =>
+        abortControllerRef.current?.signal
 
     const handleProcessError = (err: unknown, defaultMsg: string, signal: AbortSignal) => {
         if (signal.aborted) return
@@ -144,7 +145,6 @@ export function useConvertFlow(
         setExcelSuccessMessage(null)
         setOutputFile(null)
         setCsvMetadata(null)
-        setExcelMetadata(null)
         setGeneratedOutput(null)
         setIsExcelDownloading(false)
     }
@@ -158,8 +158,8 @@ export function useConvertFlow(
         try {
             const llmResult =
                 typeof customSchemaId === 'string' && customSchemaId.length > 0
-                    ? await llmService.generate(uploadResult, customSchemaId)
-                    : await llmService.generate(uploadResult)
+                    ? await llmService.generate(uploadResult, customSchemaId, signal)
+                    : await llmService.generate(uploadResult, undefined, signal)
             if (signal.aborted) return
 
             setGeneratedOutput(llmResult.output_json)
@@ -208,7 +208,10 @@ export function useConvertFlow(
 
             if (!csvResult) {
                 const sanitizedJSON = sanitizeCSVCell(csvOutput) as JsonValue
-                csvResult = await llmService.exportToCsv(sanitizedJSON)
+                csvResult = await llmService.exportToCsv(
+                    sanitizedJSON,
+                    getActiveSignal()
+                )
 
                 if (requestId !== conversionRequestIdRef.current) {
                     return
@@ -246,11 +249,10 @@ export function useConvertFlow(
         setIsExcelDownloading(true)
 
         try {
-            let excelResult = excelMetadata
-            if (!excelResult) {
-                excelResult = await llmService.exportToExcel(generatedOutput)
-                setExcelMetadata(excelResult)
-            }
+            const excelResult = await llmService.exportToExcel(
+                generatedOutput,
+                getActiveSignal()
+            )
             await llmService.downloadExcelFile(
                 excelResult.file_id,
                 getExcelDownloadFilename(outputFile.filename)
