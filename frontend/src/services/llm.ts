@@ -28,9 +28,7 @@ const EXCEL_DOWNLOAD_ERROR_MESSAGE = "Failed to export";
 const CSV_DOWNLOAD_ERROR_MESSAGE = "Failed to export";
 
 function buildJsonRequestHeaders(customSchemaId?: string | null): HeadersInit {
-    const shouldAuthorize =
-        typeof customSchemaId === "string" && customSchemaId.trim().length > 0;
-    const token = shouldAuthorize ? getStoredAccessToken() : null;
+    const token = getStoredAccessToken();
 
     if (!token) {
         return {

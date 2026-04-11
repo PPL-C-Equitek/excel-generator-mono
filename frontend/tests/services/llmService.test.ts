@@ -90,7 +90,7 @@ describe("generateJson positive", () => {
     fetchSpy.mockRestore();
   });
 
-  it("does not add authorization when no custom schema is selected", async () => {
+  it("adds bearer authorization when an access token exists even without a custom schema", async () => {
     mockGetStoredAccessToken.mockReturnValue("access-token");
     const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
       output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
@@ -103,6 +103,7 @@ describe("generateJson positive", () => {
       expect.objectContaining({
         headers: {
           "Content-Type": "application/json",
+          Authorization: "Bearer access-token",
         },
       })
     );
