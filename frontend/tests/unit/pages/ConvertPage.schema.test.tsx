@@ -78,7 +78,8 @@ describe('ConvertPage schema integration', () => {
         await waitFor(() => {
             expect(llmService.generate).toHaveBeenCalledWith(
                 expect.objectContaining({ filename: 'schema-test.pdf' }),
-                '11111111-1111-1111-1111-111111111111'
+                '11111111-1111-1111-1111-111111111111',
+                expect.any(AbortSignal)
             )
         })
     })

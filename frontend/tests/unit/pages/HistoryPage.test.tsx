@@ -41,6 +41,7 @@ function makeHookState(overrides?: Partial<ReturnType<typeof useHistoryFiles>>) 
         limit: 10,
         offset: 0,
         isLoading: false,
+        isDownloading: vi.fn().mockReturnValue(false),
         downloadError: null,
         loadError: null,
         error: null,
@@ -180,6 +181,30 @@ describe('HistoryPage', () => {
             historyItems[1].id,
             'report-b.xlsx'
         )
+    })
+
+    it('disables and relabels the csv button while the matching item is downloading', () => {
+        const isDownloading = vi.fn().mockImplementation((historyId: string, fileFormat: 'csv' | 'xlsx') => {
+            return historyId === historyItems[0].id && fileFormat === 'csv'
+        })
+        mockUseHistoryFiles.mockReturnValue(makeHookState({ isDownloading }))
+
+        render(<HistoryPage />)
+
+        const csvButton = screen.getByRole('button', { name: 'Downloading CSV...' })
+        expect(csvButton).toBeDisabled()
+    })
+
+    it('disables and relabels the excel button while the matching item is downloading', () => {
+        const isDownloading = vi.fn().mockImplementation((historyId: string, fileFormat: 'csv' | 'xlsx') => {
+            return historyId === historyItems[1].id && fileFormat === 'xlsx'
+        })
+        mockUseHistoryFiles.mockReturnValue(makeHookState({ isDownloading }))
+
+        render(<HistoryPage />)
+
+        const excelButton = screen.getByRole('button', { name: 'Downloading Excel...' })
+        expect(excelButton).toBeDisabled()
     })
 
     it('uses default download filenames when the original name has no extension', () => {

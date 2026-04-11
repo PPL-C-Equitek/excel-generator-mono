@@ -16,7 +16,37 @@ export interface HistoryListResponse {
   results: HistoryItem[];
 }
 
-const HISTORY_DOWNLOAD_ERROR_MESSAGE = "Failed to download history file.";
+const HISTORY_DOWNLOAD_ERROR_MESSAGE = "Failed to download file.";
+
+function getHistoryDownloadErrorMessage(status: number): string {
+  if (status === 401 || status === 403) {
+    return "Your session is invalid or you no longer have access.";
+  }
+
+  if (status === 404) {
+    return "This history item could not be found.";
+  }
+
+  if (status === 400) {
+    return "The history download request is invalid.";
+  }
+
+  if (status >= 500) {
+    return "Failed to download due to a server error.";
+  }
+
+  return HISTORY_DOWNLOAD_ERROR_MESSAGE;
+}
+
+function isHistoryDownloadMappedError(message: string): boolean {
+  return (
+    message === "Your session is invalid or you no longer have access." ||
+    message === "This history item could not be found." ||
+    message === "The history download request is invalid." ||
+    message === "Failed to download due to a server error." ||
+    message === HISTORY_DOWNLOAD_ERROR_MESSAGE
+  );
+}
 
 function getApiBaseOrigin(): string {
   try {
@@ -124,7 +154,7 @@ export async function downloadHistoryFile(
     );
 
     if (!response.ok) {
-      throw new Error(HISTORY_DOWNLOAD_ERROR_MESSAGE);
+      throw new Error(getHistoryDownloadErrorMessage(response.status));
     }
 
     const blob = await response.blob();
@@ -136,7 +166,11 @@ export async function downloadHistoryFile(
     document.body.appendChild(downloadAnchor);
     appendedToBody = true;
     downloadAnchor.click();
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && isHistoryDownloadMappedError(error.message)) {
+      throw error;
+    }
+
     throw new Error(HISTORY_DOWNLOAD_ERROR_MESSAGE);
   } finally {
     cleanupDownloadResources(downloadAnchor, objectUrl, appendedToBody);

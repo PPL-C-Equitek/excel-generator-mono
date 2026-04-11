@@ -54,6 +54,17 @@ function makeServiceMock(
     }
 }
 
+function deferred() {
+    let resolve!: () => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<void>((res, rej) => {
+        resolve = res
+        reject = rej
+    })
+
+    return { promise, resolve, reject }
+}
+
 describe('useHistoryFiles', () => {
     beforeEach(() => {
         vi.clearAllMocks()
@@ -152,6 +163,74 @@ describe('useHistoryFiles', () => {
         })
 
         expect(result.current.downloadError).toBe('Download failed.')
+    })
+
+    it('tracks csv download-in-progress and blocks duplicate requests for the same item', async () => {
+        const csvDownload = deferred()
+        const service = makeServiceMock({
+            downloadHistoryFile: vi.fn().mockImplementation(() => csvDownload.promise),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        act(() => {
+            void result.current.downloadCsv(historyItems[0].id, 'report-a.csv')
+        })
+
+        await waitFor(() =>
+            expect(result.current.isDownloading(historyItems[0].id, 'csv')).toBe(true)
+        )
+
+        act(() => {
+            void result.current.downloadCsv(historyItems[0].id, 'report-a.csv')
+        })
+
+        expect(service.downloadHistoryFile).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+            csvDownload.resolve()
+            await csvDownload.promise
+        })
+
+        expect(result.current.isDownloading(historyItems[0].id, 'csv')).toBe(false)
+    })
+
+    it('allows a different download key to proceed while another item is downloading', async () => {
+        const firstDownload = deferred()
+        const service = makeServiceMock({
+            downloadHistoryFile: vi.fn()
+                .mockImplementationOnce(() => firstDownload.promise)
+                .mockResolvedValueOnce(undefined),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        act(() => {
+            void result.current.downloadCsv(historyItems[0].id, 'report-a.csv')
+        })
+
+        await waitFor(() =>
+            expect(result.current.isDownloading(historyItems[0].id, 'csv')).toBe(true)
+        )
+
+        await act(async () => {
+            await result.current.downloadExcel(historyItems[0].id, 'report-a.xlsx')
+        })
+
+        expect(service.downloadHistoryFile).toHaveBeenCalledTimes(2)
+        expect(service.downloadHistoryFile).toHaveBeenNthCalledWith(
+            2,
+            historyItems[0].id,
+            'xlsx',
+            'report-a.xlsx'
+        )
+
+        await act(async () => {
+            firstDownload.resolve()
+            await firstDownload.promise
+        })
     })
 
     it('uses the fallback download error message for non-Error failures', async () => {
