@@ -143,7 +143,9 @@ describe('useConvertFlow', () => {
             })
 
             expect(service.generate).toHaveBeenCalledWith(
-                expect.objectContaining(validUploadResponse)
+                expect.objectContaining(validUploadResponse),
+                undefined,
+                expect.any(AbortSignal)
             )
         })
 
@@ -160,7 +162,8 @@ describe('useConvertFlow', () => {
 
             expect(service.generate).toHaveBeenCalledWith(
                 expect.objectContaining(validUploadResponse),
-                '11111111-1111-1111-1111-111111111111'
+                '11111111-1111-1111-1111-111111111111',
+                expect.any(AbortSignal)
             )
         })
 
@@ -386,7 +389,11 @@ describe('useConvertFlow', () => {
                 resolveSecond({ filename: 'active.pdf', size: 200, format: 'pdf' })
             })
 
-            expect(service.generate).toHaveBeenCalledWith(expect.objectContaining({ filename: 'active.pdf' }))
+            expect(service.generate).toHaveBeenCalledWith(
+                expect.objectContaining({ filename: 'active.pdf' }),
+                undefined,
+                expect.any(AbortSignal)
+            )
             expect(result.current.outputFile?.filename).toBe('active.pdf')
         })
 
@@ -631,7 +638,10 @@ describe('useConvertFlow', () => {
                 await getDownloadState(result).handleCsvDownload()
             })
 
-            expect(service.exportToCsv).toHaveBeenCalledWith({ status: 'ok' })
+            expect(service.exportToCsv).toHaveBeenCalledWith(
+                { status: 'ok' },
+                expect.any(AbortSignal)
+            )
             expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
             expect(result.current.outputFile?.filename).toBe('report.pdf')
             
@@ -768,7 +778,10 @@ describe('useConvertFlow', () => {
 
             // generate() receives exactly what was originally intended by standard flows
             // but exportToCsv expects the SANITIZED version
-            expect(service.exportToCsv).toHaveBeenCalledWith(expectedPayload)
+            expect(service.exportToCsv).toHaveBeenCalledWith(
+                expectedPayload,
+                expect.any(AbortSignal)
+            )
             
             vi.unstubAllEnvs()
         })
@@ -795,7 +808,10 @@ describe('useConvertFlow', () => {
             })
 
             // These characters do not require prepending single quotes, they just pass through cleanly
-            expect(service.exportToCsv).toHaveBeenCalledWith(rawOutput)
+            expect(service.exportToCsv).toHaveBeenCalledWith(
+                rawOutput,
+                expect.any(AbortSignal)
+            )
             
             vi.unstubAllEnvs()
         })
@@ -848,7 +864,10 @@ describe('useConvertFlow', () => {
             })
 
             // Expect that exportToCsv is called with the exact full structure spanning all sheets
-            expect(service.exportToCsv).toHaveBeenCalledWith(rawOutput)
+            expect(service.exportToCsv).toHaveBeenCalledWith(
+                rawOutput,
+                expect.any(AbortSignal)
+            )
             
             vi.unstubAllEnvs()
         })
@@ -901,7 +920,10 @@ describe('useConvertFlow', () => {
             })
 
             expect(service.exportToCsv).toHaveBeenCalledTimes(1)
-            expect(service.exportToCsv).toHaveBeenCalledWith({ status: 'ok' })
+            expect(service.exportToCsv).toHaveBeenCalledWith(
+                { status: 'ok' },
+                expect.any(AbortSignal)
+            )
             expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
         })
 
@@ -1020,7 +1042,10 @@ describe('useConvertFlow', () => {
                 await getExcelState(result).handleExcelDownload()
             })
 
-            expect(service.exportToExcel).toHaveBeenCalledWith({ status: 'ok' })
+            expect(service.exportToExcel).toHaveBeenCalledWith(
+                { status: 'ok' },
+                expect.any(AbortSignal)
+            )
             expect(service.downloadExcelFile).toHaveBeenCalledWith(
                 'xlsx_12345',
                 'report.xlsx'
@@ -1113,7 +1138,10 @@ describe('useConvertFlow', () => {
                 await getExcelState(result).handleExcelDownload()
             })
 
-            expect(service.exportToExcel).toHaveBeenCalledWith({ status: 'ok' })
+            expect(service.exportToExcel).toHaveBeenCalledWith(
+                { status: 'ok' },
+                expect.any(AbortSignal)
+            )
             expect(service.downloadExcelFile).not.toHaveBeenCalled()
             expect(getExcelState(result).isExcelDownloading).toBe(false)
             expect(getExcelState(result).excelError).toBe('Excel export failed')
@@ -1134,7 +1162,10 @@ describe('useConvertFlow', () => {
                 await getExcelState(result).handleExcelDownload()
             })
 
-            expect(service.exportToExcel).toHaveBeenCalledWith({ status: 'ok' })
+            expect(service.exportToExcel).toHaveBeenCalledWith(
+                { status: 'ok' },
+                expect.any(AbortSignal)
+            )
             expect(service.downloadExcelFile).toHaveBeenCalledWith(
                 'xlsx_12345',
                 'report.xlsx'

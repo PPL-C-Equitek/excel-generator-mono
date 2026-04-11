@@ -73,7 +73,8 @@ function rethrowMappedApiError(err: unknown): never {
 
 export async function generateJson(
     inputJson: JsonValue,
-    customSchemaId?: string | null
+    customSchemaId?: string | null,
+    signal?: AbortSignal
 ): Promise<LLMResponse> {
     const isEmpty = Array.isArray(inputJson)
         ? inputJson.length === 0
@@ -94,6 +95,7 @@ export async function generateJson(
             method: "POST",
             headers: buildJsonRequestHeaders(customSchemaId),
             body: JSON.stringify(requestBody),
+            signal,
         });
     } catch (err: unknown) {
         if (err instanceof Error) {
@@ -165,7 +167,8 @@ function cleanupExcelDownloadResources(
 }
 
 export async function exportToCsv(
-    outputJson: JsonValue
+    outputJson: JsonValue,
+    signal?: AbortSignal
 ): Promise<{ file_id: string }> {
     let data: unknown;
 
@@ -173,6 +176,7 @@ export async function exportToCsv(
         data = await fetchAPI("export/csv", {
             method: "POST",
             body: JSON.stringify({ output_json: outputJson }),
+            signal,
         });
     } catch (err: unknown) {
         if (err instanceof Error) {
@@ -202,7 +206,8 @@ export async function exportToCsv(
 }
 
 export async function exportToExcel(
-    outputJson: JsonValue
+    outputJson: JsonValue,
+    signal?: AbortSignal
 ): Promise<ExcelExportResponse> {
     let data: unknown;
     const accessToken = await getValidAccessToken();
@@ -219,6 +224,7 @@ export async function exportToExcel(
                 Authorization: `Bearer ${accessToken}`,
             },
             body: JSON.stringify({ output_json: outputJson }),
+            signal,
         });
     } catch (err: unknown) {
         rethrowMappedApiError(err);

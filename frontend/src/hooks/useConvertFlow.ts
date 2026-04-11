@@ -153,8 +153,8 @@ export function useConvertFlow(
         try {
             const llmResult =
                 typeof customSchemaId === 'string' && customSchemaId.length > 0
-                    ? await llmService.generate(uploadResult, customSchemaId)
-                    : await llmService.generate(uploadResult)
+                    ? await llmService.generate(uploadResult, customSchemaId, signal)
+                    : await llmService.generate(uploadResult, undefined, signal)
             if (signal.aborted) return
 
             setGeneratedOutput(llmResult.output_json)
@@ -203,7 +203,10 @@ export function useConvertFlow(
 
         try {
             const sanitizedJSON = sanitizeCSVCell(csvOutput) as JsonValue
-            const csvResult = await llmService.exportToCsv(sanitizedJSON)
+            const csvResult = await llmService.exportToCsv(
+                sanitizedJSON,
+                abortControllerRef.current?.signal
+            )
 
             if (requestId !== conversionRequestIdRef.current) {
                 return
@@ -238,7 +241,10 @@ export function useConvertFlow(
         setIsExcelDownloading(true)
 
         try {
-            const excelResult = await llmService.exportToExcel(generatedOutput)
+            const excelResult = await llmService.exportToExcel(
+                generatedOutput,
+                abortControllerRef.current?.signal
+            )
             await llmService.downloadExcelFile(
                 excelResult.file_id,
                 getExcelDownloadFilename(outputFile.filename)
