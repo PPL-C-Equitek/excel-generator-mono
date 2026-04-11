@@ -137,6 +137,10 @@ type AuthResponse = {
   }
 }
 
+type MessageResponse = {
+  message?: string
+}
+
 export async function login(email: string, password: string): Promise<AuthResponse> {
   return fetchAPI("auth/login/", {
     method: "POST",
@@ -149,6 +153,20 @@ export async function loginWithGoogle(token: string): Promise<AuthResponse> {
     method: "POST",
     body: JSON.stringify({ token }),
   }) as Promise<AuthResponse>
+}
+
+export async function requestPasswordReset(email: string): Promise<MessageResponse> {
+  return fetchAPI("auth/forgot-password/", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  }) as Promise<MessageResponse>
+}
+
+export async function resendPasswordReset(email: string): Promise<MessageResponse> {
+  return fetchAPI("auth/resend-password-reset/", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  }) as Promise<MessageResponse>
 }
 
 export async function logout(accessToken: string, refreshToken: string): Promise<void> {

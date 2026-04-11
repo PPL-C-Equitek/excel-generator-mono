@@ -15,6 +15,13 @@ from authentication.logout.adapters import DjangoTokenBlacklistRepository
 from authentication.logout.contracts import TokenBlacklistPort
 
 logger = logging.getLogger(__name__)
+PASSWORD_RESET_TOKEN_PREFIX = "password-reset"
+PASSWORD_RESET_SUCCESS_MESSAGE = (
+    "If an account exists for this email, we have sent a password reset link."
+)
+PASSWORD_RESET_RESEND_SUCCESS_MESSAGE = (
+    "If an account exists for this email, we have sent a new password reset link."
+)
 
 
 @dataclass(frozen=True)
@@ -100,6 +107,20 @@ class FailureTrackerProtocol(Protocol):
 def generate_verification_token(email):
     signer = TimestampSigner()
     return signer.sign(email)
+
+
+def generate_password_reset_token(email):
+    signer = TimestampSigner()
+    return signer.sign(f"{PASSWORD_RESET_TOKEN_PREFIX}:{email}")
+
+
+def decode_password_reset_token(token, max_age):
+    signer = TimestampSigner()
+    value = signer.unsign(token, max_age=max_age)
+    prefix = f"{PASSWORD_RESET_TOKEN_PREFIX}:"
+    if not isinstance(value, str) or not value.startswith(prefix):
+        raise ValueError("Invalid token purpose.")
+    return value[len(prefix):]
 
 
 def generate_tokens(user_id, email) -> TokenPayload:
@@ -302,4 +323,37 @@ def send_verification_email(email):
             logger.info("Verification link (RESEND_API_KEY not set): %s", verification_url)
     except Exception:
         logger.exception("Failed to send verification email to %s", email)
+        raise
+
+
+def send_password_reset_email(email):
+    token = generate_password_reset_token(email)
+    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+    reset_url = f"{frontend_url}/auth/reset-password?token={quote(token, safe='')}"
+
+    try:
+        resend_api_key = getattr(settings, "RESEND_API_KEY", "")
+        if resend_api_key:
+            import resend
+
+            resend.api_key = resend_api_key
+            resend.Emails.send(
+                {
+                    "from": getattr(
+                        settings,
+                        "RESEND_FROM_EMAIL",
+                        "noreply@excelprojectequitek.my.id",
+                    ),
+                    "to": email,
+                    "subject": "Reset Your Password",
+                    "html": f'<p>Click the link below to reset your password: <a href="{reset_url}">{reset_url}</a></p>',
+                }
+            )
+        else:
+            logger.info(
+                "Password reset requested for %s (RESEND_API_KEY not set; reset link not logged)",
+                email,
+            )
+    except Exception:
+        logger.exception("Failed to send password reset email to %s", email)
         raise
