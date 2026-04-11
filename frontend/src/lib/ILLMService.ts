@@ -1,8 +1,21 @@
 import type { JsonValue } from "@/utils/schemaValidator";
-import type { LLMResponse } from "@/services/llm";
+import type { ExcelExportResponse, LLMResponse } from "@/services/llm";
 
 export interface ILLMService {
-    generate: (inputJson: JsonValue) => Promise<LLMResponse>;
-    exportToCsv?: (outputJson: JsonValue) => Promise<{ file_id: string }>;
+    generate: (
+        inputJson: JsonValue,
+        customSchemaId?: string | null,
+        signal?: AbortSignal
+    ) => Promise<LLMResponse>;
+    exportToCsv?: (
+        outputJson: JsonValue,
+        signal?: AbortSignal
+    ) => Promise<{ file_id: string }>;
+    downloadCsvFile?: (fileId: string, filename?: string) => Promise<void>;
+    exportToExcel?: (
+        outputJson: JsonValue,
+        signal?: AbortSignal
+    ) => Promise<ExcelExportResponse>;
+    downloadExcelFile?: (fileId: string, filename?: string) => Promise<void>;
     getDownloadUrl?: (fileId: string, filename?: string) => string;
 }

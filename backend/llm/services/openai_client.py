@@ -1,10 +1,6 @@
-import copy
-import hashlib
-import json
 from typing import Any
 
 from django.conf import settings
-from django.core.cache import cache
 from openai import (
     APIConnectionError,
     APIError,
@@ -32,24 +28,46 @@ class OpenAIUpstreamError(OpenAIServiceError):
         self.status_code = status_code
 
 
-def _get_cache_ttl_seconds() -> int:
-    raw_value = getattr(settings, "LLM_CACHE_TTL_SECONDS", 300)
-    try:
-        ttl_seconds = int(raw_value)
-    except (TypeError, ValueError):
-        return 300
-    return max(0, ttl_seconds)
+class OpenAITextGenerationProvider:
+    def generate_text(self, prompt: str, system_prompt: str | None = None) -> str:
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Prompt must be a non-empty string.")
+
+        client = _build_client()
+        request_payload = {
+            "model": settings.OPENAI_MODEL,
+            "input": prompt,
+        }
+
+        effective_system_prompt = _resolve_system_prompt(system_prompt)
+        if effective_system_prompt:
+            request_payload["instructions"] = effective_system_prompt
+
+        try:
+            response = client.responses.create(**request_payload)
+        except AuthenticationError as exc:
+            raise OpenAIUpstreamError("LLM authentication failed.", status_code=401) from exc
+        except RateLimitError as exc:
+            raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
+        except APITimeoutError as exc:
+            raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
+        except APIStatusError as exc:
+            status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
+            raise OpenAIUpstreamError("LLM provider request failed.", status_code=status_code) from exc
+        except (APIConnectionError, APIError) as exc:
+            raise OpenAIUpstreamError("LLM provider request failed.", status_code=502) from exc
+
+        output_text = getattr(response, "output_text", None)
+        if not output_text:
+            raise OpenAIServiceError("OpenAI response did not include output_text.")
+        return output_text
 
 
-def _build_generate_json_cache_key(input_json: dict[str, Any] | list[Any]) -> str:
-    canonical_payload = json.dumps(input_json, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    key_material = (
-        f"model:{settings.OPENAI_MODEL}\n"
-        f"system_prompt:{settings.OPENAI_SYSTEM_PROMPT}\n"
-        f"payload:{canonical_payload}"
-    )
-    digest = hashlib.sha256(key_material.encode("utf-8")).hexdigest()
-    return f"llm:generate_json:{digest}"
+def _resolve_system_prompt(system_prompt: str | None = None) -> str:
+    raw_prompt = settings.OPENAI_SYSTEM_PROMPT if system_prompt is None else system_prompt
+    if not isinstance(raw_prompt, str):
+        return ""
+    return raw_prompt.strip()
 
 
 def _build_client() -> OpenAI:
@@ -69,60 +87,20 @@ def _map_api_status_to_http(status_code: int | None) -> int:
     return 502
 
 
-def generate_text(prompt: str) -> str:
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("Prompt must be a non-empty string.")
-
-    client = _build_client()
-    request_payload = {
-        "model": settings.OPENAI_MODEL,
-        "input": prompt,
-    }
-
-    system_prompt = settings.OPENAI_SYSTEM_PROMPT.strip()
-    if system_prompt:
-        request_payload["instructions"] = system_prompt
-
-    try:
-        response = client.responses.create(**request_payload)
-    except AuthenticationError as exc:
-        raise OpenAIUpstreamError("LLM authentication failed.", status_code=401) from exc
-    except RateLimitError as exc:
-        raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
-    except APITimeoutError as exc:
-        raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
-    except APIStatusError as exc:
-        status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
-        raise OpenAIUpstreamError("LLM provider request failed.", status_code=status_code) from exc
-    except (APIConnectionError, APIError) as exc:
-        raise OpenAIUpstreamError("LLM provider request failed.", status_code=502) from exc
-
-    output_text = getattr(response, "output_text", None)
-    if not output_text:
-        raise OpenAIServiceError("OpenAI response did not include output_text.")
-    return output_text
+def generate_text(prompt: str, system_prompt: str | None = None) -> str:
+    provider = OpenAITextGenerationProvider()
+    return provider.generate_text(prompt=prompt, system_prompt=system_prompt)
 
 
-def generate_json(input_json: dict[str, Any] | list[Any]) -> dict[str, Any] | list[Any]:
-    if not isinstance(input_json, (dict, list)):
-        raise ValueError("input_json must be an object or array.")
+def generate_json(
+    input_json: dict[str, Any] | list[Any],
+    system_prompt: str | None = None,
+) -> dict[str, Any] | list[Any]:
+    from .generation_service import JsonGenerationService
 
-    cache_key = _build_generate_json_cache_key(input_json)
-    cached_output = cache.get(cache_key)
-    if isinstance(cached_output, (dict, list)):
-        return copy.deepcopy(cached_output)
+    class _FunctionTextGenerationProvider:
+        def generate_text(self, prompt: str, system_prompt: str | None = None) -> str:
+            return generate_text(prompt=prompt, system_prompt=system_prompt)
 
-    output_text = generate_text(prompt=json.dumps(input_json))
-    try:
-        parsed_output = json.loads(output_text)
-    except json.JSONDecodeError as exc:
-        raise OpenAIServiceError("OpenAI response is not valid JSON.") from exc
-
-    if not isinstance(parsed_output, (dict, list)):
-        raise OpenAIServiceError("OpenAI response JSON must be an object or array.")
-
-    ttl_seconds = _get_cache_ttl_seconds()
-    if ttl_seconds > 0:
-        cache.set(cache_key, parsed_output, timeout=ttl_seconds)
-
-    return parsed_output
+    service = JsonGenerationService(text_provider=_FunctionTextGenerationProvider())
+    return service.generate(input_json=input_json, system_prompt=system_prompt)

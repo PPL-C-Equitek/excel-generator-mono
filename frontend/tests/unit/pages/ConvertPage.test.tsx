@@ -10,6 +10,13 @@ vi.mock('../../../src/lib/api', () => ({
 vi.mock('../../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
     exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_777' }),
+    downloadCsvFile: vi.fn().mockResolvedValue(undefined),
+    exportToExcel: vi.fn().mockResolvedValue({
+        file_id: 'xlsx_777',
+        file_name: 'export_777.xlsx',
+        artifact_type: 'xlsx',
+    }),
+    downloadExcelFile: vi.fn().mockResolvedValue(undefined),
     getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_777/download?filename=test.csv'),
 }))
 
@@ -311,13 +318,14 @@ describe('ConvertPage', () => {
             expect(screen.queryByTestId('download-csv-btn')).not.toBeInTheDocument()
         })
 
-        it('displays disabled Download CSV button during conversion', async () => {
+        it('does not display Download CSV button during conversion before output is ready', async () => {
             const user = userEvent.setup()
-
-            const resolvers: Array<(value: unknown) => void> = []
             const mockService = {
-                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
-                exportToCsv: vi.fn().mockImplementationOnce(() => new Promise(res => resolvers.push(res))),
+                generate: vi.fn().mockImplementationOnce(
+                    () => new Promise(() => {})
+                ),
+                exportToCsv: vi.fn(),
+                downloadCsvFile: vi.fn(),
                 getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_pending/download?filename=test.csv')
             }
 
@@ -326,13 +334,8 @@ describe('ConvertPage', () => {
             const uploadButton = screen.getByText('Upload File')
             await user.click(uploadButton)
 
-            const csvBtn = await screen.findByTestId('download-csv-btn')
-            expect(csvBtn).toBeDisabled()
-
-            // cleanup
-            await act(async () => {
-                resolvers.forEach(r => r({ file_id: 'csv_999' }))
-            })
+            expect(screen.queryByTestId('download-csv-btn')).not.toBeInTheDocument()
+            expect(mockService.exportToCsv).not.toHaveBeenCalled()
         })
 
         it('shows enabled Download CSV button after successful conversion', async () => {
@@ -341,6 +344,7 @@ describe('ConvertPage', () => {
             const mockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
+                downloadCsvFile: vi.fn().mockResolvedValue(undefined),
                 getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_999/download?filename=test.csv')
             }
 
@@ -356,15 +360,14 @@ describe('ConvertPage', () => {
             })
         })
 
-        it('triggers download with correct URL when Download CSV is clicked', async () => {
+        it('does not export CSV until Download CSV is clicked', async () => {
             const user = userEvent.setup()
             const mockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
+                downloadCsvFile: vi.fn().mockResolvedValue(undefined),
                 getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_999/download?filename=test.csv')
             }
-
-            const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => { })
 
             render(<ConvertPage llmService={mockService as unknown as ILLMService} />)
 
@@ -372,23 +375,24 @@ describe('ConvertPage', () => {
             await user.click(uploadButton)
 
             const csvBtn = await screen.findByTestId('download-csv-btn')
+            expect(mockService.exportToCsv).not.toHaveBeenCalled()
+
             await user.click(csvBtn)
 
-            expect(mockService.getDownloadUrl).toHaveBeenCalledWith('csv_999', 'test.csv')
-            expect(clickSpy).toHaveBeenCalled()
-
-            clickSpy.mockRestore()
+            expect(mockService.exportToCsv).toHaveBeenCalledTimes(1)
+            expect(mockService.exportToCsv).toHaveBeenCalledWith(
+                { status: 'ok' },
+                expect.any(AbortSignal)
+            )
+            expect(mockService.getDownloadUrl).not.toHaveBeenCalled()
         })
 
-        it('does nothing if Download CSV is clicked while disabled/csvMetadata is null', async () => {
+        it('keeps Download CSV enabled even before csvMetadata exists and starts export on click', async () => {
             const user = userEvent.setup()
-
-            // Render a state where the button gets displayed but without metadata (forcefully via mock delay or by intercepting state)
-            // Wait, we can just use the previous test where we delayed the exportToCsv.
-            const resolvers: Array<(value: unknown) => void> = []
             const delayedMockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
-                exportToCsv: vi.fn().mockImplementationOnce(() => new Promise(res => resolvers.push(res))),
+                exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_999' }),
+                downloadCsvFile: vi.fn().mockResolvedValue(undefined),
                 getDownloadUrl: vi.fn()
             }
 
@@ -397,22 +401,12 @@ describe('ConvertPage', () => {
             const uploadButton = screen.getByText('Upload File')
             await user.click(uploadButton)
 
-            // Wait for generate to resolve and output file to appear
             const csvBtn = await screen.findByTestId('download-csv-btn')
-            expect(csvBtn).toBeDisabled()
+            expect(csvBtn).not.toBeDisabled()
 
-            // Fire event forcefully by bypassing DOM disabled check to hit the internal component logic branch (line 79)
-            csvBtn.removeAttribute('disabled')
-            const clickSpy = vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(() => { })
-            fireEvent.click(csvBtn)
-            expect(clickSpy).not.toHaveBeenCalled()
+            await user.click(csvBtn)
 
-            // cleanup
-            await act(async () => {
-                resolvers.forEach(r => r({ file_id: 'csv_999' }))
-            })
-
-            clickSpy.mockRestore()
+            expect(delayedMockService.exportToCsv).toHaveBeenCalledTimes(1)
         })
 
         it('shows error message if CSV export fails', async () => {
@@ -420,6 +414,7 @@ describe('ConvertPage', () => {
             const mockService = {
                 generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
                 exportToCsv: vi.fn().mockRejectedValue(new Error('CSV Export Error')),
+                downloadCsvFile: vi.fn().mockResolvedValue(undefined),
                 getDownloadUrl: vi.fn()
             }
 
@@ -427,6 +422,9 @@ describe('ConvertPage', () => {
 
             const uploadButton = screen.getByText('Upload File')
             await user.click(uploadButton)
+
+            const csvBtn = await screen.findByTestId('download-csv-btn')
+            await user.click(csvBtn)
 
             const alertEl = await screen.findByRole('alert')
             expect(alertEl).toHaveTextContent(/CSV Export Error/i)
