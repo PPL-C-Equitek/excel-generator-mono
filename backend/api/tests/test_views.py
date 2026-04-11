@@ -595,6 +595,37 @@ class HistoryDownloadViewTest(BaseApiViewTest):
             "Failed to download history file due to internal error.",
         )
 
+    @patch("api.views.open", side_effect=OSError("fresh file missing"))
+    @patch("api.views.get_history_export_artifact")
+    @patch("api.views.export_csv_to_filesystem")
+    def test_history_download_returns_500_when_newly_generated_csv_file_cannot_be_opened(
+        self,
+        mock_export_csv,
+        mock_get_cached_artifact,
+        _mock_open_file,
+    ):
+        mock_get_cached_artifact.return_value = None
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-08T10:00:00Z",
+        }
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=csv"
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download history file due to internal error.",
+        )
+        mock_export_csv.assert_called_once()
+
     @patch("api.views.export_csv_to_filesystem")
     def test_history_download_returns_500_for_invalid_stored_output(self, mock_export_csv):
         mock_export_csv.side_effect = OutputLLMValidationError("invalid stored output")

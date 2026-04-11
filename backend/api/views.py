@@ -185,9 +185,29 @@ def _resolve_history_download_artifact(history, owner, file_format):
             _get_history_download_storage_dir(artifact_type),
             file_name,
         )
-        return file_name, artifact_type, safe_file_path
+        return file_name, artifact_type, safe_file_path, True
 
-    return _generate_history_download_artifact(history, owner, file_format)
+    file_name, artifact_type, safe_file_path = _generate_history_download_artifact(
+        history,
+        owner,
+        file_format,
+    )
+    return file_name, artifact_type, safe_file_path, False
+
+
+def _regenerate_history_download_artifact_after_stale_cache(history, owner, file_format):
+    HistoryExportArtifact = history.export_artifacts.model
+    HistoryExportArtifact.objects.filter(
+        history=history,
+        owner=owner,
+        requested_format=file_format,
+    ).delete()
+    file_name, artifact_type, safe_file_path = _generate_history_download_artifact(
+        history,
+        owner,
+        file_format,
+    )
+    return file_name, artifact_type, safe_file_path
 
 
 def _build_export_success_response(
@@ -341,12 +361,28 @@ def history_download(request, history_id):
         return _history_not_found_response()
 
     try:
-        file_name, artifact_type, safe_file_path = _resolve_history_download_artifact(
+        file_name, artifact_type, safe_file_path, used_cached_artifact = _resolve_history_download_artifact(
             history=history,
             owner=request.user,
             file_format=file_format,
         )
-        file_handle = open(safe_file_path, "rb")
+        try:
+            file_handle = open(safe_file_path, "rb")
+        except OSError:
+            if not used_cached_artifact:
+                raise
+
+            logger.warning(
+                "History download cache artifact missing on disk; regenerating."
+            )
+            file_name, artifact_type, safe_file_path = (
+                _regenerate_history_download_artifact_after_stale_cache(
+                    history=history,
+                    owner=request.user,
+                    file_format=file_format,
+                )
+            )
+            file_handle = open(safe_file_path, "rb")
     except (OutputLLMValidationError, OutputCSVMappingError):
         logger.exception("History download failed due to invalid stored output.")
         return _history_download_internal_error_response()
