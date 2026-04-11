@@ -66,7 +66,10 @@ export function useResendCooldown(initialValue = 0, storageKey?: string) {
 
   const setPersistedCooldown: React.Dispatch<React.SetStateAction<number>> = (value) => {
     setCooldown((prev) => {
-      const nextValue = value instanceof Function ? value(prev) : value;
+      const nextValue =
+        typeof value === 'function'
+          ? (value as (previousValue: number) => number)(prev)
+          : value;
       persistCooldown(storageKey, nextValue);
       return nextValue;
     });
