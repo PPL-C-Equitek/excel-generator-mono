@@ -67,6 +67,7 @@ describe('ForgotPasswordPage', () => {
   afterEach(() => {
     vi.resetAllMocks();
     vi.useRealTimers();
+    sessionStorage.clear();
   });
 
   it('renders the forgot password form', () => {

@@ -14,6 +14,7 @@ const DEFAULT_SUCCESS_MESSAGE =
   'If an account exists for this email, we have sent a password reset link.';
 const DEFAULT_RESEND_SUCCESS_MESSAGE = 'Password reset email sent again.';
 const DEFAULT_RESEND_ERROR_MESSAGE = 'Failed to resend the password reset email.';
+const RESEND_COOLDOWN_STORAGE_PREFIX = 'forgot-password-resend-cooldown:';
 
 type ForgotPasswordErrors = {
   email: string;
@@ -94,6 +95,52 @@ export async function resendPasswordResetFlow({
   });
 }
 
+type ForgotPasswordSuccessStateProps = {
+  email: string;
+  successMessage: string;
+};
+
+function ForgotPasswordSuccessState({
+  email,
+  successMessage,
+}: ForgotPasswordSuccessStateProps) {
+  const [isResending, setIsResending] = useState(false);
+  const [resendStatusMessage, setResendStatusMessage] = useState('');
+  const [resendErrorMessage, setResendErrorMessage] = useState('');
+  const resendCooldownStorageKey = `${RESEND_COOLDOWN_STORAGE_PREFIX}${email
+    .trim()
+    .toLowerCase()}`;
+  const { cooldown: resendCooldown, setCooldown: setResendCooldown } =
+    useResendCooldown(0, resendCooldownStorageKey);
+
+  const handleResendPasswordReset = async () => {
+    await resendPasswordResetFlow({
+      email,
+      isResending,
+      resendCooldown,
+      setIsResending,
+      setResendStatusMessage,
+      setResendErrorMessage,
+      setResendCooldown,
+    });
+  };
+
+  return (
+    <AuthEmailSuccessCard
+      successMessage={successMessage}
+      email={email}
+      emailNotice={<>We sent the reset link to </>}
+      statusMessage={resendStatusMessage}
+      errorMessage={resendErrorMessage}
+      primaryHref="/login"
+      primaryLabel="Back to Login"
+      secondaryButtonText={getResendButtonText(isResending, resendCooldown)}
+      onSecondaryAction={handleResendPasswordReset}
+      isSecondaryDisabled={isResending || resendCooldown > 0}
+    />
+  );
+}
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [errors, setErrors] = useState<ForgotPasswordErrors>({
@@ -102,10 +149,6 @@ export default function ForgotPasswordPage() {
   });
   const [successMessage, setSuccessMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isResending, setIsResending] = useState(false);
-  const [resendStatusMessage, setResendStatusMessage] = useState('');
-  const [resendErrorMessage, setResendErrorMessage] = useState('');
-  const { cooldown: resendCooldown, setCooldown: setResendCooldown } = useResendCooldown();
 
   const handleSubmit = async (event: FormSubmitEvent) => {
     event.preventDefault();
@@ -116,8 +159,6 @@ export default function ForgotPasswordPage() {
 
     setIsLoading(true);
     setSuccessMessage('');
-    setResendStatusMessage('');
-    setResendErrorMessage('');
     setErrors((prev) => ({ ...prev, form: '' }));
 
     try {
@@ -131,18 +172,6 @@ export default function ForgotPasswordPage() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleResendPasswordReset = async () => {
-    await resendPasswordResetFlow({
-      email,
-      isResending,
-      resendCooldown,
-      setIsResending,
-      setResendStatusMessage,
-      setResendErrorMessage,
-      setResendCooldown,
-    });
   };
 
   return (
@@ -167,17 +196,10 @@ export default function ForgotPasswordPage() {
           </div>
 
           {successMessage ? (
-            <AuthEmailSuccessCard
-              successMessage={successMessage}
+            <ForgotPasswordSuccessState
+              key={email.trim().toLowerCase()}
               email={email}
-              emailNotice={<>We sent the reset link to </>}
-              statusMessage={resendStatusMessage}
-              errorMessage={resendErrorMessage}
-              primaryHref="/login"
-              primaryLabel="Back to Login"
-              secondaryButtonText={getResendButtonText(isResending, resendCooldown)}
-              onSecondaryAction={handleResendPasswordReset}
-              isSecondaryDisabled={isResending || resendCooldown > 0}
+              successMessage={successMessage}
             />
           ) : (
             <form className="mt-8 space-y-6" onSubmit={handleSubmit} noValidate>
