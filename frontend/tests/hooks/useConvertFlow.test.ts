@@ -164,6 +164,21 @@ describe('useConvertFlow', () => {
             )
         })
 
+        it('passes AbortSignal into llmService.generate after upload succeeds', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(service.generate).toHaveBeenCalledWith(
+                expect.objectContaining(validUploadResponse),
+                undefined,
+                expect.any(AbortSignal)
+            )
+        })
+
         it('does not call generate if uploadFile throws', async () => {
             mockUploadFile.mockRejectedValue(new Error('Network error'))
             const service = makeMockService()
@@ -493,6 +508,31 @@ describe('useConvertFlow', () => {
 
             // Output should not have the stale error set
             expect(result.current.error).toBeNull()
+        })
+
+        it('aborts the previous generate signal when a new conversion starts', async () => {
+            let firstSignal: AbortSignal | undefined
+            const firstGenerate = deferred<{ output_json: { ok: boolean } }>()
+            const service = makeMockService({
+                generate: vi.fn()
+                    .mockImplementationOnce((_, __, signal?: AbortSignal) => {
+                        firstSignal = signal
+                        return firstGenerate.promise
+                    })
+                    .mockResolvedValueOnce({ output_json: { ok: true } }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                void result.current.handleFileSelect(testFile)
+                await Promise.resolve()
+            })
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(firstSignal?.aborted).toBe(true)
         })
     })
 
@@ -865,6 +905,24 @@ describe('useConvertFlow', () => {
             expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
         })
 
+        it('passes AbortSignal into exportToCsv when the user downloads CSV', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.exportToCsv).toHaveBeenCalledWith(
+                { status: 'ok' },
+                expect.any(AbortSignal)
+            )
+        })
+
         it('reuses cached csv metadata instead of exporting again', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
@@ -969,6 +1027,24 @@ describe('useConvertFlow', () => {
             )
             expect(getExcelState(result).excelError).toBeNull()
             expect(getExcelState(result).excelSuccessMessage).toBe('Successfully downloaded')
+        })
+
+        it('passes AbortSignal into exportToExcel when the user downloads excel', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).toHaveBeenCalledWith(
+                { status: 'ok' },
+                expect.any(AbortSignal)
+            )
         })
 
         it('sets isExcelDownloading while the excel request is in flight', async () => {
