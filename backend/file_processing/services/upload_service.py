@@ -426,8 +426,13 @@ def _validate_word_mime_structure(uploaded_file, ext):
     if ext == EXT_DOC and not _is_ole_container(uploaded_file):
         return DOES_NOT_MATCH_EXTENSION_ERROR
 
-    if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
-        return DOES_NOT_MATCH_EXTENSION_ERROR
+    if ext == EXT_DOCX:
+        # Encrypted OOXML (.docx) is wrapped in an OLE container; allow it to
+        # continue to Word validation so it can return the protected-file error.
+        if _is_ole_container(uploaded_file):
+            return None
+        if not _has_zip_signature(uploaded_file):
+            return DOES_NOT_MATCH_EXTENSION_ERROR
 
     return None
 
