@@ -4,7 +4,7 @@ import type React from 'react';
 import { useEffect, useState } from 'react';
 
 function getStoredCooldown(storageKey?: string): number {
-  if (!storageKey || typeof globalThis.sessionStorage === 'undefined') {
+  if (!storageKey || globalThis.sessionStorage === undefined) {
     return 0;
   }
 
@@ -29,7 +29,7 @@ function getStoredCooldown(storageKey?: string): number {
 }
 
 function persistCooldown(storageKey: string | undefined, nextValue: number): void {
-  if (!storageKey || typeof globalThis.sessionStorage === 'undefined') {
+  if (!storageKey || globalThis.sessionStorage === undefined) {
     return;
   }
 
@@ -66,7 +66,7 @@ export function useResendCooldown(initialValue = 0, storageKey?: string) {
 
   const setPersistedCooldown: React.Dispatch<React.SetStateAction<number>> = (value) => {
     setCooldown((prev) => {
-      const nextValue = typeof value === 'function' ? value(prev) : value;
+      const nextValue = value instanceof Function ? value(prev) : value;
       persistCooldown(storageKey, nextValue);
       return nextValue;
     });

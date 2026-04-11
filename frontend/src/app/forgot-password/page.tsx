@@ -103,7 +103,7 @@ type ForgotPasswordSuccessStateProps = {
 function ForgotPasswordSuccessState({
   email,
   successMessage,
-}: ForgotPasswordSuccessStateProps) {
+}: Readonly<ForgotPasswordSuccessStateProps>) {
   const [isResending, setIsResending] = useState(false);
   const [resendStatusMessage, setResendStatusMessage] = useState('');
   const [resendErrorMessage, setResendErrorMessage] = useState('');
