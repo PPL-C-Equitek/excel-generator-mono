@@ -284,7 +284,7 @@ describe("history service", () => {
 
       await expect(
         historyService.downloadHistoryFile("history-1", "csv", "invoice.csv")
-      ).rejects.toThrow("Failed to download history file.");
+      ).rejects.toThrow("Failed to download due to a server error.");
     });
 
     it("throws a specific auth error when the download response is 401", async () => {
@@ -321,6 +321,23 @@ describe("history service", () => {
       ).rejects.toThrow("This history item could not be found.");
     });
 
+    it("throws a specific invalid-request error when the download response is 400", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        headers: new Headers(),
+        blob: vi.fn(),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(
+        historyService.downloadHistoryFile("history-1", "csv", "invoice.csv")
+      ).rejects.toThrow("The history download request is invalid.");
+    });
+
     it("throws a specific server error when the download response is 500", async () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi.fn().mockResolvedValue({
@@ -341,6 +358,23 @@ describe("history service", () => {
     it("falls back to a generic error when the network request fails unexpectedly", async () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi.fn().mockRejectedValue(new Error("socket hang up"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(
+        historyService.downloadHistoryFile("history-1", "csv", "invoice.csv")
+      ).rejects.toThrow("Failed to download file.");
+    });
+
+    it("falls back to a generic error when the download response uses an unmapped status", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 418,
+        headers: new Headers(),
+        blob: vi.fn(),
+      });
       vi.stubGlobal("fetch", fetchMock);
 
       const historyService = await import("@/services/history");
