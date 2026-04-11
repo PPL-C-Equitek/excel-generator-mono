@@ -196,8 +196,8 @@ def _resolve_history_download_artifact(history, owner, file_format):
 
 
 def _regenerate_history_download_artifact_after_stale_cache(history, owner, file_format):
-    HistoryExportArtifact = history.export_artifacts.model
-    HistoryExportArtifact.objects.filter(
+    history_export_artifact_model = history.export_artifacts.model
+    history_export_artifact_model.objects.filter(
         history=history,
         owner=owner,
         requested_format=file_format,
