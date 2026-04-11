@@ -74,4 +74,63 @@ export const exportCsvInvalidPrefixHandler = http.post(
     () => HttpResponse.json({ file_id: "wrong_999" }, { status: 200 })
 );
 
+export const exportExcelSuccessHandler = http.post(
+    `${API_BASE}/export/excel`,
+    () =>
+        HttpResponse.json(
+            {
+                file_id: "xlsx_12345",
+                file_name: "export_12345.xlsx",
+                artifact_type: "xlsx",
+                size_bytes: 1024,
+                created_at: "2026-04-01T10:00:00Z",
+            },
+            { status: 200 }
+        )
+);
+
+export const exportExcelInvalidSchemaHandler = http.post(
+    `${API_BASE}/export/excel`,
+    () => HttpResponse.json({ missing: "file_id" }, { status: 200 })
+);
+
+export const exportExcelInvalidPrefixHandler = http.post(
+    `${API_BASE}/export/excel`,
+    () =>
+        HttpResponse.json(
+            {
+                file_id: "wrong_12345",
+                file_name: "export_12345.xlsx",
+                artifact_type: "xlsx",
+            },
+            { status: 200 }
+        )
+);
+
+export const exportExcelInvalidArtifactTypeHandler = http.post(
+    `${API_BASE}/export/excel`,
+    () =>
+        HttpResponse.json(
+            {
+                file_id: "xlsx_12345",
+                file_name: "export_12345.xlsx",
+                artifact_type: "csv",
+            },
+            { status: 200 }
+        )
+);
+
+export const exportExcelInvalidFileNameHandler = http.post(
+    `${API_BASE}/export/excel`,
+    () =>
+        HttpResponse.json(
+            {
+                file_id: "xlsx_12345",
+                file_name: "export_12345.csv",
+                artifact_type: "xlsx",
+            },
+            { status: 200 }
+        )
+);
+
 export const handlers = [successHandler];

@@ -1,5 +1,5 @@
 import { fetchAPI } from "@/lib/api";
-import { getStoredAccessToken } from "@/lib/auth";
+import { getStoredAccessToken, getValidAccessToken } from "@/lib/auth";
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { isJsonObject } from "@/utils/schemaValidator";
 import type { JsonValue } from "@/utils/schemaValidator";
@@ -16,6 +16,15 @@ export interface LLMRequest {
 export interface LLMResponse {
     output_json: JsonValue;
 }
+
+export interface ExcelExportResponse {
+    file_id: string;
+    file_name: string;
+    artifact_type: "xlsx";
+}
+
+const EXCEL_EXPORT_ERROR_MESSAGE = "The Excel export response is invalid.";
+const EXCEL_DOWNLOAD_ERROR_MESSAGE = "Failed to export";
 
 function buildJsonRequestHeaders(customSchemaId?: string | null): HeadersInit {
     const shouldAuthorize =
@@ -48,9 +57,24 @@ function getErrorStatus(err: Error): number | null {
     return null;
 }
 
+function rethrowMappedApiError(err: unknown): never {
+    if (err instanceof Error) {
+        const status = getErrorStatus(err);
+        if (status !== null) {
+            const userMessage = ERROR_MESSAGES[status];
+            if (userMessage) {
+                throw new Error(userMessage);
+            }
+        }
+    }
+
+    throw err;
+}
+
 export async function generateJson(
     inputJson: JsonValue,
-    customSchemaId?: string | null
+    customSchemaId?: string | null,
+    signal?: AbortSignal
 ): Promise<LLMResponse> {
     const isEmpty = Array.isArray(inputJson)
         ? inputJson.length === 0
@@ -61,9 +85,9 @@ export async function generateJson(
     }
 
     let data: unknown;
-    const requestBody: LLMRequest = { input_json: inputJson }
-    if (typeof customSchemaId === 'string' && customSchemaId.trim().length > 0) {
-        requestBody.custom_schema_id = customSchemaId
+    const requestBody: LLMRequest = { input_json: inputJson };
+    if (typeof customSchemaId === "string" && customSchemaId.trim().length > 0) {
+        requestBody.custom_schema_id = customSchemaId;
     }
 
     try {
@@ -71,6 +95,7 @@ export async function generateJson(
             method: "POST",
             headers: buildJsonRequestHeaders(customSchemaId),
             body: JSON.stringify(requestBody),
+            signal,
         });
     } catch (err: unknown) {
         if (err instanceof Error) {
@@ -98,16 +123,52 @@ export async function generateJson(
     return data as LLMResponse;
 }
 
-/**
- * Mengekspor hasil generasi JSON ke format CSV.
- * Berkomunikasi dengan endpoint REST (POST /export/csv)
- * dan mengembalikan file_id dengan prefix keamanan 'csv_'.
- *
- * @param outputJson JSON hasil LLM yang valid.
- * @returns Promise berisi file_id yang digenerate oleh backend.
- */
+function getApiBaseOrigin(): string {
+    try {
+        return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").origin;
+    } catch {
+        return "http://localhost:8000";
+    }
+}
+
+function isValidExcelExportResponse(data: unknown): data is ExcelExportResponse {
+    if (typeof data !== "object" || data === null) {
+        return false;
+    }
+
+    const response = data as Record<string, unknown>;
+    return (
+        typeof response.file_id === "string" &&
+        response.file_id.startsWith("xlsx_") &&
+        typeof response.file_name === "string" &&
+        response.file_name.endsWith(".xlsx") &&
+        response.artifact_type === "xlsx"
+    );
+}
+
+function assertValidExcelDownloadFileId(fileId: string): void {
+    if (typeof fileId !== "string" || !fileId.startsWith("xlsx_")) {
+        throw new Error("The Excel download request is invalid.");
+    }
+}
+
+function cleanupExcelDownloadResources(
+    downloadAnchor: HTMLAnchorElement | null,
+    objectUrl: string | null,
+    appendedToBody: boolean
+): void {
+    if (downloadAnchor && appendedToBody) {
+        downloadAnchor.remove();
+    }
+
+    if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+    }
+}
+
 export async function exportToCsv(
-    outputJson: JsonValue
+    outputJson: JsonValue,
+    signal?: AbortSignal
 ): Promise<{ file_id: string }> {
     let data: unknown;
 
@@ -115,6 +176,7 @@ export async function exportToCsv(
         data = await fetchAPI("export/csv", {
             method: "POST",
             body: JSON.stringify({ output_json: outputJson }),
+            signal,
         });
     } catch (err: unknown) {
         if (err instanceof Error) {
@@ -143,23 +205,96 @@ export async function exportToCsv(
     return { file_id: (data as Record<string, string>).file_id };
 }
 
-/**
- * Menghasilkan URL lengkap untuk mengunduh hasil konversi CSV.
- * Pemanggilan URL ini akan menuju ke GET /export/csv/{fileId}/download
- * bersama param filename opsional.
- *
- * @param fileId string ID dengan prefix 'csv_'.
- * @param filename Opsional, nama file target untuk download.
- * @returns URL valid untuk pengunduhan file dari API backend.
- */
-export function getDownloadUrl(fileId: string, filename?: string): string {
-    const base = (() => {
-        try {
-            return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").origin;
-        } catch {
-            return "http://localhost:8000";
+export async function exportToExcel(
+    outputJson: JsonValue,
+    signal?: AbortSignal
+): Promise<ExcelExportResponse> {
+    let data: unknown;
+    const accessToken = await getValidAccessToken();
+
+    if (!accessToken) {
+        throw new Error("Authentication credentials were not provided.");
+    }
+
+    try {
+        data = await fetchAPI("export/excel", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ output_json: outputJson }),
+            signal,
+        });
+    } catch (err: unknown) {
+        rethrowMappedApiError(err);
+    }
+
+    if (!isValidExcelExportResponse(data)) {
+        throw new Error(EXCEL_EXPORT_ERROR_MESSAGE);
+    }
+
+    return {
+        file_id: data.file_id,
+        file_name: data.file_name,
+        artifact_type: data.artifact_type,
+    };
+}
+
+export async function downloadExcelFile(
+    fileId: string,
+    filename = "export.xlsx"
+): Promise<void> {
+    assertValidExcelDownloadFileId(fileId);
+    const accessToken = await getValidAccessToken();
+
+    if (!accessToken) {
+        throw new Error("Authentication credentials were not provided.");
+    }
+
+    let objectUrl: string | null = null;
+    let downloadAnchor: HTMLAnchorElement | null = null;
+    let appendedToBody = false;
+
+    try {
+        const response = await fetch(
+            `${getApiBaseOrigin()}/export/excel/${fileId}/download`,
+            {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                },
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(EXCEL_DOWNLOAD_ERROR_MESSAGE);
         }
-    })();
+
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+
+        downloadAnchor = document.createElement("a");
+        downloadAnchor.href = objectUrl;
+        downloadAnchor.download = filename;
+        document.body.appendChild(downloadAnchor);
+        appendedToBody = true;
+        downloadAnchor.click();
+    } catch (err: unknown) {
+        if (
+            err instanceof Error &&
+            err.message === "The Excel download request is invalid."
+        ) {
+            throw err;
+        }
+        throw new Error(EXCEL_DOWNLOAD_ERROR_MESSAGE);
+    } finally {
+        cleanupExcelDownloadResources(downloadAnchor, objectUrl, appendedToBody);
+    }
+}
+
+export function getDownloadUrl(fileId: string, filename?: string): string {
+    const base = getApiBaseOrigin();
     let url = `${base}/export/csv/${fileId}/download`;
     if (filename) {
         url += `?filename=${encodeURIComponent(filename)}`;
