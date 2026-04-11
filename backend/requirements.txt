@@ -23,6 +23,7 @@ pycryptodome==3.17.0
 opencv-python-headless==4.8.0.76
 numpy==1.26.4
 resend==2.26.0
+olefile==0.47
 
 PyJWT
 google-auth-oauthlib

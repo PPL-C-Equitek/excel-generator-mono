@@ -19,6 +19,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import upload_service
+from file_processing.services.word_extraction_service import WordExtractionService
 
 from file_processing.services import word_validation_service
 
@@ -858,14 +859,16 @@ class TestUploadService(TestCase):
         self.assertEqual(error, "File content does not match its extension.")
 
     @patch("file_processing.services.upload_service.magic.from_buffer")
+    @patch("file_processing.services.upload_service._is_ole_container")
     @patch("file_processing.services.upload_service._has_zip_signature")
     def test_validate_mime_type_docx_rejects_non_zip_signature(
-        self, mock_zip_signature, mock_magic
+        self, mock_zip_signature, mock_is_ole, mock_magic
     ):
         mock_magic.return_value = (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
         mock_zip_signature.return_value = False
+        mock_is_ole.return_value = False
 
         f = SimpleUploadedFile(
             "contract.docx",
@@ -879,19 +882,42 @@ class TestUploadService(TestCase):
         self.assertEqual(error, "File content does not match its extension.")
 
     @patch("file_processing.services.upload_service.magic.from_buffer")
+    @patch("file_processing.services.upload_service._is_ole_container")
     @patch("file_processing.services.upload_service._has_zip_signature")
     def test_validate_mime_type_docx_accepts_zip_signature(
-        self, mock_zip_signature, mock_magic
+        self, mock_zip_signature, mock_is_ole, mock_magic
     ):
         mock_magic.return_value = (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
         mock_zip_signature.return_value = True
+        mock_is_ole.return_value = False
 
         f = SimpleUploadedFile(
             "contract.docx",
             b"zip-like-content",
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = validate_mime_type(f, ".docx")
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    @patch("file_processing.services.upload_service.magic.from_buffer")
+    @patch("file_processing.services.upload_service._is_ole_container")
+    @patch("file_processing.services.upload_service._has_zip_signature")
+    def test_validate_mime_type_docx_accepts_ole_for_encrypted_ooxml(
+        self, mock_zip_signature, mock_is_ole, mock_magic
+    ):
+        mock_magic.return_value = "application/x-ole-storage"
+        mock_is_ole.return_value = True
+        mock_zip_signature.return_value = False
+
+        f = SimpleUploadedFile(
+            "encrypted.docx",
+            upload_service.OLE_SIGNATURE + b"EncryptedPackage",
+            content_type="application/octet-stream",
         )
 
         is_valid, error = validate_mime_type(f, ".docx")
@@ -1211,6 +1237,254 @@ class TestUploadService(TestCase):
         self.assertEqual(_get_empty_page_numbers(None), [])
         self.assertEqual(_get_empty_page_numbers({}), [])
         self.assertEqual(_get_empty_page_numbers({"other_key": "val"}), [])
+
+
+class TestWordExtractionService(TestCase):
+    def _create_docx_file(self, xml_content: str) -> str:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        tmp.close()
+        with zipfile.ZipFile(tmp.name, "w") as archive:
+            archive.writestr("word/document.xml", xml_content)
+        return tmp.name
+
+    def test_extract_word_to_json_docx_success(self):
+        file_path = self._create_docx_file(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Hello</w:t></w:r></w:p>
+                <w:p><w:r><w:t>World</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        try:
+            result = WordExtractionService.extract_word_to_json(file_path, ".docx")
+            self.assertEqual(result["content"][0]["page"], 1)
+            self.assertEqual(result["content"][0]["text"], ["Hello", "World"])
+        finally:
+            os.unlink(file_path)
+
+    @patch("file_processing.services.word_extraction_service.olefile")
+    def test_extract_word_to_json_doc_success(self, mock_olefile):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
+        try:
+            tmp.write(b"placeholder")
+            tmp.close()
+
+            mock_ole = MagicMock()
+            mock_ole.exists.side_effect = lambda name: name == "WordDocument"
+            mock_ole.openstream.return_value.read.return_value = (
+                "Hello legacy doc\nSecond line".encode("utf-16-le")
+            )
+            mock_olefile.OleFileIO.return_value.__enter__.return_value = mock_ole
+
+            result = WordExtractionService.extract_word_to_json(tmp.name, ".doc")
+            extracted = " ".join(result["content"][0]["text"])
+            self.assertIn("Hello legacy doc", extracted)
+            self.assertIn("Second line", extracted)
+        finally:
+            os.unlink(tmp.name)
+
+    def test_extract_word_to_json_unsupported_extension_raises(self):
+        with self.assertRaises(ValueError):
+            WordExtractionService.extract_word_to_json("/tmp/file.txt", ".txt")
+
+    def test_extract_docx_to_json_invalid_structure_raises(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        tmp.close()
+        with zipfile.ZipFile(tmp.name, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types></Types>")
+
+        try:
+            with self.assertRaises(ValueError):
+                WordExtractionService._extract_docx_to_json(tmp.name)
+        finally:
+            os.unlink(tmp.name)
+
+    def test_extract_docx_to_json_handles_tab_br_cr_nodes(self):
+        file_path = self._create_docx_file(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:r><w:t>Hello</w:t></w:r>
+                  <w:r><w:tab/></w:r>
+                  <w:r><w:t>Word</w:t></w:r>
+                  <w:r><w:br/></w:r>
+                  <w:r><w:t>Line</w:t></w:r>
+                  <w:r><w:cr/></w:r>
+                </w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        try:
+            result = WordExtractionService._extract_docx_to_json(file_path)
+            self.assertEqual(result["content"][0]["text"], ["Hello Word Line"])
+        finally:
+            os.unlink(file_path)
+
+    def test_extract_docx_to_json_appends_only_non_empty_paragraph_text(self):
+        file_path = self._create_docx_file(
+            """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>   </w:t></w:r></w:p>
+                <w:p><w:r><w:t>Alpha</w:t></w:r></w:p>
+              </w:body>
+            </w:document>
+            """
+        )
+        try:
+            result = WordExtractionService._extract_docx_to_json(file_path)
+            self.assertEqual(result["content"][0]["text"], ["Alpha"])
+        finally:
+            os.unlink(file_path)
+
+    @patch("file_processing.services.word_extraction_service.olefile")
+    def test_extract_doc_to_json_skips_non_alpha_and_duplicates(self, mock_olefile):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
+        try:
+            tmp.write(b"placeholder")
+            tmp.close()
+
+            mock_ole = MagicMock()
+            mock_ole.exists.side_effect = lambda name: name == "WordDocument"
+            mock_ole.openstream.return_value.read.return_value = (
+                b"Hello\nHello\n12345\nWorld\n"
+            )
+            mock_olefile.OleFileIO.return_value.__enter__.return_value = mock_ole
+
+            result = WordExtractionService._extract_doc_to_json(tmp.name)
+            lines = result["content"][0]["text"]
+            self.assertEqual(lines.count("Hello"), 1)
+            self.assertIn("World", lines)
+            self.assertNotIn("12345", lines)
+        finally:
+            os.unlink(tmp.name)
+
+    @patch("file_processing.services.word_extraction_service.olefile")
+    def test_extract_doc_to_json_raises_on_unreadable_text(self, mock_olefile):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
+        try:
+            tmp.write(b"placeholder")
+            tmp.close()
+
+            mock_ole = MagicMock()
+            mock_ole.exists.side_effect = lambda name: name == "WordDocument"
+            mock_ole.openstream.return_value.read.return_value = b"\x00\x01\x02\x03"
+            mock_olefile.OleFileIO.return_value.__enter__.return_value = mock_ole
+
+            with self.assertRaises(ValueError) as exc:
+                WordExtractionService._extract_doc_to_json(tmp.name)
+
+            self.assertEqual(
+                str(exc.exception),
+                "Unable to extract readable text from legacy .doc file.",
+            )
+        finally:
+            os.unlink(tmp.name)
+
+    @patch("file_processing.services.word_extraction_service.olefile", None)
+    def test_extract_doc_to_json_raises_when_olefile_unavailable(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
+        try:
+            tmp.write(b"placeholder")
+            tmp.close()
+
+            with self.assertRaises(ValueError) as exc:
+                WordExtractionService._extract_doc_to_json(tmp.name)
+
+            self.assertEqual(
+                str(exc.exception),
+                "Word file is corrupt or has an invalid structure.",
+            )
+        finally:
+            os.unlink(tmp.name)
+
+    @patch("file_processing.services.word_extraction_service.olefile")
+    def test_extract_doc_to_json_raises_when_worddocument_stream_missing(
+        self, mock_olefile
+    ):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".doc")
+        try:
+            tmp.write(b"placeholder")
+            tmp.close()
+
+            mock_ole = MagicMock()
+            mock_ole.exists.return_value = False
+            mock_olefile.OleFileIO.return_value.__enter__.return_value = mock_ole
+
+            with self.assertRaises(ValueError) as exc:
+                WordExtractionService._extract_doc_to_json(tmp.name)
+
+            self.assertEqual(
+                str(exc.exception),
+                "Word file is corrupt or has an invalid structure.",
+            )
+        finally:
+            os.unlink(tmp.name)
+
+    def test_extract_printable_lines_skips_low_density_rows(self):
+        payload = b"abc1234567890\nHello World\n"
+
+        lines = WordExtractionService._extract_printable_lines(payload)
+
+        self.assertIn("Hello World", lines)
+        self.assertNotIn("abc1234567890", lines)
+
+    @patch(
+        "file_processing.services.word_extraction_service.open",
+        side_effect=OSError("boom"),
+    )
+    def test_extract_doc_to_json_open_error_raises_value_error(self, _mock_open):
+        with self.assertRaises(ValueError):
+            WordExtractionService._extract_doc_to_json("/tmp/missing.doc")
+
+    def test_local_name_handles_namespaced_and_plain_tags(self):
+        self.assertEqual(WordExtractionService._local_name("{ns}p"), "p")
+        self.assertEqual(WordExtractionService._local_name("p"), "p")
+
+    @patch(
+        "file_processing.services.upload_service.WordExtractionService.extract_word_to_json"
+    )
+    def test_process_word_success(self, mock_extract):
+        mock_extract.return_value = {"content": [{"page": 1, "text": ["ok"]}]}
+
+        success, error, data = upload_service.process_word("/tmp/f.docx", ".docx")
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(data, {"content": [{"page": 1, "text": ["ok"]}]})
+
+    @patch(
+        "file_processing.services.upload_service.WordExtractionService.extract_word_to_json"
+    )
+    def test_process_word_value_error_propagates_message(self, mock_extract):
+        mock_extract.side_effect = ValueError("bad word")
+
+        success, error, data = upload_service.process_word("/tmp/f.docx", ".docx")
+
+        self.assertFalse(success)
+        self.assertEqual(error, "bad word")
+        self.assertIsNone(data)
+
+    @patch("file_processing.services.upload_service.logger.exception")
+    @patch(
+        "file_processing.services.upload_service.WordExtractionService.extract_word_to_json"
+    )
+    def test_process_word_generic_exception_returns_word_corrupt_error(
+        self, mock_extract, mock_logger
+    ):
+        mock_extract.side_effect = RuntimeError("boom")
+
+        success, error, data = upload_service.process_word("/tmp/f.doc", ".doc")
+
+        self.assertFalse(success)
+        self.assertEqual(error, upload_service.WORD_CORRUPT_ERROR)
+        self.assertIsNone(data)
+        mock_logger.assert_called_once()
 
 
 class TestUploadServiceCoverageGaps(TestCase):
@@ -1842,6 +2116,68 @@ class TestUploadServiceCoverageGaps(TestCase):
         self.assertIsNone(error)
 
 
+class TestWordValidationServiceCoverage(TestCase):
+    class _StubFile:
+        def __init__(self, payload=b""):
+            self._payload = payload
+
+        def seek(self, *_args, **_kwargs):
+            return None
+
+        def read(self, *_args, **_kwargs):
+            return self._payload
+
+    def test_validate_word_returns_unsupported_for_unknown_extension(self):
+        is_valid, error = word_validation_service.validate_word(
+            self._StubFile(), ".txt"
+        )
+        self.assertFalse(is_valid)
+        self.assertEqual(error, "Unsupported file type.")
+
+    @patch(
+        "file_processing.services.word_validation_service.is_ole_container",
+        return_value=True,
+    )
+    def test_docx_encrypted_handler_blocks_ole_using_stub(self, _mock_is_ole):
+        context = word_validation_service.WordValidationContext(
+            uploaded_file=self._StubFile(),
+            ext=".docx",
+        )
+        handler = word_validation_service.DocxEncryptedValidationHandler()
+
+        is_valid, error = handler.handle(context)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, word_validation_service.WORD_PROTECTED_ERROR)
+
+    @patch(
+        "file_processing.services.word_validation_service.is_ole_container",
+        return_value=True,
+    )
+    def test_doc_structure_handler_stream_failure_returns_corrupt(self, _mock_is_ole):
+        class _BrokenStubFile:
+            def seek(self, *_args, **_kwargs):
+                raise OSError("seek failed")
+
+            def read(self, *_args, **_kwargs):
+                return b""
+
+        context = word_validation_service.WordValidationContext(
+            uploaded_file=_BrokenStubFile(),
+            ext=".doc",
+        )
+
+        handler = word_validation_service.DocStructureValidationHandler()
+        is_valid, error = handler.handle(context)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(error, word_validation_service.WORD_CORRUPT_ERROR)
+
+    def test_build_word_validation_chain_returns_none_for_unknown_extension(self):
+        chain = word_validation_service._build_word_validation_chain(".bin")
+        self.assertIsNone(chain)
+
+
 class TestWordValidationService(unittest.TestCase):
     def _build_valid_docx(self, pages=1):
         content = BytesIO()
@@ -1914,3 +2250,12 @@ class TestWordValidationService(unittest.TestCase):
 
         self.assertFalse(is_valid)
         self.assertEqual(error, word_validation_service.WORD_CORRUPT_ERROR)
+
+    def test_extract_docx_page_count_without_pages_returns_zero(self):
+        class ArchiveNoPages:
+            def read(self, _name):
+                return b"<Properties><Template>Normal</Template></Properties>"
+
+        self.assertEqual(
+            word_validation_service.extract_docx_page_count(ArchiveNoPages()), 0
+        )

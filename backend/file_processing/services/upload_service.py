@@ -1,15 +1,21 @@
 import os
 import logging
 from uuid import uuid4
+
 from django.conf import settings
 from django.utils.text import get_valid_filename
-from .excel_service import process_uploaded_excel
-from .txt_service import process_uploaded_txt
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
+
+from .excel_service import process_uploaded_excel
+from .txt_service import process_uploaded_txt
+from file_processing.extractors.image_extractor import ImageExtractor
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import word_validation_service
+from file_processing.services.image_validation_service import validate_image
+from file_processing.services.word_extraction_service import WordExtractionService
+from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 
 try:
     import magic
@@ -21,9 +27,6 @@ except Exception:  # pragma: no cover - optional dependency in local envs
             raise ImportError("python-magic unavailable")
 
     magic = _MagicShim()
-from file_processing.services.image_validation_service import validate_image
-from file_processing.extractors.image_extractor import ImageExtractor
-from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,10 @@ EXT_PNG = ".png"
 EXT_JPG = ".jpg"
 EXT_JPEG = ".jpeg"
 
+MIME_OCTET_STREAM = "application/octet-stream"
+MIME_OLE_STORAGE = "application/x-ole-storage"
+MIME_ZIP = "application/zip"
+
 IMAGE_EXTENSIONS = {EXT_PNG, EXT_JPG, EXT_JPEG}
 ALLOWED_EXTENSIONS = [
     EXT_PDF,
@@ -55,6 +62,7 @@ ALLOWED_EXTENSIONS = [
     EXT_TXT,
     EXT_CSV,
 ]
+
 ALLOWED_MIME_TYPES = {
     EXT_PDF: [
         "application/pdf",
@@ -109,6 +117,7 @@ ALLOWED_MIME_TYPES = {
         "application/vnd.ms-excel",
     ],
 }
+
 MAX_PDF_PAGES = 100
 MAX_EXCEL_SHEETS = 100
 PDF_CORRUPT_ERROR = "PDF file is corrupt or has an invalid structure."
@@ -130,14 +139,16 @@ CSV_PROTECTED_ERROR = (
     "Pastikan file adalah CSV biasa yang tidak diproteksi."
 )
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
-OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
+
+OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+ZIP_SIGNATURE_PREFIX = b"PK"
 
 BINARY_SIGNATURES: list[tuple[bytes, str]] = [
     (b"\x50\x4b\x03\x04", FILE_EXTENSION_MISMATCH_ERROR),
     (b"\x50\x4b\x05\x06", FILE_EXTENSION_MISMATCH_ERROR),
-    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", TXT_PROTECTED_ERROR),
+    (OLE_SIGNATURE, TXT_PROTECTED_ERROR),
     (b"\x7fELF", FILE_EXTENSION_MISMATCH_ERROR),
     (b"MZ", FILE_EXTENSION_MISMATCH_ERROR),
     (b"%PDF", FILE_EXTENSION_MISMATCH_ERROR),
@@ -147,19 +158,15 @@ BINARY_SIGNATURES: list[tuple[bytes, str]] = [
 
 
 def _has_extracted_text(extracted_data):
-    """Return True if any page contains extracted text."""
     if not extracted_data or "content" not in extracted_data:
         return False
-
     for page in extracted_data["content"]:
         if page.get("text"):
             return True
-
     return False
 
 
 def _get_empty_page_numbers(extracted_data):
-    """Return list of page numbers whose 'text' list is empty."""
     empty = []
     if not extracted_data or "content" not in extracted_data:
         return empty
@@ -178,10 +185,8 @@ def _process_pdf(file_path, uploaded_file):
         extracted_data = NonOCRPDFService.extract_non_ocr_pdf_to_json(file_path)
 
         if not _has_extracted_text(extracted_data):
-            # Fully scanned PDF — run OCR on all pages
             extracted_data = OCRService.process_pdf(file_path)
         else:
-            # Check for mixed PDF (some pages have text, some don't)
             empty_pages = _get_empty_page_numbers(extracted_data)
             if empty_pages:
                 ocr_data = OCRService.process_pdf_pages(file_path, empty_pages)
@@ -190,7 +195,6 @@ def _process_pdf(file_path, uploaded_file):
                 for page in extracted_data["content"]:
                     if page["page"] in ocr_by_page:
                         page["text"] = ocr_by_page[page["page"]]["text"]
-
     except Exception:
         logger.exception("Non-OCR extraction failed, fallback to OCR")
         extracted_data = OCRService.process_pdf(file_path)
@@ -210,11 +214,25 @@ def _process_image(file_path):
         return False, "Image OCR extraction failed.", None
 
 
+def process_word(file_path, ext):
+    try:
+        extracted_data = WordExtractionService.extract_word_to_json(file_path, ext)
+    except ValueError as exc:
+        return False, str(exc), None
+    except Exception:
+        logger.exception("Word extraction failed")
+        return False, WORD_CORRUPT_ERROR, None
+
+    return True, None, extracted_data
+
+
 def _dispatch_upload_processing(ext, file_path, uploaded_file):
     processors = {
         EXT_PDF: lambda: _process_pdf(file_path, uploaded_file),
         EXT_XLS: lambda: process_uploaded_excel(file_path),
         EXT_XLSX: lambda: process_uploaded_excel(file_path),
+        EXT_DOC: lambda: process_word(file_path, EXT_DOC),
+        EXT_DOCX: lambda: process_word(file_path, EXT_DOCX),
         EXT_TXT: lambda: process_uploaded_txt(file_path),
         EXT_CSV: lambda: process_uploaded_txt(file_path),
         EXT_PNG: lambda: _process_image(file_path),
@@ -235,7 +253,6 @@ def process_upload(uploaded_file):
         return False, error, None, None
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
-
     file_path = save_temp_file(uploaded_file)
 
     try:
@@ -246,7 +263,6 @@ def process_upload(uploaded_file):
         )
         if not success:
             return False, error, None, None
-
     finally:
         try:
             if os.path.exists(file_path):
@@ -261,22 +277,18 @@ def validate_file(uploaded_file):
     filename = uploaded_file.name
     ext = os.path.splitext(filename)[1].lower()
 
-    # Validate extension
     if ext not in ALLOWED_EXTENSIONS:
         return (
             False,
             "Unsupported file type. Only PDF, XLS, XLSX, TXT, CSV, PNG, JPG, JPEG, DOC, and DOCX are allowed.",
         )
 
-    # Image files have their own dedicated validation pipeline
     if ext in IMAGE_EXTENSIONS:
         return validate_image(uploaded_file)
 
-    # Validate size
     if uploaded_file.size > MAX_FILE_SIZE:
         return False, FILE_TOO_LARGE_ERROR
 
-    # Validate MIME type
     is_valid_mime, mime_error = validate_mime_type(uploaded_file, ext)
     if not is_valid_mime:
         return False, mime_error
@@ -297,7 +309,6 @@ def validate_file(uploaded_file):
 
 
 def validate_pdf(uploaded_file):
-    """Single-parse PDF validation: encryption, structure, and page count."""
     try:
         uploaded_file.seek(0)
         reader = PdfReader(uploaded_file, strict=True)
@@ -313,7 +324,6 @@ def validate_pdf(uploaded_file):
         return False, page_count_or_error
 
     page_count = page_count_or_error
-
     is_valid, error = check_pdf_page_count(page_count)
     if not is_valid:
         return False, error
@@ -329,8 +339,7 @@ def check_pdf_encrypted(reader):
 
 def check_pdf_structure(reader):
     try:
-        page_count = len(reader.pages)
-        return True, page_count
+        return True, len(reader.pages)
     except PdfReadError:
         return False, PDF_CORRUPT_ERROR
     except Exception:
@@ -339,10 +348,7 @@ def check_pdf_structure(reader):
 
 def check_pdf_page_count(page_count):
     if page_count > MAX_PDF_PAGES:
-        return (
-            False,
-            f"PDF exceeds the maximum allowed page count of {MAX_PDF_PAGES}.",
-        )
+        return False, f"PDF exceeds the maximum allowed page count of {MAX_PDF_PAGES}."
     return True, None
 
 
@@ -420,15 +426,23 @@ def _validate_word_mime_structure(uploaded_file, ext):
     if ext == EXT_DOC and not _is_ole_container(uploaded_file):
         return DOES_NOT_MATCH_EXTENSION_ERROR
 
-    if ext == EXT_DOCX and not _has_zip_signature(uploaded_file):
-        return DOES_NOT_MATCH_EXTENSION_ERROR
+    if ext == EXT_DOCX:
+        # Encrypted OOXML (.docx) is wrapped in an OLE container; allow it to
+        # continue to Word validation so it can return the protected-file error.
+        if _is_ole_container(uploaded_file):
+            return None
+        if not _has_zip_signature(uploaded_file):
+            return DOES_NOT_MATCH_EXTENSION_ERROR
 
     return None
 
 
 def _resolve_txt_detected_mime(uploaded_file, detected_mime):
     request_mime = (getattr(uploaded_file, "content_type", "") or "").lower()
-    if detected_mime in {MIME_OCTET_STREAM, MIME_ZIP, MIME_OLE_STORAGE} and request_mime:
+    if (
+        detected_mime in {MIME_OCTET_STREAM, MIME_ZIP, MIME_OLE_STORAGE}
+        and request_mime
+    ):
         return request_mime
     return detected_mime
 
@@ -498,7 +512,6 @@ def _fallback_mime(head, ext):
 
 
 def _is_ole_container(uploaded_file):
-    """Return True if file starts with OLE Compound File signature."""
     try:
         uploaded_file.seek(0)
         header = uploaded_file.read(len(OLE_SIGNATURE))
@@ -509,10 +522,6 @@ def _is_ole_container(uploaded_file):
 
 
 def _is_legacy_xls_content(uploaded_file):
-    """
-    Best-effort check for real legacy .xls content to avoid mislabeling it
-    as password-protected .xlsx.
-    """
     try:
         import xlrd
     except Exception:
@@ -529,7 +538,6 @@ def _is_legacy_xls_content(uploaded_file):
 
 
 def _has_zip_signature(uploaded_file):
-    """Return True if file starts with ZIP signature prefix."""
     try:
         uploaded_file.seek(0)
         header = uploaded_file.read(len(ZIP_SIGNATURE_PREFIX))
@@ -594,9 +602,7 @@ def save_temp_file(uploaded_file):
     os.makedirs(settings.UPLOAD_TEMP_DIR, exist_ok=True)
 
     original_name = os.path.basename(uploaded_file.name)
-
     safe_name = get_valid_filename(original_name)
-
     unique_name = f"{uuid4()}_{safe_name}"
 
     base_dir = os.path.abspath(settings.UPLOAD_TEMP_DIR)
