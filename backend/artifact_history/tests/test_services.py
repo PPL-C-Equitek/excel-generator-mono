@@ -1,8 +1,15 @@
 from django.test import TestCase
+from django.db import IntegrityError
+from unittest.mock import patch
 
 from authentication.models import User
-from artifact_history.models import ArtifactHistory
-from artifact_history.services import create_artifact_history, list_artifact_history_for_user
+from artifact_history.models import ArtifactHistory, HistoryExportArtifact
+from artifact_history.services import (
+    create_artifact_history,
+    create_history_export_artifact,
+    get_history_export_artifact,
+    list_artifact_history_for_user,
+)
 
 
 def make_output_json(table_name="Sheet1", value="hello"):
@@ -90,3 +97,157 @@ class ArtifactHistoryServiceTest(TestCase):
     def test_list_artifact_history_for_user_rejects_invalid_offset(self):
         with self.assertRaises(ValueError):
             list_artifact_history_for_user(self.owner, limit=10, offset=-1)
+
+    def test_create_artifact_history_uses_default_created_at_when_omitted(self):
+        record = create_artifact_history(
+            owner=self.owner,
+            original_name="report.pdf",
+            custom_name=None,
+            output_json=make_output_json(),
+            status_processing="completed",
+        )
+
+        self.assertIsNotNone(record.created_at)
+
+
+class HistoryExportArtifactServiceTest(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            email="owner@example.com",
+            name="Owner",
+            password="Test12345",
+            status="verified",
+        )
+        self.other_owner = User.objects.create_user(
+            email="other@example.com",
+            name="Other",
+            password="Test12345",
+            status="verified",
+        )
+        self.history = ArtifactHistory.objects.create(
+            owner=self.owner,
+            original_name="report.pdf",
+            custom_name=None,
+            output_json=make_output_json(),
+            status_processing="completed",
+            created_at="2026-04-08T10:00:00Z",
+        )
+
+    def test_create_history_export_artifact_persists_owned_cache_record(self):
+        artifact = create_history_export_artifact(
+            history=self.history,
+            owner=self.owner,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_abc123",
+            file_name="export_abc123.xlsx",
+            created_at="2026-04-08T10:05:00Z",
+        )
+
+        self.assertEqual(artifact.history, self.history)
+        self.assertEqual(artifact.owner, self.owner)
+        self.assertEqual(artifact.requested_format, "xlsx")
+
+    def test_get_history_export_artifact_returns_owned_cached_artifact(self):
+        artifact = create_history_export_artifact(
+            history=self.history,
+            owner=self.owner,
+            requested_format="csv",
+            artifact_type="zip",
+            file_id="csv_abc123",
+            file_name="export_abc123.zip",
+            created_at="2026-04-08T10:05:00Z",
+        )
+
+        result = get_history_export_artifact(
+            history=self.history,
+            owner=self.owner,
+            requested_format="csv",
+        )
+
+        self.assertEqual(result, artifact)
+
+    def test_get_history_export_artifact_returns_none_when_cache_is_missing(self):
+        result = get_history_export_artifact(
+            history=self.history,
+            owner=self.owner,
+            requested_format="xlsx",
+        )
+
+        self.assertIsNone(result)
+
+    def test_get_history_export_artifact_does_not_return_other_users_cache(self):
+        create_history_export_artifact(
+            history=self.history,
+            owner=self.owner,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_abc123",
+            file_name="export_abc123.xlsx",
+            created_at="2026-04-08T10:05:00Z",
+        )
+
+        result = get_history_export_artifact(
+            history=self.history,
+            owner=self.other_owner,
+            requested_format="xlsx",
+        )
+
+        self.assertIsNone(result)
+
+    def test_create_history_export_artifact_uses_default_created_at_when_omitted(self):
+        artifact = create_history_export_artifact(
+            history=self.history,
+            owner=self.owner,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_abc123",
+            file_name="export_abc123.xlsx",
+        )
+
+        self.assertIsNotNone(artifact.created_at)
+
+    @patch("artifact_history.services._create_history_export_artifact_record")
+    def test_create_history_export_artifact_returns_existing_record_when_create_hits_unique_race(
+        self,
+        mock_create,
+    ):
+        existing_artifact = HistoryExportArtifact.objects.create(
+            history=self.history,
+            owner=self.owner,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_existing",
+            file_name="export_existing.xlsx",
+            created_at="2026-04-08T10:05:00Z",
+        )
+        mock_create.side_effect = IntegrityError("duplicate key value violates unique constraint")
+
+        artifact = create_history_export_artifact(
+            history=self.history,
+            owner=self.owner,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_new",
+            file_name="export_new.xlsx",
+            created_at="2026-04-08T10:06:00Z",
+        )
+
+        self.assertEqual(artifact.id, existing_artifact.id)
+
+    @patch("artifact_history.services._create_history_export_artifact_record")
+    def test_create_history_export_artifact_reraises_integrity_error_when_existing_record_is_missing(
+        self,
+        mock_create,
+    ):
+        mock_create.side_effect = IntegrityError("duplicate key value violates unique constraint")
+
+        with self.assertRaises(IntegrityError):
+            create_history_export_artifact(
+                history=self.history,
+                owner=self.owner,
+                requested_format="xlsx",
+                artifact_type="xlsx",
+                file_id="xlsx_newtoken",
+                file_name="export_newtoken.xlsx",
+            )
