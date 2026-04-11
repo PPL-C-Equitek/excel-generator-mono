@@ -423,6 +423,96 @@ class HistoryDownloadViewTest(BaseApiViewTest):
         mock_export_excel.assert_not_called()
 
     @patch("api.views.open")
+    @patch("api.views.create_history_export_artifact")
+    @patch("api.views.get_history_export_artifact")
+    @patch("api.views.export_csv_to_filesystem")
+    def test_history_download_regenerates_when_cached_csv_artifact_file_is_missing(
+        self,
+        mock_export_csv,
+        mock_get_cached_artifact,
+        mock_create_cached_artifact,
+        mock_open_file,
+    ):
+        stale_cached_artifact = HistoryExportArtifact(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="csv",
+            artifact_type="csv",
+            file_id="csv_old",
+            file_name="stale.csv",
+            created_at=timezone.now(),
+        )
+        mock_get_cached_artifact.return_value = stale_cached_artifact
+        mock_export_csv.return_value = {
+            "file_id": "csv_new",
+            "file_name": "export_new.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-08T10:00:00Z",
+        }
+        mock_open_file.side_effect = [
+            OSError("stale file missing"),
+            BytesIO(b"col\n1\n"),
+        ]
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=csv"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn(
+            'attachment; filename="export_new.csv"',
+            response["Content-Disposition"],
+        )
+        mock_export_csv.assert_called_once()
+        mock_create_cached_artifact.assert_called_once_with(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="csv",
+            artifact_type="csv",
+            file_id="csv_new",
+            file_name="export_new.csv",
+            created_at="2026-04-08T10:00:00Z",
+        )
+
+    @patch("api.views.open")
+    @patch("api.views.get_history_export_artifact")
+    @patch("api.views.export_excel_to_filesystem")
+    def test_history_download_returns_500_when_stale_cached_xlsx_regeneration_fails(
+        self,
+        mock_export_excel,
+        mock_get_cached_artifact,
+        mock_open_file,
+    ):
+        stale_cached_artifact = HistoryExportArtifact(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_old",
+            file_name="stale.xlsx",
+            created_at=timezone.now(),
+        )
+        mock_get_cached_artifact.return_value = stale_cached_artifact
+        mock_open_file.side_effect = OSError("stale file missing")
+        mock_export_excel.side_effect = OutputExcelGenerationError("failed")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=xlsx"
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download history file due to internal error.",
+        )
+        mock_export_excel.assert_called_once()
+
+    @patch("api.views.open")
     @patch("api.views.export_excel_to_filesystem")
     def test_history_download_returns_excel_file_for_owner(
         self, mock_export_excel, mock_open_file
