@@ -159,7 +159,7 @@ def _generate_history_download_artifact(history, owner, file_format):
         )
         safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
 
-    create_history_export_artifact(
+    cached_artifact = create_history_export_artifact(
         history=history,
         owner=owner,
         requested_format=file_format,
@@ -169,7 +169,20 @@ def _generate_history_download_artifact(history, owner, file_format):
         created_at=artifact.get("created_at"),
     )
 
-    return artifact["file_name"], artifact["artifact_type"], safe_file_path
+    if (
+        cached_artifact.file_name != artifact["file_name"]
+        or cached_artifact.artifact_type != artifact["artifact_type"]
+    ):
+        try:
+            os.remove(safe_file_path)
+        except OSError:
+            logger.warning("Failed to delete orphaned history download artifact.", exc_info=True)
+
+    resolved_file_path = safe_join(
+        _get_history_download_storage_dir(cached_artifact.artifact_type),
+        cached_artifact.file_name,
+    )
+    return cached_artifact.file_name, cached_artifact.artifact_type, resolved_file_path
 
 
 def _resolve_history_download_artifact(history, owner, file_format):
