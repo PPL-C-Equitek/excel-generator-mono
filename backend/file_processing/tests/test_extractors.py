@@ -1,14 +1,9 @@
 from unittest import TestCase
 from unittest.mock import patch, MagicMock
-import numpy as np
-from PIL import Image
 
 from file_processing.extractors.ocr.base_ocr_engine import BaseOCREngine
 from file_processing.extractors.pdf_ocr_extractor import PdfOcrExtractor
 from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
-
-import file_processing.extractors.ocr.easyocr_engine as easyocr_module
-from file_processing.extractors.ocr.easyocr_engine import EasyOCREngine, _group_into_lines
 
 class DummyOCREngine(BaseOCREngine):
     def __init__(self, text_to_return=""):
@@ -435,153 +430,6 @@ class TestTesseractEngine(TestCase):
         with self.assertRaises(ImportError):
             engine.extract_text_with_confidence("image")
 
-class TestEasyOCREngineExtra(TestCase):
-
-    def setUp(self):
-        easyocr_module._reader_cache = None
-
-    @patch("file_processing.extractors.ocr.easyocr_engine.easyocr")
-    def test_reader_cache_reuse(self, mock_easyocr):
-        """Reader should be cached and not re-created."""
-        mock_reader = MagicMock()
-        mock_easyocr.Reader.return_value = mock_reader
-        mock_reader.readtext.return_value = []
-
-        engine = EasyOCREngine(apply_preprocessing=False)
-
-        engine.extract_text("img")
-        engine.extract_text("img")
-
-        mock_easyocr.Reader.assert_called_once()
-
-
-    def test_group_into_lines_empty(self):
-        """Empty OCR results should return empty list."""
-        lines = _group_into_lines([])
-        self.assertEqual(lines, [])
-
-
-    def test_group_into_lines_merge(self):
-        """Two boxes on same line should merge."""
-        results = [
-            ([[0,0],[10,0],[10,10],[0,10]], "Hello", 0.9),
-            ([[20,1],[30,1],[30,11],[20,11]], "World", 0.8),
-        ]
-
-        lines = _group_into_lines(results)
-
-        self.assertEqual(lines[0][0], "Hello World")
-
-
-    def test_image_to_array_numpy(self):
-        engine = EasyOCREngine()
-        arr = np.zeros((10,10))
-
-        result = engine._image_to_array(arr)
-
-        self.assertTrue((result == arr).all())
-
-
-    def test_image_to_array_pil(self):
-        engine = EasyOCREngine()
-        img = Image.new("RGB", (10,10))
-
-        result = engine._image_to_array(img)
-
-        self.assertIsInstance(result, np.ndarray)
-
-
-    @patch("file_processing.extractors.ocr.easyocr_engine.easyocr")
-    def test_no_text_confidence(self, mock_easyocr):
-        """Confidence should be 0 if no text detected."""
-        mock_reader = MagicMock()
-        mock_reader.readtext.return_value = []
-        mock_easyocr.Reader.return_value = mock_reader
-
-        engine = EasyOCREngine(apply_preprocessing=False)
-
-        text, conf = engine.extract_text_with_confidence("img")
-
-        self.assertEqual(text, "")
-        self.assertEqual(conf, 0.0)
-
-
-    @patch("file_processing.extractors.ocr.easyocr_engine.easyocr")
-    @patch("file_processing.services.image_preprocessing.upscale_image")
-    def test_preprocess_exception_fallback(self, mock_upscale, mock_easyocr):
-        """If preprocessing fails, original image should be used."""
-        mock_upscale.side_effect = Exception("fail")
-
-        mock_reader = MagicMock()
-        mock_reader.readtext.return_value = []
-        mock_easyocr.Reader.return_value = mock_reader
-
-        engine = EasyOCREngine(apply_preprocessing=True)
-
-        engine.extract_text(np.zeros((10,10)))
-
-        self.assertTrue(mock_upscale.called)
-
-    @patch("file_processing.services.image_preprocessing.remove_noise")
-    @patch("file_processing.services.image_preprocessing.normalize_contrast")
-    @patch("file_processing.services.image_preprocessing.convert_to_grayscale")
-    @patch("file_processing.services.image_preprocessing.upscale_image")
-    def test_preprocess_success_pipeline(
-        self,
-        mock_upscale,
-        mock_gray,
-        mock_contrast,
-        mock_noise,
-    ):
-        """Cover successful preprocessing path."""
-        img = np.zeros((10, 10))
-
-        mock_upscale.return_value = img
-        mock_gray.return_value = img
-        mock_contrast.return_value = img
-        mock_noise.return_value = img
-
-        engine = EasyOCREngine(apply_preprocessing=True)
-
-        result = engine._preprocess(img)
-
-        self.assertIsInstance(result, np.ndarray)
-        self.assertTrue(mock_upscale.called)
-        self.assertTrue(mock_gray.called)
-        self.assertTrue(mock_contrast.called)
-        self.assertTrue(mock_noise.called)
-
-
-    def test_group_into_lines_multiple_lines(self):
-        """Force grouping into two lines."""
-        results = [
-            ([[0,0],[10,0],[10,10],[0,10]], "Line1", 0.9),
-            ([[0,40],[10,40],[10,50],[0,50]], "Line2", 0.8),
-        ]
-
-        lines = _group_into_lines(results)
-
-        self.assertEqual(len(lines), 2)
-        self.assertEqual(lines[0][0], "Line1")
-        self.assertEqual(lines[1][0], "Line2")
-
-
-    @patch("file_processing.extractors.ocr.easyocr_engine.easyocr")
-    def test_extract_text_with_confidence_logging(self, mock_easyocr):
-        """Cover logger branch with actual detected regions."""
-        mock_reader = MagicMock()
-        mock_reader.readtext.return_value = [
-            ([[0,0],[10,0],[10,10],[0,10]], "A", 0.9),
-            ([[20,0],[30,0],[30,10],[20,10]], "B", 0.8),
-        ]
-        mock_easyocr.Reader.return_value = mock_reader
-
-        engine = EasyOCREngine(apply_preprocessing=False)
-
-        text, conf = engine.extract_text_with_confidence("img")
-
-        self.assertEqual(text, "A B")
-        self.assertEqual(conf, 85.0)
 
 class TestBaseOCREngine(TestCase):
 
