@@ -207,7 +207,7 @@ class HistoryExportArtifactServiceTest(TestCase):
 
         self.assertIsNotNone(artifact.created_at)
 
-    @patch("artifact_history.services.HistoryExportArtifact.objects.create")
+    @patch("artifact_history.services._create_history_export_artifact_record")
     def test_create_history_export_artifact_returns_existing_record_when_create_hits_unique_race(
         self,
         mock_create,
@@ -234,4 +234,20 @@ class HistoryExportArtifactServiceTest(TestCase):
         )
 
         self.assertEqual(artifact.id, existing_artifact.id)
-        self.assertEqual(artifact.file_id, "xlsx_existing")
+
+    @patch("artifact_history.services._create_history_export_artifact_record")
+    def test_create_history_export_artifact_reraises_integrity_error_when_existing_record_is_missing(
+        self,
+        mock_create,
+    ):
+        mock_create.side_effect = IntegrityError("duplicate key value violates unique constraint")
+
+        with self.assertRaises(IntegrityError):
+            create_history_export_artifact(
+                history=self.history,
+                owner=self.owner,
+                requested_format="xlsx",
+                artifact_type="xlsx",
+                file_id="xlsx_newtoken",
+                file_name="export_newtoken.xlsx",
+            )

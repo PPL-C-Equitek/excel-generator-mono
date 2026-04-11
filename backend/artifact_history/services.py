@@ -1,3 +1,5 @@
+from django.db import IntegrityError, transaction
+
 from artifact_history.models import ArtifactHistory, HistoryExportArtifact
 
 
@@ -53,6 +55,21 @@ def create_history_export_artifact(
     if created_at is not None:
         create_kwargs["created_at"] = created_at
 
+    try:
+        with transaction.atomic():
+            return _create_history_export_artifact_record(**create_kwargs)
+    except IntegrityError:
+        existing_artifact = get_history_export_artifact(
+            history=history,
+            owner=owner,
+            requested_format=requested_format,
+        )
+        if existing_artifact is None:
+            raise
+        return existing_artifact
+
+
+def _create_history_export_artifact_record(**create_kwargs):
     return HistoryExportArtifact.objects.create(**create_kwargs)
 
 
