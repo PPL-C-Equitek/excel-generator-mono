@@ -24,6 +24,7 @@ opencv-python-headless==4.8.0.76
 easyocr==1.7.0
 numpy==1.26.4
 resend==2.26.0
+olefile==0.47
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.2.2+cpu
