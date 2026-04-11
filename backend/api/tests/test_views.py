@@ -1,5 +1,7 @@
 from PyPDF2 import PdfReader, PdfWriter
+from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
+from django.utils._os import safe_join
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from types import SimpleNamespace
@@ -299,6 +301,7 @@ class HistoryDownloadViewTest(BaseApiViewTest):
         )
 
     @patch("api.views.open")
+    @patch("api.views.os.remove")
     @patch("api.views.create_history_export_artifact")
     @patch("api.views.get_history_export_artifact")
     @patch("api.views.export_excel_to_filesystem")
@@ -307,6 +310,7 @@ class HistoryDownloadViewTest(BaseApiViewTest):
         mock_export_excel,
         mock_get_cached_artifact,
         mock_create_cached_artifact,
+        mock_remove_file,
         mock_open_file,
     ):
         mock_get_cached_artifact.return_value = None
@@ -317,6 +321,15 @@ class HistoryDownloadViewTest(BaseApiViewTest):
             "size_bytes": 12,
             "created_at": "2026-04-08T10:00:00Z",
         }
+        mock_create_cached_artifact.return_value = HistoryExportArtifact(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_token",
+            file_name="export_token.xlsx",
+            created_at=timezone.now(),
+        )
         mock_open_file.return_value = BytesIO(b"xlsx")
         self.client.force_authenticate(user=self.verified_user)
 
@@ -340,6 +353,104 @@ class HistoryDownloadViewTest(BaseApiViewTest):
             file_name="export_token.xlsx",
             created_at="2026-04-08T10:00:00Z",
         )
+        mock_remove_file.assert_not_called()
+
+    @patch("api.views.open")
+    @patch("api.views.os.remove")
+    @patch("api.views.create_history_export_artifact")
+    @patch("api.views.get_history_export_artifact")
+    @patch("api.views.export_excel_to_filesystem")
+    def test_history_download_uses_race_winner_cached_artifact_and_deletes_loser_file(
+        self,
+        mock_export_excel,
+        mock_get_cached_artifact,
+        mock_create_cached_artifact,
+        mock_remove_file,
+        mock_open_file,
+    ):
+        mock_get_cached_artifact.return_value = None
+        mock_export_excel.return_value = {
+            "file_id": "xlsx_loser",
+            "file_name": "export_loser.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 12,
+            "created_at": "2026-04-08T10:00:00Z",
+        }
+        mock_create_cached_artifact.return_value = HistoryExportArtifact(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_winner",
+            file_name="export_winner.xlsx",
+            created_at=timezone.now(),
+        )
+        mock_open_file.return_value = BytesIO(b"xlsx")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=xlsx"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="export_winner.xlsx"',
+            response["Content-Disposition"],
+        )
+        mock_open_file.assert_called_once_with(
+            safe_join(settings.EXCEL_EXPORT_DIR, "export_winner.xlsx"),
+            "rb",
+        )
+        mock_remove_file.assert_called_once_with(
+            safe_join(settings.EXCEL_EXPORT_DIR, "export_loser.xlsx")
+        )
+
+    @patch("api.views.logger.warning")
+    @patch("api.views.open")
+    @patch("api.views.os.remove")
+    @patch("api.views.create_history_export_artifact")
+    @patch("api.views.get_history_export_artifact")
+    @patch("api.views.export_excel_to_filesystem")
+    def test_history_download_still_serves_race_winner_when_orphan_cleanup_fails(
+        self,
+        mock_export_excel,
+        mock_get_cached_artifact,
+        mock_create_cached_artifact,
+        mock_remove_file,
+        mock_open_file,
+        mock_log_warning,
+    ):
+        mock_get_cached_artifact.return_value = None
+        mock_export_excel.return_value = {
+            "file_id": "xlsx_loser",
+            "file_name": "export_loser.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 12,
+            "created_at": "2026-04-08T10:00:00Z",
+        }
+        mock_create_cached_artifact.return_value = HistoryExportArtifact(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="xlsx",
+            artifact_type="xlsx",
+            file_id="xlsx_winner",
+            file_name="export_winner.xlsx",
+            created_at=timezone.now(),
+        )
+        mock_remove_file.side_effect = OSError("cannot delete orphan")
+        mock_open_file.return_value = BytesIO(b"xlsx")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=xlsx"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'attachment; filename="export_winner.xlsx"',
+            response["Content-Disposition"],
+        )
+        mock_log_warning.assert_called_once()
 
     @patch("api.views.open")
     @patch("api.views.get_history_export_artifact")
@@ -450,6 +561,15 @@ class HistoryDownloadViewTest(BaseApiViewTest):
             "size_bytes": 12,
             "created_at": "2026-04-08T10:00:00Z",
         }
+        mock_create_cached_artifact.return_value = HistoryExportArtifact(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="csv",
+            artifact_type="csv",
+            file_id="csv_new",
+            file_name="export_new.csv",
+            created_at=timezone.now(),
+        )
         mock_open_file.side_effect = [
             OSError("stale file missing"),
             BytesIO(b"col\n1\n"),
