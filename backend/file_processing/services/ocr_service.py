@@ -1,12 +1,11 @@
-"""Multi-stage OCR service — EasyOCR primary, line-by-line output.
+"""Tesseract-based OCR service — line-by-line output for scanned PDFs.
 
 Pipeline overview (for PDFs):
   1. Attempt direct text extraction (PyPDF2).
   2. If text layer is sufficient ⟶ return immediately (split by newlines).
   3. Convert scanned pages to images at 400 DPI.
-  4. Run EasyOCR with spatial line grouping (bounding-box Y-clustering).
-  5. If confidence < threshold ⟶ fallback to Tesseract.
-  6. Return structured per-page results with line-by-line text.
+  4. Run Tesseract with multi-PSM strategy (preprocessing + fallback modes).
+  5. Return structured per-page results with line-by-line text.
 
 Output format aligns with NonOCRPDFService: each page's ``"text"`` is a
 list of strings — one string per visual line.  No sentence splitting is
@@ -17,7 +16,7 @@ performed, which preserves financial data like:
   • Dates:             01.03.2026
 
 For standalone images:
-  - Run step 4–5 directly.
+  - Run step 4 directly.
 """
 
 import logging
@@ -25,18 +24,16 @@ from typing import Any, Dict, List
 
 from PyPDF2 import PdfReader
 
-from file_processing.extractors.ocr.easyocr_engine import EasyOCREngine
 from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
 from file_processing.extractors.pdf_ocr_extractor import PdfOcrExtractor
 from file_processing.services.ocr_config import (
-    CONFIDENCE_THRESHOLD,
     TEXT_LAYER_MIN_CHARS_PER_PAGE,
 )
 
 logger = logging.getLogger(__name__)
 
 class OCRService:
-    """Orchestrates the EasyOCR-primary OCR pipeline."""
+    """Orchestrates the Tesseract OCR pipeline."""
 
     THRESHOLD_TEXT_LENGTH = TEXT_LAYER_MIN_CHARS_PER_PAGE
 
@@ -46,63 +43,29 @@ class OCRService:
         return [line.strip() for line in text.splitlines() if line.strip()]
 
     @classmethod
-    def _try_tesseract_fallback(cls, image) -> str:
-        """Run Tesseract (with full preprocessing) on a single image.
+    def _ocr_single_image(cls, image) -> str:
+        """Run Tesseract OCR on a single image.
 
-        Called when EasyOCR confidence is below the threshold.
-        Tesseract uses the heavy pipeline (adaptive thresholding,
-        morphological cleanup, deskew, border padding) which can
-        sometimes rescue very noisy or low-contrast scans.
+        Uses multi-PSM strategy for robust handling of various document layouts.
         """
         try:
             engine = TesseractEngine(apply_preprocessing=True)
             text, conf = engine.extract_text_with_confidence(image)
             logger.info(
-                "Tesseract fallback: confidence=%.1f%%, chars=%d",
+                "Tesseract OCR: confidence=%.1f%%, chars=%d",
                 conf, len(text),
             )
             return text
-        except ImportError:
+        except ImportError as exc:
             logger.warning(
-                "pytesseract is not installed; skipping fallback."
+                "pytesseract is not installed; cannot perform OCR."
             )
-            return ""
-        except Exception:
-            logger.exception("Tesseract fallback failed")
-            return ""
-
-    @classmethod
-    def _ocr_single_image(cls, image, engine: EasyOCREngine) -> str:
-        """Run OCR on a single image with confidence-based fallback.
-
-        1. EasyOCR with light preprocessing (primary).
-        2. If confidence < threshold → try Tesseract with full preprocessing.
-        3. Return whichever produced more text.
-        """
-        text, confidence = engine.extract_text_with_confidence(image)
-
-        logger.info(
-            "EasyOCR primary: confidence=%.1f%%, chars=%d",
-            confidence, len(text),
-        )
-
-        if confidence < CONFIDENCE_THRESHOLD:
-            logger.info(
-                "Confidence %.1f%% < threshold %.1f%%; attempting Tesseract fallback",
-                confidence, CONFIDENCE_THRESHOLD,
-            )
-            fallback_text = cls._try_tesseract_fallback(image)
-
-            if len(fallback_text.strip()) > len(text.strip()):
-                logger.info(
-                    "Using Tesseract result (%d chars vs EasyOCR %d chars)",
-                    len(fallback_text), len(text),
-                )
-                return fallback_text
-            else:
-                logger.info("Keeping EasyOCR result despite low confidence")
-
-        return text
+            raise ValueError(
+                "OCR dependency error: pytesseract or Tesseract is not available."
+            ) from exc
+        except Exception as exc:
+            logger.exception("Tesseract OCR failed")
+            raise ValueError(f"OCR runtime error: {str(exc)}") from exc
 
     @classmethod
     def process_pdf_pages(cls, file_path: str, page_numbers: List[int]) -> Dict[str, Any]:
@@ -123,11 +86,10 @@ class OCRService:
             extractor = PdfOcrExtractor()
             page_images = extractor.convert_pages(file_path, page_numbers=page_numbers)
 
-            engine = EasyOCREngine()
             content: List[Dict[str, Any]] = []
 
             for page_num, image in page_images:
-                raw_text = cls._ocr_single_image(image, engine)
+                raw_text = cls._ocr_single_image(image)
                 text_blocks = cls.split_lines(raw_text)
 
                 content.append({"page": page_num, "text": text_blocks})
@@ -147,7 +109,7 @@ class OCRService:
         """Process a full PDF through the multi-stage pipeline.
 
         Stage 1 — Direct text extraction (PyPDF2).
-        Stage 2 — If text layer is insufficient → OCR with fallback.
+        Stage 2 — If text layer is insufficient → OCR with Tesseract.
 
         Returns:
             ``{"content": [{"page": N, "text": [...]}, ...]}``
@@ -193,17 +155,16 @@ class OCRService:
             # ---- Stage 2: OCR fallback for scanned PDF ----
             logger.info(
                 "Text layer insufficient; switching to OCR pipeline "
-                "(method=EasyOCR+Tesseract fallback)",
+                "(method=Tesseract multi-PSM)",
             )
 
             extractor = PdfOcrExtractor()
             page_images = extractor.convert_pages(file_path)
 
-            engine = EasyOCREngine()
             ocr_content: List[Dict[str, Any]] = []
 
             for page_num, image in page_images:
-                raw_text = cls._ocr_single_image(image, engine)
+                raw_text = cls._ocr_single_image(image)
                 text_blocks = cls.split_lines(raw_text)
 
                 logger.info(
@@ -230,7 +191,7 @@ class OCRService:
     def process_image(cls, image) -> Dict[str, Any]:
         """Run OCR on a standalone image (not from a PDF).
 
-        Applies preprocessing and confidence-based fallback.
+        Applies Tesseract OCR and returns line-based output.
 
         Args:
             image: A PIL Image.
@@ -240,8 +201,7 @@ class OCRService:
         """
         logger.info("Processing standalone image via OCR")
 
-        engine = EasyOCREngine()
-        raw_text = cls._ocr_single_image(image, engine)
+        raw_text = cls._ocr_single_image(image)
         text_blocks = cls.split_lines(raw_text)
 
         logger.info("Standalone image OCR: %d line(s) extracted", len(text_blocks))

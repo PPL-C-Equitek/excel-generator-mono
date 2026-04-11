@@ -20,7 +20,11 @@ from authentication.logout.adapters import (
 )
 from authentication.logout.http import LogoutView as CleanLogoutView
 from authentication.models import User
-from authentication.serializers import LoginSerializer, RefreshTokenSerializer, VerifyEmailSerializer
+from authentication.serializers import (
+    LoginSerializer,
+    RefreshTokenSerializer,
+    VerifyEmailSerializer,
+)
 from authentication.services import (
     send_verification_email,
     generate_tokens,

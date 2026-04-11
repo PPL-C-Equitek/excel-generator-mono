@@ -1,5 +1,6 @@
 const ACCESS_TOKEN_KEYS = ['access_token', 'accessToken', 'auth.accessToken']
 const REFRESH_TOKEN_KEYS = ['refresh_token', 'refreshToken', 'auth.refreshToken']
+const USER_METADATA_KEYS = ['user_name', 'user_email']
 
 type TokenPair = {
     access_token: string
@@ -125,7 +126,7 @@ export function clearAuthTokens(): void {
         return
     }
 
-    for (const key of [...ACCESS_TOKEN_KEYS, ...REFRESH_TOKEN_KEYS]) {
+    for (const key of [...ACCESS_TOKEN_KEYS, ...REFRESH_TOKEN_KEYS, ...USER_METADATA_KEYS]) {
         removeFromStorage(globalThis.window.localStorage, key)
         removeFromStorage(globalThis.window.sessionStorage, key)
     }

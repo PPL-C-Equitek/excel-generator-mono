@@ -18,11 +18,12 @@ describe('Sidebar', () => {
         expect(screen.getByText('EQUITEK')).toHaveAttribute('href', '/')
     })
 
-    it('renders Convert, Schema, and History menu', () => {
+    it('renders Convert, Schema, History, and Change Password menu', () => {
         render(<Sidebar activeMenu="convert" />)
         expect(screen.getByText('Convert')).toBeInTheDocument()
         expect(screen.getByText('Schema')).toBeInTheDocument()
         expect(screen.getByText('History')).toBeInTheDocument()
+        expect(screen.getByText('Change Password')).toBeInTheDocument()
     })
 
     it('marks Convert as active when activeMenu is convert', () => {
@@ -33,6 +34,11 @@ describe('Sidebar', () => {
     it('marks Schema as active when activeMenu is schema', () => {
         render(<Sidebar activeMenu="schema" />)
         expect(screen.getByText('Schema').closest('a')).toHaveClass('bg-white')
+    })
+
+    it('marks Change Password as active when activeMenu is change-password', () => {
+        render(<Sidebar activeMenu="change-password" />)
+        expect(screen.getByText('Change Password').closest('a')).toHaveClass('bg-white')
     })
 
     it('renders stored user name at the bottom', () => {
