@@ -58,25 +58,38 @@ export default function HistoryPage() {
     const hasItems = items.length > 0
 
     return (
-        <div className="flex min-h-screen">
+        <div className="flex min-h-screen bg-gray-50">
             <Sidebar activeMenu="history" />
-            <main className="flex-1 bg-gray-50 px-16 py-10">
-                <div className="mx-auto max-w-5xl">
-                    <div className="mb-8">
-                        <h1 className="text-2xl font-bold text-gray-900">History</h1>
-                        <p className="mt-2 text-sm text-gray-500">
-                            Your generated results are available here for CSV or Excel download.
-                        </p>
-                    </div>
+            <main className="ml-56 flex-1 px-8 py-12">
+                <div className="mx-auto max-w-6xl space-y-8">
+                    <section className="rounded-3xl border border-red-100 bg-white p-8 shadow-sm shadow-red-100/30">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                            <div className="space-y-3">
+                                <span className="inline-flex rounded-full bg-red-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-red-700">
+                                    Download History
+                                </span>
+                                <div>
+                                    <h1 className="text-2xl font-bold text-slate-900">History</h1>
+                                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
+                                        Your generated results are stored here for CSV or Excel
+                                        download whenever you need them again.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                                Total records: <span className="ml-2 font-semibold text-slate-900">{count}</span>
+                            </div>
+                        </div>
+                    </section>
 
                     {isLoading ? (
-                        <div className="rounded-2xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
+                        <div className="rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
                             Loading history...
                         </div>
                     ) : null}
 
                     {!isLoading && loadError ? (
-                        <div className="rounded-2xl border border-red-200 bg-red-50 p-6">
+                        <div className="rounded-3xl border border-red-200 bg-white p-6 shadow-sm">
                             <p className="text-sm text-red-700">{loadError}</p>
                             <button
                                 type="button"
@@ -91,8 +104,8 @@ export default function HistoryPage() {
                     ) : null}
 
                     {!isLoading && !loadError && !hasItems ? (
-                        <div className="rounded-2xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-                            <h2 className="text-base font-semibold text-gray-900">No history yet</h2>
+                        <div className="rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+                            <h2 className="text-base font-semibold text-slate-900">No history yet</h2>
                             <p className="mt-2">
                                 Generate a result first, then it will appear here for download.
                             </p>
@@ -102,13 +115,13 @@ export default function HistoryPage() {
                     {!isLoading && !loadError && hasItems ? (
                         <div className="space-y-4">
                             {downloadError ? (
-                                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                                <div className="rounded-2xl border border-red-200 bg-white p-4 text-sm text-red-700 shadow-sm">
                                     {downloadError}
                                 </div>
                             ) : null}
 
-                            <div className="flex items-center justify-between">
-                                <p className="text-sm text-gray-500">
+                            <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+                                <p className="text-sm text-slate-500">
                                     Showing {offset + 1}-{Math.min(offset + items.length, count)} of {count}
                                 </p>
                                 <div className="flex items-center gap-3">
@@ -138,7 +151,7 @@ export default function HistoryPage() {
                             {items.map((item) => (
                                 <section
                                     key={item.id}
-                                    className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm"
+                                    className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-red-100/20"
                                 >
                                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                                         {(() => {
@@ -147,49 +160,49 @@ export default function HistoryPage() {
 
                                             return (
                                                 <>
-                                        <div className="space-y-2">
-                                            <h2 className="text-lg font-semibold text-gray-900">
-                                                {getDisplayName(item.custom_name, item.original_name)}
-                                            </h2>
-                                            <p className="text-sm text-gray-500">
-                                                Original file: {item.original_name}
-                                            </p>
-                                            <p className="text-sm text-gray-500">
-                                                Status: {item.status_processing}
-                                            </p>
-                                            <p className="text-sm text-gray-500">
-                                                Created at: {formatCreatedAt(item.created_at)}
-                                            </p>
-                                        </div>
+                                                    <div className="space-y-2">
+                                                        <h2 className="text-lg font-semibold text-slate-900">
+                                                            {getDisplayName(item.custom_name, item.original_name)}
+                                                        </h2>
+                                                        <p className="text-sm text-slate-500">
+                                                            Original file: {item.original_name}
+                                                        </p>
+                                                        <p className="inline-flex w-fit rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
+                                                            Status: {item.status_processing}
+                                                        </p>
+                                                        <p className="text-sm text-slate-500">
+                                                            Created at: {formatCreatedAt(item.created_at)}
+                                                        </p>
+                                                    </div>
 
-                                        <div className="flex flex-col gap-3 sm:flex-row">
-                                            <button
-                                                type="button"
-                                                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-red-700"
-                                                onClick={() => {
-                                                    void downloadCsv(
-                                                        item.id,
-                                                        getCsvFilename(item.original_name)
-                                                    )
-                                                }}
-                                                disabled={isCsvDownloading}
-                                            >
-                                                {isCsvDownloading ? 'Downloading CSV...' : 'Download CSV'}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-                                                onClick={() => {
-                                                    void downloadExcel(
-                                                        item.id,
-                                                        getXlsxFilename(item.original_name)
-                                                    )
-                                                }}
-                                                disabled={isExcelDownloading}
-                                            >
-                                                {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
-                                            </button>
-                                        </div>
+                                                    <div className="flex flex-col gap-3 sm:flex-row">
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-red-700"
+                                                            onClick={() => {
+                                                                void downloadCsv(
+                                                                    item.id,
+                                                                    getCsvFilename(item.original_name)
+                                                                )
+                                                            }}
+                                                            disabled={isCsvDownloading}
+                                                        >
+                                                            {isCsvDownloading ? 'Downloading CSV...' : 'Download CSV'}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                                                            onClick={() => {
+                                                                void downloadExcel(
+                                                                    item.id,
+                                                                    getXlsxFilename(item.original_name)
+                                                                )
+                                                            }}
+                                                            disabled={isExcelDownloading}
+                                                        >
+                                                            {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
+                                                        </button>
+                                                    </div>
                                                 </>
                                             )
                                         })()}
