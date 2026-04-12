@@ -114,6 +114,29 @@ describe('Reset Password Page', () => {
     fetchSpy.mockRestore();
   });
 
+  test('shows fallback invalid token message when the 400 response body is not an object', async () => {
+    (useSearchParams as Mock).mockReturnValue({
+      get: vi.fn().mockReturnValue('bad_token'),
+    });
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: vi.fn().mockResolvedValue(null),
+    } as unknown as Response);
+
+    render(<ResetPasswordPage />);
+    await fillAndSubmitForm();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/password reset failed\. the token is invalid or has expired\./i)
+      ).toBeInTheDocument();
+    });
+
+    fetchSpy.mockRestore();
+  });
+
   test('keeps form state and shows backend password confirmation error', async () => {
     (useSearchParams as Mock).mockReturnValue({
       get: vi.fn().mockReturnValue('fake_token'),

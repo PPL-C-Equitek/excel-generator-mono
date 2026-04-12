@@ -324,6 +324,22 @@ describe('HistoryPage', () => {
         })
     })
 
+    it('keeps the delete dialog open when deleting the item fails', async () => {
+        const deleteHistory = vi.fn().mockResolvedValue(false)
+        mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+        fireEvent.click(screen.getByRole('button', { name: 'Delete History' }))
+
+        await waitFor(() => {
+            expect(deleteHistory).toHaveBeenCalledWith(historyItems[0].id)
+        })
+
+        expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
     it('closes the delete dialog without deleting when cancelled', () => {
         const deleteHistory = vi.fn().mockResolvedValue(true)
         mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
