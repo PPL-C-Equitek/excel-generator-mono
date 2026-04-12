@@ -7,9 +7,9 @@ import { useSearchParams } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import { LANDING_NAV_LINKS } from '@/constants/landing';
 
-type VerifyStatus = 'form' | 'loading' | 'success' | 'error';
+type ResetStatus = 'form' | 'loading' | 'success' | 'error';
 
-type VerifyFormErrors = {
+type ResetFormErrors = {
   password: string;
   passwordConfirm: string;
 };
@@ -32,14 +32,8 @@ function PageShell({ children }: Readonly<{ children: ReactNode }>) {
   );
 }
 
-function StateTitle({ children, tone }: Readonly<{ children: ReactNode; tone: 'neutral' | 'success' | 'error' }>) {
-  const toneClass = {
-    neutral: 'text-white',
-    success: 'text-white',
-    error: 'text-white',
-  }[tone];
-
-  return <h1 className={`text-3xl font-extrabold tracking-tight ${toneClass}`}>{children}</h1>;
+function StateTitle({ children }: Readonly<{ children: ReactNode }>) {
+  return <h1 className="text-2xl font-bold text-white">{children}</h1>;
 }
 
 function PrimaryButton({ href, children }: Readonly<{ href: string; children: ReactNode }>) {
@@ -65,7 +59,7 @@ function SecondaryButton({ href, children }: Readonly<{ href: string; children: 
   );
 }
 
-function VerifyEmailLoadingFallback() {
+function ResetPasswordLoadingFallback() {
   return (
     <PageShell>
       <div className="flex flex-col items-center gap-6 text-center">
@@ -73,23 +67,23 @@ function VerifyEmailLoadingFallback() {
           <div className="h-14 w-14 animate-spin rounded-full border-4 border-slate-200 border-t-red-600" />
         </div>
         <div className="space-y-2">
-          <StateTitle tone="neutral">Verify Email</StateTitle>
-          <p className="text-sm leading-relaxed text-white/75">Verifying your email...</p>
+          <StateTitle>Reset Password</StateTitle>
+          <p className="text-sm leading-relaxed text-white/75">Loading your reset link...</p>
         </div>
       </div>
     </PageShell>
   );
 }
 
-function VerifyEmailContent() {
+function ResetPasswordContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
 
-  const [status, setStatus] = useState<VerifyStatus>('form');
+  const [status, setStatus] = useState<ResetStatus>('form');
   const [message, setMessage] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [errors, setErrors] = useState<VerifyFormErrors>({
+  const [errors, setErrors] = useState<ResetFormErrors>({
     password: '',
     passwordConfirm: '',
   });
@@ -97,14 +91,14 @@ function VerifyEmailContent() {
   useEffect(() => {
     if (!token) {
       setStatus('error');
-      setMessage('Verification token was not found. Please sign up again.');
+      setMessage('Reset token was not found. Please request a new password reset email.');
     }
   }, [token]);
 
   const handleSubmit = async (event: FormSubmitEvent) => {
     event.preventDefault();
 
-    const nextErrors: VerifyFormErrors = {
+    const nextErrors: ResetFormErrors = {
       password: '',
       passwordConfirm: '',
     };
@@ -122,11 +116,11 @@ function VerifyEmailContent() {
     if (nextErrors.password || nextErrors.passwordConfirm) return;
 
     setStatus('loading');
-    setMessage('Verifying your email...');
+    setMessage('Resetting your password...');
 
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || ''}/auth/verify-email/`,
+        `${process.env.NEXT_PUBLIC_API_URL || ''}/auth/reset-password/`,
         {
           method: 'POST',
           headers: {
@@ -152,15 +146,20 @@ function VerifyEmailContent() {
           return;
         }
 
-        const errorMessage = data?.message;
-        throw new Error(errorMessage || 'Verification failed. The token is invalid or has expired.');
+        throw new Error(
+          data?.message || 'Password reset failed. The token is invalid or has expired.'
+        );
       }
 
       setStatus('success');
-      setMessage(data?.message || 'Your email has been verified successfully.');
+      setMessage(data?.message || 'Your password has been reset successfully.');
     } catch (error: unknown) {
       setStatus('error');
-      setMessage(error instanceof Error ? error.message : 'Something went wrong while verifying your email.');
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'Something went wrong while resetting your password.'
+      );
     }
   };
 
@@ -169,9 +168,9 @@ function VerifyEmailContent() {
       {status === 'form' && (
         <form className="space-y-6" onSubmit={handleSubmit} noValidate>
           <div className="space-y-2 text-center">
-            <StateTitle tone="neutral">Set Your Password</StateTitle>
+            <StateTitle>Reset Your Password</StateTitle>
             <p className="text-sm leading-relaxed text-white/75">
-              Create a password to finish verifying your account.
+              Enter a new password to finish resetting your account.
             </p>
           </div>
 
@@ -220,7 +219,7 @@ function VerifyEmailContent() {
             className="inline-flex w-full items-center justify-center rounded-xl bg-white px-6 py-3 text-sm font-semibold transition-all duration-200 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2"
             style={{ color: 'var(--brand-primary)' }}
           >
-            Verify Email and Save Password
+            Reset Password
           </button>
         </form>
       )}
@@ -231,7 +230,7 @@ function VerifyEmailContent() {
             <div className="h-14 w-14 animate-spin rounded-full border-4 border-slate-200 border-t-red-600" />
           </div>
           <div className="space-y-2">
-            <StateTitle tone="neutral">Verify Email</StateTitle>
+            <StateTitle>Reset Password</StateTitle>
             <p className="text-sm leading-relaxed text-white/75">{message}</p>
           </div>
         </div>
@@ -245,7 +244,7 @@ function VerifyEmailContent() {
             </svg>
           </div>
           <div className="space-y-3">
-            <StateTitle tone="success">Email Verified</StateTitle>
+            <StateTitle>Password Reset</StateTitle>
             <p className="mx-auto max-w-sm text-sm leading-relaxed text-white/80">
               {message}
             </p>
@@ -262,13 +261,13 @@ function VerifyEmailContent() {
             </svg>
           </div>
           <div className="space-y-2">
-            <StateTitle tone="error">Verification Failed</StateTitle>
+            <StateTitle>Reset Failed</StateTitle>
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-700">
               {message}
             </div>
           </div>
           <div className="flex w-full flex-col gap-3 sm:flex-row">
-            <PrimaryButton href="/register">Back to Register</PrimaryButton>
+            <PrimaryButton href="/forgot-password">Request a New Link</PrimaryButton>
             <SecondaryButton href="/">Back to Home</SecondaryButton>
           </div>
         </div>
@@ -277,10 +276,10 @@ function VerifyEmailContent() {
   );
 }
 
-export default function VerifyEmailPage() {
+export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<VerifyEmailLoadingFallback />}>
-      <VerifyEmailContent />
+    <Suspense fallback={<ResetPasswordLoadingFallback />}>
+      <ResetPasswordContent />
     </Suspense>
   );
 }

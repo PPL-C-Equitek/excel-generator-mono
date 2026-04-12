@@ -231,10 +231,10 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar links={LANDING_NAV_LINKS} />
+    <div className="force-light min-h-screen bg-gray-50 flex flex-col">
+      <Navbar links={LANDING_NAV_LINKS} activePage="register" />
 
-      <main className="mx-auto flex w-full max-w-6xl items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
+      <main className="flex flex-1 items-center justify-center px-4 py-12">
         <div className="mx-auto w-full max-w-lg space-y-8 rounded-2xl p-10" style={{ backgroundColor: 'var(--brand-primary)' }}>
           <div>
             <h1 className="text-white font-bold text-2xl text-center mb-1">Register</h1>
@@ -321,7 +321,7 @@ export default function RegisterPage() {
               <p className="text-center text-sm" style={{ color: 'rgba(255,255,255,0.75)' }}>
                 Already have an account?{' '}
                 <Link href="/login" className="font-semibold text-white underline hover:text-red-50">
-                  login here
+                  Login here
                 </Link>
               </p>
             </form>

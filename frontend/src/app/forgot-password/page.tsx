@@ -11,8 +11,8 @@ import { resendEmailActionFlow, shouldSkipEmailResend } from '@/lib/authEmailAct
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const DEFAULT_SUCCESS_MESSAGE =
-  'If an account exists for this email, we have sent a password reset link.';
-const DEFAULT_RESEND_SUCCESS_MESSAGE = 'Password reset email sent again.';
+  'If the email exists, we sent a reset link.';
+const DEFAULT_RESEND_SUCCESS_MESSAGE = 'If the email exists, we sent a new reset link.';
 const DEFAULT_RESEND_ERROR_MESSAGE = 'Failed to resend the password reset email.';
 const RESEND_COOLDOWN_STORAGE_PREFIX = 'forgot-password-resend-cooldown:';
 
@@ -175,10 +175,10 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="force-light min-h-screen bg-gray-50 flex flex-col">
       <Navbar links={LANDING_NAV_LINKS} />
 
-      <main className="mx-auto flex w-full max-w-6xl items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
+      <main className="flex flex-1 items-center justify-center px-4 py-12">
         <div
           className="mx-auto w-full max-w-lg space-y-8 rounded-2xl p-10"
           style={{ backgroundColor: 'var(--brand-primary)' }}

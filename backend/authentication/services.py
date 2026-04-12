@@ -17,10 +17,10 @@ from authentication.logout.contracts import TokenBlacklistPort
 logger = logging.getLogger(__name__)
 PASSWORD_RESET_TOKEN_PREFIX = "password-reset"
 PASSWORD_RESET_SUCCESS_MESSAGE = (
-    "If an account exists for this email, we have sent a password reset link."
+    "If the email exists, we sent a reset link."
 )
 PASSWORD_RESET_RESEND_SUCCESS_MESSAGE = (
-    "If an account exists for this email, we have sent a new password reset link."
+    "If the email exists, we sent a new reset link."
 )
 
 
