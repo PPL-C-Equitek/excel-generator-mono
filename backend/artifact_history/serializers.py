@@ -2,6 +2,8 @@ from rest_framework import serializers
 
 from artifact_history.models import ArtifactHistory
 
+HISTORY_CUSTOM_NAME_MAX_LENGTH = 120
+
 
 class HistoryItemSerializer(serializers.ModelSerializer):
     class Meta:
@@ -18,7 +20,7 @@ class HistoryItemSerializer(serializers.ModelSerializer):
 
 class HistoryRenameSerializer(serializers.ModelSerializer):
     custom_name = serializers.CharField(
-        max_length=255,
+        max_length=HISTORY_CUSTOM_NAME_MAX_LENGTH,
         allow_blank=True,
         trim_whitespace=True,
     )
@@ -26,4 +28,3 @@ class HistoryRenameSerializer(serializers.ModelSerializer):
     class Meta:
         model = ArtifactHistory
         fields = ("custom_name",)
-

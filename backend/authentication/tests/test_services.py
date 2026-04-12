@@ -7,7 +7,18 @@ from django.utils import timezone
 from django.core.signing import TimestampSigner
 from django.test import SimpleTestCase, override_settings
 from authentication.models import User
-from authentication.services import RefreshTokenService, generate_verification_token, send_verification_email, generate_tokens, DjangoUserLookupGateway, LoginFailureTracker, InvalidRefreshTokenError, send_password_changed_email
+from authentication.services import (
+    DjangoUserLookupGateway,
+    InvalidRefreshTokenError,
+    LoginFailureTracker,
+    RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
+    RefreshTokenService,
+    _get_resend_from_email,
+    generate_tokens,
+    generate_verification_token,
+    send_password_changed_email,
+    send_verification_email,
+)
 
 class GenerateVerificationTokenTest(SimpleTestCase):
     def test_generates_signed_token_containing_email(self):
@@ -55,7 +66,10 @@ class SendVerificationEmailTest(SimpleTestCase):
     @override_settings(RESEND_API_KEY="re_test_key", FRONTEND_URL="https://app.example.com")
     def test_logs_and_reraises_exception_when_resend_fails(self):
         with self.assertLogs("authentication.services", level="ERROR") as log:
-            with self.assertRaises(ValueError, msg="RESEND_FROM_EMAIL is not configured."):
+            with self.assertRaisesRegex(
+                ValueError,
+                RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
+            ):
                 send_verification_email("user@example.com")
 
         self.assertTrue(any("Failed to send" in msg for msg in log.output))
@@ -67,6 +81,12 @@ class SendVerificationEmailTest(SimpleTestCase):
 
         log_text = "\n".join(log.output)
         self.assertIn("https://myapp.com/auth/verify-email?token=", log_text)
+
+
+class ResendFromEmailHelperTest(SimpleTestCase):
+    @override_settings(RESEND_FROM_EMAIL=123)
+    def test_returns_empty_string_when_setting_is_not_a_string(self):
+        self.assertEqual(_get_resend_from_email(), "")
 
 class GenerateTokensTest(SimpleTestCase):
     SECRET_KEY = "test-secret-key"
@@ -218,7 +238,10 @@ class SendPasswordChangedEmailTest(SimpleTestCase):
     @override_settings(RESEND_API_KEY="re_test_key")
     def test_logs_and_reraises_when_password_changed_email_send_fails(self):
         with self.assertLogs("authentication.services", level="ERROR") as log:
-            with self.assertRaises(ValueError, msg="RESEND_FROM_EMAIL is not configured."):
+            with self.assertRaisesRegex(
+                ValueError,
+                RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
+            ):
                 send_password_changed_email("user@example.com")
 
         self.assertTrue(any("Failed to send password changed email" in msg for msg in log.output))

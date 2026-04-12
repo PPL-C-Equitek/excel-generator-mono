@@ -17,8 +17,14 @@ from django.utils import timezone
 from rest_framework.test import APIClient, APIRequestFactory, APISimpleTestCase
 
 from api.models import GroupMember
-from api.views import _resolve_download_filename, _sanitize_download_filename, upload
+from api.views import (
+    _delete_history_artifact_file,
+    _resolve_download_filename,
+    _sanitize_download_filename,
+    upload,
+)
 from artifact_history.models import ArtifactHistory, HistoryExportArtifact
+from artifact_history.serializers import HISTORY_CUSTOM_NAME_MAX_LENGTH
 from authentication.models import User
 from file_processing.services.export_service import (
     OutputCSVDownloadLookupError,
@@ -326,6 +332,22 @@ class HistoryDetailViewTest(BaseApiViewTest):
         self.assertEqual(response.status_code, 400)
         self.assertIn("custom_name", response.data)
 
+    def test_history_detail_patch_returns_400_for_custom_name_above_limit(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.patch(
+            f"/history/{self.history.id}/rename/",
+            {"custom_name": "A" * (HISTORY_CUSTOM_NAME_MAX_LENGTH + 1)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("custom_name", response.data)
+        self.assertIn(
+            str(HISTORY_CUSTOM_NAME_MAX_LENGTH),
+            str(response.data["custom_name"][0]),
+        )
+
     def test_history_detail_delete_returns_401_for_anonymous_user(self):
         response = self.client.delete(f"/history/{self.history.id}/delete/")
 
@@ -372,6 +394,25 @@ class HistoryDetailViewTest(BaseApiViewTest):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data["message"], "History item not found.")
+
+    @patch("api.views.delete_artifact_history", side_effect=RuntimeError("boom"))
+    @patch("api.views._delete_history_cached_artifacts")
+    def test_history_detail_delete_returns_500_when_deletion_fails(
+        self,
+        mock_delete_cached_artifacts,
+        mock_delete_history,
+    ):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.delete(f"/history/{self.history.id}/delete/")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.data["message"],
+            "Failed to delete history item due to internal error.",
+        )
+        mock_delete_cached_artifacts.assert_called_once_with(self.history)
+        mock_delete_history.assert_called_once_with(self.history)
 
 class HistoryDownloadViewTest(BaseApiViewTest):
     def setUp(self):
@@ -2426,3 +2467,47 @@ class DownloadFilenameHelperTest(APISimpleTestCase):
             artifact_type="csv",
         )
         self.assertEqual(resolved, "laporan.CSV")
+
+
+class HistoryArtifactCleanupHelperTest(APISimpleTestCase):
+    @patch("api.views.safe_join", side_effect=ValueError("unsafe path"))
+    def test_delete_history_artifact_file_skips_unsafe_cached_path(
+        self,
+        _mock_safe_join,
+    ):
+        artifact = SimpleNamespace(artifact_type="csv", file_name="cached.csv")
+
+        with self.assertLogs("api.views", level="WARNING") as log:
+            _delete_history_artifact_file(artifact)
+
+        self.assertIn(
+            "History artifact cleanup skipped because the cached path is unsafe.",
+            "\n".join(log.output),
+        )
+
+    @patch("api.views.os.remove", side_effect=FileNotFoundError())
+    def test_delete_history_artifact_file_ignores_missing_cached_file(
+        self,
+        mock_remove,
+    ):
+        artifact = SimpleNamespace(artifact_type="csv", file_name="cached.csv")
+
+        _delete_history_artifact_file(artifact)
+
+        mock_remove.assert_called_once()
+
+    @patch("api.views.os.remove", side_effect=OSError("disk busy"))
+    def test_delete_history_artifact_file_logs_warning_when_cleanup_fails(
+        self,
+        mock_remove,
+    ):
+        artifact = SimpleNamespace(artifact_type="csv", file_name="cached.csv")
+
+        with self.assertLogs("api.views", level="WARNING") as log:
+            _delete_history_artifact_file(artifact)
+
+        mock_remove.assert_called_once()
+        self.assertIn(
+            "Failed to delete cached history artifact file during history removal.",
+            "\n".join(log.output),
+        )

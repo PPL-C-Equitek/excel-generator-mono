@@ -7,6 +7,7 @@ import type { HistoryItem } from '@/services/history'
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const UTC_PLUS_SEVEN_OFFSET_HOURS = 7
+const HISTORY_FILE_NAME_MAX_LENGTH = 120
 
 function getDisplayName(customName: string, originalName: string): string {
     return customName.trim() || originalName
@@ -237,12 +238,12 @@ export default function HistoryPage() {
                                                                         }}
                                                                         placeholder="Enter a file name"
                                                                         className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
-                                                                        maxLength={255}
+                                                                        maxLength={HISTORY_FILE_NAME_MAX_LENGTH}
                                                                         disabled={isRenaming}
                                                                     />
                                                                 </div>
                                                                 <p className="text-xs text-slate-500">
-                                                                    Leave this blank to use the uploaded file name.
+                                                                    Leave this blank to use the uploaded file name. Up to {HISTORY_FILE_NAME_MAX_LENGTH} characters.
                                                                 </p>
                                                                 <div className="flex flex-wrap gap-3">
                                                                     <button

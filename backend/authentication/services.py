@@ -22,6 +22,7 @@ PASSWORD_RESET_SUCCESS_MESSAGE = (
 PASSWORD_RESET_RESEND_SUCCESS_MESSAGE = (
     "If the email exists, we sent a new reset link."
 )
+RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE = "RESEND_FROM_EMAIL is not configured."
 
 
 @dataclass(frozen=True)
@@ -109,6 +110,13 @@ def _get_resend_from_email() -> str:
     if not isinstance(from_email, str):
         return ""
     return from_email.strip()
+
+
+def _require_resend_from_email() -> str:
+    from_email = _get_resend_from_email()
+    if not from_email:
+        raise ValueError(RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE)
+    return from_email
 
 
 def generate_verification_token(email):
@@ -318,9 +326,7 @@ def send_verification_email(email):
     try:
         resend_api_key = getattr(settings, "RESEND_API_KEY", "")
         if resend_api_key:
-            from_email = _get_resend_from_email()
-            if not from_email:
-                raise ValueError("RESEND_FROM_EMAIL is not configured.")
+            from_email = _require_resend_from_email()
             import resend
             resend.api_key = resend_api_key
             resend.Emails.send({
@@ -343,9 +349,7 @@ def send_password_reset_email(email):
     try:
         resend_api_key = getattr(settings, "RESEND_API_KEY", "")
         if resend_api_key:
-            from_email = _get_resend_from_email()
-            if not from_email:
-                raise ValueError("RESEND_FROM_EMAIL is not configured.")
+            from_email = _require_resend_from_email()
             import resend
 
             resend.api_key = resend_api_key
@@ -371,9 +375,7 @@ def send_password_changed_email(email):
     try:
         resend_api_key = getattr(settings, "RESEND_API_KEY", "")
         if resend_api_key:
-            from_email = _get_resend_from_email()
-            if not from_email:
-                raise ValueError("RESEND_FROM_EMAIL is not configured.")
+            from_email = _require_resend_from_email()
             import resend
 
             resend.api_key = resend_api_key

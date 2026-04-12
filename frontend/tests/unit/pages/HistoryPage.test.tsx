@@ -260,6 +260,17 @@ describe('HistoryPage', () => {
         expect(screen.queryByLabelText('File Name')).not.toBeInTheDocument()
     })
 
+    it('limits the file name input length while renaming', () => {
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Edit Name' })[0])
+
+        expect(screen.getByLabelText('File Name')).toHaveAttribute('maxLength', '120')
+        expect(
+            screen.getByText('Leave this blank to use the uploaded file name. Up to 120 characters.')
+        ).toBeInTheDocument()
+    })
+
     it('opens the delete dialog and confirms item deletion', async () => {
         const deleteHistory = vi.fn().mockResolvedValue(true)
         mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
