@@ -217,6 +217,162 @@ class HistoryListViewTest(BaseApiViewTest):
         )
 
 
+class HistoryDetailViewTest(BaseApiViewTest):
+    def setUp(self):
+        super().setUp()
+        self.verified_user = User.objects.create_user(
+            email="verified-history-detail@example.com",
+            name="Verified History Detail",
+            password="secret",
+            status="verified",
+        )
+        self.unverified_user = User.objects.create_user(
+            email="unverified-history-detail@example.com",
+            name="Unverified History Detail",
+            password="secret",
+            status="unverified",
+        )
+        self.other_user = User.objects.create_user(
+            email="other-history-detail@example.com",
+            name="Other History Detail",
+            password="secret",
+            status="verified",
+        )
+        self.history = ArtifactHistory.objects.create(
+            owner=self.verified_user,
+            original_name="invoice.pdf",
+            custom_name="April Invoice",
+            output_json={
+                "document_info": {"source_type": "PDF", "filename": "invoice.pdf"},
+                "summary": {"table_count": 1},
+                "content_data": [
+                    {"table_name": "Sheet1", "headers": ["A"], "rows": [{"A": "1"}]}
+                ],
+            },
+            status_processing="completed",
+            created_at=timezone.now() - timedelta(minutes=2),
+        )
+
+    def test_history_detail_patch_returns_401_for_anonymous_user(self):
+        response = self.client.patch(
+            f"/history/{self.history.id}/",
+            {"custom_name": "Renamed Invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_history_detail_patch_returns_403_for_unverified_user(self):
+        self.client.force_authenticate(user=self.unverified_user)
+
+        response = self.client.patch(
+            f"/history/{self.history.id}/",
+            {"custom_name": "Renamed Invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_history_detail_patch_updates_custom_name_for_owner(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.patch(
+            f"/history/{self.history.id}/",
+            {"custom_name": "Renamed Invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.history.refresh_from_db()
+        self.assertEqual(self.history.custom_name, "Renamed Invoice")
+        self.assertEqual(response.data["id"], str(self.history.id))
+        self.assertEqual(response.data["custom_name"], "Renamed Invoice")
+        self.assertEqual(response.data["original_name"], "invoice.pdf")
+
+    def test_history_detail_patch_allows_blank_custom_name(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.patch(
+            f"/history/{self.history.id}/",
+            {"custom_name": "   "},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.history.refresh_from_db()
+        self.assertEqual(self.history.custom_name, "")
+
+    def test_history_detail_patch_returns_404_for_non_owner(self):
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.patch(
+            f"/history/{self.history.id}/",
+            {"custom_name": "Renamed Invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["message"], "History item not found.")
+
+    def test_history_detail_patch_returns_400_for_missing_custom_name(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.patch(
+            f"/history/{self.history.id}/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("custom_name", response.data)
+
+    def test_history_detail_delete_returns_401_for_anonymous_user(self):
+        response = self.client.delete(f"/history/{self.history.id}/")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_history_detail_delete_returns_403_for_unverified_user(self):
+        self.client.force_authenticate(user=self.unverified_user)
+
+        response = self.client.delete(f"/history/{self.history.id}/")
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch("api.views.os.remove")
+    def test_history_detail_delete_removes_record_and_cached_artifacts_for_owner(
+        self,
+        mock_remove_file,
+    ):
+        HistoryExportArtifact.objects.create(
+            history=self.history,
+            owner=self.verified_user,
+            requested_format="csv",
+            artifact_type="csv",
+            file_id="csv_token",
+            file_name="cached.csv",
+            created_at=timezone.now() - timedelta(minutes=1),
+        )
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.delete(f"/history/{self.history.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(ArtifactHistory.objects.filter(id=self.history.id).exists())
+        self.assertFalse(
+            HistoryExportArtifact.objects.filter(history_id=self.history.id).exists()
+        )
+        mock_remove_file.assert_called_once_with(
+            safe_join(settings.CSV_EXPORT_DIR, "cached.csv")
+        )
+
+    def test_history_detail_delete_returns_404_for_non_owner(self):
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.delete(f"/history/{self.history.id}/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["message"], "History item not found.")
+
 class HistoryDownloadViewTest(BaseApiViewTest):
     def setUp(self):
         super().setUp()
