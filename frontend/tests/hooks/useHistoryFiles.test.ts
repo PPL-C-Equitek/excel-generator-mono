@@ -13,6 +13,8 @@ interface HistoryServiceMock {
         fileFormat: 'csv' | 'xlsx',
         filename?: string
     ) => Promise<void>
+    renameHistoryFile: (historyId: string, customName: string) => Promise<HistoryItem>
+    deleteHistoryFile: (historyId: string) => Promise<void>
 }
 
 const historyItems: HistoryItem[] = [
@@ -50,6 +52,18 @@ function makeServiceMock(
     return {
         getHistoryFiles: vi.fn().mockResolvedValue(makeHistoryResponse()),
         downloadHistoryFile: vi.fn().mockResolvedValue(undefined),
+        renameHistoryFile: vi.fn().mockImplementation(async (historyId: string, customName: string) => {
+            const matchingItem = historyItems.find((item) => item.id === historyId)
+            if (!matchingItem) {
+                throw new Error('History item not found.')
+            }
+
+            return {
+                ...matchingItem,
+                custom_name: customName,
+            }
+        }),
+        deleteHistoryFile: vi.fn().mockResolvedValue(undefined),
         ...overrides,
     }
 }
@@ -165,6 +179,39 @@ describe('useHistoryFiles', () => {
         expect(result.current.downloadError).toBe('Download failed.')
     })
 
+    it('renames a history item in local state', async () => {
+        const service = makeServiceMock()
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.renameHistory(historyItems[0].id, 'Renamed Report')
+        })
+
+        expect(service.renameHistoryFile).toHaveBeenCalledWith(
+            historyItems[0].id,
+            'Renamed Report'
+        )
+        expect(result.current.items[0].custom_name).toBe('Renamed Report')
+        expect(result.current.mutationError).toBeNull()
+    })
+
+    it('stores a mutation error when renaming fails', async () => {
+        const service = makeServiceMock({
+            renameHistoryFile: vi.fn().mockRejectedValue(new Error('Rename failed.')),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.renameHistory(historyItems[0].id, 'Renamed Report')
+        })
+
+        expect(result.current.mutationError).toBe('Rename failed.')
+    })
+
     it('tracks csv download-in-progress and blocks duplicate requests for the same item', async () => {
         const csvDownload = deferred()
         const service = makeServiceMock({
@@ -246,6 +293,108 @@ describe('useHistoryFiles', () => {
         })
 
         expect(result.current.downloadError).toBe('Failed to download history file.')
+    })
+
+    it('deletes a history item from local state without reloading when the page stays filled', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi.fn().mockResolvedValue(
+                makeHistoryResponse({
+                    count: 2,
+                    results: historyItems,
+                })
+            ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.deleteHistory(historyItems[0].id)
+        })
+
+        expect(service.deleteHistoryFile).toHaveBeenCalledWith(historyItems[0].id)
+        expect(service.getHistoryFiles).toHaveBeenCalledTimes(1)
+        expect(result.current.items).toHaveLength(1)
+        expect(result.current.count).toBe(1)
+    })
+
+    it('reloads the current page after delete when more records should refill the page', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi
+                .fn()
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 11,
+                        limit: 10,
+                        offset: 0,
+                        results: historyItems,
+                    })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 10,
+                        limit: 10,
+                        offset: 0,
+                        results: [historyItems[1]],
+                    })
+                ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.deleteHistory(historyItems[0].id)
+        })
+
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(2, 10, 0)
+    })
+
+    it('reloads the previous page after delete when the current page becomes invalid', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi
+                .fn()
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 11,
+                        limit: 10,
+                        offset: 10,
+                        results: [historyItems[0]],
+                    })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 10,
+                        limit: 10,
+                        offset: 0,
+                        results: historyItems,
+                    })
+                ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.deleteHistory(historyItems[0].id)
+        })
+
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(2, 10, 0)
+    })
+
+    it('stores a mutation error when deleting fails', async () => {
+        const service = makeServiceMock({
+            deleteHistoryFile: vi.fn().mockRejectedValue(new Error('Delete failed.')),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.deleteHistory(historyItems[0].id)
+        })
+
+        expect(result.current.mutationError).toBe('Delete failed.')
     })
 
     it('reloads the current page of history items', async () => {

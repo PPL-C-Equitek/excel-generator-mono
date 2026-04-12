@@ -149,7 +149,7 @@ describe('LoginPage', () => {
         it('does not call login API when form is submitted empty', async () => {
             render(<LoginPage />)
 
-            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+            fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
             await waitFor(() => {
                 expect(api.login).not.toHaveBeenCalled()
@@ -167,7 +167,7 @@ describe('LoginPage', () => {
             fireEvent.change(screen.getByLabelText(/password/i), {
                 target: { value: 'wrongpassword' },
             })
-            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+            fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
             await waitFor(() => {
                 expect(localStorage.getItem('access_token')).toBeNull()
@@ -186,7 +186,7 @@ describe('LoginPage', () => {
             fireEvent.change(screen.getByLabelText(/password/i), {
                 target: { value: 'wrongpassword' },
             })
-            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+            fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
             await waitFor(() => {
                 expect(globalThis.location.href).not.toBe('/convert')
@@ -262,7 +262,7 @@ describe('handleLogin', () => {
         fireEvent.change(screen.getByLabelText(/password/i), {
             target: { value: 'user1123' },
         })
-        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+        fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
         await waitFor(() => {
             expect(localStorage.getItem('user_name')).toBe('User 1')
@@ -284,7 +284,7 @@ describe('handleLogin', () => {
         fireEvent.change(screen.getByLabelText(/password/i), {
             target: { value: 'user1123' },
         })
-        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+        fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
         await waitFor(() => {
             expect(localStorage.getItem('access_token')).toBe('mock-access')
@@ -304,7 +304,7 @@ describe('handleLogin', () => {
         fireEvent.change(screen.getByLabelText(/password/i), {
             target: { value: 'wrongpassword' },
         })
-        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+        fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
         await waitFor(() => {
             expect(window.alert).toHaveBeenCalledWith('Invalid credentials')
@@ -322,7 +322,7 @@ describe('handleLogin', () => {
         fireEvent.change(screen.getByLabelText(/password/i), {
             target: { value: 'user1123' },
         })
-        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+        fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
         await waitFor(() => {
             expect(window.alert).toHaveBeenCalledWith('Something went wrong')
@@ -344,7 +344,7 @@ describe('handleLogin', () => {
             fireEvent.change(screen.getByLabelText(/password/i), {
                 target: { value: 'user1123' },
             })
-            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+            fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
             await waitFor(() => {
                 expect(api.login).toHaveBeenCalledWith('user1@gmail.com', 'user1123')
@@ -365,7 +365,7 @@ describe('handleLogin', () => {
             fireEvent.change(screen.getByLabelText(/password/i), {
                 target: { value: 'user1123' },
             })
-            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+            fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
             await waitFor(() => {
                 expect(globalThis.location.href).toBe('/convert')
@@ -385,7 +385,7 @@ describe('handleLogin', () => {
             fireEvent.change(screen.getByLabelText(/password/i), {
                 target: { value: 'wrongpassword' },
             })
-            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+            fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
             await waitFor(() => {
                 expect(window.alert).toHaveBeenCalledWith('Invalid credentials')
@@ -411,7 +411,7 @@ describe('handleLogin', () => {
             fireEvent.change(screen.getByLabelText(/password/i), {
                 target: { value: 'user1123' },
             })
-            fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+            fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
             await waitFor(() => {
                 expect(localStorage.getItem('access_token')).toBe('new-access')

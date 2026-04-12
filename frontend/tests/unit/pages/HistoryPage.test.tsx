@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import HistoryPage from '../../../src/app/history/HistoryPage'
 import { useHistoryFiles } from '../../../src/hooks/useHistoryFiles'
@@ -41,15 +41,20 @@ function makeHookState(overrides?: Partial<ReturnType<typeof useHistoryFiles>>) 
         limit: 10,
         offset: 0,
         isLoading: false,
+        renamingHistoryId: null,
+        deletingHistoryId: null,
         isDownloading: vi.fn().mockReturnValue(false),
         downloadError: null,
         loadError: null,
+        mutationError: null,
         error: null,
         reloadHistory: vi.fn().mockResolvedValue(undefined),
         goToNextPage: vi.fn().mockResolvedValue(undefined),
         goToPreviousPage: vi.fn().mockResolvedValue(undefined),
         downloadCsv: vi.fn().mockResolvedValue(undefined),
         downloadExcel: vi.fn().mockResolvedValue(undefined),
+        renameHistory: vi.fn().mockResolvedValue(true),
+        deleteHistory: vi.fn().mockResolvedValue(true),
         ...overrides,
     }
 }
@@ -72,6 +77,8 @@ describe('HistoryPage', () => {
 
         expect(screen.getByText('report-a.pdf')).toBeInTheDocument()
         expect(screen.getByText('Budget Sheet')).toBeInTheDocument()
+        expect(screen.getAllByRole('button', { name: 'Edit Name' })).toHaveLength(2)
+        expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2)
         expect(screen.getAllByRole('button', { name: 'Download CSV' })).toHaveLength(2)
         expect(screen.getAllByRole('button', { name: 'Download Excel' })).toHaveLength(2)
     })
@@ -151,6 +158,21 @@ describe('HistoryPage', () => {
         ).toBeInTheDocument()
     })
 
+    it('renders a mutation error banner when rename or delete fails', () => {
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                mutationError: 'Failed to rename history item.',
+                error: 'Failed to rename history item.',
+            })
+        )
+
+        render(<HistoryPage />)
+
+        expect(
+            screen.getByText('Failed to rename history item.')
+        ).toBeInTheDocument()
+    })
+
     it('calls the csv download action for an item', () => {
         const downloadCsv = vi.fn().mockResolvedValue(undefined)
         mockUseHistoryFiles.mockReturnValue(makeHookState({ downloadCsv }))
@@ -205,6 +227,65 @@ describe('HistoryPage', () => {
 
         const excelButton = screen.getByRole('button', { name: 'Downloading Excel...' })
         expect(excelButton).toBeDisabled()
+    })
+
+    it('opens inline rename mode and submits a renamed display name', async () => {
+        const renameHistory = vi.fn().mockResolvedValue(true)
+        mockUseHistoryFiles.mockReturnValue(makeHookState({ renameHistory }))
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Edit Name' })[0])
+        fireEvent.change(screen.getByLabelText('Display Name'), {
+            target: { value: 'Quarterly Report' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Save Name' }))
+
+        await waitFor(() => {
+            expect(renameHistory).toHaveBeenCalledWith(
+                historyItems[0].id,
+                'Quarterly Report'
+            )
+        })
+    })
+
+    it('allows inline rename mode to be cancelled', () => {
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Edit Name' })[0])
+        expect(screen.getByLabelText('Display Name')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+        expect(screen.queryByLabelText('Display Name')).not.toBeInTheDocument()
+    })
+
+    it('opens the delete dialog and confirms item deletion', async () => {
+        const deleteHistory = vi.fn().mockResolvedValue(true)
+        mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+        expect(screen.getByRole('dialog')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Delete History' }))
+
+        await waitFor(() => {
+            expect(deleteHistory).toHaveBeenCalledWith(historyItems[0].id)
+        })
+    })
+
+    it('closes the delete dialog without deleting when cancelled', () => {
+        const deleteHistory = vi.fn().mockResolvedValue(true)
+        mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(deleteHistory).not.toHaveBeenCalled()
     })
 
     it('uses default download filenames when the original name has no extension', () => {

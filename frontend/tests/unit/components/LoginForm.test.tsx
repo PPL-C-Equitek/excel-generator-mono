@@ -14,7 +14,7 @@ describe('LoginForm', () => {
         it('renders subtitle text', () => {
             render(<LoginForm />)
             expect(
-                screen.getByText(/Welcome back! Please enter your details/i)
+                screen.getByText(/Sign in to continue to your workspace/i)
             ).toBeInTheDocument()
         })
 
