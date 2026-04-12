@@ -552,6 +552,56 @@ describe("history service", () => {
       ).rejects.toThrow("This field is required.");
     });
 
+    it("falls back to the mapped 400 error when the rename error payload is a non-string array", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: vi.fn().mockResolvedValue([123]),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(
+        historyService.renameHistoryFile("history-1", "Renamed Invoice")
+      ).rejects.toThrow("The history request is invalid.");
+    });
+
+    it("reads a nested string error when the rename response stores it outside message fields", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: vi.fn().mockResolvedValue({
+          custom_name: "Name already exists.",
+        }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(
+        historyService.renameHistoryFile("history-1", "Renamed Invoice")
+      ).rejects.toThrow("Name already exists.");
+    });
+
+    it("maps 401 rename failures to the session access error when no structured payload is returned", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: vi.fn().mockResolvedValue(null),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(
+        historyService.renameHistoryFile("history-1", "Renamed Invoice")
+      ).rejects.toThrow("Your session is invalid or you no longer have access.");
+    });
+
     it("throws an error when the rename response shape is invalid", async () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi.fn().mockResolvedValue({
@@ -561,6 +611,22 @@ describe("history service", () => {
           id: "history-1",
           custom_name: "Renamed Invoice",
         }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(
+        historyService.renameHistoryFile("history-1", "Renamed Invoice")
+      ).rejects.toThrow("The history response is invalid.");
+    });
+
+    it("throws an error when the rename response body is not an object", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue(null),
       });
       vi.stubGlobal("fetch", fetchMock);
 
@@ -619,6 +685,56 @@ describe("history service", () => {
 
       await expect(historyService.deleteHistoryFile("history-1")).rejects.toThrow(
         "History item not found."
+      );
+    });
+
+    it("maps 401 delete failures to the session access error when the payload is empty", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: vi.fn().mockResolvedValue(null),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(historyService.deleteHistoryFile("history-1")).rejects.toThrow(
+        "Your session is invalid or you no longer have access."
+      );
+    });
+
+    it("falls back to the delete error message for 500 responses with non-string nested values", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: vi.fn().mockResolvedValue({
+          errors: [123],
+        }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(historyService.deleteHistoryFile("history-1")).rejects.toThrow(
+        "Failed to delete history item."
+      );
+    });
+
+    it("falls back to the delete error message for unmapped statuses", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 418,
+        json: vi.fn().mockResolvedValue(null),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(historyService.deleteHistoryFile("history-1")).rejects.toThrow(
+        "Failed to delete history item."
       );
     });
   });

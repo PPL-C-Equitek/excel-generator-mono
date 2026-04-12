@@ -335,6 +335,16 @@ describe('auth token refresh helpers', () => {
         expect(() => storeAuthTokens('access', 'refresh')).not.toThrow()
     })
 
+    it('does not throw when auth state dispatch is unavailable on window', () => {
+        vi.stubGlobal('window', {
+            localStorage: window.localStorage,
+            sessionStorage: window.sessionStorage,
+        } as unknown as Window)
+
+        expect(() => storeAuthTokens('access', 'refresh')).not.toThrow()
+        expect(() => clearAuthTokens()).not.toThrow()
+    })
+
     it('does not throw when storage setItem throws during storeAuthTokens', () => {
         vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
             throw new Error('write blocked')

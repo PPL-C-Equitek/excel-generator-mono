@@ -42,11 +42,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function readFirstError(errors: unknown, field: 'password' | 'password_confirm'): string {
-  if (!isRecord(errors)) {
-    return '';
-  }
-
+function readFirstError(errors: Record<string, unknown>, field: 'password' | 'password_confirm'): string {
   const value = errors[field];
   if (!Array.isArray(value)) {
     return '';
@@ -124,6 +120,68 @@ function ErrorIcon() {
   );
 }
 
+function validatePasswordForm(password: string, passwordConfirm: string): TokenFormErrors {
+  const nextErrors: TokenFormErrors = {
+    password: '',
+    passwordConfirm: '',
+  };
+
+  if (!password) {
+    nextErrors.password = 'Password is required.';
+  }
+
+  if (!passwordConfirm) {
+    nextErrors.passwordConfirm = 'Password confirmation is required.';
+  } else if (password !== passwordConfirm) {
+    nextErrors.passwordConfirm = 'Passwords do not match.';
+  }
+
+  return nextErrors;
+}
+
+function hasFormErrors(errors: TokenFormErrors): boolean {
+  return Boolean(errors.password || errors.passwordConfirm);
+}
+
+function readMessageFromResponse(data: unknown, fallback: string): string {
+  return isRecord(data) && typeof data.message === 'string'
+    ? data.message
+    : fallback;
+}
+
+function readFieldErrors(data: unknown): TokenFormErrors | null {
+  const errorMap = isRecord(data) ? data.errors : null;
+  if (!isRecord(errorMap)) {
+    return null;
+  }
+
+  const nextErrors = {
+    password: readFirstError(errorMap, 'password'),
+    passwordConfirm: readFirstError(errorMap, 'password_confirm'),
+  };
+
+  return hasFormErrors(nextErrors) ? nextErrors : null;
+}
+
+async function submitTokenPasswordAction(
+  endpointPath: string,
+  token: string | null,
+  password: string,
+  passwordConfirm: string
+): Promise<Response> {
+  return fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}${endpointPath}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      token,
+      password,
+      password_confirm: passwordConfirm,
+    }),
+  });
+}
+
 function TokenPasswordActionContent({
   config,
 }: Readonly<{ config: TokenPasswordActionConfig }>) {
@@ -149,23 +207,9 @@ function TokenPasswordActionContent({
   const handleSubmit = async (event: FormSubmitEvent) => {
     event.preventDefault();
 
-    const nextErrors: TokenFormErrors = {
-      password: '',
-      passwordConfirm: '',
-    };
-
-    if (!password) {
-      nextErrors.password = 'Password is required.';
-    }
-
-    if (!passwordConfirm) {
-      nextErrors.passwordConfirm = 'Password confirmation is required.';
-    } else if (password !== passwordConfirm) {
-      nextErrors.passwordConfirm = 'Passwords do not match.';
-    }
-
+    const nextErrors = validatePasswordForm(password, passwordConfirm);
     setErrors(nextErrors);
-    if (nextErrors.password || nextErrors.passwordConfirm) {
+    if (hasFormErrors(nextErrors)) {
       return;
     }
 
@@ -173,47 +217,27 @@ function TokenPasswordActionContent({
     setMessage(config.loadingMessage);
 
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || ''}${config.endpointPath}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            token,
-            password,
-            password_confirm: passwordConfirm,
-          }),
-        }
+      const response = await submitTokenPasswordAction(
+        config.endpointPath,
+        token,
+        password,
+        passwordConfirm
       );
-
       const data = await response.json().catch(() => null);
+      const fieldErrors = response.status === 400 ? readFieldErrors(data) : null;
+
+      if (fieldErrors) {
+        setErrors(fieldErrors);
+        setStatus('form');
+        return;
+      }
 
       if (!response.ok) {
-        const errorMap = isRecord(data) ? data.errors : null;
-        if (response.status === 400 && errorMap) {
-          setErrors({
-            password: readFirstError(errorMap, 'password'),
-            passwordConfirm: readFirstError(errorMap, 'password_confirm'),
-          });
-          setStatus('form');
-          return;
-        }
-
-        const errorMessage =
-          isRecord(data) && typeof data.message === 'string'
-            ? data.message
-            : config.invalidTokenMessage;
-        throw new Error(errorMessage);
+        throw new Error(readMessageFromResponse(data, config.invalidTokenMessage));
       }
 
       setStatus('success');
-      setMessage(
-        isRecord(data) && typeof data.message === 'string'
-          ? data.message
-          : config.successFallbackMessage
-      );
+      setMessage(readMessageFromResponse(data, config.successFallbackMessage));
     } catch (error: unknown) {
       setStatus('error');
       setMessage(

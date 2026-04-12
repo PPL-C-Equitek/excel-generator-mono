@@ -275,6 +275,30 @@ describe('Verify Email Page', () => {
     });
   });
 
+  test('Test 10e (Invalid field error shape): falls back to the generic invalid token message', async () => {
+    (useSearchParams as Mock).mockReturnValue({
+      get: vi.fn().mockReturnValue('fake_token'),
+    });
+
+    server.use(
+      http.post(VERIFY_EMAIL_ENDPOINT, () =>
+        HttpResponse.json(
+          { errors: 'invalid-shape' },
+          { status: 400 }
+        )
+      )
+    );
+
+    render(<VerifyEmailPage />);
+    await fillAndSubmitForm('Strong#123', 'Strong#123');
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/verification failed\. the token is invalid or has expired\./i)
+      ).toBeInTheDocument();
+    });
+  });
+
   test('Test 11 (API payload): sends token and password fields in POST body', async () => {
     (useSearchParams as Mock).mockReturnValue({
       get: vi.fn().mockReturnValue('payload_token'),

@@ -122,27 +122,23 @@ export function getStoredRefreshToken(): string | null {
 }
 
 export function storeAuthTokens(accessToken: string, refreshToken: string): void {
-    if (globalThis.window === undefined) {
-        return
-    }
+    const windowObject = globalThis.window
 
-    writeToStorage(globalThis.window.localStorage, 'access_token', accessToken)
-    writeToStorage(globalThis.window.localStorage, 'accessToken', accessToken)
-    writeToStorage(globalThis.window.localStorage, 'refresh_token', refreshToken)
-    writeToStorage(globalThis.window.localStorage, 'refreshToken', refreshToken)
-    writeToStorage(globalThis.window.sessionStorage, 'access_token', accessToken)
-    writeToStorage(globalThis.window.sessionStorage, 'refresh_token', refreshToken)
+    writeToStorage(windowObject?.localStorage, 'access_token', accessToken)
+    writeToStorage(windowObject?.localStorage, 'accessToken', accessToken)
+    writeToStorage(windowObject?.localStorage, 'refresh_token', refreshToken)
+    writeToStorage(windowObject?.localStorage, 'refreshToken', refreshToken)
+    writeToStorage(windowObject?.sessionStorage, 'access_token', accessToken)
+    writeToStorage(windowObject?.sessionStorage, 'refresh_token', refreshToken)
     emitAuthStateChanged()
 }
 
 export function clearAuthTokens(): void {
-    if (globalThis.window === undefined) {
-        return
-    }
+    const windowObject = globalThis.window
 
     for (const key of [...ACCESS_TOKEN_KEYS, ...REFRESH_TOKEN_KEYS, ...USER_METADATA_KEYS]) {
-        removeFromStorage(globalThis.window.localStorage, key)
-        removeFromStorage(globalThis.window.sessionStorage, key)
+        removeFromStorage(windowObject?.localStorage, key)
+        removeFromStorage(windowObject?.sessionStorage, key)
     }
 
     emitAuthStateChanged()

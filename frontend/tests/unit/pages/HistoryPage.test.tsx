@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import HistoryPage from '../../../src/app/history/HistoryPage'
 import { useHistoryFiles } from '../../../src/hooks/useHistoryFiles'
@@ -246,6 +246,28 @@ describe('HistoryPage', () => {
                 historyItems[0].id,
                 'Quarterly Report'
             )
+            expect(screen.queryByLabelText('File Name')).not.toBeInTheDocument()
+        })
+    })
+
+    it('keeps rename mode open when saving the name fails', async () => {
+        const renameHistory = vi.fn().mockResolvedValue(false)
+        mockUseHistoryFiles.mockReturnValue(makeHookState({ renameHistory }))
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Edit Name' })[0])
+        fireEvent.change(screen.getByLabelText('File Name'), {
+            target: { value: 'Quarterly Report' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Save Name' }))
+
+        await waitFor(() => {
+            expect(renameHistory).toHaveBeenCalledWith(
+                historyItems[0].id,
+                'Quarterly Report'
+            )
+            expect(screen.getByLabelText('File Name')).toBeInTheDocument()
         })
     })
 
@@ -286,6 +308,22 @@ describe('HistoryPage', () => {
         })
     })
 
+    it('closes rename mode after deleting the item being edited', async () => {
+        const deleteHistory = vi.fn().mockResolvedValue(true)
+        mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Edit Name' })[0])
+        fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+        fireEvent.click(screen.getByRole('button', { name: 'Delete History' }))
+
+        await waitFor(() => {
+            expect(deleteHistory).toHaveBeenCalledWith(historyItems[0].id)
+            expect(screen.queryByLabelText('File Name')).not.toBeInTheDocument()
+        })
+    })
+
     it('closes the delete dialog without deleting when cancelled', () => {
         const deleteHistory = vi.fn().mockResolvedValue(true)
         mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
@@ -297,6 +335,49 @@ describe('HistoryPage', () => {
 
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
         expect(deleteHistory).not.toHaveBeenCalled()
+    })
+
+    it('renders the selected history name inside the delete dialog', () => {
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[1])
+
+        const dialog = screen.getByRole('dialog')
+        expect(dialog).toBeInTheDocument()
+        expect(within(dialog).getByText('Budget Sheet')).toBeInTheDocument()
+    })
+
+    it('shows saving feedback while a history name is being renamed', () => {
+        mockUseHistoryFiles
+            .mockReturnValueOnce(makeHookState())
+            .mockReturnValueOnce(
+                makeHookState({
+                    renamingHistoryId: historyItems[0].id,
+                })
+            )
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Edit Name' })[0])
+
+        const savingButton = screen.getByRole('button', { name: 'Saving...' })
+        expect(savingButton).toBeDisabled()
+    })
+
+    it('shows deleting feedback while a history item is pending deletion', () => {
+        mockUseHistoryFiles
+            .mockReturnValueOnce(makeHookState())
+            .mockReturnValueOnce(
+                makeHookState({
+                    deletingHistoryId: historyItems[0].id,
+                })
+            )
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+
+        expect(screen.getAllByRole('button', { name: 'Deleting...' })).toHaveLength(2)
     })
 
     it('uses default download filenames when the original name has no extension', () => {
