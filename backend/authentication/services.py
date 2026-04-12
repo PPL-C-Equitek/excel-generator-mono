@@ -104,6 +104,13 @@ class FailureTrackerProtocol(Protocol):
         ...
 
 
+def _get_resend_from_email() -> str:
+    from_email = getattr(settings, "RESEND_FROM_EMAIL", "")
+    if not isinstance(from_email, str):
+        return ""
+    return from_email.strip()
+
+
 def generate_verification_token(email):
     signer = TimestampSigner()
     return signer.sign(email)
@@ -311,10 +318,13 @@ def send_verification_email(email):
     try:
         resend_api_key = getattr(settings, "RESEND_API_KEY", "")
         if resend_api_key:
+            from_email = _get_resend_from_email()
+            if not from_email:
+                raise ValueError("RESEND_FROM_EMAIL is not configured.")
             import resend
             resend.api_key = resend_api_key
             resend.Emails.send({
-                "from": getattr(settings, "RESEND_FROM_EMAIL", "noreply@excelprojectequitek.my.id"),
+                "from": from_email,
                 "to": email,
                 "subject": "Verify Your Email",
                 "html": f'<p>Click the link below to verify: <a href="{verification_url}">{verification_url}</a></p>',
@@ -333,16 +343,15 @@ def send_password_reset_email(email):
     try:
         resend_api_key = getattr(settings, "RESEND_API_KEY", "")
         if resend_api_key:
+            from_email = _get_resend_from_email()
+            if not from_email:
+                raise ValueError("RESEND_FROM_EMAIL is not configured.")
             import resend
 
             resend.api_key = resend_api_key
             resend.Emails.send(
                 {
-                    "from": getattr(
-                        settings,
-                        "RESEND_FROM_EMAIL",
-                        "noreply@excelprojectequitek.my.id",
-                    ),
+                    "from": from_email,
                     "to": email,
                     "subject": "Reset Your Password",
                     "html": f'<p>Click the link below to reset your password: <a href="{reset_url}">{reset_url}</a></p>',
@@ -362,16 +371,15 @@ def send_password_changed_email(email):
     try:
         resend_api_key = getattr(settings, "RESEND_API_KEY", "")
         if resend_api_key:
+            from_email = _get_resend_from_email()
+            if not from_email:
+                raise ValueError("RESEND_FROM_EMAIL is not configured.")
             import resend
 
             resend.api_key = resend_api_key
             resend.Emails.send(
                 {
-                    "from": getattr(
-                        settings,
-                        "RESEND_FROM_EMAIL",
-                        "noreply@excelprojectequitek.my.id",
-                    ),
+                    "from": from_email,
                     "to": email,
                     "subject": "Your Password Was Changed",
                     "html": (

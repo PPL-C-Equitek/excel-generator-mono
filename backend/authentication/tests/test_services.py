@@ -54,13 +54,9 @@ class SendVerificationEmailTest(SimpleTestCase):
 
     @override_settings(RESEND_API_KEY="re_test_key", FRONTEND_URL="https://app.example.com")
     def test_logs_and_reraises_exception_when_resend_fails(self):
-        mock_resend = MagicMock()
-        mock_resend.Emails.send.side_effect = Exception("API down")
-
-        with patch.dict(sys.modules, {"resend": mock_resend}):
-            with self.assertLogs("authentication.services", level="ERROR") as log:
-                with self.assertRaises(Exception, msg="API down"):
-                    send_verification_email("user@example.com")
+        with self.assertLogs("authentication.services", level="ERROR") as log:
+            with self.assertRaises(ValueError, msg="RESEND_FROM_EMAIL is not configured."):
+                send_verification_email("user@example.com")
 
         self.assertTrue(any("Failed to send" in msg for msg in log.output))
 
@@ -221,12 +217,8 @@ class SendPasswordChangedEmailTest(SimpleTestCase):
 
     @override_settings(RESEND_API_KEY="re_test_key")
     def test_logs_and_reraises_when_password_changed_email_send_fails(self):
-        mock_resend = MagicMock()
-        mock_resend.Emails.send.side_effect = RuntimeError("API down")
-
-        with patch.dict(sys.modules, {"resend": mock_resend}):
-            with self.assertLogs("authentication.services", level="ERROR") as log:
-                with self.assertRaises(RuntimeError):
-                    send_password_changed_email("user@example.com")
+        with self.assertLogs("authentication.services", level="ERROR") as log:
+            with self.assertRaises(ValueError, msg="RESEND_FROM_EMAIL is not configured."):
+                send_password_changed_email("user@example.com")
 
         self.assertTrue(any("Failed to send password changed email" in msg for msg in log.output))
