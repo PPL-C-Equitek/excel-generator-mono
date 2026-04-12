@@ -9,6 +9,7 @@ from PyPDF2.errors import PdfReadError
 
 from .excel_service import process_uploaded_excel
 from .txt_service import process_uploaded_txt
+from .csv_service import process_uploaded_csv
 from file_processing.extractors.image_extractor import ImageExtractor
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
@@ -141,7 +142,6 @@ CSV_PROTECTED_ERROR = (
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
 ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
-
 OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 ZIP_SIGNATURE_PREFIX = b"PK"
 
@@ -234,7 +234,7 @@ def _dispatch_upload_processing(ext, file_path, uploaded_file):
         EXT_DOC: lambda: process_word(file_path, EXT_DOC),
         EXT_DOCX: lambda: process_word(file_path, EXT_DOCX),
         EXT_TXT: lambda: process_uploaded_txt(file_path),
-        EXT_CSV: lambda: process_uploaded_txt(file_path),
+        EXT_CSV: lambda: process_uploaded_csv(file_path),
         EXT_PNG: lambda: _process_image(file_path),
         EXT_JPG: lambda: _process_image(file_path),
         EXT_JPEG: lambda: _process_image(file_path),
@@ -253,6 +253,7 @@ def process_upload(uploaded_file):
         return False, error, None, None
 
     ext = os.path.splitext(uploaded_file.name)[1].lower()
+
     file_path = save_temp_file(uploaded_file)
 
     try:
@@ -263,6 +264,7 @@ def process_upload(uploaded_file):
         )
         if not success:
             return False, error, None, None
+
     finally:
         try:
             if os.path.exists(file_path):

@@ -107,10 +107,10 @@ class HistoryListViewTest(BaseApiViewTest):
             created_at=created_at,
         )
 
-    def test_history_list_returns_403_for_anonymous_user(self):
+    def test_history_list_returns_401_for_anonymous_user(self):
         response = self.client.get("/history/")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
 
     def test_history_list_returns_403_for_authenticated_unverified_user(self):
         self.client.force_authenticate(user=self.unverified_user)
@@ -253,12 +253,12 @@ class HistoryDownloadViewTest(BaseApiViewTest):
             created_at=timezone.now() - timedelta(minutes=1),
         )
 
-    def test_history_download_returns_403_for_anonymous_user(self):
+    def test_history_download_returns_401_for_anonymous_user(self):
         response = self.client.get(
             f"/history/{self.history.id}/download/?file_format=csv"
         )
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
 
     def test_history_download_returns_403_for_authenticated_unverified_user(self):
         self.client.force_authenticate(user=self.unverified_user)
@@ -1422,7 +1422,7 @@ class ExportCSVViewTest(APISimpleTestCase):
         self.assertIn("output_json", response.data)
 
     @patch("api.views.export_csv_to_filesystem")
-    def test_export_csv_endpoint_returns_403_for_unauthenticated_user(
+    def test_export_csv_endpoint_returns_401_for_unauthenticated_user(
         self,
         mocked_export,
     ):
@@ -1430,7 +1430,7 @@ class ExportCSVViewTest(APISimpleTestCase):
 
         response = self.client.post("/export/csv", data=payload, format="json")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
         mocked_export.assert_not_called()
 
     @patch("api.views.export_csv_to_filesystem")
@@ -1579,7 +1579,7 @@ class ExportExcelViewTest(APISimpleTestCase):
         self.assertIn("output_json", response.data)
 
     @patch("api.views.export_excel_to_filesystem")
-    def test_export_excel_endpoint_returns_403_for_unauthenticated_user(
+    def test_export_excel_endpoint_returns_401_for_unauthenticated_user(
         self,
         mocked_export,
     ):
@@ -1587,7 +1587,7 @@ class ExportExcelViewTest(APISimpleTestCase):
 
         response = self.client.post("/export/excel", data=payload, format="json")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
         mocked_export.assert_not_called()
 
     @patch("api.views.export_excel_to_filesystem")
@@ -1728,13 +1728,13 @@ class DownloadCSVViewTest(APISimpleTestCase):
         )
 
     @patch("api.views.resolve_csv_download_artifact", create=True)
-    def test_download_csv_endpoint_returns_403_for_unauthenticated_user(
+    def test_download_csv_endpoint_returns_401_for_unauthenticated_user(
         self,
         mocked_resolver,
     ):
         response = self.client.get("/export/csv/csv_abc123/download")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
         mocked_resolver.assert_not_called()
 
     @patch("api.views.resolve_csv_download_artifact", create=True)
@@ -1981,13 +1981,13 @@ class DownloadExcelViewTest(APISimpleTestCase):
         )
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
-    def test_download_excel_endpoint_returns_403_for_unauthenticated_user(
+    def test_download_excel_endpoint_returns_401_for_unauthenticated_user(
         self,
         mocked_resolver,
     ):
         response = self.client.get("/export/excel/xlsx_abc123/download")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
         mocked_resolver.assert_not_called()
 
     @patch("api.views.resolve_excel_download_artifact", create=True)

@@ -180,9 +180,10 @@ class TestOCRService(TestCase):
     def test_ocr_single_image_import_error(self, mock_tesseract):
         mock_tesseract.side_effect = ImportError()
 
-        result = OCRService._ocr_single_image("img")
+        with self.assertRaises(ValueError) as context:
+            OCRService._ocr_single_image("img")
 
-        self.assertEqual(result, "")
+        self.assertIn("OCR dependency error", str(context.exception))
 
     @patch("file_processing.services.ocr_service.TesseractEngine")
     def test_ocr_single_image_generic_exception(self, mock_tesseract):
@@ -191,9 +192,10 @@ class TestOCRService(TestCase):
 
         mock_tesseract.return_value = mock_engine
 
-        result = OCRService._ocr_single_image("img")
+        with self.assertRaises(ValueError) as context:
+            OCRService._ocr_single_image("img")
 
-        self.assertEqual(result, "")
+        self.assertIn("OCR runtime error", str(context.exception))
 
 
 class TestNonOCRPDFService(TestCase):

@@ -56,14 +56,16 @@ class OCRService:
                 conf, len(text),
             )
             return text
-        except ImportError:
+        except ImportError as exc:
             logger.warning(
                 "pytesseract is not installed; cannot perform OCR."
             )
-            return ""
-        except Exception:
+            raise ValueError(
+                "OCR dependency error: pytesseract or Tesseract is not available."
+            ) from exc
+        except Exception as exc:
             logger.exception("Tesseract OCR failed")
-            return ""
+            raise ValueError(f"OCR runtime error: {str(exc)}") from exc
 
     @classmethod
     def process_pdf_pages(cls, file_path: str, page_numbers: List[int]) -> Dict[str, Any]:

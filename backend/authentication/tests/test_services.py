@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.core.signing import TimestampSigner
 from django.test import SimpleTestCase, override_settings
 from authentication.models import User
-from authentication.services import RefreshTokenService, generate_verification_token, send_verification_email, generate_tokens, DjangoUserLookupGateway, LoginFailureTracker, InvalidRefreshTokenError
+from authentication.services import RefreshTokenService, generate_verification_token, send_verification_email, generate_tokens, DjangoUserLookupGateway, LoginFailureTracker, InvalidRefreshTokenError, send_password_changed_email
 
 class GenerateVerificationTokenTest(SimpleTestCase):
     def test_generates_signed_token_containing_email(self):
@@ -191,3 +191,42 @@ class RefreshTokenServiceTest(SimpleTestCase):
         with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
             with self.assertRaises(InvalidRefreshTokenError, msg="Invalid token payload."):
                 RefreshTokenService().refresh(token)
+
+
+class SendPasswordChangedEmailTest(SimpleTestCase):
+    @override_settings(RESEND_API_KEY="")
+    def test_logs_password_changed_notification_when_no_api_key(self):
+        with self.assertLogs("authentication.services", level="INFO") as log:
+            send_password_changed_email("user@example.com")
+
+        log_text = "\n".join(log.output)
+        self.assertIn("Password changed notification", log_text)
+        self.assertIn("user@example.com", log_text)
+
+    @override_settings(
+        RESEND_API_KEY="re_test_key",
+        RESEND_FROM_EMAIL="noreply@app.example.com",
+    )
+    def test_sends_password_changed_email_via_resend_when_api_key_configured(self):
+        mock_resend = MagicMock()
+        with patch.dict(sys.modules, {"resend": mock_resend}):
+            send_password_changed_email("user@example.com")
+
+        self.assertEqual(mock_resend.api_key, "re_test_key")
+        mock_resend.Emails.send.assert_called_once()
+        call_kwargs = mock_resend.Emails.send.call_args[0][0]
+        self.assertEqual(call_kwargs["from"], "noreply@app.example.com")
+        self.assertEqual(call_kwargs["to"], "user@example.com")
+        self.assertEqual(call_kwargs["subject"], "Your Password Was Changed")
+
+    @override_settings(RESEND_API_KEY="re_test_key")
+    def test_logs_and_reraises_when_password_changed_email_send_fails(self):
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = RuntimeError("API down")
+
+        with patch.dict(sys.modules, {"resend": mock_resend}):
+            with self.assertLogs("authentication.services", level="ERROR") as log:
+                with self.assertRaises(RuntimeError):
+                    send_password_changed_email("user@example.com")
+
+        self.assertTrue(any("Failed to send password changed email" in msg for msg in log.output))
