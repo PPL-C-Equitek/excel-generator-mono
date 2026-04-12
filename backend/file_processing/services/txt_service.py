@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ENCODING = "utf-8"
 
-def _read_lines_from_path(file_path: str) -> Iterator[str]:
+def _read_lines_from_path(file_path: str) -> list[str]:
     if ".." in os.path.normpath(file_path).split(os.sep):
         raise ValueError("Path file tidak valid (Potensi Path Traversal terdeteksi).")
 
@@ -18,8 +18,7 @@ def _read_lines_from_path(file_path: str) -> Iterator[str]:
         raise FileNotFoundError(f"File tidak ditemukan: {safe_path}")
 
     with open(safe_path, "r", encoding=DEFAULT_ENCODING, errors="strict") as fh:
-        for line in fh:
-            yield line.rstrip('\r\n')
+        return [line.rstrip('\r\n') for line in fh]
 
 
 def _read_lines_from_stream(stream: IO[bytes] | IO[str] | Any) -> Iterator[str]:
@@ -67,8 +66,8 @@ def process_uploaded_txt(
 ) -> tuple[bool, str | None, list[list[str]] | None]:
     try:
         data = parse_txt(file_or_path)
-    except FileNotFoundError as exc:
-        return False, str(exc), None
+    except FileNotFoundError:
+        return False, "File tidak ditemukan.", None
     except UnicodeDecodeError:
         return False, "File teks rusak atau format karakter tidak didukung.", None
     except Exception:

@@ -9,8 +9,7 @@ DEFAULT_ENCODING = "utf-8-sig"
 def _read_lines_from_file(file_or_path: str | IO[bytes] | IO[str] | Any):
     if isinstance(file_or_path, str):
         with open(file_or_path, "r", encoding=DEFAULT_ENCODING, errors="strict") as fh:
-            for line in fh:
-                yield line
+            yield from fh.readlines()
     else:
         try:
             file_or_path.seek(0)
