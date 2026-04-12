@@ -41,8 +41,7 @@ export default function LogoutButton() {
             clearCookie('refresh_token')
             clearCookie('accessToken')
             clearCookie('refreshToken')
-            setMessage('Berhasil keluar')
-            router.push('/')
+            router.push('/login')
         } catch (error) {
             setIsError(true)
             setMessage(
@@ -67,14 +66,11 @@ export default function LogoutButton() {
                 {isLoading ? 'Logging out...' : 'Logout'}
             </button>
 
-            {message ? (
+            {isError && message ? (
                 <p
                     role="status"
                     aria-live="polite"
-                    className={`mt-2 rounded-lg border px-3 py-2 text-sm ${isError
-                        ? 'border-red-400 bg-red-50 text-red-700'
-                        : 'border-green-400 bg-green-50 text-green-700'
-                        }`}
+                    className="mt-2 rounded-lg border border-red-400 bg-red-50 px-3 py-2 text-sm text-red-700"
                 >
                     {message}
                 </p>

@@ -50,7 +50,7 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
             {/* Heading */}
             <h1 className="text-white font-bold text-2xl text-center mb-1">Login</h1>
             <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.75)' }}>
-                Welcome back! Please enter your details.
+                Sign in to continue to your workspace.
             </p>
 
             {/* Error */}
@@ -119,7 +119,7 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
                     href="/forgot-password"
                     className="text-white font-bold text-sm hover:underline"
                 >
-                    Forgot password?
+                    Forgot Password?
                 </a>
             </div>
 
@@ -129,7 +129,7 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
                 className="w-full py-3 rounded-xl font-bold text-sm mb-3 transition active:scale-[0.98]"
                 style={{ backgroundColor: '#ffffff', color: 'var(--brand-primary)' }}
             >
-                Sign in
+                Sign In
             </button>
 
             {/* Sign in with Google */}
@@ -140,7 +140,7 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
                 style={{ backgroundColor: '#ffffff', color: '#111827' }}
             >
                 <span className="text-base">G</span>{' '}
-                Sign in with Google
+                Sign In with Google
             </button>
 
             {/* Sign up */}

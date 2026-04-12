@@ -5,10 +5,13 @@ from unittest.mock import patch
 from authentication.models import User
 from artifact_history.models import ArtifactHistory, HistoryExportArtifact
 from artifact_history.services import (
+    delete_artifact_history,
+    get_artifact_history_for_user,
     create_artifact_history,
     create_history_export_artifact,
     get_history_export_artifact,
     list_artifact_history_for_user,
+    update_artifact_history_custom_name,
 )
 
 
@@ -89,6 +92,67 @@ class ArtifactHistoryServiceTest(TestCase):
         results = list_artifact_history_for_user(self.owner, limit=10, offset=0)
 
         self.assertEqual(list(results), [])
+
+    def test_get_artifact_history_for_user_returns_owned_record(self):
+        record = ArtifactHistory.objects.create(
+            owner=self.owner,
+            original_name="owner.pdf",
+            custom_name=None,
+            output_json=make_output_json("OwnerSheet", "owner"),
+            status_processing="completed",
+            created_at="2026-04-08T10:00:00Z",
+        )
+
+        result = get_artifact_history_for_user(self.owner, record.id)
+
+        self.assertEqual(result, record)
+
+    def test_get_artifact_history_for_user_returns_none_for_other_user_record(self):
+        record = ArtifactHistory.objects.create(
+            owner=self.other_owner,
+            original_name="other.pdf",
+            custom_name=None,
+            output_json=make_output_json("OtherSheet", "other"),
+            status_processing="completed",
+            created_at="2026-04-08T10:00:00Z",
+        )
+
+        result = get_artifact_history_for_user(self.owner, record.id)
+
+        self.assertIsNone(result)
+
+    def test_update_artifact_history_custom_name_trims_and_saves_value(self):
+        record = ArtifactHistory.objects.create(
+            owner=self.owner,
+            original_name="owner.pdf",
+            custom_name=None,
+            output_json=make_output_json("OwnerSheet", "owner"),
+            status_processing="completed",
+            created_at="2026-04-08T10:00:00Z",
+        )
+
+        updated_record = update_artifact_history_custom_name(
+            record,
+            "  Quarterly Report  ",
+        )
+
+        record.refresh_from_db()
+        self.assertEqual(updated_record.custom_name, "Quarterly Report")
+        self.assertEqual(record.custom_name, "Quarterly Report")
+
+    def test_delete_artifact_history_removes_record(self):
+        record = ArtifactHistory.objects.create(
+            owner=self.owner,
+            original_name="owner.pdf",
+            custom_name=None,
+            output_json=make_output_json("OwnerSheet", "owner"),
+            status_processing="completed",
+            created_at="2026-04-08T10:00:00Z",
+        )
+
+        delete_artifact_history(record)
+
+        self.assertFalse(ArtifactHistory.objects.filter(id=record.id).exists())
 
     def test_list_artifact_history_for_user_rejects_invalid_limit(self):
         with self.assertRaises(ValueError):

@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, DragEvent, ChangeEvent } from 'react'
+import { useState, type ReactNode, type DragEvent, type ChangeEvent } from 'react'
 
 interface UploadZoneProps {
     readonly onFileSelect?: (file: File) => void
     readonly disabled?: boolean
+    readonly footerContent?: ReactNode
 }
 
 function FileIcon() {
@@ -25,7 +26,7 @@ function formatFileSize(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export default function UploadZone({ onFileSelect, disabled }: UploadZoneProps) {
+export default function UploadZone({ onFileSelect, disabled, footerContent }: UploadZoneProps) {
     const [isDragging, setIsDragging] = useState(false)
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
@@ -60,7 +61,6 @@ export default function UploadZone({ onFileSelect, disabled }: UploadZoneProps) 
     if (selectedFile) {
         return (
             <div className="flex flex-col items-center gap-6 py-8 animate-fadeIn">
-                {/* File card */}
                 <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white shadow-md p-6 flex flex-col items-center gap-4">
                     <FileIcon />
                     <div className="text-center">
@@ -73,7 +73,8 @@ export default function UploadZone({ onFileSelect, disabled }: UploadZoneProps) 
                     </div>
                 </div>
 
-                {/* Actions */}
+                {footerContent ? <div className="w-full">{footerContent}</div> : null}
+
                 <div className="flex items-center gap-3">
                     <button
                         onClick={handleReset}
@@ -105,32 +106,35 @@ export default function UploadZone({ onFileSelect, disabled }: UploadZoneProps) 
         )
     }
 
-    // Default upload zone
     return (
-        <label
-            data-testid="drop-zone"
-            onDragOver={(e) => { e.preventDefault(); if (!disabled) setIsDragging(true) }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={handleDrop}
-            aria-label="File upload drop zone"
-            className={`border-2 border-dashed rounded-lg p-20 flex flex-col items-center justify-center gap-3 transition-colors
+        <div className="space-y-6">
+            <label
+                data-testid="drop-zone"
+                onDragOver={(e) => { e.preventDefault(); if (!disabled) setIsDragging(true) }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={handleDrop}
+                aria-label="File upload drop zone"
+                className={`flex border-2 border-dashed rounded-lg p-20 flex-col items-center justify-center gap-3 transition-colors
                 ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
                 ${isDragging ? 'border-red-600 bg-red-50' : 'border-gray-300 bg-gray-100'}`}
-        >
-            <input
-                data-testid="file-input"
-                type="file"
-                onChange={handleChange}
-                disabled={disabled}
-                className="hidden"
-            />
-            <span
-                className={`bg-red-700 text-white font-bold px-8 py-3 rounded-xl transition pointer-events-none
-                    ${disabled ? 'opacity-50' : 'hover:bg-red-800'}`}
             >
-                Upload File
-            </span>
-            <p className="text-gray-400 text-sm">Or drop file here</p>
-        </label>
+                <input
+                    data-testid="file-input"
+                    type="file"
+                    onChange={handleChange}
+                    disabled={disabled}
+                    className="hidden"
+                />
+                <span
+                    className={`bg-red-700 text-white font-bold px-8 py-3 rounded-xl transition pointer-events-none
+                    ${disabled ? 'opacity-50' : 'hover:bg-red-800'}`}
+                >
+                    Upload File
+                </span>
+                <p className="text-gray-400 text-sm">Or drop file here</p>
+            </label>
+
+            {footerContent}
+        </div>
     )
 }

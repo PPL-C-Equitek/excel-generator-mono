@@ -27,39 +27,41 @@ export default function AuthEmailSuccessCard({
   isSecondaryDisabled,
 }: AuthEmailSuccessCardProps) {
   return (
-    <div className="mt-8 space-y-4">
-      <div className="flex flex-col items-center gap-4 rounded-xl border border-green-200 bg-green-50 p-5 text-sm text-green-700">
-        <div className="flex items-center gap-3 text-green-600">
-          <svg className="h-8 w-8 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+    <div className="mt-8 space-y-6">
+      <div className="flex flex-col items-center gap-5 text-center">
+        <div className="rounded-full border border-white/20 bg-white/10 p-4 text-white shadow-lg shadow-red-950/20">
+          <svg className="h-14 w-14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
             <path
-              fillRule="evenodd"
-              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-              clipRule="evenodd"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M9 12.75 11.25 15 15 9.75m6 2.25A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z"
             />
           </svg>
-          <span className="break-words text-center text-lg font-medium">
-            {successMessage}
-          </span>
         </div>
 
-        <p className="text-center text-sm text-green-700">
-          {emailNotice}
-          <span className="font-semibold">{email}</span>.
-        </p>
+        <div className="space-y-3">
+          <p className="mx-auto max-w-md text-sm leading-relaxed text-white/90">
+            {successMessage}
+          </p>
+          <p className="mx-auto max-w-sm text-sm leading-relaxed text-white/75">
+            {emailNotice}
+            <span className="font-semibold text-white">{email}</span>.
+          </p>
+        </div>
 
         {statusMessage && (
-          <p className="w-full rounded-md bg-green-100 px-3 py-2 text-center text-sm text-green-700">
+          <p className="w-full rounded-xl border border-white/15 bg-white/10 px-4 py-3 text-center text-sm text-white/85">
             {statusMessage}
           </p>
         )}
 
         {errorMessage && (
-          <p className="w-full rounded-md bg-red-100 px-3 py-2 text-center text-sm text-red-600">
+          <p className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-center text-sm text-red-600">
             {errorMessage}
           </p>
         )}
 
-        <div className="mt-2 flex w-full flex-col gap-3 sm:flex-row">
+        <div className="flex w-full flex-col gap-3 sm:flex-row">
           <Link
             href={primaryHref}
             className="flex w-full justify-center rounded-xl border border-transparent bg-white px-4 py-3 text-sm font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2"
@@ -73,12 +75,9 @@ export default function AuthEmailSuccessCard({
             disabled={isSecondaryDisabled}
             className={`w-full rounded-xl border px-4 py-3 text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 ${
               isSecondaryDisabled
-                ? 'cursor-not-allowed border-gray-300 bg-gray-100 text-gray-500'
-                : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
+                ? 'cursor-not-allowed border-white/15 bg-white/10 text-white/50'
+                : 'border-white/20 bg-transparent text-white hover:bg-white/10'
             }`}
-            style={
-              isSecondaryDisabled ? undefined : { color: 'var(--brand-primary)' }
-            }
           >
             {secondaryButtonText}
           </button>

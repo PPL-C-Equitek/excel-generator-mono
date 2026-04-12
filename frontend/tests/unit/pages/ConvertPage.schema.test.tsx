@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ILLMService } from '../../../src/lib/ILLMService'
 
@@ -13,17 +14,22 @@ import { uploadFile } from '../../../src/lib/api'
 vi.mock('../../../src/components/UploadZone', () => ({
     default: ({
         onFileSelect,
+        footerContent,
     }: {
         onFileSelect?: (file: File) => void
+        footerContent?: ReactNode
     }) => (
-        <button
-            type="button"
-            onClick={() => {
-                onFileSelect?.(new File(['content'], 'schema-test.pdf', { type: 'application/pdf' }))
-            }}
-        >
-            Upload File
-        </button>
+        <div>
+            <button
+                type="button"
+                onClick={() => {
+                    onFileSelect?.(new File(['content'], 'schema-test.pdf', { type: 'application/pdf' }))
+                }}
+            >
+                Upload File
+            </button>
+            {footerContent}
+        </div>
     ),
 }))
 

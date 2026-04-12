@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { getStoredAccessToken } from '@/lib/auth'
+import { useEffect, useState } from 'react'
+import { AUTH_STATE_CHANGE_EVENT, getStoredAccessToken } from '@/lib/auth'
 import LogoutButton from '@/components/LogoutButton'
 import { AUTHENTICATED_NAV_LINKS, type AppPage, type NavLink } from '@/constants/landing'
 
@@ -16,8 +17,22 @@ export default function Navbar({
     brandName = 'EQUITEK',
     activePage,
 }: NavbarProps) {
-    const isAuthenticated = Boolean(getStoredAccessToken())
+    const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getStoredAccessToken()))
     const visibleLinks = isAuthenticated ? AUTHENTICATED_NAV_LINKS : links
+
+    useEffect(() => {
+        const syncAuthState = () => {
+            setIsAuthenticated(Boolean(getStoredAccessToken()))
+        }
+
+        globalThis.window.addEventListener('storage', syncAuthState)
+        globalThis.window.addEventListener(AUTH_STATE_CHANGE_EVENT, syncAuthState)
+
+        return () => {
+            globalThis.window.removeEventListener('storage', syncAuthState)
+            globalThis.window.removeEventListener(AUTH_STATE_CHANGE_EVENT, syncAuthState)
+        }
+    }, [])
 
     return (
         <nav

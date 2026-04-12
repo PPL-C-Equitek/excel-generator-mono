@@ -16,8 +16,8 @@ const VERIFY_EMAIL_ENDPOINT = /\/auth\/verify-email\/$/;
 async function fillAndSubmitForm(password = 'Strong#123', confirmPassword = 'Strong#123') {
   const user = userEvent.setup();
   await user.type(screen.getByLabelText(/^password$/i), password);
-  await user.type(screen.getByLabelText(/^konfirmasi password$/i), confirmPassword);
-  await user.click(screen.getByRole('button', { name: /verifikasi dan simpan password/i }));
+  await user.type(screen.getByLabelText(/^confirm password$/i), confirmPassword);
+  await user.click(screen.getByRole('button', { name: /verify email and save password/i }));
 }
 
 describe('Verify Email Page', () => {
@@ -32,8 +32,8 @@ describe('Verify Email Page', () => {
 
     render(<VerifyEmailPage />);
 
-    expect(screen.getByText(/set password anda/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /verifikasi dan simpan password/i })).toBeInTheDocument();
+    expect(screen.getByText(/set your password/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /verify email and save password/i })).toBeInTheDocument();
   });
 
   test('Test 2 (Loading): shows loading spinner/text after submit while verifying', async () => {
@@ -44,7 +44,7 @@ describe('Verify Email Page', () => {
     server.use(
       http.post(VERIFY_EMAIL_ENDPOINT, async () => {
         await new Promise((resolve) => setTimeout(resolve, 200));
-        return HttpResponse.json({ message: 'Email berhasil diverifikasi' }, { status: 200 });
+        return HttpResponse.json({ message: 'Email verified successfully' }, { status: 200 });
       })
     );
 
@@ -52,7 +52,7 @@ describe('Verify Email Page', () => {
 
     await fillAndSubmitForm();
 
-    expect(screen.getByText(/memverifikasi email anda/i)).toBeInTheDocument();
+    expect(screen.getByText(/verifying your email/i)).toBeInTheDocument();
   });
 
   test('Test 1b (Suspense fallback): renders fallback when search params are pending', () => {
@@ -63,7 +63,7 @@ describe('Verify Email Page', () => {
     const fetchSpy = vi.spyOn(global, 'fetch');
     render(<VerifyEmailPage />);
 
-    expect(screen.getByText(/memverifikasi email anda/i)).toBeInTheDocument();
+    expect(screen.getByText(/verifying your email/i)).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -75,7 +75,7 @@ describe('Verify Email Page', () => {
 
     server.use(
       http.post(VERIFY_EMAIL_ENDPOINT, () =>
-        HttpResponse.json({ message: 'Email berhasil diverifikasi' }, { status: 200 })
+        HttpResponse.json({ message: 'Email verified successfully' }, { status: 200 })
       )
     );
 
@@ -83,8 +83,8 @@ describe('Verify Email Page', () => {
     await fillAndSubmitForm();
 
     await waitFor(() => {
-      expect(screen.getByText(/email berhasil diverifikasi/i)).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: /login/i })).toBeInTheDocument();
+      expect(screen.getByText(/email verified successfully/i)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /continue to login/i })).toBeInTheDocument();
     });
   });
 
@@ -95,7 +95,7 @@ describe('Verify Email Page', () => {
 
     server.use(
       http.post(VERIFY_EMAIL_ENDPOINT, () =>
-        HttpResponse.json({ message: 'Link tidak valid atau sudah kadaluarsa' }, { status: 400 })
+        HttpResponse.json({ message: 'The verification link is invalid or has expired' }, { status: 400 })
       )
     );
 
@@ -103,7 +103,7 @@ describe('Verify Email Page', () => {
     await fillAndSubmitForm();
 
     await waitFor(() => {
-      expect(screen.getByText(/link tidak valid/i)).toBeInTheDocument();
+      expect(screen.getByText(/verification link is invalid/i)).toBeInTheDocument();
     });
   });
 
@@ -115,7 +115,7 @@ describe('Verify Email Page', () => {
     const fetchSpy = vi.spyOn(global, 'fetch');
     render(<VerifyEmailPage />);
 
-    expect(screen.getByText(/token verifikasi tidak ditemukan/i)).toBeInTheDocument();
+    expect(screen.getByText(/verification token was not found/i)).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -134,7 +134,7 @@ describe('Verify Email Page', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/verifikasi gagal\. token tidak valid atau sudah kedaluwarsa\./i)
+        screen.getByText(/verification failed\. the token is invalid or has expired\./i)
       ).toBeInTheDocument();
     });
   });
@@ -150,7 +150,7 @@ describe('Verify Email Page', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/terjadi kesalahan saat memverifikasi email\./i)
+        screen.getByText(/something went wrong while verifying your email\./i)
       ).toBeInTheDocument();
     });
 
@@ -170,8 +170,8 @@ describe('Verify Email Page', () => {
     await fillAndSubmitForm();
 
     await waitFor(() => {
-      expect(screen.getByText(/email anda berhasil diverifikasi\./i)).toBeInTheDocument();
-      expect(screen.getByText(/verifikasi berhasil/i)).toBeInTheDocument();
+      expect(screen.getByText(/your email has been verified successfully\./i)).toBeInTheDocument();
+      expect(screen.getByText(/email verified/i)).toBeInTheDocument();
     });
   });
 
@@ -189,7 +189,7 @@ describe('Verify Email Page', () => {
     await fillAndSubmitForm();
 
     await waitFor(() => {
-      expect(screen.getByText(/email anda berhasil diverifikasi\./i)).toBeInTheDocument();
+      expect(screen.getByText(/your email has been verified successfully\./i)).toBeInTheDocument();
     });
 
     fetchSpy.mockRestore();
@@ -205,7 +205,7 @@ describe('Verify Email Page', () => {
 
     await fillAndSubmitForm('Strong#123', 'Strong#124');
 
-    expect(screen.getByText(/password tidak cocok/i)).toBeInTheDocument();
+    expect(screen.getByText(/passwords do not match/i)).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -219,10 +219,10 @@ describe('Verify Email Page', () => {
     const fetchSpy = vi.spyOn(global, 'fetch');
     render(<VerifyEmailPage />);
 
-    await user.click(screen.getByRole('button', { name: /verifikasi dan simpan password/i }));
+    await user.click(screen.getByRole('button', { name: /verify email and save password/i }));
 
-    expect(screen.getByText(/^password wajib diisi$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^konfirmasi password wajib diisi$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^password is required\.$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^password confirmation is required\.$/i)).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -246,8 +246,8 @@ describe('Verify Email Page', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/password confirmation does not match/i)).toBeInTheDocument();
-      expect(screen.getByText(/set password anda/i)).toBeInTheDocument();
-      expect(screen.queryByText(/verifikasi gagal/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/set your password/i)).toBeInTheDocument();
+      expect(screen.queryByText(/verification failed/i)).not.toBeInTheDocument();
     });
   });
 
@@ -270,8 +270,32 @@ describe('Verify Email Page', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/password must contain at least one special character/i)).toBeInTheDocument();
-      expect(screen.getByText(/set password anda/i)).toBeInTheDocument();
-      expect(screen.queryByText(/verifikasi gagal/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/set your password/i)).toBeInTheDocument();
+      expect(screen.queryByText(/verification failed/i)).not.toBeInTheDocument();
+    });
+  });
+
+  test('Test 10e (Invalid field error shape): falls back to the generic invalid token message', async () => {
+    (useSearchParams as Mock).mockReturnValue({
+      get: vi.fn().mockReturnValue('fake_token'),
+    });
+
+    server.use(
+      http.post(VERIFY_EMAIL_ENDPOINT, () =>
+        HttpResponse.json(
+          { errors: 'invalid-shape' },
+          { status: 400 }
+        )
+      )
+    );
+
+    render(<VerifyEmailPage />);
+    await fillAndSubmitForm('Strong#123', 'Strong#123');
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/verification failed\. the token is invalid or has expired\./i)
+      ).toBeInTheDocument();
     });
   });
 

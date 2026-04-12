@@ -120,7 +120,7 @@ describe('ForgotPasswordPage', () => {
 
     expect(
       await screen.findByText(
-        'If an account exists for this email, we have sent a password reset link.'
+        'If the email exists, we sent a reset link.'
       )
     ).toBeInTheDocument();
   });

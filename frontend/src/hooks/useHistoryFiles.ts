@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import {
+    deleteHistoryFile,
     downloadHistoryFile,
     getHistoryFiles,
+    renameHistoryFile,
     type HistoryItem,
     type HistoryListResponse,
 } from '@/services/history'
@@ -15,6 +17,8 @@ interface HistoryService {
         fileFormat: 'csv' | 'xlsx',
         filename?: string
     ) => Promise<void>
+    renameHistoryFile: (historyId: string, customName: string) => Promise<HistoryItem>
+    deleteHistoryFile: (historyId: string) => Promise<void>
 }
 
 interface UseHistoryFilesReturn {
@@ -23,15 +27,20 @@ interface UseHistoryFilesReturn {
     limit: number
     offset: number
     isLoading: boolean
+    renamingHistoryId: string | null
+    deletingHistoryId: string | null
     isDownloading: (historyId: string, fileFormat: 'csv' | 'xlsx') => boolean
     downloadError: string | null
     loadError: string | null
+    mutationError: string | null
     error: string | null
     reloadHistory: () => Promise<void>
     goToNextPage: () => Promise<void>
     goToPreviousPage: () => Promise<void>
     downloadCsv: (historyId: string, filename?: string) => Promise<void>
     downloadExcel: (historyId: string, filename?: string) => Promise<void>
+    renameHistory: (historyId: string, customName: string) => Promise<boolean>
+    deleteHistory: (historyId: string) => Promise<boolean>
 }
 
 const DEFAULT_LIMIT = 10
@@ -39,6 +48,8 @@ const DEFAULT_LIMIT = 10
 const historyService: HistoryService = {
     getHistoryFiles,
     downloadHistoryFile,
+    renameHistoryFile,
+    deleteHistoryFile,
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -57,12 +68,22 @@ export function useHistoryFiles(
     const [limit, setLimit] = useState(DEFAULT_LIMIT)
     const [offset, setOffset] = useState(0)
     const [isLoading, setIsLoading] = useState(true)
+    const [renamingHistoryId, setRenamingHistoryId] = useState<string | null>(null)
+    const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null)
     const [loadError, setLoadError] = useState<string | null>(null)
     const [downloadError, setDownloadError] = useState<string | null>(null)
+    const [mutationError, setMutationError] = useState<string | null>(null)
     const [activeDownloads, setActiveDownloads] = useState<Record<string, boolean>>({})
 
-    const loadHistory = async (nextLimit = limit, nextOffset = offset) => {
-        setIsLoading(true)
+    const loadHistory = async (
+        nextLimit = limit,
+        nextOffset = offset,
+        options?: { showLoader?: boolean }
+    ) => {
+        const showLoader = options?.showLoader ?? true
+        if (showLoader) {
+            setIsLoading(true)
+        }
         setLoadError(null)
 
         try {
@@ -76,7 +97,9 @@ export function useHistoryFiles(
             setCount(0)
             setLoadError(getErrorMessage(error, 'Failed to load history.'))
         } finally {
-            setIsLoading(false)
+            if (showLoader) {
+                setIsLoading(false)
+            }
         }
     }
 
@@ -134,6 +157,59 @@ export function useHistoryFiles(
         }
     }
 
+    const renameHistory = async (
+        historyId: string,
+        customName: string
+    ): Promise<boolean> => {
+        setMutationError(null)
+        setRenamingHistoryId(historyId)
+
+        try {
+            const updatedHistory = await service.renameHistoryFile(historyId, customName)
+            setItems((current) =>
+                current.map((item) =>
+                    item.id === historyId ? updatedHistory : item
+                )
+            )
+            return true
+        } catch (error: unknown) {
+            setMutationError(getErrorMessage(error, 'Failed to rename history item.'))
+            return false
+        } finally {
+            setRenamingHistoryId(null)
+        }
+    }
+
+    const deleteHistory = async (historyId: string): Promise<boolean> => {
+        setMutationError(null)
+        setDeletingHistoryId(historyId)
+
+        try {
+            await service.deleteHistoryFile(historyId)
+            const nextCount = Math.max(0, count - 1)
+            const remainingItems = items.filter((item) => item.id !== historyId)
+            const shouldLoadPreviousPage = nextCount > 0 && offset >= nextCount
+            const shouldRefillCurrentPage =
+                nextCount > offset + remainingItems.length
+
+            if (shouldLoadPreviousPage) {
+                await loadHistory(limit, Math.max(0, offset - limit), { showLoader: false })
+            } else if (shouldRefillCurrentPage) {
+                await loadHistory(limit, offset, { showLoader: false })
+            } else {
+                setItems(remainingItems)
+                setCount(nextCount)
+            }
+
+            return true
+        } catch (error: unknown) {
+            setMutationError(getErrorMessage(error, 'Failed to delete history item.'))
+            return false
+        } finally {
+            setDeletingHistoryId(null)
+        }
+    }
+
     const downloadCsv = async (historyId: string, filename?: string) => {
         await downloadFile(historyId, 'csv', filename)
     }
@@ -151,14 +227,19 @@ export function useHistoryFiles(
         limit,
         offset,
         isLoading,
+        renamingHistoryId,
+        deletingHistoryId,
         isDownloading,
         downloadError,
         loadError,
-        error: loadError ?? downloadError,
+        mutationError,
+        error: loadError ?? downloadError ?? mutationError,
         reloadHistory,
         goToNextPage,
         goToPreviousPage,
         downloadCsv,
         downloadExcel,
+        renameHistory,
+        deleteHistory,
     }
 }

@@ -44,6 +44,12 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                             void handleFileSelect(file, selectedSchema?.id ?? null)
                         }}
                         disabled={isConverting}
+                        footerContent={
+                            <SchemaSelector
+                                className="mt-0"
+                                onSchemaChange={setSelectedSchema}
+                            />
+                        }
                     />
 
                     {isConverting && (
@@ -123,8 +129,6 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                             )}
                         </div>
                     )}
-
-                    <SchemaSelector onSchemaChange={setSelectedSchema} />
                 </div>
             </main>
         </div>

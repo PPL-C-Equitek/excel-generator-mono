@@ -13,12 +13,14 @@ interface SchemaSelectorProps {
     readonly service?: ICustomSchemaService
     readonly accessTokenResolver?: () => string | null | Promise<string | null>
     readonly onSchemaChange?: (schema: CustomSchemaRecord | null) => void
+    readonly className?: string
 }
 
 export default function SchemaSelector({
     service = customSchemaService,
     accessTokenResolver = getValidAccessToken,
     onSchemaChange,
+    className = 'mt-8',
 }: SchemaSelectorProps) {
     const { hasAccessToken, isLoading, schemas, error } = useCustomSchemas(
         service,
@@ -37,7 +39,7 @@ export default function SchemaSelector({
     }, [onSchemaChange, selectedSchema])
 
     return (
-        <section className="mt-8 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <section className={`${className} rounded-xl border border-gray-200 bg-white p-6 shadow-sm`}>
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
                     <h2 className="text-lg font-semibold text-gray-900">Choose A Schema</h2>

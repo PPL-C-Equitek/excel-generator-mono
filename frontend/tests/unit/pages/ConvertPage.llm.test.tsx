@@ -15,6 +15,7 @@
 
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { OutputFile } from '../../../src/hooks/useConvertFlow'
 import ConvertPage from '../../../src/app/convert/ConvertPage'
@@ -28,13 +29,20 @@ vi.mock('../../../src/components/Sidebar', () => ({
 }))
 
 vi.mock('../../../src/components/UploadZone', () => ({
-    default: ({ onFileSelect }: { onFileSelect?: (file: File) => void }) => {
+    default: ({
+        onFileSelect,
+        footerContent,
+    }: {
+        onFileSelect?: (file: File) => void
+        footerContent?: ReactNode
+    }) => {
         const file = new File(['content'], 'report.pdf', { type: 'application/pdf' })
         return (
             <div data-testid="upload-zone">
                 <button data-testid="upload-btn" onClick={() => onFileSelect?.(file)}>
                     Upload File
                 </button>
+                {footerContent}
             </div>
         )
     },

@@ -5,18 +5,21 @@ from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
 from django.http import FileResponse
 from django.utils._os import safe_join
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from .models import GroupMember
-from artifact_history.models import ArtifactHistory
+from artifact_history.serializers import HistoryItemSerializer, HistoryRenameSerializer
 from artifact_history.services import (
+    delete_artifact_history,
+    get_artifact_history_for_user,
     create_history_export_artifact,
     get_history_export_artifact,
     list_artifact_history_for_user,
+    update_artifact_history_custom_name,
 )
 from authentication.permissions import IsVerifiedUser
 from file_processing.services.upload_service import (
@@ -131,6 +134,23 @@ def _history_download_internal_error_response():
     )
 
 
+def _history_delete_internal_error_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "Failed to delete history item due to internal error.",
+        },
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
+
+def _get_owned_history_or_not_found(user, history_id):
+    history = get_artifact_history_for_user(user, history_id)
+    if history is None:
+        return None, _history_not_found_response()
+    return history, None
+
+
 def _get_history_download_storage_dir(artifact_type):
     if artifact_type == "xlsx":
         return settings.EXCEL_EXPORT_DIR
@@ -221,6 +241,35 @@ def _regenerate_history_download_artifact_after_stale_cache(history, owner, file
         file_format,
     )
     return file_name, artifact_type, safe_file_path
+
+
+def _delete_history_artifact_file(artifact):
+    try:
+        safe_file_path = safe_join(
+            _get_history_download_storage_dir(artifact.artifact_type),
+            artifact.file_name,
+        )
+    except (KeyError, SuspiciousFileOperation, TypeError, ValueError):
+        logger.warning(
+            "History artifact cleanup skipped because the cached path is unsafe.",
+            exc_info=True,
+        )
+        return
+
+    try:
+        os.remove(safe_file_path)
+    except FileNotFoundError:
+        return
+    except OSError:
+        logger.warning(
+            "Failed to delete cached history artifact file during history removal.",
+            exc_info=True,
+        )
+
+
+def _delete_history_cached_artifacts(history):
+    for artifact in history.export_artifacts.all():
+        _delete_history_artifact_file(artifact)
 
 
 def _build_export_success_response(
@@ -333,16 +382,7 @@ def history_list(request):
         )
 
     total_count = request.user.artifact_histories.count()
-    results = [
-        {
-            "id": str(record.id),
-            "original_name": record.original_name,
-            "custom_name": record.custom_name,
-            "status_processing": record.status_processing,
-            "created_at": record.created_at,
-        }
-        for record in records
-    ]
+    results = HistoryItemSerializer(records, many=True).data
 
     return Response(
         {
@@ -353,6 +393,50 @@ def history_list(request):
         },
         status=status.HTTP_200_OK,
     )
+
+
+@require_http_methods(["PATCH"])
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def history_rename(request, history_id):
+    history, error_response = _get_owned_history_or_not_found(request.user, history_id)
+    if error_response is not None:
+        return error_response
+
+    serializer = HistoryRenameSerializer(
+        history,
+        data=request.data,
+        partial=False,
+    )
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    updated_history = update_artifact_history_custom_name(
+        history,
+        serializer.validated_data["custom_name"],
+    )
+    return Response(
+        HistoryItemSerializer(updated_history).data,
+        status=status.HTTP_200_OK,
+    )
+
+
+@require_http_methods(["DELETE"])
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def history_delete(request, history_id):
+    history, error_response = _get_owned_history_or_not_found(request.user, history_id)
+    if error_response is not None:
+        return error_response
+
+    try:
+        _delete_history_cached_artifacts(history)
+        delete_artifact_history(history)
+    except Exception:
+        logger.exception("Unexpected error while deleting history item.")
+        return _history_delete_internal_error_response()
+
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @require_GET
@@ -369,9 +453,9 @@ def history_download(request, history_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    history = ArtifactHistory.objects.filter(owner=request.user, id=history_id).first()
-    if history is None:
-        return _history_not_found_response()
+    history, error_response = _get_owned_history_or_not_found(request.user, history_id)
+    if error_response is not None:
+        return error_response
 
     try:
         file_name, artifact_type, safe_file_path, used_cached_artifact = _resolve_history_download_artifact(

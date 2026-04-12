@@ -48,8 +48,13 @@ export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
             </nav>
 
             <div className="mt-auto border-t border-white/20 px-4 py-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                    <span className="text-white font-bold text-sm">{username}</span>
+                <div className="mb-3 flex min-w-0 items-center gap-3">
+                    <span
+                        title={username}
+                        className="min-w-0 flex-1 truncate text-white font-bold text-sm"
+                    >
+                        {username}
+                    </span>
                 </div>
                 {onLogout ? (
                     <button

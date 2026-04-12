@@ -58,7 +58,7 @@ export default function LoginPage() {
     })
 
     return (
-        <div className="force-light min-h-screen flex flex-col">
+        <div className="force-light min-h-screen flex flex-col bg-gray-50">
             <Navbar links={LANDING_NAV_LINKS} activePage="login" />
             <main className="flex flex-1 items-center justify-center px-4 py-12">
                 <LoginForm
