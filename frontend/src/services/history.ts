@@ -316,7 +316,7 @@ export async function renameHistoryFile(
   }
 
   const data = await requestHistoryApi<unknown>(
-    `history/${historyId}/`,
+    `history/${historyId}/rename/`,
     accessToken,
     {
       method: "PATCH",
@@ -339,7 +339,7 @@ export async function deleteHistoryFile(historyId: string): Promise<void> {
   }
 
   await requestHistoryApi<void>(
-    `history/${historyId}/`,
+    `history/${historyId}/delete/`,
     accessToken,
     {
       method: "DELETE",

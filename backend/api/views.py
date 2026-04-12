@@ -5,7 +5,7 @@ from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
 from django.http import FileResponse
 from django.utils._os import safe_join
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -142,6 +142,13 @@ def _history_delete_internal_error_response():
         },
         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
+
+
+def _get_owned_history_or_not_found(user, history_id):
+    history = get_artifact_history_for_user(user, history_id)
+    if history is None:
+        return None, _history_not_found_response()
+    return history, None
 
 
 def _get_history_download_storage_dir(artifact_type):
@@ -388,30 +395,39 @@ def history_list(request):
     )
 
 
-@api_view(["PATCH", "DELETE"])
+@require_http_methods(["PATCH"])
+@api_view(["PATCH"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
-def history_detail(request, history_id):
-    history = get_artifact_history_for_user(request.user, history_id)
-    if history is None:
-        return _history_not_found_response()
+def history_rename(request, history_id):
+    history, error_response = _get_owned_history_or_not_found(request.user, history_id)
+    if error_response is not None:
+        return error_response
 
-    if request.method == "PATCH":
-        serializer = HistoryRenameSerializer(
-            history,
-            data=request.data,
-            partial=False,
-        )
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer = HistoryRenameSerializer(
+        history,
+        data=request.data,
+        partial=False,
+    )
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        updated_history = update_artifact_history_custom_name(
-            history,
-            serializer.validated_data["custom_name"],
-        )
-        return Response(
-            HistoryItemSerializer(updated_history).data,
-            status=status.HTTP_200_OK,
-        )
+    updated_history = update_artifact_history_custom_name(
+        history,
+        serializer.validated_data["custom_name"],
+    )
+    return Response(
+        HistoryItemSerializer(updated_history).data,
+        status=status.HTTP_200_OK,
+    )
+
+
+@require_http_methods(["DELETE"])
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def history_delete(request, history_id):
+    history, error_response = _get_owned_history_or_not_found(request.user, history_id)
+    if error_response is not None:
+        return error_response
 
     try:
         _delete_history_cached_artifacts(history)
@@ -437,9 +453,9 @@ def history_download(request, history_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    history = get_artifact_history_for_user(request.user, history_id)
-    if history is None:
-        return _history_not_found_response()
+    history, error_response = _get_owned_history_or_not_found(request.user, history_id)
+    if error_response is not None:
+        return error_response
 
     try:
         file_name, artifact_type, safe_file_path, used_cached_artifact = _resolve_history_download_artifact(

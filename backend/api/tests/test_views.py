@@ -255,7 +255,7 @@ class HistoryDetailViewTest(BaseApiViewTest):
 
     def test_history_detail_patch_returns_401_for_anonymous_user(self):
         response = self.client.patch(
-            f"/history/{self.history.id}/",
+            f"/history/{self.history.id}/rename/",
             {"custom_name": "Renamed Invoice"},
             format="json",
         )
@@ -266,7 +266,7 @@ class HistoryDetailViewTest(BaseApiViewTest):
         self.client.force_authenticate(user=self.unverified_user)
 
         response = self.client.patch(
-            f"/history/{self.history.id}/",
+            f"/history/{self.history.id}/rename/",
             {"custom_name": "Renamed Invoice"},
             format="json",
         )
@@ -277,7 +277,7 @@ class HistoryDetailViewTest(BaseApiViewTest):
         self.client.force_authenticate(user=self.verified_user)
 
         response = self.client.patch(
-            f"/history/{self.history.id}/",
+            f"/history/{self.history.id}/rename/",
             {"custom_name": "Renamed Invoice"},
             format="json",
         )
@@ -293,7 +293,7 @@ class HistoryDetailViewTest(BaseApiViewTest):
         self.client.force_authenticate(user=self.verified_user)
 
         response = self.client.patch(
-            f"/history/{self.history.id}/",
+            f"/history/{self.history.id}/rename/",
             {"custom_name": "   "},
             format="json",
         )
@@ -306,7 +306,7 @@ class HistoryDetailViewTest(BaseApiViewTest):
         self.client.force_authenticate(user=self.other_user)
 
         response = self.client.patch(
-            f"/history/{self.history.id}/",
+            f"/history/{self.history.id}/rename/",
             {"custom_name": "Renamed Invoice"},
             format="json",
         )
@@ -318,7 +318,7 @@ class HistoryDetailViewTest(BaseApiViewTest):
         self.client.force_authenticate(user=self.verified_user)
 
         response = self.client.patch(
-            f"/history/{self.history.id}/",
+            f"/history/{self.history.id}/rename/",
             {},
             format="json",
         )
@@ -327,14 +327,14 @@ class HistoryDetailViewTest(BaseApiViewTest):
         self.assertIn("custom_name", response.data)
 
     def test_history_detail_delete_returns_401_for_anonymous_user(self):
-        response = self.client.delete(f"/history/{self.history.id}/")
+        response = self.client.delete(f"/history/{self.history.id}/delete/")
 
         self.assertEqual(response.status_code, 401)
 
     def test_history_detail_delete_returns_403_for_unverified_user(self):
         self.client.force_authenticate(user=self.unverified_user)
 
-        response = self.client.delete(f"/history/{self.history.id}/")
+        response = self.client.delete(f"/history/{self.history.id}/delete/")
 
         self.assertEqual(response.status_code, 403)
 
@@ -354,7 +354,7 @@ class HistoryDetailViewTest(BaseApiViewTest):
         )
         self.client.force_authenticate(user=self.verified_user)
 
-        response = self.client.delete(f"/history/{self.history.id}/")
+        response = self.client.delete(f"/history/{self.history.id}/delete/")
 
         self.assertEqual(response.status_code, 204)
         self.assertFalse(ArtifactHistory.objects.filter(id=self.history.id).exists())
@@ -368,7 +368,7 @@ class HistoryDetailViewTest(BaseApiViewTest):
     def test_history_detail_delete_returns_404_for_non_owner(self):
         self.client.force_authenticate(user=self.other_user)
 
-        response = self.client.delete(f"/history/{self.history.id}/")
+        response = self.client.delete(f"/history/{self.history.id}/delete/")
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data["message"], "History item not found.")

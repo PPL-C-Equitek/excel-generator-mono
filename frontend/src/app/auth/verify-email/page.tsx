@@ -1,286 +1,32 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
-import type { ComponentProps, ReactNode } from 'react';
-import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import Navbar from '@/components/Navbar';
-import { LANDING_NAV_LINKS } from '@/constants/landing';
+import TokenPasswordActionPage, {
+  type TokenPasswordActionConfig,
+} from '@/components/auth/TokenPasswordActionPage';
 
-type VerifyStatus = 'form' | 'loading' | 'success' | 'error';
-
-type VerifyFormErrors = {
-  password: string;
-  passwordConfirm: string;
+const verifyEmailConfig: TokenPasswordActionConfig = {
+  endpointPath: '/auth/verify-email/',
+  suspenseTitle: 'Verify Email',
+  suspenseMessage: 'Verifying your email...',
+  missingTokenMessage: 'Verification token was not found. Please sign up again.',
+  formTitle: 'Set Your Password',
+  formDescription: 'Create a password to finish verifying your account.',
+  submitLabel: 'Verify Email and Save Password',
+  loadingTitle: 'Verify Email',
+  loadingMessage: 'Verifying your email...',
+  invalidTokenMessage: 'Verification failed. The token is invalid or has expired.',
+  unknownErrorMessage: 'Something went wrong while verifying your email.',
+  successTitle: 'Email Verified',
+  successFallbackMessage: 'Your email has been verified successfully.',
+  successPrimaryHref: '/login',
+  successPrimaryLabel: 'Continue to Login',
+  errorTitle: 'Verification Failed',
+  errorPrimaryHref: '/register',
+  errorPrimaryLabel: 'Back to Register',
+  errorSecondaryHref: '/',
+  errorSecondaryLabel: 'Back to Home',
 };
 
-type FormSubmitEvent = Parameters<NonNullable<ComponentProps<'form'>['onSubmit']>>[0];
-
-function PageShell({ children }: Readonly<{ children: ReactNode }>) {
-  return (
-    <div className="force-light min-h-screen bg-gray-50 flex flex-col">
-      <Navbar links={LANDING_NAV_LINKS} />
-      <main className="flex flex-1 items-center justify-center px-4 py-12">
-        <div
-          className="mx-auto w-full max-w-lg space-y-8 rounded-2xl p-10"
-          style={{ backgroundColor: 'var(--brand-primary)' }}
-        >
-          {children}
-        </div>
-      </main>
-    </div>
-  );
-}
-
-function StateTitle({ children, tone }: Readonly<{ children: ReactNode; tone: 'neutral' | 'success' | 'error' }>) {
-  const toneClass = {
-    neutral: 'text-white',
-    success: 'text-white',
-    error: 'text-white',
-  }[tone];
-
-  return <h1 className={`text-3xl font-extrabold tracking-tight ${toneClass}`}>{children}</h1>;
-}
-
-function PrimaryButton({ href, children }: Readonly<{ href: string; children: ReactNode }>) {
-  return (
-    <Link
-      href={href}
-      className="inline-flex w-full items-center justify-center rounded-xl bg-white px-6 py-3 text-sm font-semibold transition-all duration-200 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2"
-      style={{ color: 'var(--brand-primary)' }}
-    >
-      {children}
-    </Link>
-  );
-}
-
-function SecondaryButton({ href, children }: Readonly<{ href: string; children: ReactNode }>) {
-  return (
-    <Link
-      href={href}
-      className="inline-flex w-full items-center justify-center rounded-xl border border-white/30 bg-transparent px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2"
-    >
-      {children}
-    </Link>
-  );
-}
-
-function VerifyEmailLoadingFallback() {
-  return (
-    <PageShell>
-      <div className="flex flex-col items-center gap-6 text-center">
-        <div className="rounded-full bg-slate-100 p-3">
-          <div className="h-14 w-14 animate-spin rounded-full border-4 border-slate-200 border-t-red-600" />
-        </div>
-        <div className="space-y-2">
-          <StateTitle tone="neutral">Verify Email</StateTitle>
-          <p className="text-sm leading-relaxed text-white/75">Verifying your email...</p>
-        </div>
-      </div>
-    </PageShell>
-  );
-}
-
-function VerifyEmailContent() {
-  const searchParams = useSearchParams();
-  const token = searchParams.get('token');
-
-  const [status, setStatus] = useState<VerifyStatus>('form');
-  const [message, setMessage] = useState('');
-  const [password, setPassword] = useState('');
-  const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [errors, setErrors] = useState<VerifyFormErrors>({
-    password: '',
-    passwordConfirm: '',
-  });
-
-  useEffect(() => {
-    if (!token) {
-      setStatus('error');
-      setMessage('Verification token was not found. Please sign up again.');
-    }
-  }, [token]);
-
-  const handleSubmit = async (event: FormSubmitEvent) => {
-    event.preventDefault();
-
-    const nextErrors: VerifyFormErrors = {
-      password: '',
-      passwordConfirm: '',
-    };
-
-    if (!password) {
-      nextErrors.password = 'Password is required.';
-    }
-    if (!passwordConfirm) {
-      nextErrors.passwordConfirm = 'Password confirmation is required.';
-    } else if (password !== passwordConfirm) {
-      nextErrors.passwordConfirm = 'Passwords do not match.';
-    }
-
-    setErrors(nextErrors);
-    if (nextErrors.password || nextErrors.passwordConfirm) return;
-
-    setStatus('loading');
-    setMessage('Verifying your email...');
-
-    try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || ''}/auth/verify-email/`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            token,
-            password,
-            password_confirm: passwordConfirm,
-          }),
-        }
-      );
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        if (response.status === 400 && data?.errors) {
-          setErrors({
-            password: data.errors.password?.[0] || '',
-            passwordConfirm: data.errors.password_confirm?.[0] || '',
-          });
-          setStatus('form');
-          return;
-        }
-
-        const errorMessage = data?.message;
-        throw new Error(errorMessage || 'Verification failed. The token is invalid or has expired.');
-      }
-
-      setStatus('success');
-      setMessage(data?.message || 'Your email has been verified successfully.');
-    } catch (error: unknown) {
-      setStatus('error');
-      setMessage(error instanceof Error ? error.message : 'Something went wrong while verifying your email.');
-    }
-  };
-
-  return (
-    <PageShell>
-      {status === 'form' && (
-        <form className="space-y-6" onSubmit={handleSubmit} noValidate>
-          <div className="space-y-2 text-center">
-            <StateTitle tone="neutral">Set Your Password</StateTitle>
-            <p className="text-sm leading-relaxed text-white/75">
-              Create a password to finish verifying your account.
-            </p>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="password" className="mb-1 block text-sm font-bold text-white">
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500 ${
-                  errors.password ? 'border-red-300' : 'border-slate-300'
-                }`}
-                style={{ backgroundColor: '#ffffff' }}
-              />
-              {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
-            </div>
-
-            <div>
-              <label htmlFor="passwordConfirm" className="mb-1 block text-sm font-bold text-white">
-                Confirm Password
-              </label>
-              <input
-                id="passwordConfirm"
-                name="passwordConfirm"
-                type="password"
-                value={passwordConfirm}
-                onChange={(event) => setPasswordConfirm(event.target.value)}
-                className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500 ${
-                  errors.passwordConfirm ? 'border-red-300' : 'border-slate-300'
-                }`}
-                style={{ backgroundColor: '#ffffff' }}
-              />
-              {errors.passwordConfirm && (
-                <p className="mt-1 text-sm text-red-600">{errors.passwordConfirm}</p>
-              )}
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            className="inline-flex w-full items-center justify-center rounded-xl bg-white px-6 py-3 text-sm font-semibold transition-all duration-200 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2"
-            style={{ color: 'var(--brand-primary)' }}
-          >
-            Verify Email and Save Password
-          </button>
-        </form>
-      )}
-
-      {status === 'loading' && (
-        <div className="flex flex-col items-center gap-6 text-center">
-          <div className="rounded-full bg-slate-100 p-3">
-            <div className="h-14 w-14 animate-spin rounded-full border-4 border-slate-200 border-t-red-600" />
-          </div>
-          <div className="space-y-2">
-            <StateTitle tone="neutral">Verify Email</StateTitle>
-            <p className="text-sm leading-relaxed text-white/75">{message}</p>
-          </div>
-        </div>
-      )}
-
-      {status === 'success' && (
-        <div className="flex flex-col items-center gap-6 text-center">
-          <div className="rounded-full border border-white/20 bg-white/10 p-4 text-white shadow-lg shadow-red-950/20">
-            <svg className="h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m6 2.25A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z" />
-            </svg>
-          </div>
-          <div className="space-y-3">
-            <StateTitle tone="success">Email Verified</StateTitle>
-            <p className="mx-auto max-w-sm text-sm leading-relaxed text-white/80">
-              {message}
-            </p>
-          </div>
-          <PrimaryButton href="/login">Continue to Login</PrimaryButton>
-        </div>
-      )}
-
-      {status === 'error' && (
-        <div className="flex flex-col items-center gap-6 text-center">
-          <div className="rounded-full bg-red-100 p-3 text-red-600">
-            <svg className="h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-            </svg>
-          </div>
-          <div className="space-y-2">
-            <StateTitle tone="error">Verification Failed</StateTitle>
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-700">
-              {message}
-            </div>
-          </div>
-          <div className="flex w-full flex-col gap-3 sm:flex-row">
-            <PrimaryButton href="/register">Back to Register</PrimaryButton>
-            <SecondaryButton href="/">Back to Home</SecondaryButton>
-          </div>
-        </div>
-      )}
-    </PageShell>
-  );
-}
-
 export default function VerifyEmailPage() {
-  return (
-    <Suspense fallback={<VerifyEmailLoadingFallback />}>
-      <VerifyEmailContent />
-    </Suspense>
-  );
+  return <TokenPasswordActionPage config={verifyEmailConfig} />;
 }

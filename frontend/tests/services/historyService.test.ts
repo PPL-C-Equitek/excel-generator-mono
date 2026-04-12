@@ -513,7 +513,7 @@ describe("history service", () => {
         "Renamed Invoice"
       );
 
-      expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/history/history-1/`, {
+      expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/history/history-1/rename/`, {
         method: "PATCH",
         headers: expect.any(Headers),
         body: JSON.stringify({ custom_name: "Renamed Invoice" }),
@@ -585,7 +585,7 @@ describe("history service", () => {
       const historyService = await import("@/services/history");
       await historyService.deleteHistoryFile("history-1");
 
-      expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/history/history-1/`, {
+      expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/history/history-1/delete/`, {
         method: "DELETE",
         headers: expect.any(Headers),
       });
