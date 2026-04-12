@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within, act, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ILLMService } from '../../../src/lib/ILLMService'
 
@@ -34,7 +35,13 @@ let mockOnFileSelectCalls: Array<{ file: File }> = []
 
 // Mock the UploadZone component with more control
 vi.mock('../../../src/components/UploadZone', () => ({
-    default: ({ onFileSelect }: { onFileSelect?: (file: File) => void }) => {
+    default: ({
+        onFileSelect,
+        footerContent,
+    }: {
+        onFileSelect?: (file: File) => void
+        footerContent?: ReactNode
+    }) => {
         const handleClick = () => {
             const mockFile = createMockFile()
             mockOnFileSelectCalls.push({ file: mockFile })
@@ -45,6 +52,7 @@ vi.mock('../../../src/components/UploadZone', () => ({
             <div data-testid="upload-zone">
                 <button onClick={handleClick}>Upload File</button>
                 <span data-testid="upload-zone-rendered">UploadZone Rendered</span>
+                {footerContent}
             </div>
         )
     }

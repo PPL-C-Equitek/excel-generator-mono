@@ -12,12 +12,12 @@ function getDisplayName(customName: string, originalName: string): string {
     return customName.trim() || originalName
 }
 
-function getCsvFilename(originalName: string): string {
-    return `${originalName.replace(/\.[^.]+$/, '')}.csv`
+function getCsvFilename(displayName: string): string {
+    return `${displayName.replace(/\.[^.]+$/, '')}.csv`
 }
 
-function getXlsxFilename(originalName: string): string {
-    return `${originalName.replace(/\.[^.]+$/, '')}.xlsx`
+function getXlsxFilename(displayName: string): string {
+    return `${displayName.replace(/\.[^.]+$/, '')}.xlsx`
 }
 
 function formatCreatedAt(value: string): string {
@@ -205,6 +205,10 @@ export default function HistoryPage() {
                                             const isDeleting = deletingHistoryId === item.id
                                             const isCsvDownloading = isDownloading(item.id, 'csv')
                                             const isExcelDownloading = isDownloading(item.id, 'xlsx')
+                                            const historyName = getDisplayName(
+                                                item.custom_name,
+                                                item.original_name
+                                            )
 
                                             return (
                                                 <>
@@ -222,7 +226,7 @@ export default function HistoryPage() {
                                                                         htmlFor={`history-name-${item.id}`}
                                                                         className="block text-sm font-semibold text-slate-900"
                                                                     >
-                                                                        Display Name
+                                                                        File Name
                                                                     </label>
                                                                     <input
                                                                         id={`history-name-${item.id}`}
@@ -231,14 +235,14 @@ export default function HistoryPage() {
                                                                         onChange={(event) => {
                                                                             setRenameValue(event.target.value)
                                                                         }}
-                                                                        placeholder="Enter a display name"
+                                                                        placeholder="Enter a file name"
                                                                         className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
                                                                         maxLength={255}
                                                                         disabled={isRenaming}
                                                                     />
                                                                 </div>
                                                                 <p className="text-xs text-slate-500">
-                                                                    Leave this blank to fall back to the original file name.
+                                                                    Leave this blank to use the uploaded file name.
                                                                 </p>
                                                                 <div className="flex flex-wrap gap-3">
                                                                     <button
@@ -260,12 +264,9 @@ export default function HistoryPage() {
                                                             </form>
                                                         ) : (
                                                             <h2 className="break-words text-lg font-semibold text-slate-900">
-                                                                {getDisplayName(item.custom_name, item.original_name)}
+                                                                {historyName}
                                                             </h2>
                                                         )}
-                                                        <p className="text-sm text-slate-500">
-                                                            Original file: {item.original_name}
-                                                        </p>
                                                         <p className="inline-flex w-fit rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
                                                             Status: {item.status_processing}
                                                         </p>
@@ -301,32 +302,32 @@ export default function HistoryPage() {
                                                         </div>
 
                                                         <div className="flex flex-col gap-3 sm:flex-row">
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-red-700"
-                                                            onClick={() => {
-                                                                void downloadCsv(
-                                                                    item.id,
-                                                                    getCsvFilename(item.original_name)
-                                                                )
-                                                            }}
-                                                            disabled={isCsvDownloading}
-                                                        >
-                                                            {isCsvDownloading ? 'Downloading CSV...' : 'Download CSV'}
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-                                                            onClick={() => {
-                                                                void downloadExcel(
-                                                                    item.id,
-                                                                    getXlsxFilename(item.original_name)
-                                                                )
-                                                            }}
-                                                            disabled={isExcelDownloading}
-                                                        >
-                                                            {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
-                                                        </button>
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-red-700"
+                                                                onClick={() => {
+                                                                    void downloadCsv(
+                                                                        item.id,
+                                                                        getCsvFilename(historyName)
+                                                                    )
+                                                                }}
+                                                                disabled={isCsvDownloading}
+                                                            >
+                                                                {isCsvDownloading ? 'Downloading CSV...' : 'Download CSV'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                                                                onClick={() => {
+                                                                    void downloadExcel(
+                                                                        item.id,
+                                                                        getXlsxFilename(historyName)
+                                                                    )
+                                                                }}
+                                                                disabled={isExcelDownloading}
+                                                            >
+                                                                {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 </>

@@ -201,7 +201,7 @@ describe('HistoryPage', () => {
 
         expect(downloadExcel).toHaveBeenCalledWith(
             historyItems[1].id,
-            'report-b.xlsx'
+            'Budget Sheet.xlsx'
         )
     })
 
@@ -236,7 +236,7 @@ describe('HistoryPage', () => {
         render(<HistoryPage />)
 
         fireEvent.click(screen.getAllByRole('button', { name: 'Edit Name' })[0])
-        fireEvent.change(screen.getByLabelText('Display Name'), {
+        fireEvent.change(screen.getByLabelText('File Name'), {
             target: { value: 'Quarterly Report' },
         })
         fireEvent.click(screen.getByRole('button', { name: 'Save Name' }))
@@ -253,11 +253,11 @@ describe('HistoryPage', () => {
         render(<HistoryPage />)
 
         fireEvent.click(screen.getAllByRole('button', { name: 'Edit Name' })[0])
-        expect(screen.getByLabelText('Display Name')).toBeInTheDocument()
+        expect(screen.getByLabelText('File Name')).toBeInTheDocument()
 
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-        expect(screen.queryByLabelText('Display Name')).not.toBeInTheDocument()
+        expect(screen.queryByLabelText('File Name')).not.toBeInTheDocument()
     })
 
     it('opens the delete dialog and confirms item deletion', async () => {
