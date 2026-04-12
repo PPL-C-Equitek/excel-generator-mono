@@ -35,6 +35,20 @@ def list_artifact_history_for_user(user, limit, offset):
     return ArtifactHistory.objects.filter(owner=user)[offset: offset + limit]
 
 
+def get_artifact_history_for_user(user, history_id):
+    return ArtifactHistory.objects.filter(owner=user, id=history_id).first()
+
+
+def update_artifact_history_custom_name(history, custom_name):
+    history.custom_name = (custom_name or "").strip()
+    history.save(update_fields=["custom_name"])
+    return history
+
+
+def delete_artifact_history(history):
+    history.delete()
+
+
 def create_history_export_artifact(
     history,
     owner,

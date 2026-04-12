@@ -17,6 +17,8 @@ export interface HistoryListResponse {
 }
 
 const HISTORY_DOWNLOAD_ERROR_MESSAGE = "Failed to download file.";
+const HISTORY_RENAME_ERROR_MESSAGE = "Failed to rename history item.";
+const HISTORY_DELETE_ERROR_MESSAGE = "Failed to delete history item.";
 
 function getHistoryDownloadErrorMessage(status: number): string {
   if (status === 401 || status === 403) {
@@ -48,12 +50,80 @@ function isHistoryDownloadMappedError(message: string): boolean {
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readStringField(data: unknown, field: string): string | null {
+  if (!isRecord(data)) {
+    return null;
+  }
+
+  const value = data[field];
+  return typeof value === "string" ? value : null;
+}
+
+function findFirstString(values: unknown[]): string | null {
+  const firstString = values.find((value) => typeof value === "string");
+  return typeof firstString === "string" ? firstString : null;
+}
+
+function readNestedString(data: unknown): string | null {
+  if (!isRecord(data)) {
+    return null;
+  }
+
+  for (const value of Object.values(data)) {
+    if (typeof value === "string") {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      const nestedString = findFirstString(value);
+      if (nestedString) {
+        return nestedString;
+      }
+    }
+  }
+
+  return null;
+}
+
+function readHistoryErrorMessage(data: unknown, fallback: string): string {
+  return (
+    readStringField(data, "message") ??
+    readStringField(data, "detail") ??
+    (Array.isArray(data) ? findFirstString(data) : null) ??
+    readNestedString(data) ??
+    fallback
+  );
+}
+
 function getApiBaseOrigin(): string {
   try {
     return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").origin;
   } catch {
     return "http://localhost:8000";
   }
+}
+
+function buildHistoryApiUrl(path: string): string {
+  const normalizedPath = path.replace(/^\/+/, "");
+  return `${getApiBaseOrigin()}/${normalizedPath}`;
+}
+
+function isValidHistoryItem(data: unknown): data is HistoryItem {
+  if (!isRecord(data)) {
+    return false;
+  }
+
+  return (
+    typeof data.id === "string" &&
+    typeof data.original_name === "string" &&
+    typeof data.custom_name === "string" &&
+    typeof data.status_processing === "string" &&
+    typeof data.created_at === "string"
+  );
 }
 
 function isValidHistoryListResponse(data: unknown): data is HistoryListResponse {
@@ -84,6 +154,65 @@ function assertValidHistoryDownloadFormat(fileFormat: string): void {
   if (fileFormat !== "csv" && fileFormat !== "xlsx") {
     throw new Error("The history download request is invalid.");
   }
+}
+
+function getHistoryActionErrorMessage(
+  status: number,
+  fallback: string
+): string {
+  if (status === 401 || status === 403) {
+    return "Your session is invalid or you no longer have access.";
+  }
+
+  if (status === 404) {
+    return "This history item could not be found.";
+  }
+
+  if (status === 400) {
+    return "The history request is invalid.";
+  }
+
+  if (status >= 500) {
+    return fallback;
+  }
+
+  return fallback;
+}
+
+async function requestHistoryApi<T>(
+  path: string,
+  accessToken: string,
+  options?: RequestInit,
+  fallbackErrorMessage = "Request failed."
+): Promise<T> {
+  const headers = new Headers(options?.headers);
+  headers.set("Authorization", `Bearer ${accessToken}`);
+
+  if (options?.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(buildHistoryApiUrl(path), {
+    ...options,
+    headers,
+  });
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      readHistoryErrorMessage(
+        data,
+        getHistoryActionErrorMessage(response.status, fallbackErrorMessage)
+      )
+    );
+  }
+
+  return data as T;
 }
 
 function cleanupDownloadResources(
@@ -144,7 +273,7 @@ export async function downloadHistoryFile(
 
   try {
     const response = await fetch(
-      `${getApiBaseOrigin()}/history/${historyId}/download/?file_format=${fileFormat}`,
+      buildHistoryApiUrl(`history/${historyId}/download/?file_format=${fileFormat}`),
       {
         method: "GET",
         headers: {
@@ -175,4 +304,46 @@ export async function downloadHistoryFile(
   } finally {
     cleanupDownloadResources(downloadAnchor, objectUrl, appendedToBody);
   }
+}
+
+export async function renameHistoryFile(
+  historyId: string,
+  customName: string
+): Promise<HistoryItem> {
+  const accessToken = await getValidAccessToken();
+  if (!accessToken) {
+    throw new Error("Authentication credentials were not provided.");
+  }
+
+  const data = await requestHistoryApi<unknown>(
+    `history/${historyId}/`,
+    accessToken,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ custom_name: customName }),
+    },
+    HISTORY_RENAME_ERROR_MESSAGE
+  );
+
+  if (!isValidHistoryItem(data)) {
+    throw new Error("The history response is invalid.");
+  }
+
+  return data;
+}
+
+export async function deleteHistoryFile(historyId: string): Promise<void> {
+  const accessToken = await getValidAccessToken();
+  if (!accessToken) {
+    throw new Error("Authentication credentials were not provided.");
+  }
+
+  await requestHistoryApi<void>(
+    `history/${historyId}/`,
+    accessToken,
+    {
+      method: "DELETE",
+    },
+    HISTORY_DELETE_ERROR_MESSAGE
+  );
 }

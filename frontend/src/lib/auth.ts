@@ -54,6 +54,10 @@ function emitAuthStateChanged(): void {
         return
     }
 
+    if (typeof globalThis.window.dispatchEvent !== 'function') {
+        return
+    }
+
     globalThis.window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT))
 }
 

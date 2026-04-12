@@ -6,6 +6,7 @@ urlpatterns = [
     path("about/", views.about),
     path("members/", views.members),
     path("history/", views.history_list),
+    path("history/<uuid:history_id>/", views.history_detail),
     path("history/<uuid:history_id>/download/", views.history_download),
     path("upload/", views.upload),
     path("export/csv", views.export_csv),
