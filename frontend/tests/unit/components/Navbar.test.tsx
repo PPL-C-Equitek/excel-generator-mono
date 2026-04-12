@@ -1,7 +1,9 @@
 import { render, screen } from '@testing-library/react'
+import { act } from '@testing-library/react'
 import { beforeEach, describe, it, expect } from 'vitest'
 import { vi } from 'vitest'
 import Navbar from '../../../src/components/Navbar'
+import { AUTH_STATE_CHANGE_EVENT } from '../../../src/lib/auth'
 import type { NavLink } from '../../../src/constants/landing'
 
 vi.mock('@/components/LogoutButton', () => ({
@@ -115,6 +117,24 @@ describe('Navbar', () => {
             expect(screen.getByText('History')).toBeInTheDocument()
             expect(screen.queryByText('Change Password')).not.toBeInTheDocument()
             expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
+        })
+
+        it('updates the navbar immediately when auth state changes on the current page', () => {
+            window.localStorage.setItem('access_token', 'existing-token')
+
+            render(<Navbar links={mockNavLinks} />)
+
+            expect(screen.queryByText('Login')).not.toBeInTheDocument()
+            expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
+
+            window.localStorage.removeItem('access_token')
+
+            act(() => {
+                window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT))
+            })
+
+            expect(screen.getByText('Login')).toBeInTheDocument()
+            expect(screen.getByText('Register')).toBeInTheDocument()
         })
     })
 })

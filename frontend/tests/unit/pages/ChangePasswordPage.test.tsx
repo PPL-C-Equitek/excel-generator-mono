@@ -163,7 +163,7 @@ describe('ChangePasswordPage', () => {
         ).toBeInTheDocument()
 
         await act(async () => {
-            vi.advanceTimersByTime(1500)
+            vi.advanceTimersByTime(2500)
         })
 
         expect(mockReplace).toHaveBeenCalledWith('/login')
@@ -192,11 +192,11 @@ describe('ChangePasswordPage', () => {
         })
 
         expect(
-            screen.getByText('Password changed successfully. Redirecting to login...')
+            screen.getByText('Your password has been updated successfully.')
         ).toBeInTheDocument()
 
         await act(async () => {
-            vi.advanceTimersByTime(1500)
+            vi.advanceTimersByTime(2500)
         })
 
         expect(mockReplace).toHaveBeenCalledWith('/login')

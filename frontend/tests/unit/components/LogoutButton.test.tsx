@@ -7,12 +7,14 @@ import * as api from '@/lib/api'
 
 const mockPush = vi.fn()
 const mockReplace = vi.fn()
+const mockRefresh = vi.fn()
 const mockLogout = vi.spyOn(api, 'logout')
 
 vi.mock('next/navigation', () => ({
     useRouter: () => ({
         push: mockPush,
         replace: mockReplace,
+        refresh: mockRefresh,
     }),
 }))
 
@@ -25,6 +27,7 @@ describe('LogoutButton', () => {
         document.cookie = 'refresh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'
         document.cookie = 'accessToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'
         document.cookie = 'refreshToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'
+        window.history.pushState({}, '', '/')
         mockLogout.mockResolvedValue()
     })
 
@@ -34,8 +37,9 @@ describe('LogoutButton', () => {
         expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
     })
 
-    it('calls POST /auth/logout/, clears auth state, shows success notification, and redirects to homepage', async () => {
+    it('calls POST /auth/logout/, clears auth state, and redirects to login', async () => {
         const user = userEvent.setup()
+        window.history.pushState({}, '', '/convert')
         window.localStorage.setItem('access_token', 'access-token')
         window.localStorage.setItem('refresh_token', 'refresh-token')
         document.cookie = 'access_token=cookie-access-token; path=/'
@@ -51,8 +55,26 @@ describe('LogoutButton', () => {
 
         expect(window.localStorage.getItem('access_token')).toBeNull()
         expect(window.localStorage.getItem('refresh_token')).toBeNull()
-        expect(screen.getByRole('status')).toHaveTextContent('Berhasil keluar')
-        expect(mockPush).toHaveBeenCalledWith('/')
+        expect(screen.queryByRole('status')).not.toBeInTheDocument()
+        expect(mockPush).toHaveBeenCalledWith('/login')
+    })
+
+    it('redirects to login after successful logout when already on /', async () => {
+        const user = userEvent.setup()
+        window.localStorage.setItem('access_token', 'access-token')
+        window.localStorage.setItem('refresh_token', 'refresh-token')
+
+        render(<LogoutButton />)
+
+        await user.click(screen.getByRole('button', { name: /logout/i }))
+
+        await waitFor(() => {
+            expect(mockLogout).toHaveBeenCalledWith('access-token', 'refresh-token')
+        })
+
+        expect(mockPush).toHaveBeenCalledWith('/login')
+        expect(mockRefresh).not.toHaveBeenCalled()
+        expect(screen.queryByRole('status')).not.toBeInTheDocument()
     })
 
     it('shows an error message and keeps auth state when logout fails on the server', async () => {

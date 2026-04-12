@@ -20,6 +20,10 @@ import {
 type FormSubmitEvent = Parameters<
     NonNullable<ComponentProps<'form'>['onSubmit']>
 >[0]
+
+const SUCCESS_REDIRECT_DELAY_MS = 2500
+const DEFAULT_SUCCESS_MESSAGE = 'Your password has been updated successfully.'
+
 export { validateChangePasswordForm } from './form'
 
 export default function ChangePasswordPage() {
@@ -77,13 +81,10 @@ export default function ChangePasswordPage() {
             )
 
             clearAuthTokens()
-            setSuccessMessage(
-                response.message ||
-                    'Password changed successfully. Redirecting to login...'
-            )
+            setSuccessMessage(response.message || DEFAULT_SUCCESS_MESSAGE)
             redirectTimerRef.current = globalThis.setTimeout(() => {
                 router.replace('/login')
-            }, 1500)
+            }, SUCCESS_REDIRECT_DELAY_MS)
         } catch (error: unknown) {
             setErrors((prev) => ({
                 ...prev,
@@ -101,9 +102,9 @@ export default function ChangePasswordPage() {
         <div className="flex min-h-screen">
             <Sidebar activeMenu="change-password" />
             <main className="ml-56 flex flex-1 items-center justify-center bg-gray-50 px-8 py-12">
-                <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-10 shadow-sm">
+                <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-10 shadow-sm shadow-red-100/20">
                     <div className="space-y-2 text-center">
-                        <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">
+                        <h1 className="text-2xl font-bold text-slate-900">
                             Change Password
                         </h1>
                         <p className="text-sm leading-relaxed text-slate-600">
@@ -112,8 +113,20 @@ export default function ChangePasswordPage() {
                     </div>
 
                     {successMessage ? (
-                        <div className="mt-8 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm text-green-700">
-                            {successMessage}
+                        <div className="mt-8 flex flex-col items-center gap-5 text-center">
+                            <div className="rounded-full border border-red-100 bg-red-50 p-4 text-red-700 shadow-sm shadow-red-100/50">
+                                <svg className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m6 2.25A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z" />
+                                </svg>
+                            </div>
+                            <div className="space-y-2">
+                                <h2 className="text-2xl font-bold text-slate-900">
+                                    Password Updated
+                                </h2>
+                                <p className="mx-auto max-w-md text-sm leading-relaxed text-slate-600">
+                                    {successMessage}
+                                </p>
+                            </div>
                         </div>
                     ) : (
                         <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
@@ -133,6 +146,7 @@ export default function ChangePasswordPage() {
                                     value={currentPassword}
                                     onChange={(event) => setCurrentPassword(event.target.value)}
                                     className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500"
+                                    style={{ backgroundColor: '#ffffff' }}
                                 />
                                 <p className="mt-1 text-xs text-slate-500">
                                     Leave this blank if you signed in with Google only.
@@ -154,6 +168,7 @@ export default function ChangePasswordPage() {
                                     className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500 ${
                                         errors.newPassword ? 'border-red-300' : 'border-slate-300'
                                     }`}
+                                    style={{ backgroundColor: '#ffffff' }}
                                 />
                                 {errors.newPassword && (
                                     <p className="mt-1 text-sm text-red-600">{errors.newPassword}</p>
@@ -172,6 +187,7 @@ export default function ChangePasswordPage() {
                                     className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500 ${
                                         errors.newPasswordConfirm ? 'border-red-300' : 'border-slate-300'
                                     }`}
+                                    style={{ backgroundColor: '#ffffff' }}
                                 />
                                 {errors.newPasswordConfirm && (
                                     <p className="mt-1 text-sm text-red-600">
