@@ -42,6 +42,7 @@ jobs:
       - name: Build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: mock-google-client-id
         run: |
           cd frontend
           npm run build
@@ -201,13 +202,24 @@ jobs:
             POSTGRES_HOST=localhost
             POSTGRES_PORT=5432
             DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
+            JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
             DJANGO_DEBUG=False
             DJANGO_ALLOWED_HOSTS=${{ vars.DJANGO_ALLOWED_HOSTS }}
             DJANGO_CORS_ALLOWED_ORIGINS=${{ vars.DJANGO_CORS_ALLOWED_ORIGINS }}
             NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+            FRONTEND_URL=${{ vars.FRONTEND_URL }}
+            GOOGLE_OAUTH_CLIENT_ID=${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+            NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             OPENAI_MODEL=${{ vars.OPENAI_MODEL }}
             OPENAI_SYSTEM_PROMPT=${{ vars.OPENAI_SYSTEM_PROMPT }}
+            LLM_CACHE_TTL_SECONDS=${{ vars.LLM_CACHE_TTL_SECONDS }}
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            RESEND_FROM_EMAIL=${{ vars.RESEND_FROM_EMAIL }}
+            MEDIA_ROOT=${{ vars.MEDIA_ROOT }}
+            CSV_EXPORT_DIR=${{ vars.CSV_EXPORT_DIR }}
+            EXCEL_EXPORT_DIR=${{ vars.EXCEL_EXPORT_DIR }}
+            TESSERACT_LANG=${{ vars.TESSERACT_LANG }}
             ENVEOF
 
             cd ~/apps/excel-generator-mono
