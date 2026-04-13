@@ -156,6 +156,17 @@ class RegisterViewTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertEqual(response.data["message"], "An internal server error occurred")
 
+    @patch("authentication.register.http.build_register_user_use_case")
+    def test_register_unhandled_use_case_exception_returns_500(self, mock_build_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.side_effect = Exception("unexpected boom")
+        mock_build_use_case.return_value = mock_use_case
+
+        response = self.client.post(self.url, self.valid_payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(response.data["message"], "An internal server error occurred")
+
     @patch("authentication.register.adapters.User")
     def test_register_integrity_error_returns_409_conflict(self, mock_user_model):
         mock_user_model.objects.filter.return_value.first.return_value = None
@@ -341,3 +352,38 @@ class UnverifiedUserReregistrationFlowTest(APITestCase):
         self.assertFalse(self.user.check_password(invalid_password))
         self.assertEqual(self.user.email_verification_nonce, self.previous_nonce)
         mock_send_verification_email.assert_not_called()
+
+    @patch("authentication.register.use_cases.User")
+    @patch("authentication.register.adapters.send_verification_email")
+    def test_reregister_unverified_user_still_resends_when_second_user_lookup_is_missing(
+        self,
+        mock_send_verification_email,
+        mock_use_case_user_model,
+    ):
+        # Simulate a race where the direct ORM lookup in use case returns no row.
+        mock_use_case_user_model.objects.filter.return_value.first.return_value = None
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Pending User",
+                "email": "pending@example.com",
+                "password": self.new_password,
+            },
+            format="json",
+        )
+
+        self.user.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(
+            response.json(),
+            {
+                "code": "UNVERIFIED_EMAIL",
+                "message": "Email registered but unverified. A new link has been sent.",
+            },
+        )
+        self.assertTrue(self.user.check_password(self.old_password))
+        self.assertFalse(self.user.check_password(self.new_password))
+        self.assertEqual(self.user.email_verification_nonce, self.previous_nonce)
+        mock_send_verification_email.assert_called_once_with(self.user.email)
