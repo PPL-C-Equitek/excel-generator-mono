@@ -22,6 +22,7 @@ class User(AbstractBaseUser):
     email = models.EmailField(unique=True)
     password = models.CharField(max_length=255)
     status = models.CharField(max_length=20, default="unverified")
+    email_verification_nonce = models.UUIDField(default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = UserManager()
