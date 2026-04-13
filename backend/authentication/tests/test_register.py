@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 
 from django.core.cache import cache
 from django.db import IntegrityError
-from rest_framework.test import APISimpleTestCase
+from rest_framework.test import APISimpleTestCase, APITestCase
 from rest_framework import status
 
 from authentication.models import User
@@ -241,3 +241,50 @@ class UserStrTest(APISimpleTestCase):
     def test_str_returns_email(self):
         user = User(email="repr@example.com", name="Repr User")
         self.assertEqual(str(user), "repr@example.com")
+
+
+class UnverifiedUserReregistrationFlowTest(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.url = "/auth/register/"
+        self.old_password = "OldPassword#123"
+        self.new_password = "NewPassword#456"
+        self.user = User.objects.create_user(
+            email="pending@example.com",
+            name="Pending User",
+            password=self.old_password,
+            status="unverified",
+        )
+        self.previous_nonce = self.user.email_verification_nonce
+
+    @patch("authentication.register.adapters.send_verification_email")
+    def test_reregister_unverified_user_updates_password_rotates_nonce_resends_email_and_returns_conflict(
+        self, mock_send_verification_email
+    ):
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Pending User",
+                "email": "pending@example.com",
+                "password": self.new_password,
+            },
+            format="json",
+        )
+
+        self.user.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(
+            response.json(),
+            {
+                "code": "UNVERIFIED_EMAIL",
+                "message": "Email registered but unverified. A new link has been sent.",
+            },
+        )
+        self.assertTrue(self.user.check_password(self.new_password))
+        self.assertFalse(self.user.check_password(self.old_password))
+        self.assertNotEqual(
+            self.user.email_verification_nonce,
+            self.previous_nonce,
+        )
+        mock_send_verification_email.assert_called_once_with(self.user.email)
