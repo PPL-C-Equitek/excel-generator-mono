@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 
 from api.decorators import rate_limit
 from authentication.register import RegisterCommand, RegistrationServiceError, build_register_user_use_case
-from authentication.register.exceptions import RegistrationConflictError
+from authentication.register.exceptions import RegistrationConflictError, UnverifiedRegistrationError
 from authentication.serializers import RegisterSerializer
 
 logger = logging.getLogger(__name__)
@@ -51,11 +51,20 @@ class RegisterView(APIView):
                 RegisterCommand(
                     name=validated["name"],
                     email=validated["email"],
-                )
+                ),
+                password=request.data.get("password"),
             )
             return Response(
                 {"message": result.message},
                 status=status.HTTP_201_CREATED,
+            )
+        except UnverifiedRegistrationError:
+            return Response(
+                {
+                    "code": "UNVERIFIED_EMAIL",
+                    "message": "Email registered but unverified. A new link has been sent.",
+                },
+                status=status.HTTP_409_CONFLICT,
             )
         except RegistrationServiceError:
             logger.exception("Unexpected error during user registration.")
