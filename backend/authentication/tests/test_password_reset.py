@@ -68,10 +68,15 @@ class SendPasswordResetEmailTest(SimpleTestCase):
     @override_settings(
         RESEND_API_KEY="re_test_key",
         FRONTEND_URL="https://app.example.com",
+        RESEND_FROM_EMAIL="noreply@app.example.com",
     )
     def test_raises_when_resend_email_send_fails(self):
-        with self.assertRaises(ValueError, msg="RESEND_FROM_EMAIL is not configured."):
-            send_password_reset_email("user@example.com")
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = RuntimeError("send failed")
+
+        with patch.dict(sys.modules, {"resend": mock_resend}):
+            with self.assertRaisesRegex(RuntimeError, "send failed"):
+                send_password_reset_email("user@example.com")
 
 
 class ForgotPasswordViewTest(APISimpleTestCase):

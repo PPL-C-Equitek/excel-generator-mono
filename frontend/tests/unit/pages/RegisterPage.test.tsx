@@ -1,28 +1,20 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axios from 'axios';
-import { useRouter } from 'next/navigation';
 import RegisterPage, {
   shouldSkipResendVerification,
   resendVerificationFlow,
 } from '@/app/register/page';
 
-import { vi, describe, test, expect, beforeEach, afterEach, Mock, Mocked } from 'vitest';
-
-vi.mock('next/navigation', () => ({
-  useRouter: vi.fn(),
-}));
+import { vi, describe, test, expect, beforeEach, afterEach, Mocked } from 'vitest';
 
 vi.mock('axios');
 const mockedAxios = axios as Mocked<typeof axios>;
 
 describe('Registration Page', () => {
-  const mockPush = vi.fn();
-
   beforeEach(() => {
     vi.resetAllMocks();
     mockedAxios.post.mockReset();
-    (useRouter as Mock).mockReturnValue({ push: mockPush });
   });
 
   afterEach(() => {
@@ -184,7 +176,7 @@ describe('Registration Page', () => {
       });
     });
 
-    test('navigates to login page on successful registration', async () => {
+    test('successful registration keeps the user on the success card instead of redirecting', async () => {
       const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
@@ -198,7 +190,8 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(mockPush).toHaveBeenCalledWith('/login');
+        expect(screen.getByText(/registrasi berhasil/i)).toBeInTheDocument();
+        expect(screen.getByRole('link', { name: /pergi ke halaman login/i })).toBeInTheDocument();
       });
     });
 
@@ -216,7 +209,7 @@ describe('Registration Page', () => {
         expect(screen.getByText(/registrasi berhasil\. cek email anda\./i)).toBeInTheDocument();
       });
 
-      expect(mockPush).not.toHaveBeenCalled();
+      expect(screen.getByRole('link', { name: /pergi ke halaman login/i })).toBeInTheDocument();
     });
 
     test('successful resend verification shows success message', async () => {

@@ -1,5 +1,6 @@
 import logging
 import jwt
+import uuid
 from datetime import timedelta
 from urllib.parse import quote
 
@@ -7,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol, TypedDict
 from django.conf import settings
 from django.core.cache import cache
-from django.core.signing import TimestampSigner
+from django.core.signing import BadSignature, TimestampSigner
 from django.utils import timezone
 
 from authentication.models import User
@@ -119,9 +120,27 @@ def _require_resend_from_email() -> str:
     return from_email
 
 
-def generate_verification_token(email):
+EMAIL_VERIFICATION_TOKEN_PREFIX = "email-verify"
+
+
+def generate_verification_token(email, nonce):
     signer = TimestampSigner()
-    return signer.sign(email)
+    return signer.sign(f"{EMAIL_VERIFICATION_TOKEN_PREFIX}:{email}:{nonce}")
+
+
+def decode_verification_token(token, max_age):
+    signer = TimestampSigner()
+    value = signer.unsign(token, max_age=max_age)
+    prefix = f"{EMAIL_VERIFICATION_TOKEN_PREFIX}:"
+    if not isinstance(value, str) or not value.startswith(prefix):
+        raise BadSignature("Invalid token purpose.")
+
+    payload = value[len(prefix):]
+    email, separator, nonce = payload.rpartition(":")
+    if not separator or not email or not nonce:
+        raise BadSignature("Invalid token payload.")
+
+    return email, nonce
 
 
 def generate_password_reset_token(email):
@@ -319,7 +338,12 @@ class RefreshTokenService:
 
 
 def send_verification_email(email):
-    token = generate_verification_token(email)
+    user = User.objects.get(email=email)
+    previous_nonce = user.email_verification_nonce
+    user.email_verification_nonce = uuid.uuid4()
+    user.save(update_fields=["email_verification_nonce"])
+
+    token = generate_verification_token(user.email, str(user.email_verification_nonce))
     frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
     verification_url = f"{frontend_url}/auth/verify-email?token={quote(token, safe='')}"
 
@@ -331,15 +355,17 @@ def send_verification_email(email):
             resend.api_key = resend_api_key
             resend.Emails.send({
                 "from": from_email,
-                "to": email,
+                "to": user.email,
                 "subject": "Verify Your Email",
                 "html": f'<p>Click the link below to verify: <a href="{verification_url}">{verification_url}</a></p>',
             })
         else:
             logger.info("Verification link (RESEND_API_KEY not set): %s", verification_url)
-    except Exception:
-        logger.exception("Failed to send verification email to %s", email)
-        raise
+    except Exception as exc:
+        user.email_verification_nonce = previous_nonce
+        user.save(update_fields=["email_verification_nonce"])
+        logger.exception("Failed to send verification email to %s", user.email)
+        raise exc
 
 
 def send_password_reset_email(email):

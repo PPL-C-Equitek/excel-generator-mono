@@ -704,6 +704,22 @@ describe("history service", () => {
       );
     });
 
+    it("falls back to the delete error message when the error body cannot be parsed", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: vi.fn().mockRejectedValue(new Error("invalid json")),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(historyService.deleteHistoryFile("history-1")).rejects.toThrow(
+        "Failed to delete history item."
+      );
+    });
+
     it("falls back to the delete error message for 500 responses with non-string nested values", async () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi.fn().mockResolvedValue({
