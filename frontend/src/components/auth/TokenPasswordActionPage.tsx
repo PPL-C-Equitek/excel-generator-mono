@@ -17,6 +17,7 @@ type FormSubmitEvent = Parameters<NonNullable<ComponentProps<'form'>['onSubmit']
 
 export interface TokenPasswordActionConfig {
   endpointPath: string;
+  validateEndpointPath?: string;
   suspenseTitle: string;
   suspenseMessage: string;
   missingTokenMessage: string;
@@ -70,6 +71,14 @@ function ActionShell({ children }: Readonly<{ children: ReactNode }>) {
 
 function ActionTitle({ children }: Readonly<{ children: ReactNode }>) {
   return <h1 className="text-2xl font-bold text-white">{children}</h1>;
+}
+
+function FieldErrorMessage({ children }: Readonly<{ children: ReactNode }>) {
+  return (
+    <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-800 shadow-sm">
+      {children}
+    </p>
+  );
 }
 
 function ActionLink({
@@ -182,13 +191,30 @@ async function submitTokenPasswordAction(
   });
 }
 
+async function validateTokenAction(
+  endpointPath: string,
+  token: string | null
+): Promise<Response> {
+  return fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}${endpointPath}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      token,
+    }),
+  });
+}
+
 function TokenPasswordActionContent({
   config,
 }: Readonly<{ config: TokenPasswordActionConfig }>) {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
 
-  const [status, setStatus] = useState<ActionStatus>('form');
+  const [status, setStatus] = useState<ActionStatus>(
+    config.validateEndpointPath ? 'loading' : 'form'
+  );
   const [message, setMessage] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
@@ -203,6 +229,52 @@ function TokenPasswordActionContent({
       setMessage(config.missingTokenMessage);
     }
   }, [config.missingTokenMessage, token]);
+
+  useEffect(() => {
+    if (!config.validateEndpointPath || !token) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const checkTokenValidity = async () => {
+      setStatus('loading');
+      setMessage(config.suspenseMessage);
+
+      try {
+        const response = await validateTokenAction(config.validateEndpointPath!, token);
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          throw new Error(readMessageFromResponse(data, config.invalidTokenMessage));
+        }
+
+        if (!isCancelled) {
+          setStatus('form');
+          setMessage('');
+        }
+      } catch (error: unknown) {
+        if (!isCancelled) {
+          setStatus('error');
+          setMessage(
+            error instanceof Error ? error.message : config.unknownErrorMessage
+          );
+        }
+      }
+    };
+
+    void checkTokenValidity();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    config.invalidTokenMessage,
+    config.suspenseMessage,
+    config.unknownErrorMessage,
+    config.validateEndpointPath,
+    token,
+  ]);
 
   const handleSubmit = async (event: FormSubmitEvent) => {
     event.preventDefault();
@@ -269,11 +341,11 @@ function TokenPasswordActionContent({
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500 ${
-                  errors.password ? 'border-red-300' : 'border-slate-300'
+                  errors.password ? 'border-rose-400 bg-rose-50/70' : 'border-slate-300'
                 }`}
                 style={{ backgroundColor: '#ffffff' }}
               />
-              {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
+              {errors.password && <FieldErrorMessage>{errors.password}</FieldErrorMessage>}
             </div>
 
             <div>
@@ -287,12 +359,12 @@ function TokenPasswordActionContent({
                 value={passwordConfirm}
                 onChange={(event) => setPasswordConfirm(event.target.value)}
                 className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500 ${
-                  errors.passwordConfirm ? 'border-red-300' : 'border-slate-300'
+                  errors.passwordConfirm ? 'border-rose-400 bg-rose-50/70' : 'border-slate-300'
                 }`}
                 style={{ backgroundColor: '#ffffff' }}
               />
               {errors.passwordConfirm && (
-                <p className="mt-1 text-sm text-red-600">{errors.passwordConfirm}</p>
+                <FieldErrorMessage>{errors.passwordConfirm}</FieldErrorMessage>
               )}
             </div>
           </div>
