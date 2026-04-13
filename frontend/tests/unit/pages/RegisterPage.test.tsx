@@ -8,13 +8,28 @@ import RegisterPage, {
 
 import { vi, describe, test, expect, beforeEach, afterEach, Mocked } from 'vitest';
 
+const mockRouterPush = vi.fn();
+const mockToastError = vi.fn();
+
 vi.mock('axios');
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockRouterPush,
+  }),
+}));
+vi.mock('sonner', () => ({
+  toast: {
+    error: mockToastError,
+  },
+}));
 const mockedAxios = axios as Mocked<typeof axios>;
 
 describe('Registration Page', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockedAxios.post.mockReset();
+    mockRouterPush.mockReset();
+    mockToastError.mockReset();
   });
 
   afterEach(() => {
@@ -429,6 +444,42 @@ describe('Registration Page', () => {
 
       await waitFor(() => {
         expect(screen.getByText(/email ini sudah terdaftar, silakan login/i)).toBeInTheDocument();
+      });
+    });
+
+    test('RED: handles 409 UNVERIFIED_EMAIL by showing toast and redirecting to verify-email page', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {
+            code: 'UNVERIFIED_EMAIL',
+            message: 'Email registered but unverified. A new link has been sent.',
+          },
+        },
+      });
+
+      await user.type(nameInput, 'Pending User');
+      await user.type(emailInput, 'pending@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(mockedAxios.post).toHaveBeenCalledWith(expect.stringContaining('/auth/register/'), {
+          name: 'Pending User',
+          email: 'pending@example.com',
+        });
+      });
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith(
+          expect.stringMatching(/email belum diverifikasi|email registered but unverified/i)
+        );
+      });
+
+      await waitFor(() => {
+        expect(mockRouterPush).toHaveBeenCalledWith('/auth/verify-email');
       });
     });
 
