@@ -1,7 +1,9 @@
+import uuid
 from unittest.mock import patch, MagicMock
 
 from django.core.cache import cache
 from django.core.signing import SignatureExpired, BadSignature
+from rest_framework.response import Response
 from rest_framework.test import APISimpleTestCase, APITestCase
 from rest_framework import status
 
@@ -346,11 +348,19 @@ class VerificationTokenLifecycleTest(APITestCase):
         self.assertEqual(second_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("already verified", second_response.data["message"].lower())
 
-    def test_old_token_becomes_invalid_after_resend(self):
+    @patch("authentication.views.send_verification_email")
+    def test_old_token_becomes_invalid_after_resend(self, mock_send_verification_email):
         old_token = generate_verification_token(
             self.user.email,
             str(self.user.email_verification_nonce),
         )
+
+        def rotate_nonce(email):
+            user = User.objects.get(email=email)
+            user.email_verification_nonce = uuid.uuid4()
+            user.save(update_fields=["email_verification_nonce"])
+
+        mock_send_verification_email.side_effect = rotate_nonce
 
         resend_response = self.client.post(
             "/auth/resend-verification/",

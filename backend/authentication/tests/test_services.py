@@ -4,7 +4,8 @@ import uuid
 from unittest.mock import patch, MagicMock
 from django.utils import timezone
 
-from django.test import SimpleTestCase, override_settings
+from django.core.signing import BadSignature, TimestampSigner
+from django.test import SimpleTestCase, TestCase, override_settings
 from authentication.models import User
 from authentication.services import (
     DjangoUserLookupGateway,
@@ -13,6 +14,7 @@ from authentication.services import (
     RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
     RefreshTokenService,
     _get_resend_from_email,
+    _require_resend_from_email,
     decode_verification_token,
     generate_tokens,
     generate_verification_token,
@@ -36,8 +38,27 @@ class GenerateVerificationTokenTest(SimpleTestCase):
         token_b = generate_verification_token("b@example.com", "nonce-b")
         self.assertNotEqual(token_a, token_b)
 
+    def test_decode_rejects_token_with_invalid_purpose(self):
+        token = TimestampSigner().sign("password-reset:user@example.com:nonce-123")
 
-class SendVerificationEmailTest(SimpleTestCase):
+        with self.assertRaises(BadSignature):
+            decode_verification_token(token, max_age=60)
+
+    def test_decode_rejects_token_with_invalid_payload(self):
+        token = TimestampSigner().sign("email-verify:user@example.com")
+
+        with self.assertRaises(BadSignature):
+            decode_verification_token(token, max_age=60)
+
+
+class SendVerificationEmailTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="user@example.com",
+            password="Password123!",
+            name="Test User",
+        )
+
     @override_settings(RESEND_API_KEY="", FRONTEND_URL="http://localhost:3000")
     def test_logs_verification_link_when_no_api_key(self):
         with self.assertLogs("authentication.services", level="INFO") as log:
@@ -68,12 +89,12 @@ class SendVerificationEmailTest(SimpleTestCase):
 
     @override_settings(RESEND_API_KEY="re_test_key", FRONTEND_URL="https://app.example.com")
     def test_logs_and_reraises_exception_when_resend_fails(self):
-        with self.assertLogs("authentication.services", level="ERROR") as log:
-            with self.assertRaisesRegex(
-                ValueError,
-                RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
-            ):
-                send_verification_email("user@example.com")
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = RuntimeError("send failed")
+        with patch.dict(sys.modules, {"resend": mock_resend}):
+            with self.assertLogs("authentication.services", level="ERROR") as log:
+                with self.assertRaisesRegex(RuntimeError, "send failed"):
+                    send_verification_email("user@example.com")
 
         self.assertTrue(any("Failed to send" in msg for msg in log.output))
 
@@ -85,11 +106,32 @@ class SendVerificationEmailTest(SimpleTestCase):
         log_text = "\n".join(log.output)
         self.assertIn("https://myapp.com/auth/verify-email?token=", log_text)
 
+    @override_settings(RESEND_API_KEY="", FRONTEND_URL="http://localhost:3000")
+    def test_rotates_email_verification_nonce_before_logging_link(self):
+        previous_nonce = self.user.email_verification_nonce
+
+        send_verification_email("user@example.com")
+
+        self.user.refresh_from_db()
+        self.assertNotEqual(self.user.email_verification_nonce, previous_nonce)
+
 
 class ResendFromEmailHelperTest(SimpleTestCase):
     @override_settings(RESEND_FROM_EMAIL=123)
     def test_returns_empty_string_when_setting_is_not_a_string(self):
         self.assertEqual(_get_resend_from_email(), "")
+
+    @override_settings(RESEND_FROM_EMAIL="  noreply@app.example.com  ")
+    def test_require_returns_trimmed_resend_from_email(self):
+        self.assertEqual(_require_resend_from_email(), "noreply@app.example.com")
+
+    @override_settings(RESEND_FROM_EMAIL="")
+    def test_require_raises_when_resend_from_email_missing(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
+        ):
+            _require_resend_from_email()
 
 class GenerateTokensTest(SimpleTestCase):
     SECRET_KEY = "test-secret-key"
@@ -240,11 +282,11 @@ class SendPasswordChangedEmailTest(SimpleTestCase):
 
     @override_settings(RESEND_API_KEY="re_test_key")
     def test_logs_and_reraises_when_password_changed_email_send_fails(self):
-        with self.assertLogs("authentication.services", level="ERROR") as log:
-            with self.assertRaisesRegex(
-                ValueError,
-                RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
-            ):
-                send_password_changed_email("user@example.com")
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = RuntimeError("send failed")
+        with patch.dict(sys.modules, {"resend": mock_resend}):
+            with self.assertLogs("authentication.services", level="ERROR") as log:
+                with self.assertRaisesRegex(RuntimeError, "send failed"):
+                    send_password_changed_email("user@example.com")
 
         self.assertTrue(any("Failed to send password changed email" in msg for msg in log.output))
