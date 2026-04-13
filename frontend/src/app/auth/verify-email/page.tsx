@@ -6,6 +6,7 @@ import TokenPasswordActionPage, {
 
 const verifyEmailConfig: TokenPasswordActionConfig = {
   endpointPath: '/auth/verify-email/',
+  validateEndpointPath: '/auth/verify-email/validate/',
   suspenseTitle: 'Verify Email',
   suspenseMessage: 'Verifying your email...',
   missingTokenMessage: 'Verification token was not found. Please sign up again.',

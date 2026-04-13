@@ -12,6 +12,7 @@ from authentication import views
 urlpatterns = [
     path("register/", RegisterView.as_view(), name="register"),
     path("verify-email/", views.VerifyEmailView.as_view(), name="verify-email"),
+    path("verify-email/validate/", views.ValidateVerificationTokenView.as_view(), name="validate-verification-token"),
     path("resend-verification/", views.ResendVerificationView.as_view(), name="resend-verification"),
     path("forgot-password/", ForgotPasswordView.as_view(), name="forgot-password"),
     path("resend-password-reset/", ResendPasswordResetView.as_view(), name="resend-password-reset"),

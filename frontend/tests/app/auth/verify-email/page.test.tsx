@@ -3,15 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { useSearchParams } from 'next/navigation';
 import VerifyEmailPage from '../../../../src/app/auth/verify-email/page';
 import { vi, describe, test, expect, beforeEach, Mock } from 'vitest';
-import { http, HttpResponse } from 'msw';
-import { server } from '../../../mocks/server';
 
-// Mock Next.js navigation
 vi.mock('next/navigation', () => ({
   useSearchParams: vi.fn(),
 }));
 
 const VERIFY_EMAIL_ENDPOINT = /\/auth\/verify-email\/$/;
+const VERIFY_EMAIL_VALIDATE_ENDPOINT = /\/auth\/verify-email\/validate\/$/;
 
 async function fillAndSubmitForm(password = 'Strong#123', confirmPassword = 'Strong#123') {
   const user = userEvent.setup();
@@ -25,92 +23,97 @@ describe('Verify Email Page', () => {
     vi.clearAllMocks();
   });
 
-  test('Test 1 (Form): shows set password form when token exists', () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('fake_token'),
+  test('shows suspense fallback while search params are still resolving', async () => {
+    let hasResolved = false;
+    const searchParamsPromise = Promise.resolve().then(() => {
+      hasResolved = true;
     });
 
-    render(<VerifyEmailPage />);
-
-    expect(screen.getByText(/set your password/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /verify email and save password/i })).toBeInTheDocument();
-  });
-
-  test('Test 2 (Loading): shows loading spinner/text after submit while verifying', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('fake_token'),
-    });
-
-    server.use(
-      http.post(VERIFY_EMAIL_ENDPOINT, async () => {
-        await new Promise((resolve) => setTimeout(resolve, 200));
-        return HttpResponse.json({ message: 'Email verified successfully' }, { status: 200 });
-      })
-    );
-
-    render(<VerifyEmailPage />);
-
-    await fillAndSubmitForm();
-
-    expect(screen.getByText(/verifying your email/i)).toBeInTheDocument();
-  });
-
-  test('Test 1b (Suspense fallback): renders fallback when search params are pending', () => {
     (useSearchParams as Mock).mockImplementation(() => {
-      throw new Promise(() => {});
+      if (!hasResolved) {
+        throw searchParamsPromise;
+      }
+
+      return { get: vi.fn().mockReturnValue('suspense_token') };
     });
 
-    const fetchSpy = vi.spyOn(global, 'fetch');
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
+    } as unknown as Response);
+
     render(<VerifyEmailPage />);
 
+    expect(screen.getByText(/verify email/i)).toBeInTheDocument();
     expect(screen.getByText(/verifying your email/i)).toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(screen.getByText(/set your password/i)).toBeInTheDocument();
+    });
+
     fetchSpy.mockRestore();
   });
 
-  test('Test 3 (Success): displays success message and login link on 200 OK', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('fake_token'),
-    });
+  test('shows set password form only after token validation succeeds', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('fake_token') });
 
-    server.use(
-      http.post(VERIFY_EMAIL_ENDPOINT, () =>
-        HttpResponse.json({ message: 'Email verified successfully' }, { status: 200 })
-      )
-    );
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
+    } as unknown as Response);
 
     render(<VerifyEmailPage />);
-    await fillAndSubmitForm();
 
-    await waitFor(() => {
-      expect(screen.getByText(/email verified successfully/i)).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: /continue to login/i })).toBeInTheDocument();
-    });
-  });
-
-  test('Test 4 (Error): displays error message on 400/404 response', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('invalid_token'),
-    });
-
-    server.use(
-      http.post(VERIFY_EMAIL_ENDPOINT, () =>
-        HttpResponse.json({ message: 'The verification link is invalid or has expired' }, { status: 400 })
-      )
+    expect(screen.getByText(/verifying your email/i)).toBeInTheDocument();
+    expect(await screen.findByText(/set your password/i)).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringMatching(VERIFY_EMAIL_VALIDATE_ENDPOINT),
+      expect.objectContaining({ body: JSON.stringify({ token: 'fake_token' }) })
     );
 
-    render(<VerifyEmailPage />);
-    await fillAndSubmitForm();
-
-    await waitFor(() => {
-      expect(screen.getByText(/verification link is invalid/i)).toBeInTheDocument();
-    });
+    fetchSpy.mockRestore();
   });
 
-  test('Test 5 (No Token): shows error immediately if no token is provided without calling API', () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue(null),
+  test('shows immediate error when validation fails before form render', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('invalid_token') });
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: vi.fn().mockResolvedValue({}),
+    } as unknown as Response);
+
+    render(<VerifyEmailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/verification failed\. the token is invalid or has expired\./i)).toBeInTheDocument();
     });
+
+    expect(screen.queryByText(/set your password/i)).not.toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  test('shows already verified message for reused token', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('used_token') });
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: vi.fn().mockResolvedValue({ message: 'Email is already verified' }),
+    } as unknown as Response);
+
+    render(<VerifyEmailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/email is already verified/i)).toBeInTheDocument();
+    });
+
+    fetchSpy.mockRestore();
+  });
+
+  test('shows error immediately if no token is provided without calling API', () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue(null) });
 
     const fetchSpy = vi.spyOn(global, 'fetch');
     render(<VerifyEmailPage />);
@@ -120,32 +123,168 @@ describe('Verify Email Page', () => {
     fetchSpy.mockRestore();
   });
 
-  test('Test 6 (Error fallback): displays default invalid/expired token message when API error has no message', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('invalid_token'),
-    });
+  test('shows success state after valid validation and submit', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('success_token') });
 
-    server.use(
-      http.post(VERIFY_EMAIL_ENDPOINT, () => HttpResponse.json({}, { status: 400 }))
-    );
+    const fetchSpy = vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ message: 'Email verified successfully' }),
+      } as unknown as Response);
 
     render(<VerifyEmailPage />);
+    await screen.findByText(/set your password/i);
     await fillAndSubmitForm();
+
+    await waitFor(() => {
+      expect(screen.getByText(/email verified successfully/i)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /continue to login/i })).toBeInTheDocument();
+    });
+
+    fetchSpy.mockRestore();
+  });
+
+  test('shows success fallback when submit response has no message', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('success_fallback') });
+
+    const fetchSpy = vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({}),
+      } as unknown as Response);
+
+    render(<VerifyEmailPage />);
+    await screen.findByText(/set your password/i);
+    await fillAndSubmitForm();
+
+    await waitFor(() => {
+      expect(screen.getByText(/your email has been verified successfully\./i)).toBeInTheDocument();
+    });
+
+    fetchSpy.mockRestore();
+  });
+
+  test('keeps form state and maps backend field errors on submit', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('field_error_token') });
+
+    const fetchSpy = vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: vi.fn().mockResolvedValue({
+          errors: { password_confirm: ['Password confirmation does not match'] },
+        }),
+      } as unknown as Response);
+
+    render(<VerifyEmailPage />);
+    await screen.findByText(/set your password/i);
+    await fillAndSubmitForm();
+
+    await waitFor(() => {
+      expect(screen.getByText(/password confirmation does not match/i)).toBeInTheDocument();
+      expect(screen.getByText(/set your password/i)).toBeInTheDocument();
+    });
+
+    fetchSpy.mockRestore();
+  });
+
+  test('does not call submit endpoint when password confirmation mismatches', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('mismatch_token') });
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
+    } as unknown as Response);
+
+    render(<VerifyEmailPage />);
+    await screen.findByText(/set your password/i);
+    await fillAndSubmitForm('Strong#123', 'Strong#124');
+
+    expect(screen.getByText(/passwords do not match/i)).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  test('shows required field errors when password inputs are left empty', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('required_token') });
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
+    } as unknown as Response);
+
+    render(<VerifyEmailPage />);
+    await screen.findByText(/set your password/i);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /verify email and save password/i }));
+
+    expect(screen.getByText(/password is required\./i)).toBeInTheDocument();
+    expect(screen.getByText(/password confirmation is required\./i)).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  test('shows unknown validation fallback when validation throws a non-error value', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('unknown_validation') });
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockRejectedValueOnce('unexpected failure');
+
+    render(<VerifyEmailPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/something went wrong while verifying your email\./i)
+      ).toBeInTheDocument();
+    });
+
+    fetchSpy.mockRestore();
+  });
+
+  test('falls back to the invalid token message when validation returns unreadable json', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('bad_json_validation') });
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: vi.fn().mockRejectedValue(new Error('bad json')),
+    } as unknown as Response);
+
+    render(<VerifyEmailPage />);
 
     await waitFor(() => {
       expect(
         screen.getByText(/verification failed\. the token is invalid or has expired\./i)
       ).toBeInTheDocument();
     });
+
+    fetchSpy.mockRestore();
   });
 
-  test('Test 7 (Unknown thrown): displays generic message when thrown value is not an Error', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('broken_token'),
-    });
+  test('shows unknown submit fallback when submit throws a non-error value', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('unknown_submit') });
 
-    const fetchSpy = vi.spyOn(global, 'fetch').mockRejectedValueOnce('network-down' as never);
+    const fetchSpy = vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
+      } as unknown as Response)
+      .mockRejectedValueOnce('unexpected failure');
+
     render(<VerifyEmailPage />);
+    await screen.findByText(/set your password/i);
     await fillAndSubmitForm();
 
     await waitFor(() => {
@@ -157,163 +296,112 @@ describe('Verify Email Page', () => {
     fetchSpy.mockRestore();
   });
 
-  test('Test 8 (Success fallback): displays default success message when API response has no message', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('success_token'),
-    });
+  test('falls back to the invalid token message when submit returns unreadable json', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('bad_json_submit') });
 
-    server.use(
-      http.post(VERIFY_EMAIL_ENDPOINT, () => HttpResponse.json({}, { status: 200 }))
-    );
+    const fetchSpy = vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: vi.fn().mockRejectedValue(new Error('bad json')),
+      } as unknown as Response);
 
     render(<VerifyEmailPage />);
+    await screen.findByText(/set your password/i);
     await fillAndSubmitForm();
-
-    await waitFor(() => {
-      expect(screen.getByText(/your email has been verified successfully\./i)).toBeInTheDocument();
-      expect(screen.getByText(/email verified/i)).toBeInTheDocument();
-    });
-  });
-
-  test('Test 9 (JSON parse failure): still shows success fallback when response body cannot be parsed', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('token_parse_fail'),
-    });
-
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: vi.fn().mockRejectedValueOnce(new Error('Invalid JSON')),
-    } as unknown as Response);
-
-    render(<VerifyEmailPage />);
-    await fillAndSubmitForm();
-
-    await waitFor(() => {
-      expect(screen.getByText(/your email has been verified successfully\./i)).toBeInTheDocument();
-    });
-
-    fetchSpy.mockRestore();
-  });
-
-  test('Test 10 (Form validation): does not call API when password confirmation mismatches', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('fake_token'),
-    });
-
-    const fetchSpy = vi.spyOn(global, 'fetch');
-    render(<VerifyEmailPage />);
-
-    await fillAndSubmitForm('Strong#123', 'Strong#124');
-
-    expect(screen.getByText(/passwords do not match/i)).toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
-    fetchSpy.mockRestore();
-  });
-
-  test('Test 10b (Form validation): requires password and confirmation before submit', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('fake_token'),
-    });
-
-    const user = userEvent.setup();
-    const fetchSpy = vi.spyOn(global, 'fetch');
-    render(<VerifyEmailPage />);
-
-    await user.click(screen.getByRole('button', { name: /verify email and save password/i }));
-
-    expect(screen.getByText(/^password is required\.$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^password confirmation is required\.$/i)).toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
-    fetchSpy.mockRestore();
-  });
-
-  test('Test 10c (Error mapping): shows nested password_confirm backend error', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('fake_token'),
-    });
-
-    server.use(
-      http.post(VERIFY_EMAIL_ENDPOINT, () =>
-        HttpResponse.json(
-          { errors: { password_confirm: ['Password confirmation does not match'] } },
-          { status: 400 }
-        )
-      )
-    );
-
-    render(<VerifyEmailPage />);
-    await fillAndSubmitForm('Strong#123', 'Strong#123');
-
-    await waitFor(() => {
-      expect(screen.getByText(/password confirmation does not match/i)).toBeInTheDocument();
-      expect(screen.getByText(/set your password/i)).toBeInTheDocument();
-      expect(screen.queryByText(/verification failed/i)).not.toBeInTheDocument();
-    });
-  });
-
-  test('Test 10d (Password policy): weak password error stays on verify form', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('fake_token'),
-    });
-
-    server.use(
-      http.post(VERIFY_EMAIL_ENDPOINT, () =>
-        HttpResponse.json(
-          { errors: { password: ['Password must contain at least one special character'] } },
-          { status: 400 }
-        )
-      )
-    );
-
-    render(<VerifyEmailPage />);
-    await fillAndSubmitForm('Strong123', 'Strong123');
-
-    await waitFor(() => {
-      expect(screen.getByText(/password must contain at least one special character/i)).toBeInTheDocument();
-      expect(screen.getByText(/set your password/i)).toBeInTheDocument();
-      expect(screen.queryByText(/verification failed/i)).not.toBeInTheDocument();
-    });
-  });
-
-  test('Test 10e (Invalid field error shape): falls back to the generic invalid token message', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('fake_token'),
-    });
-
-    server.use(
-      http.post(VERIFY_EMAIL_ENDPOINT, () =>
-        HttpResponse.json(
-          { errors: 'invalid-shape' },
-          { status: 400 }
-        )
-      )
-    );
-
-    render(<VerifyEmailPage />);
-    await fillAndSubmitForm('Strong#123', 'Strong#123');
 
     await waitFor(() => {
       expect(
         screen.getByText(/verification failed\. the token is invalid or has expired\./i)
       ).toBeInTheDocument();
     });
+
+    fetchSpy.mockRestore();
   });
 
-  test('Test 11 (API payload): sends token and password fields in POST body', async () => {
-    (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('payload_token'),
-    });
+  test('does not switch state after unmount when validation resolves late', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('late_success') });
 
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+    let resolveResponse: ((value: Response) => void) | undefined;
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        })
+    );
+
+    const { unmount } = render(<VerifyEmailPage />);
+    unmount();
+
+    resolveResponse?.({
       ok: true,
-      json: vi.fn().mockResolvedValueOnce({ message: 'ok' }),
+      json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
     } as unknown as Response);
 
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  test('does not switch state after unmount when validation fails late', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('late_failure') });
+
+    let rejectResponse: ((reason?: unknown) => void) | undefined;
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementationOnce(
+      () =>
+        new Promise<Response>((_, reject) => {
+          rejectResponse = reject;
+        })
+    );
+
+    const { unmount } = render(<VerifyEmailPage />);
+    unmount();
+
+    rejectResponse?.(new Error('late failure'));
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  test('sends token to validate endpoint and password payload to verify endpoint', async () => {
+    (useSearchParams as Mock).mockReturnValue({ get: vi.fn().mockReturnValue('payload_token') });
+
+    const fetchSpy = vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ message: 'Verification token is valid' }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ message: 'ok' }),
+      } as unknown as Response);
+
     render(<VerifyEmailPage />);
+    await screen.findByText(/set your password/i);
     await fillAndSubmitForm('Strong#123', 'Strong#123');
 
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(
+      expect(fetchSpy).toHaveBeenNthCalledWith(
+        1,
+        expect.stringMatching(VERIFY_EMAIL_VALIDATE_ENDPOINT),
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: 'payload_token' }),
+        })
+      );
+
+      expect(fetchSpy).toHaveBeenNthCalledWith(
+        2,
         expect.stringMatching(VERIFY_EMAIL_ENDPOINT),
         expect.objectContaining({
           method: 'POST',
