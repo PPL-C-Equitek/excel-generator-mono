@@ -1,4 +1,5 @@
 import zipfile
+import math
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
@@ -6,6 +7,7 @@ from typing import Any, Optional, Tuple
 EXT_DOCX = ".docx"
 EXT_DOC = ".doc"
 MAX_WORD_PAGES = 100
+DOCX_CHARS_PER_PAGE_ESTIMATE = 2500
 WORD_CORRUPT_ERROR = "Word file is corrupt or has an invalid structure."
 WORD_PROTECTED_ERROR = "Word file is password-protected."
 OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -164,16 +166,83 @@ def check_docx_structure(uploaded_file: Any) -> Tuple[bool, Any]:
 
 
 def extract_docx_page_count(archive: zipfile.ZipFile) -> int:
+    app_pages = 0
     try:
         app_xml = archive.read("docProps/app.xml")
         root = ET.fromstring(app_xml)
         for element in root.iter():
             if element.tag.endswith("Pages") and element.text:
-                return max(int(element.text), 0)
+                app_pages = max(int(element.text), 0)
+                if app_pages > 0:
+                    break
+    except Exception:
+        pass
+
+    try:
+        document_xml = archive.read("word/document.xml")
+    except Exception:
+        return app_pages
+
+    estimated_pages = _estimate_docx_pages_from_document_xml(document_xml)
+    return max(app_pages, estimated_pages)
+
+
+def _estimate_docx_pages_from_document_xml(document_xml: bytes) -> int:
+    try:
+        root = ET.fromstring(document_xml)
     except Exception:
         return 0
 
-    return 0
+    if _local_name(root.tag) != "document":
+        return 0
+
+    manual_page_breaks = 0
+    rendered_page_breaks = 0
+    page_break_before_count = 0
+    section_count = 0
+    text_char_count = 0
+
+    for node in root.iter():
+        node_name = _local_name(node.tag)
+
+        if node_name == "lastRenderedPageBreak":
+            rendered_page_breaks += 1
+        elif node_name == "br":
+            break_type = ""
+            for key, value in node.attrib.items():
+                if key.endswith("type"):
+                    break_type = (value or "").strip().lower()
+                    break
+            if break_type == "page":
+                manual_page_breaks += 1
+        elif node_name == "pageBreakBefore":
+            page_break_before_count += 1
+        elif node_name == "sectPr":
+            section_count += 1
+        elif node_name == "t" and node.text:
+            text_char_count += len(node.text.strip())
+
+    marker_estimate = 0
+    if rendered_page_breaks > 0:
+        marker_estimate = max(marker_estimate, rendered_page_breaks + 1)
+    if manual_page_breaks > 0:
+        marker_estimate = max(marker_estimate, manual_page_breaks + 1)
+    if page_break_before_count > 0:
+        marker_estimate = max(marker_estimate, page_break_before_count + 1)
+    if section_count > 1:
+        marker_estimate = max(marker_estimate, section_count)
+
+    text_estimate = 0
+    if text_char_count > 0:
+        text_estimate = max(1, math.ceil(text_char_count / DOCX_CHARS_PER_PAGE_ESTIMATE))
+
+    return max(marker_estimate, text_estimate)
+
+
+def _local_name(tag_name: str) -> str:
+    if "}" in tag_name:
+        return tag_name.rsplit("}", 1)[1]
+    return tag_name
 
 
 def check_doc_encrypted(uploaded_file: Any) -> Tuple[bool, Optional[str]]:
