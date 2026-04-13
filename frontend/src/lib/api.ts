@@ -121,13 +121,7 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
 }
 
 export async function uploadFile(file: File, options?: RequestInit) {
-  const base = (() => {
-    try {
-      return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").origin;
-    } catch {
-      return "http://localhost:8000";
-    }
-  })();
+  const base = API_URL;
 
   const body = new FormData();
   body.append("file", file);

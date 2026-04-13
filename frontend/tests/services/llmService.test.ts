@@ -861,12 +861,12 @@ describe("getDownloadUrl", () => {
     expect(url).toBe(`${API_BASE}/export/csv/csv_abc/download?filename=laporan%20keuangan%202024.csv`);
   });
 
-  it("falls back to localhost:8000 if URL parsing fails", () => {
+  it("preserves the configured API path when building the download URL", () => {
     const original = process.env.NEXT_PUBLIC_API_URL;
-    process.env.NEXT_PUBLIC_API_URL = "htt   p://in^valid\nurl";
+    process.env.NEXT_PUBLIC_API_URL = "https://example.com/api/v1/";
 
     const url = getDownloadUrl("csv_abc");
-    expect(url).toBe("http://localhost:8000/export/csv/csv_abc/download");
+    expect(url).toBe("https://example.com/api/v1/export/csv/csv_abc/download");
 
     process.env.NEXT_PUBLIC_API_URL = original;
   });
