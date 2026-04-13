@@ -2,8 +2,10 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import type { AxiosError } from 'axios';
+import { toast } from 'sonner';
 import AuthEmailSuccessCard from '@/components/AuthEmailSuccessCard';
 import Navbar from '@/components/Navbar';
 import { LANDING_NAV_LINKS } from '@/constants/landing';
@@ -26,6 +28,7 @@ type RegisterFormErrors = {
 type FormSubmitEvent = Parameters<NonNullable<React.ComponentProps<'form'>['onSubmit']>>[0];
 
 type RegisterErrorResponse = {
+  code?: string;
   message?: string;
   errors?: {
     name?: string[];
@@ -124,6 +127,7 @@ export async function resendVerificationFlow({
 }
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [formData, setFormData] = useState<RegisterFormData>({
     name: '',
     email: '',
@@ -179,8 +183,18 @@ export default function RegisterPage() {
       const axiosError = error as AxiosError<RegisterErrorResponse>;
       const responseData = axiosError.response?.data;
       const message = responseData?.message;
+      const code = responseData?.code;
       const status = axiosError.response?.status;
       const backendErrors = responseData?.errors;
+
+      if (status === 409 && code === 'UNVERIFIED_EMAIL') {
+        const emailForRedirect = formData.email.trim();
+        toast.success(
+          message || 'Email belum diverifikasi. Kami telah mengirim ulang link verifikasi.'
+        );
+        router.push(`/auth/verify-email/pending?email=${encodeURIComponent(emailForRedirect)}`);
+        return;
+      }
 
       if (status === 409) {
         setErrors((prev) => ({

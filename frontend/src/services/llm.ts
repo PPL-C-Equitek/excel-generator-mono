@@ -123,11 +123,7 @@ export async function generateJson(
 }
 
 function getApiBaseOrigin(): string {
-    try {
-        return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").origin;
-    } catch {
-        return "http://localhost:8000";
-    }
+  return (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 }
 
 function isValidExcelExportResponse(data: unknown): data is ExcelExportResponse {

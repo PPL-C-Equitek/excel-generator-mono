@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 
 from django.core.cache import cache
 from django.db import IntegrityError
-from rest_framework.test import APISimpleTestCase
+from rest_framework.test import APISimpleTestCase, APITestCase
 from rest_framework import status
 
 from authentication.models import User
@@ -84,7 +84,9 @@ class RegisterViewTest(APISimpleTestCase):
 
     @patch("authentication.register.adapters.send_verification_email")
     @patch("authentication.register.adapters.User")
-    def test_register_duplicate_email_returns_409_conflict(self, mock_user_model, mock_send_email):
+    def test_register_duplicate_unverified_email_returns_409_conflict_and_resends_verification(
+        self, mock_user_model, mock_send_email
+    ):
         existing_user = MagicMock()
         existing_user.status = "unverified"
         existing_user.email = "john@example.com"
@@ -98,9 +100,16 @@ class RegisterViewTest(APISimpleTestCase):
         response = self.client.post(self.url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(
+            response.json(),
+            {
+                "code": "UNVERIFIED_EMAIL",
+                "message": "Email registered but unverified. A new link has been sent.",
+            },
+        )
         mock_user_model.objects.create_user.assert_not_called()
         mock_user_model.objects.filter.assert_called_once_with(email="john@example.com")
-        mock_send_email.assert_not_called()
+        mock_send_email.assert_called_once_with("john@example.com")
 
     @patch("authentication.register.adapters.send_verification_email")
     @patch("authentication.register.adapters.User")
@@ -150,6 +159,17 @@ class RegisterViewTest(APISimpleTestCase):
     @patch("authentication.register.adapters.User")
     def test_register_server_error_returns_500(self, mock_user_model):
         mock_user_model.objects.filter.return_value.first.side_effect = Exception("DB connection lost")
+
+        response = self.client.post(self.url, self.valid_payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(response.data["message"], "An internal server error occurred")
+
+    @patch("authentication.register.http.build_register_user_use_case")
+    def test_register_unhandled_use_case_exception_returns_500(self, mock_build_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.side_effect = Exception("unexpected boom")
+        mock_build_use_case.return_value = mock_use_case
 
         response = self.client.post(self.url, self.valid_payload, format="json")
 
@@ -241,3 +261,164 @@ class UserStrTest(APISimpleTestCase):
     def test_str_returns_email(self):
         user = User(email="repr@example.com", name="Repr User")
         self.assertEqual(str(user), "repr@example.com")
+
+
+class UnverifiedUserReregistrationFlowTest(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.url = "/auth/register/"
+        self.old_password = "OldPassword#123"
+        self.new_password = "NewPassword#456"
+        self.user = User.objects.create_user(
+            email="pending@example.com",
+            name="Pending User",
+            password=self.old_password,
+            status="unverified",
+        )
+        self.previous_nonce = self.user.email_verification_nonce
+
+    @patch("authentication.register.adapters.send_verification_email")
+    def test_reregister_unverified_user_updates_password_rotates_nonce_resends_email_and_returns_conflict(
+        self, mock_send_verification_email
+    ):
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Pending User",
+                "email": "pending@example.com",
+                "password": self.new_password,
+            },
+            format="json",
+        )
+
+        self.user.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(
+            response.json(),
+            {
+                "code": "UNVERIFIED_EMAIL",
+                "message": "Email registered but unverified. A new link has been sent.",
+            },
+        )
+        self.assertTrue(self.user.check_password(self.new_password))
+        self.assertFalse(self.user.check_password(self.old_password))
+        self.assertNotEqual(
+            self.user.email_verification_nonce,
+            self.previous_nonce,
+        )
+        mock_send_verification_email.assert_called_once_with(self.user.email)
+
+    @patch("authentication.register.adapters.send_verification_email")
+    def test_reregister_unverified_user_without_password_resends_email_and_returns_unverified_conflict(
+        self, mock_send_verification_email
+    ):
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Pending User",
+                "email": "pending@example.com",
+            },
+            format="json",
+        )
+
+        self.user.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(
+            response.json(),
+            {
+                "code": "UNVERIFIED_EMAIL",
+                "message": "Email registered but unverified. A new link has been sent.",
+            },
+        )
+        self.assertTrue(self.user.check_password(self.old_password))
+        mock_send_verification_email.assert_called_once_with(self.user.email)
+
+    @patch("authentication.register.adapters.send_verification_email")
+    def test_reregister_unverified_user_returns_500_when_verification_email_send_fails(
+        self, mock_send_verification_email
+    ):
+        mock_send_verification_email.side_effect = Exception("mail server down")
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Pending User",
+                "email": "pending@example.com",
+                "password": self.new_password,
+            },
+            format="json",
+        )
+
+        self.user.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.json(),
+            {"message": "An internal server error occurred"},
+        )
+        self.assertTrue(self.user.check_password(self.new_password))
+        self.assertNotEqual(self.user.email_verification_nonce, self.previous_nonce)
+        mock_send_verification_email.assert_called_once_with(self.user.email)
+
+    @patch("authentication.register.adapters.send_verification_email")
+    def test_reregister_unverified_user_with_invalid_password_returns_400_before_nonce_rotation(
+        self, mock_send_verification_email
+    ):
+        invalid_password = "123"
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Pending User",
+                "email": "pending@example.com",
+                "password": invalid_password,
+            },
+            format="json",
+        )
+
+        self.user.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("errors", response.json())
+        self.assertIn("password", response.json()["errors"])
+        self.assertTrue(self.user.check_password(self.old_password))
+        self.assertFalse(self.user.check_password(invalid_password))
+        self.assertEqual(self.user.email_verification_nonce, self.previous_nonce)
+        mock_send_verification_email.assert_not_called()
+
+    @patch("authentication.register.use_cases.User")
+    @patch("authentication.register.adapters.send_verification_email")
+    def test_reregister_unverified_user_still_resends_when_second_user_lookup_is_missing(
+        self,
+        mock_send_verification_email,
+        mock_use_case_user_model,
+    ):
+        # Simulate a race where the direct ORM lookup in use case returns no row.
+        mock_use_case_user_model.objects.filter.return_value.first.return_value = None
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Pending User",
+                "email": "pending@example.com",
+                "password": self.new_password,
+            },
+            format="json",
+        )
+
+        self.user.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(
+            response.json(),
+            {
+                "code": "UNVERIFIED_EMAIL",
+                "message": "Email registered but unverified. A new link has been sent.",
+            },
+        )
+        self.assertTrue(self.user.check_password(self.old_password))
+        self.assertFalse(self.user.check_password(self.new_password))
+        self.assertEqual(self.user.email_verification_nonce, self.previous_nonce)
+        mock_send_verification_email.assert_called_once_with(self.user.email)

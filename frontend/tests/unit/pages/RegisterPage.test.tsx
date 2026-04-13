@@ -8,13 +8,30 @@ import RegisterPage, {
 
 import { vi, describe, test, expect, beforeEach, afterEach, Mocked } from 'vitest';
 
+const { mockRouterPush, mockToastSuccess } = vi.hoisted(() => ({
+  mockRouterPush: vi.fn(),
+  mockToastSuccess: vi.fn(),
+}));
+
 vi.mock('axios');
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockRouterPush,
+  }),
+}));
+vi.mock('sonner', () => ({
+  toast: {
+    success: mockToastSuccess,
+  },
+}));
 const mockedAxios = axios as Mocked<typeof axios>;
 
 describe('Registration Page', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockedAxios.post.mockReset();
+    mockRouterPush.mockReset();
+    mockToastSuccess.mockReset();
   });
 
   afterEach(() => {
@@ -429,6 +446,70 @@ describe('Registration Page', () => {
 
       await waitFor(() => {
         expect(screen.getByText(/email ini sudah terdaftar, silakan login/i)).toBeInTheDocument();
+      });
+    });
+
+    test('RED: handles 409 UNVERIFIED_EMAIL by showing toast and redirecting to verify-email page', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {
+            code: 'UNVERIFIED_EMAIL',
+            message: 'Email registered but unverified. A new link has been sent.',
+          },
+        },
+      });
+
+      await user.type(nameInput, 'Pending User');
+      await user.type(emailInput, 'pending@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(mockedAxios.post).toHaveBeenCalledWith(expect.stringContaining('/auth/register/'), {
+          name: 'Pending User',
+          email: 'pending@example.com',
+        });
+      });
+
+      await waitFor(() => {
+        expect(mockToastSuccess).toHaveBeenCalledWith(
+          expect.stringMatching(/email belum diverifikasi|email registered but unverified/i)
+        );
+      });
+
+      await waitFor(() => {
+        expect(mockRouterPush).toHaveBeenCalledWith('/auth/verify-email/pending?email=pending%40example.com');
+      });
+    });
+
+    test('uses UNVERIFIED_EMAIL fallback toast message when backend message is empty', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {
+            code: 'UNVERIFIED_EMAIL',
+          },
+        },
+      });
+
+      await user.type(nameInput, 'Pending No Msg');
+      await user.type(emailInput, 'pending.nomsg@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(mockToastSuccess).toHaveBeenCalledWith(
+          'Email belum diverifikasi. Kami telah mengirim ulang link verifikasi.'
+        );
+      });
+
+      await waitFor(() => {
+        expect(mockRouterPush).toHaveBeenCalledWith('/auth/verify-email/pending?email=pending.nomsg%40example.com');
       });
     });
 

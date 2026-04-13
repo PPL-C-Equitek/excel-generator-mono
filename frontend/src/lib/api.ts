@@ -4,6 +4,12 @@ const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
 
 function mapUploadErrorMessage(message: string): string {
   const normalized = message.toLowerCase();
+  const mentionsPdf = normalized.includes("pdf");
+  const mentionsExcel = normalized.includes("excel");
+  const mentionsWord =
+    /\bword\b/.test(normalized) ||
+    normalized.includes(".doc") ||
+    normalized.includes(".docx");
 
   if (
     normalized.includes("file too large") ||
@@ -14,38 +20,56 @@ function mapUploadErrorMessage(message: string): string {
 
   if (
     normalized.includes("pdf exceeds the maximum allowed page count") ||
-    normalized.includes("maximum allowed page count of 100")
+    (mentionsPdf && normalized.includes("maximum allowed page count of 100"))
   ) {
     return "PDF has too many pages (maximum 100).";
   }
 
   if (
+    normalized.includes("word exceeds the maximum allowed page count") ||
+    (mentionsWord && normalized.includes("maximum allowed page count of 100"))
+  ) {
+    return "Word has too many pages (maximum 100).";
+  }
+
+  if (
     normalized.includes("excel exceeds the maximum allowed sheet count") ||
     normalized.includes("maximum allowed sheet count of 100") ||
-    (normalized.includes("excel") && normalized.includes("too many sheets"))
+    (mentionsExcel && normalized.includes("too many sheets"))
   ) {
     return "Excel has too many sheets (maximum 100).";
   }
 
-  if (normalized.includes("excel") && normalized.includes("password-protected")) {
+  if (mentionsExcel && normalized.includes("password-protected")) {
     return "Excel is password-protected. Please remove the password and try again.";
   }
 
-  if (normalized.includes("password-protected")) {
+  if (mentionsWord && normalized.includes("password-protected")) {
+    return "Word file is password-protected. Please remove the password and try again.";
+  }
+
+  if (mentionsPdf && normalized.includes("password-protected")) {
     return "PDF is password-protected. Please remove the password and try again.";
   }
 
   if (
-    normalized.includes("pdf file is corrupt") ||
-    normalized.includes("invalid structure")
+    mentionsWord &&
+    (normalized.includes("corrupt") || normalized.includes("invalid structure"))
+  ) {
+    return "Word file is corrupt or has an invalid structure.";
+  }
+
+  if (
+    mentionsPdf &&
+    (normalized.includes("pdf file is corrupt") || normalized.includes("invalid structure"))
   ) {
     return "PDF file is corrupted or invalid.";
   }
 
   if (
     normalized.includes("invalid or corrupted excel file") ||
-    (normalized.includes("excel") && normalized.includes("corrupt")) ||
-    (normalized.includes("excel") && normalized.includes("cannot read"))
+    (mentionsExcel && normalized.includes("corrupt")) ||
+    (mentionsExcel && normalized.includes("cannot read"))
   ) {
     return "Excel file is corrupt or has an invalid structure.";
   }
@@ -56,6 +80,10 @@ function mapUploadErrorMessage(message: string): string {
     normalized.includes("too many upload")
   ) {
     return "Rate limit exceeded. Please try again later.";
+  }
+
+  if (normalized.includes("password-protected")) {
+    return "File is password-protected. Please remove the password and try again.";
   }
 
   return message;
@@ -93,13 +121,7 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
 }
 
 export async function uploadFile(file: File, options?: RequestInit) {
-  const base = (() => {
-    try {
-      return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").origin;
-    } catch {
-      return "http://localhost:8000";
-    }
-  })();
+  const base = API_URL;
 
   const body = new FormData();
   body.append("file", file);
