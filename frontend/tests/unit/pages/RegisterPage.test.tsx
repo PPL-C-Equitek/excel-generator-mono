@@ -485,6 +485,34 @@ describe('Registration Page', () => {
       });
     });
 
+    test('uses UNVERIFIED_EMAIL fallback toast message when backend message is empty', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      mockedAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {
+            code: 'UNVERIFIED_EMAIL',
+          },
+        },
+      });
+
+      await user.type(nameInput, 'Pending No Msg');
+      await user.type(emailInput, 'pending.nomsg@example.com');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(mockToastSuccess).toHaveBeenCalledWith(
+          'Email belum diverifikasi. Kami telah mengirim ulang link verifikasi.'
+        );
+      });
+
+      await waitFor(() => {
+        expect(mockRouterPush).toHaveBeenCalledWith('/auth/verify-email/pending?email=pending.nomsg%40example.com');
+      });
+    });
+
     test('shows rate limit fallback message on 429 when no data.message is provided', async () => {
       const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
