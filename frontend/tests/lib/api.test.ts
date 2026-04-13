@@ -347,9 +347,9 @@ describe("uploadFile", () => {
         await expect(uploadFile(file)).rejects.toThrow("Upload failed");
     });
 
-    it("falls back to localhost:8000 when NEXT_PUBLIC_API_URL is not a valid URL", async () => {
+    it("preserves the configured API path when uploading files", async () => {
         vi.resetModules();
-        vi.stubEnv("NEXT_PUBLIC_API_URL", "not-a-valid-url");
+        vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:9999/api/v1/");
 
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: true,
@@ -363,7 +363,7 @@ describe("uploadFile", () => {
         await freshUploadFile(file);
 
         const calledUrl = mockedFetch.mock.calls[0][0] as string;
-        expect(calledUrl).toBe("http://localhost:8000/upload/");
+        expect(calledUrl).toBe("http://localhost:9999/api/v1/upload/");
     });
 });
 
