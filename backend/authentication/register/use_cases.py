@@ -33,7 +33,7 @@ class DefaultRegisterUserUseCase(RegisterUserUseCase):
                 self._register_new_user(command)
                 return RegistrationResult(message=self._success_message)
 
-            if existing_user.status != "verified" and password:
+            if existing_user.status != "verified":
                 self._reregister_unverified_user(command=command, password=password, existing_user=existing_user)
 
             raise RegistrationConflictError("Email is already registered.")
@@ -54,14 +54,15 @@ class DefaultRegisterUserUseCase(RegisterUserUseCase):
     def _reregister_unverified_user(
         self,
         command: RegisterCommand,
-        password: str,
+        password: str | None,
         existing_user: RegistrationUser,
     ) -> None:
-        user = User.objects.filter(email=command.email).first()
-        if user is not None:
-            user.set_password(password)
-            user.email_verification_nonce = uuid.uuid4()
-            user.save(update_fields=["password", "email_verification_nonce"])
+        if password:
+            user = User.objects.filter(email=command.email).first()
+            if user is not None:
+                user.set_password(password)
+                user.email_verification_nonce = uuid.uuid4()
+                user.save(update_fields=["password", "email_verification_nonce"])
 
         unverified_strategy = self._strategy_factory.create(existing_user)
         unverified_strategy.execute(command, existing_user)

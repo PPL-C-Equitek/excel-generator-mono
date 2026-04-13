@@ -8,8 +8,10 @@ import RegisterPage, {
 
 import { vi, describe, test, expect, beforeEach, afterEach, Mocked } from 'vitest';
 
-const mockRouterPush = vi.fn();
-const mockToastError = vi.fn();
+const { mockRouterPush, mockToastSuccess } = vi.hoisted(() => ({
+  mockRouterPush: vi.fn(),
+  mockToastSuccess: vi.fn(),
+}));
 
 vi.mock('axios');
 vi.mock('next/navigation', () => ({
@@ -19,7 +21,7 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('sonner', () => ({
   toast: {
-    error: mockToastError,
+    success: mockToastSuccess,
   },
 }));
 const mockedAxios = axios as Mocked<typeof axios>;
@@ -29,7 +31,7 @@ describe('Registration Page', () => {
     vi.resetAllMocks();
     mockedAxios.post.mockReset();
     mockRouterPush.mockReset();
-    mockToastError.mockReset();
+    mockToastSuccess.mockReset();
   });
 
   afterEach(() => {
@@ -473,13 +475,13 @@ describe('Registration Page', () => {
       });
 
       await waitFor(() => {
-        expect(mockToastError).toHaveBeenCalledWith(
+        expect(mockToastSuccess).toHaveBeenCalledWith(
           expect.stringMatching(/email belum diverifikasi|email registered but unverified/i)
         );
       });
 
       await waitFor(() => {
-        expect(mockRouterPush).toHaveBeenCalledWith('/auth/verify-email');
+        expect(mockRouterPush).toHaveBeenCalledWith('/auth/verify-email/pending?email=pending%40example.com');
       });
     });
 
