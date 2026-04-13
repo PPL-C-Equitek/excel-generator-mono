@@ -59,6 +59,12 @@ npm test
 
 # Run tests with coverage
 npm run test:coverage
+
+# Run Playwright behavioral smoke tests
+npm run test:e2e
+
+# Start the local e2e Docker stack and run Playwright against it
+npm run test:e2e:docker
 ```
 
 ### Linting
@@ -233,6 +239,35 @@ npm run test:coverage
 ```
 
 Coverage reports are generated in `coverage/` directory.
+
+### Behavioral Testing
+
+Playwright is used for behavioral smoke coverage on top of the existing unit and integration tests.
+
+Local flow:
+
+```bash
+# From frontend/, start the dedicated e2e stack and run the behavioral suite
+npm run test:e2e:docker
+```
+
+What happens automatically during `npm run test:e2e:docker`:
+
+- Docker Compose builds and starts the dedicated e2e db, backend, and frontend services
+- the Playwright Chromium browser is installed when needed
+- Django migrations are applied against the e2e database
+- deterministic seed data is created with `python manage.py seed_e2e --reset`
+- Playwright runs the smoke suite for auth, schema, and history flows
+
+If you already have local services running without Docker, `npm run test:e2e` still works and Playwright will manage them directly.
+
+Default e2e database connection:
+
+- host: `127.0.0.1`
+- port: `55432`
+- database: `excel_generator_e2e`
+- user: `excel_e2e`
+- password: `excel_e2e`
 
 ---
 

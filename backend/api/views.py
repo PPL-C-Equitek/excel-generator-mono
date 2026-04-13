@@ -22,11 +22,6 @@ from artifact_history.services import (
     update_artifact_history_custom_name,
 )
 from authentication.permissions import IsVerifiedUser
-from file_processing.services.upload_service import (
-    FILE_TOO_LARGE_ERROR,
-    MAX_FILE_SIZE,
-    process_upload,
-)
 from file_processing.serializers import (
     CsvExportRequestSerializer,
     CsvExportResponseSerializer,
@@ -45,6 +40,10 @@ from file_processing.services.export_service import (
     export_excel_to_filesystem,
     resolve_csv_download_artifact,
     resolve_excel_download_artifact,
+)
+from file_processing.utils.upload_constants import (
+    FILE_TOO_LARGE_ERROR,
+    MAX_FILE_SIZE,
 )
 
 logger = logging.getLogger(__name__)
@@ -515,6 +514,8 @@ def history_download(request, history_id):
 @parser_classes([MultiPartParser])
 def upload(request):
     try:
+        from file_processing.services.upload_service import process_upload
+
         raw_content_length = request.META.get("CONTENT_LENGTH")
         if raw_content_length is not None:
             try:
