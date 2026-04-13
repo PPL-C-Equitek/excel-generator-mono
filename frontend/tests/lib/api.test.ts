@@ -197,6 +197,23 @@ describe("uploadFile", () => {
         );
     });
 
+    it("maps password-protected Word error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Word file is password-protected." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "protected.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow(
+            "Word file is password-protected. Please remove the password and try again."
+        );
+    });
+
     it("maps corrupted PDF error to dedicated FE message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
@@ -208,6 +225,38 @@ describe("uploadFile", () => {
         const file = new File(["file-content"], "corrupt.pdf", { type: "application/pdf" });
 
         await expect(uploadFile(file)).rejects.toThrow("PDF file is corrupted or invalid.");
+    });
+
+    it("maps corrupted Word error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Word file is corrupt or has an invalid structure." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "corrupt.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Word file is corrupt or has an invalid structure.");
+    });
+
+    it("maps max Word page count error to user-friendly FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({
+                message: "Word exceeds the maximum allowed page count of 100.",
+            }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "long.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Word has too many pages (maximum 100).");
     });
 
     it("maps generic corrupted Excel error to dedicated FE message", async () => {
