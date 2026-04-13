@@ -4,7 +4,6 @@ import uuid
 from unittest.mock import patch, MagicMock
 from django.utils import timezone
 
-from django.core.signing import TimestampSigner
 from django.test import SimpleTestCase, override_settings
 from authentication.models import User
 from authentication.services import (
@@ -14,6 +13,7 @@ from authentication.services import (
     RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
     RefreshTokenService,
     _get_resend_from_email,
+    decode_verification_token,
     generate_tokens,
     generate_verification_token,
     send_password_changed_email,
@@ -22,15 +22,18 @@ from authentication.services import (
 
 class GenerateVerificationTokenTest(SimpleTestCase):
     def test_generates_signed_token_containing_email(self):
-        token = generate_verification_token("test@example.com")
+        token = generate_verification_token(
+            "test@example.com",
+            "nonce-123",
+        )
 
-        signer = TimestampSigner()
-        email = signer.unsign(token, max_age=60)
+        email, nonce = decode_verification_token(token, max_age=60)
         self.assertEqual(email, "test@example.com")
+        self.assertEqual(nonce, "nonce-123")
 
     def test_different_emails_produce_different_tokens(self):
-        token_a = generate_verification_token("a@example.com")
-        token_b = generate_verification_token("b@example.com")
+        token_a = generate_verification_token("a@example.com", "nonce-a")
+        token_b = generate_verification_token("b@example.com", "nonce-b")
         self.assertNotEqual(token_a, token_b)
 
 
