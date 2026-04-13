@@ -288,3 +288,56 @@ class UnverifiedUserReregistrationFlowTest(APITestCase):
             self.previous_nonce,
         )
         mock_send_verification_email.assert_called_once_with(self.user.email)
+
+    @patch("authentication.register.adapters.send_verification_email")
+    def test_reregister_unverified_user_returns_500_when_verification_email_send_fails(
+        self, mock_send_verification_email
+    ):
+        mock_send_verification_email.side_effect = Exception("mail server down")
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Pending User",
+                "email": "pending@example.com",
+                "password": self.new_password,
+            },
+            format="json",
+        )
+
+        self.user.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.json(),
+            {"message": "An internal server error occurred"},
+        )
+        self.assertTrue(self.user.check_password(self.new_password))
+        self.assertNotEqual(self.user.email_verification_nonce, self.previous_nonce)
+        mock_send_verification_email.assert_called_once_with(self.user.email)
+
+    @patch("authentication.register.adapters.send_verification_email")
+    def test_reregister_unverified_user_with_invalid_password_returns_400_before_nonce_rotation(
+        self, mock_send_verification_email
+    ):
+        invalid_password = "123"
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Pending User",
+                "email": "pending@example.com",
+                "password": invalid_password,
+            },
+            format="json",
+        )
+
+        self.user.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("errors", response.json())
+        self.assertIn("password", response.json()["errors"])
+        self.assertTrue(self.user.check_password(self.old_password))
+        self.assertFalse(self.user.check_password(invalid_password))
+        self.assertEqual(self.user.email_verification_nonce, self.previous_nonce)
+        mock_send_verification_email.assert_not_called()
