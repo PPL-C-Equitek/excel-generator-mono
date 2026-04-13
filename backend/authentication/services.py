@@ -339,6 +339,7 @@ class RefreshTokenService:
 
 def send_verification_email(email):
     user = User.objects.get(email=email)
+    previous_nonce = user.email_verification_nonce
     user.email_verification_nonce = uuid.uuid4()
     user.save(update_fields=["email_verification_nonce"])
 
@@ -360,9 +361,11 @@ def send_verification_email(email):
             })
         else:
             logger.info("Verification link (RESEND_API_KEY not set): %s", verification_url)
-    except Exception:
+    except Exception as exc:
+        user.email_verification_nonce = previous_nonce
+        user.save(update_fields=["email_verification_nonce"])
         logger.exception("Failed to send verification email to %s", user.email)
-        raise
+        raise exc
 
 
 def send_password_reset_email(email):

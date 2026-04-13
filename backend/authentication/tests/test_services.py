@@ -87,7 +87,11 @@ class SendVerificationEmailTest(TestCase):
         self.assertEqual(call_kwargs["subject"], "Verify Your Email")
         self.assertIn("verify-email?token=", call_kwargs["html"])
 
-    @override_settings(RESEND_API_KEY="re_test_key", FRONTEND_URL="https://app.example.com")
+    @override_settings(
+        RESEND_API_KEY="re_test_key",
+        FRONTEND_URL="https://app.example.com",
+        RESEND_FROM_EMAIL="test@example.com",
+    )
     def test_logs_and_reraises_exception_when_resend_fails(self):
         mock_resend = MagicMock()
         mock_resend.Emails.send.side_effect = RuntimeError("send failed")
@@ -280,7 +284,10 @@ class SendPasswordChangedEmailTest(SimpleTestCase):
         self.assertEqual(call_kwargs["to"], "user@example.com")
         self.assertEqual(call_kwargs["subject"], "Your Password Was Changed")
 
-    @override_settings(RESEND_API_KEY="re_test_key")
+    @override_settings(
+        RESEND_API_KEY="re_test_key",
+        RESEND_FROM_EMAIL="test@example.com",
+    )
     def test_logs_and_reraises_when_password_changed_email_send_fails(self):
         mock_resend = MagicMock()
         mock_resend.Emails.send.side_effect = RuntimeError("send failed")
