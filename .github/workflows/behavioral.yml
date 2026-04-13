@@ -1,5 +1,8 @@
 name: Behavioral Smoke
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
