@@ -38,7 +38,7 @@ export const authStatePath = path.resolve(
 
 function quoteCommandPart(value: string): string {
     if (value.includes(' ') || value.includes('"')) {
-        return `"${value.replace(/"/g, '\\"')}"`
+        return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
     }
 
     return value
