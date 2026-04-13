@@ -2259,3 +2259,47 @@ class TestWordValidationService(unittest.TestCase):
         self.assertEqual(
             word_validation_service.extract_docx_page_count(ArchiveNoPages()), 0
         )
+
+    def test_extract_docx_page_count_uses_document_fallback_when_app_xml_missing(self):
+        class ArchiveNoAppPages:
+            def read(self, name):
+                if name == "docProps/app.xml":
+                    return b"<Properties><Template>Normal</Template></Properties>"
+                if name == "word/document.xml":
+                    namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    page_breaks = "".join(
+                        "<w:lastRenderedPageBreak/>"
+                        for _ in range(word_validation_service.MAX_WORD_PAGES)
+                    )
+                    return (
+                        f'<w:document xmlns:w="{namespace}"><w:body><w:p><w:r>'
+                        f"{page_breaks}</w:r></w:p></w:body></w:document>"
+                    ).encode("utf-8")
+                raise KeyError(name)
+
+        page_count = word_validation_service.extract_docx_page_count(
+            ArchiveNoAppPages()
+        )
+        self.assertGreater(page_count, word_validation_service.MAX_WORD_PAGES)
+
+    def test_extract_docx_page_count_prefers_higher_document_estimate(self):
+        class ArchiveStaleAppPages:
+            def read(self, name):
+                if name == "docProps/app.xml":
+                    return b"<Properties><Pages>2</Pages></Properties>"
+                if name == "word/document.xml":
+                    namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    page_break_before_nodes = "".join(
+                        "<w:p><w:pPr><w:pageBreakBefore/></w:pPr></w:p>"
+                        for _ in range(word_validation_service.MAX_WORD_PAGES)
+                    )
+                    return (
+                        f'<w:document xmlns:w="{namespace}"><w:body>'
+                        f"{page_break_before_nodes}</w:body></w:document>"
+                    ).encode("utf-8")
+                raise KeyError(name)
+
+        page_count = word_validation_service.extract_docx_page_count(
+            ArchiveStaleAppPages()
+        )
+        self.assertGreater(page_count, word_validation_service.MAX_WORD_PAGES)
