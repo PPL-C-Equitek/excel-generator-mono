@@ -215,7 +215,9 @@ function TokenPasswordActionContent({
   const [status, setStatus] = useState<ActionStatus>(
     config.validateEndpointPath ? 'loading' : 'form'
   );
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState(
+    config.validateEndpointPath ? config.suspenseMessage : ''
+  );
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [errors, setErrors] = useState<TokenFormErrors>({
