@@ -1,6 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+type StringProcessEnv = NodeJS.ProcessEnv & Record<string, string>
+
 export const frontendDirectory = path.resolve(__dirname, '..')
 export const repositoryRoot = path.resolve(frontendDirectory, '..')
 export const backendDirectory = path.resolve(repositoryRoot, 'backend')
@@ -61,11 +63,28 @@ export function buildCommand(executable: string, args: string[]): string {
     return [quoteCommandPart(executable), ...args.map(quoteCommandPart)].join(' ')
 }
 
-export function createBackendEnvironment(): NodeJS.ProcessEnv {
-    const mediaRoot = process.env.MEDIA_ROOT ?? './media'
+function createDefinedEnvironment(
+    baseEnvironment: NodeJS.ProcessEnv,
+    overrides: Record<string, string>
+): StringProcessEnv {
+    const nextEnvironment: StringProcessEnv = {} as StringProcessEnv
+
+    for (const [key, value] of Object.entries(baseEnvironment)) {
+        if (typeof value === 'string') {
+            nextEnvironment[key] = value
+        }
+    }
 
     return {
-        ...process.env,
+        ...nextEnvironment,
+        ...overrides,
+    }
+}
+
+export function createBackendEnvironment(): StringProcessEnv {
+    const mediaRoot = process.env.MEDIA_ROOT ?? './media'
+
+    return createDefinedEnvironment(process.env, {
         PYTHONUNBUFFERED: '1',
         DJANGO_SECRET_KEY: process.env.DJANGO_SECRET_KEY ?? 'e2e-django-secret',
         JWT_SECRET_KEY: process.env.JWT_SECRET_KEY ?? 'e2e-jwt-secret',
@@ -92,15 +111,14 @@ export function createBackendEnvironment(): NodeJS.ProcessEnv {
             process.env.EXCEL_EXPORT_DIR ?? `${mediaRoot}/exports/excel`,
         TESSERACT_LANG: process.env.TESSERACT_LANG ?? 'eng',
         E2E_TESTING: 'true',
-    }
+    })
 }
 
-export function createFrontendEnvironment(): NodeJS.ProcessEnv {
-    return {
-        ...process.env,
+export function createFrontendEnvironment(): StringProcessEnv {
+    return createDefinedEnvironment(process.env, {
         NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? backendBaseUrl,
         NEXT_PUBLIC_GOOGLE_CLIENT_ID:
             process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? 'mock-google-client-id',
         E2E_TESTING: 'true',
-    }
+    })
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
     deleteHistoryFile,
     downloadHistoryFile,
@@ -75,9 +75,9 @@ export function useHistoryFiles(
     const [mutationError, setMutationError] = useState<string | null>(null)
     const [activeDownloads, setActiveDownloads] = useState<Record<string, boolean>>({})
 
-    const loadHistory = async (
-        nextLimit = limit,
-        nextOffset = offset,
+    const loadHistory = useCallback(async (
+        nextLimit: number,
+        nextOffset: number,
         options?: { showLoader?: boolean }
     ) => {
         const showLoader = options?.showLoader ?? true
@@ -101,11 +101,11 @@ export function useHistoryFiles(
                 setIsLoading(false)
             }
         }
-    }
+    }, [service])
 
     useEffect(() => {
         void loadHistory(DEFAULT_LIMIT, 0)
-    }, [])
+    }, [loadHistory])
 
     const reloadHistory = async () => {
         await loadHistory(limit, offset)
