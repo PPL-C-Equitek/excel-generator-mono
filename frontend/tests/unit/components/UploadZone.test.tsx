@@ -108,6 +108,20 @@ describe('Drag and Drop Functionality', () => {
     expect(screen.getByTestId('drop-zone')).toBeInTheDocument()
     expect(screen.queryByTestId('convert-btn')).not.toBeInTheDocument()
   })
+
+  it('stages a dropped file and shows its name in the confirmation state', () => {
+    const file = createMockFile('dropped.pdf')
+    render(<UploadZone footerContent={<div>Footer note</div>} />)
+
+    fireEvent.drop(screen.getByTestId('drop-zone'), {
+      preventDefault: vi.fn(),
+      dataTransfer: { files: [file] as unknown as FileList },
+    })
+
+    expect(screen.getByText('dropped.pdf')).toBeInTheDocument()
+    expect(screen.getByText('Footer note')).toBeInTheDocument()
+    expect(screen.getByTestId('convert-btn')).toBeInTheDocument()
+  })
 })
 
 describe('Disabled State', () => {
@@ -154,6 +168,17 @@ describe('File Confirmation', () => {
 
     expect(screen.queryByTestId('convert-btn')).not.toBeInTheDocument()
     expect(mockOnFileSelect).not.toHaveBeenCalled()
+  })
+
+  it('calls onFileSelect with the staged file when Convert is clicked', async () => {
+    const mockOnFileSelect = vi.fn()
+    render(<UploadZone onFileSelect={mockOnFileSelect} />)
+
+    const file = await uploadAndStageFile(createMockFile('convert-me.pdf'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    expect(mockOnFileSelect).toHaveBeenCalledTimes(1)
+    expect(mockOnFileSelect).toHaveBeenCalledWith(file)
   })
 
   it('displays file size in B for files under 1 KB', async () => {
