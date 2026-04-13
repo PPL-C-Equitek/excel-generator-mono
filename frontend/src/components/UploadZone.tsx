@@ -48,12 +48,6 @@ export default function UploadZone({ onFileSelect, disabled, footerContent }: Up
         if (file) handleFile(file)
     }
 
-    const handleConvert = () => {
-        if (selectedFile) {
-            onFileSelect?.(selectedFile)
-        }
-    }
-
     const handleReset = () => {
         setSelectedFile(null)
     }
@@ -85,7 +79,7 @@ export default function UploadZone({ onFileSelect, disabled, footerContent }: Up
                     </button>
                     <button
                         data-testid="convert-btn"
-                        onClick={handleConvert}
+                        onClick={() => onFileSelect?.(selectedFile)}
                         disabled={disabled}
                         className="px-8 py-2.5 rounded-xl bg-red-700 text-white font-bold text-sm hover:bg-red-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
                     >
