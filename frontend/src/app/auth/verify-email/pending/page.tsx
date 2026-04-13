@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import axios from 'axios';
@@ -15,7 +15,7 @@ function getResendButtonText(isResending: boolean, resendCooldown: number): stri
   return 'Kirim Ulang Email';
 }
 
-export default function VerifyEmailPendingPage() {
+function VerifyEmailPendingContent() {
   const searchParams = useSearchParams();
   const email = (searchParams.get('email') || '').trim();
 
@@ -105,5 +105,13 @@ export default function VerifyEmailPendingPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function VerifyEmailPendingPage() {
+  return (
+    <Suspense fallback={null}>
+      <VerifyEmailPendingContent />
+    </Suspense>
   );
 }
