@@ -39,37 +39,47 @@ class DirectDownloadHandlerTest(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/csv")
 
-    def test_csv_direct_download_passes_file_id(self):
+    def test_base_direct_download_resolves_artifact_via_strategy(self):
         strategy = Mock()
-        strategy.export_storage_dir.return_value = "/tmp/csv"
-        resolver = Mock(return_value={"ok": True})
+        strategy.resolve_direct_download = Mock(return_value={"ok": True})
+        handler = BaseDirectDownloadHandler(
+            strategy=strategy,
+            resolve_download_filename=Mock(),
+            open_file=Mock(),
+        )
+
+        result = handler.resolve_artifact("artifact_token")
+
+        self.assertEqual(result, {"ok": True})
+        strategy.resolve_direct_download.assert_called_once_with("artifact_token")
+
+    def test_csv_direct_download_inherits_strategy_based_resolution(self):
+        strategy = Mock()
+        strategy.resolve_direct_download = Mock(return_value={"ok": True})
         handler = CsvDirectDownloadHandler(
             strategy=strategy,
             resolve_download_filename=Mock(),
             open_file=Mock(),
-            resolver=resolver,
         )
 
         result = handler.resolve_artifact("csv_token")
 
         self.assertEqual(result, {"ok": True})
-        resolver.assert_called_once_with(file_id="csv_token", storage_dir="/tmp/csv")
+        strategy.resolve_direct_download.assert_called_once_with("csv_token")
 
-    def test_excel_direct_download_passes_export_id(self):
+    def test_excel_direct_download_inherits_strategy_based_resolution(self):
         strategy = Mock()
-        strategy.export_storage_dir.return_value = "/tmp/excel"
-        resolver = Mock(return_value={"ok": True})
+        strategy.resolve_direct_download = Mock(return_value={"ok": True})
         handler = ExcelDirectDownloadHandler(
             strategy=strategy,
             resolve_download_filename=Mock(),
             open_file=Mock(),
-            resolver=resolver,
         )
 
         result = handler.resolve_artifact("xlsx_token")
 
         self.assertEqual(result, {"ok": True})
-        resolver.assert_called_once_with(export_id="xlsx_token", storage_dir="/tmp/excel")
+        strategy.resolve_direct_download.assert_called_once_with("xlsx_token")
 
 
 class DummyRequestSerializer:
