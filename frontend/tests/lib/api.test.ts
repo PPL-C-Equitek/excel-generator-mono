@@ -9,8 +9,18 @@ import {
     requestPasswordReset,
     resendPasswordReset,
 } from "@/lib/api";
+import { FILE_TOO_LARGE_MESSAGE } from "@/constants/upload";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+function parseMockRequestBody(mockFetch: ReturnType<typeof vi.fn>, callIndex = 0) {
+    const requestInit = mockFetch.mock.calls[callIndex]?.[1] as RequestInit | undefined
+    if (!requestInit || typeof requestInit.body !== "string") {
+        throw new Error("Expected a JSON request body")
+    }
+
+    return JSON.parse(requestInit.body)
+}
 
 describe("fetchAPI", () => {
     afterEach(() => {
@@ -127,7 +137,7 @@ describe("uploadFile", () => {
 
         const file = new File(["file-content"], "big.pdf", { type: "application/pdf" });
 
-        await expect(uploadFile(file)).rejects.toThrow("File size too big.");
+        await expect(uploadFile(file)).rejects.toThrow(FILE_TOO_LARGE_MESSAGE);
     });
 
     it("maps max PDF page count error to user-friendly FE message", async () => {
@@ -405,7 +415,7 @@ describe('login', () => {
 
             await login('user1@gmail.com', 'user1123')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body).toEqual({ email: 'user1@gmail.com', password: 'user1123' })
         })
 
@@ -462,7 +472,7 @@ describe('login', () => {
 
             await login('  USER1@GMAIL.COM  ', 'user1123')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body.email).toBe('  USER1@GMAIL.COM  ')
         })
 
@@ -528,7 +538,7 @@ describe('loginWithGoogle', () => {
 
             await loginWithGoogle('mock-google-token')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body).toEqual({ token: 'mock-google-token' })
         })
 
