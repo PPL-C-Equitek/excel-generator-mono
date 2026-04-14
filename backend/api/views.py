@@ -140,7 +140,7 @@ def _get_excel_export_handler():
     return handler
 
 
-def _get_history_download_coordinator():
+def _get_history_download_handler():
     return HistoryDownloadHandler(
         resolve_history_download_artifact=_resolve_history_download_artifact,
         regenerate_history_download_artifact_after_stale_cache=(
@@ -591,7 +591,7 @@ def history_download(request, history_id):
     if error_response is not None:
         return error_response
 
-    return _get_history_download_coordinator().handle(
+    return _get_history_download_handler().handle(
         history=history,
         owner=request.user,
         file_format=file_format,
