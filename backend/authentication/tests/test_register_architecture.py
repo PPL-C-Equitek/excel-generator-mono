@@ -7,7 +7,10 @@ from django.db import IntegrityError
 from rest_framework import status
 from rest_framework.test import APISimpleTestCase, APIRequestFactory
 
-from authentication.register.adapters import DefaultRegistrationStrategyFactory
+from authentication.register.adapters import (
+    DefaultRegistrationStrategyFactory,
+    DjangoRegistrationWriterRepository,
+)
 from authentication.register.entities import RegisterCommand, RegistrationResult, RegistrationUser
 from authentication.register.exceptions import (
     RegistrationConflictError,
@@ -384,3 +387,17 @@ class RegisterViewDependencyInjectionTest(APISimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["errors"]["password"][0], "Not a valid string.")
         use_case.execute.assert_not_called()
+
+
+class DjangoRegistrationWriterRepositoryTest(APISimpleTestCase):
+    @patch("authentication.register.adapters.User")
+    def test_update_unverified_user_password_is_noop_when_user_missing(self, mock_user_model):
+        mock_user_model.objects.filter.return_value.first.return_value = None
+
+        repository = DjangoRegistrationWriterRepository()
+        repository.update_unverified_user_password(
+            email="missing@example.com",
+            password="Strong#123",
+        )
+
+        mock_user_model.objects.filter.assert_called_once_with(email="missing@example.com")
