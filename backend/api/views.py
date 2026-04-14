@@ -26,6 +26,7 @@ from api.services import (
     CsvExportHandler,
     ExcelDirectDownloadHandler,
     ExcelExportHandler,
+    HistoryDownloadCoordinator,
 )
 from api.strategies import ArtifactFormatRegistry, CsvFormatStrategy, ExcelFormatStrategy
 from authentication.permissions import IsVerifiedUser
@@ -139,6 +140,32 @@ def _get_excel_export_handler():
         "Failed to generate Excel due to invalid response metadata."
     )
     return handler
+
+
+def _get_history_download_coordinator():
+    return HistoryDownloadCoordinator(
+        resolve_history_download_artifact=_resolve_history_download_artifact,
+        regenerate_history_download_artifact_after_stale_cache=(
+            _regenerate_history_download_artifact_after_stale_cache
+        ),
+        resolve_download_filename=_resolve_download_filename,
+        get_history_download_content_type=_get_history_download_content_type,
+        history_download_internal_error_response=_history_download_internal_error_response,
+        invalid_stored_output_error_types=(
+            OutputLLMValidationError,
+            OutputCSVMappingError,
+        ),
+        generation_error_types=(
+            OutputCSVGenerationError,
+            OutputExcelGenerationError,
+            SuspiciousFileOperation,
+            ValueError,
+            OSError,
+            KeyError,
+        ),
+        open_file=open,
+        logger=logger,
+    )
 
 
 def _sanitize_download_filename(candidate):
@@ -566,57 +593,11 @@ def history_download(request, history_id):
     if error_response is not None:
         return error_response
 
-    try:
-        file_name, artifact_type, safe_file_path, used_cached_artifact = _resolve_history_download_artifact(
-            history=history,
-            owner=request.user,
-            file_format=file_format,
-        )
-        try:
-            file_handle = open(safe_file_path, "rb")
-        except OSError:
-            if not used_cached_artifact:
-                raise
-
-            logger.warning(
-                "History download cache artifact missing on disk; regenerating."
-            )
-            file_name, artifact_type, safe_file_path = (
-                _regenerate_history_download_artifact_after_stale_cache(
-                    history=history,
-                    owner=request.user,
-                    file_format=file_format,
-                )
-            )
-            file_handle = open(safe_file_path, "rb")
-    except (OutputLLMValidationError, OutputCSVMappingError):
-        logger.exception("History download failed due to invalid stored output.")
-        return _history_download_internal_error_response()
-    except (
-        OutputCSVGenerationError,
-        OutputExcelGenerationError,
-        SuspiciousFileOperation,
-        ValueError,
-        OSError,
-        KeyError,
-    ):
-        logger.exception("History download failed while generating artifact.")
-        return _history_download_internal_error_response()
-    except Exception:
-        logger.exception("Unexpected error while preparing history download.")
-        return _history_download_internal_error_response()
-
-    download_name = _resolve_download_filename(
+    return _get_history_download_coordinator().handle(
+        history=history,
+        owner=request.user,
+        file_format=file_format,
         requested_name=request.query_params.get("filename"),
-        default_name=file_name,
-        artifact_type=artifact_type,
-    )
-
-    return FileResponse(
-        file_handle,
-        as_attachment=True,
-        filename=download_name,
-        content_type=_get_history_download_content_type(artifact_type),
     )
 
 
