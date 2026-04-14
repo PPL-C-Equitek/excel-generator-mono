@@ -76,6 +76,42 @@ describe("fetchAPI", () => {
         expect(calledUrl).toBe("http://localhost:9999/health/");
         expect(result).toEqual({ status: "trimmed" });
     });
+
+    it("clears auth tokens and redirects to /login when a protected request returns 401", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        window.localStorage.setItem("access_token", "access-token");
+        window.localStorage.setItem("refresh_token", "refresh-token");
+
+        const removeItemSpy = vi.spyOn(window.localStorage, "removeItem");
+        const assignSpy = vi.fn();
+        Object.defineProperty(window, "location", {
+            configurable: true,
+            value: {
+                ...window.location,
+                assign: assignSpy,
+            },
+        });
+
+        await expect(
+            fetchAPI("history/", {
+                headers: {
+                    Authorization: "Bearer access-token",
+                },
+            })
+        ).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(removeItemSpy).toHaveBeenCalledWith("access_token");
+        expect(removeItemSpy).toHaveBeenCalledWith("refresh_token");
+        expect(assignSpy).toHaveBeenCalledWith("/login");
+    });
 });
 
 describe("uploadFile", () => {
