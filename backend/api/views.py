@@ -21,7 +21,12 @@ from artifact_history.services import (
     list_artifact_history_for_user,
     update_artifact_history_custom_name,
 )
-from api.services import CsvDirectDownloadHandler, ExcelDirectDownloadHandler
+from api.services import (
+    CsvDirectDownloadHandler,
+    CsvExportHandler,
+    ExcelDirectDownloadHandler,
+    ExcelExportHandler,
+)
 from api.strategies import ArtifactFormatRegistry, CsvFormatStrategy, ExcelFormatStrategy
 from authentication.permissions import IsVerifiedUser
 from file_processing.services.upload_service import (
@@ -86,6 +91,54 @@ def _get_excel_direct_download_handler():
         open_file=open,
         resolver=resolve_excel_download_artifact,
     )
+
+
+def _get_csv_export_handler():
+    handler = CsvExportHandler(
+        strategy=_get_artifact_formats().get("csv"),
+        build_error_response=_build_export_error_response,
+        build_success_response=_build_export_success_response,
+    )
+    handler.request_serializer_class = CsvExportRequestSerializer
+    handler.response_serializer_class = CsvExportResponseSerializer
+    handler.validation_error_types = (
+        OutputLLMValidationError,
+        OutputCSVMappingError,
+    )
+    handler.generation_error_types = (OutputCSVGenerationError,)
+    handler.invalid_request_message = "Invalid CSV export request."
+    handler.internal_error_message = "Failed to generate CSV due to internal error."
+    handler.validation_log_message = "Validation or mapping error during CSV export."
+    handler.generation_log_message = "CSV generation error during CSV export."
+    handler.unexpected_log_message = "Unexpected error during CSV export."
+    handler.invalid_metadata_message = (
+        "Failed to generate CSV due to invalid response metadata."
+    )
+    return handler
+
+
+def _get_excel_export_handler():
+    handler = ExcelExportHandler(
+        strategy=_get_artifact_formats().get("xlsx"),
+        build_error_response=_build_export_error_response,
+        build_success_response=_build_export_success_response,
+    )
+    handler.request_serializer_class = ExcelExportRequestSerializer
+    handler.response_serializer_class = ExcelExportResponseSerializer
+    handler.validation_error_types = (
+        OutputLLMValidationError,
+        OutputCSVMappingError,
+    )
+    handler.generation_error_types = (OutputExcelGenerationError,)
+    handler.invalid_request_message = "Invalid Excel export request."
+    handler.internal_error_message = "Failed to generate Excel due to internal error."
+    handler.validation_log_message = "Validation or mapping error during Excel export."
+    handler.generation_log_message = "Excel generation error during Excel export."
+    handler.unexpected_log_message = "Unexpected error during Excel export."
+    handler.invalid_metadata_message = (
+        "Failed to generate Excel due to invalid response metadata."
+    )
+    return handler
 
 
 def _sanitize_download_filename(candidate):
@@ -635,68 +688,14 @@ def upload(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def export_csv(request):
-    serializer = CsvExportRequestSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        metadata = export_csv_to_filesystem(
-            output_json=serializer.validated_data["output_json"],
-            storage_dir=settings.CSV_EXPORT_DIR,
-        )
-    except Exception as exc:
-        return _build_export_error_response(
-            error=exc,
-            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
-            generation_error_types=(OutputCSVGenerationError,),
-            invalid_request_message="Invalid CSV export request.",
-            internal_error_message="Failed to generate CSV due to internal error.",
-            validation_log_message="Validation or mapping error during CSV export.",
-            generation_log_message="CSV generation error during CSV export.",
-            unexpected_log_message="Unexpected error during CSV export.",
-        )
-
-    return _build_export_success_response(
-        metadata=metadata,
-        response_serializer_class=CsvExportResponseSerializer,
-        invalid_metadata_message=(
-            "Failed to generate CSV due to invalid response metadata."
-        ),
-    )
+    return _get_csv_export_handler().handle(request)
 
 
 @require_POST
 @api_view(["POST"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def export_excel(request):
-    serializer = ExcelExportRequestSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        metadata = export_excel_to_filesystem(
-            output_json=serializer.validated_data["output_json"],
-            storage_dir=settings.EXCEL_EXPORT_DIR,
-        )
-    except Exception as exc:
-        return _build_export_error_response(
-            error=exc,
-            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
-            generation_error_types=(OutputExcelGenerationError,),
-            invalid_request_message="Invalid Excel export request.",
-            internal_error_message="Failed to generate Excel due to internal error.",
-            validation_log_message="Validation or mapping error during Excel export.",
-            generation_log_message="Excel generation error during Excel export.",
-            unexpected_log_message="Unexpected error during Excel export.",
-        )
-
-    return _build_export_success_response(
-        metadata=metadata,
-        response_serializer_class=ExcelExportResponseSerializer,
-        invalid_metadata_message=(
-            "Failed to generate Excel due to invalid response metadata."
-        ),
-    )
+    return _get_excel_export_handler().handle(request)
 
 
 @require_GET
