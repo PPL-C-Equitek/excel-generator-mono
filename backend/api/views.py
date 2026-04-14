@@ -21,6 +21,7 @@ from artifact_history.services import (
     list_artifact_history_for_user,
     update_artifact_history_custom_name,
 )
+from api.strategies import ArtifactFormatRegistry, CsvFormatStrategy, ExcelFormatStrategy
 from authentication.permissions import IsVerifiedUser
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
@@ -49,6 +50,23 @@ from file_processing.services.export_service import (
 
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
+
+
+def _get_artifact_formats():
+    return ArtifactFormatRegistry(
+        [
+            CsvFormatStrategy(
+                storage_dir=settings.CSV_EXPORT_DIR,
+                export_to_filesystem=export_csv_to_filesystem,
+                resolve_direct_download=resolve_csv_download_artifact,
+            ),
+            ExcelFormatStrategy(
+                storage_dir=settings.EXCEL_EXPORT_DIR,
+                export_to_filesystem=export_excel_to_filesystem,
+                resolve_direct_download=resolve_excel_download_artifact,
+            ),
+        ]
+    )
 
 
 def _sanitize_download_filename(candidate):
@@ -153,31 +171,20 @@ def _get_owned_history_or_not_found(user, history_id):
 
 def _get_history_download_storage_dir(artifact_type):
     if artifact_type == "xlsx":
-        return settings.EXCEL_EXPORT_DIR
-    return settings.CSV_EXPORT_DIR
+        return _get_artifact_formats().get("xlsx").export_storage_dir()
+    return _get_artifact_formats().get("csv").export_storage_dir()
 
 
 def _get_history_download_content_type(artifact_type):
-    if artifact_type == "zip":
-        return "application/zip"
     if artifact_type == "xlsx":
-        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    return "text/csv"
+        return _get_artifact_formats().get("xlsx").resolve_history_content_type(artifact_type)
+    return _get_artifact_formats().get("csv").resolve_history_content_type(artifact_type)
 
 
 def _generate_history_download_artifact(history, owner, file_format):
-    if file_format == "csv":
-        artifact = export_csv_to_filesystem(
-            output_json=history.output_json,
-            storage_dir=settings.CSV_EXPORT_DIR,
-        )
-        safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
-    else:
-        artifact = export_excel_to_filesystem(
-            output_json=history.output_json,
-            storage_dir=settings.EXCEL_EXPORT_DIR,
-        )
-        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+    strategy = _get_artifact_formats().get(file_format)
+    artifact = strategy.export_to_filesystem(history.output_json)
+    safe_file_path = safe_join(strategy.export_storage_dir(), artifact["file_name"])
 
     cached_artifact = create_history_export_artifact(
         history=history,
