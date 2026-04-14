@@ -22,7 +22,7 @@ class JWTAuthenticationTest(SimpleTestCase):
     def _request_with_header(self, header_value):
         return self.factory.get("/api/health/", HTTP_AUTHORIZATION=header_value)
 
-    def _access_token(self, user_id):
+    def _access_token(self, user_id, session_version=1):
         now = timezone.now()
         payload = {
             "user_id": str(user_id),
@@ -30,6 +30,7 @@ class JWTAuthenticationTest(SimpleTestCase):
             "type": "access",
             "iat": int(now.timestamp()),
             "exp": int((now + timedelta(minutes=5)).timestamp()),
+            "session_version": session_version,
         }
         return jwt.encode(payload, self.SECRET_KEY, algorithm="HS256")
 
@@ -157,6 +158,7 @@ class JWTAuthenticationTest(SimpleTestCase):
         request = self._request_with_header(f"Bearer {token}")
 
         expected_user = MagicMock()
+        expected_user.session_version = 1
         mock_user_model.objects.get.return_value = expected_user
 
         user, payload = self.auth.authenticate(request)
