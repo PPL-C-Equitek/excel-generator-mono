@@ -79,3 +79,28 @@ class LoginSerializer(serializers.Serializer):
 
 class RefreshTokenSerializer(serializers.Serializer):
     refresh_token = serializers.CharField(required=True, write_only=True)
+
+
+class TokenObtainPairSerializer:
+    @staticmethod
+    def build_access_payload(*, user, now_timestamp: int, exp_timestamp: int) -> dict:
+        return {
+            "user_id": str(user.id),
+            "email": user.email,
+            "type": "access",
+            "iat": now_timestamp,
+            "exp": exp_timestamp,
+            "iss": "excel-generator",
+            "session_version": user.session_version,
+        }
+
+    @staticmethod
+    def build_refresh_payload(*, user, now_timestamp: int, exp_timestamp: int) -> dict:
+        return {
+            "user_id": str(user.id),
+            "email": user.email,
+            "type": "refresh",
+            "iat": now_timestamp,
+            "exp": exp_timestamp,
+            "session_version": user.session_version,
+        }

@@ -107,7 +107,7 @@ class GoogleOAuthService:
             user.save(update_fields=["status"])
         
         # Generate JWT tokens
-        tokens = generate_tokens(user.id, user.email)
+        tokens = generate_tokens(user.id, user.email, user.session_version)
         
         return {
             "user": user,

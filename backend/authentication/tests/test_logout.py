@@ -83,7 +83,7 @@ class LogoutViewTest(APITestCase):
             [status.HTTP_200_OK, status.HTTP_204_NO_CONTENT],
         )
         self.assertEqual(second_response.status_code, status.HTTP_401_UNAUTHORIZED)
-        self.assertEqual(mock_blacklist_refresh_token.call_count, 2)
+        self.assertEqual(mock_blacklist_refresh_token.call_count, 1)
 
     @patch("authentication.views.blacklist_refresh_token", create=True)
     def test_logout_with_expired_access_token_returns_401_before_blacklist_logic(
