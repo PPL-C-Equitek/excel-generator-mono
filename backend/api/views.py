@@ -3,7 +3,6 @@ import logging
 
 from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
-from django.http import FileResponse
 from django.utils._os import safe_join
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from rest_framework.decorators import api_view, parser_classes, permission_classes
