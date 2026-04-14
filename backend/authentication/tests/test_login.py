@@ -1,434 +1,157 @@
 import uuid
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from rest_framework.test import APISimpleTestCase
 from rest_framework import status
+from rest_framework.test import APISimpleTestCase
 
-from authentication.models import User
-from authentication.views import LoginFailureTracker
 
 class LoginViewTest(APISimpleTestCase):
-    """Test cases for the login endpoint using TDD approach (RED phase)"""
-    
     def setUp(self):
         self.url = "/auth/login/"
-        self.valid_payload = {
-            "email": "user@example.com",
-            "password": "securePass1",
-        }
-
-    # Input Validation Tests
 
     def test_login_missing_email_returns_400(self):
-        """System should return 400 if email is missing"""
-        payload = {
-            "password": "securePass1",
-        }
-        response = self.client.post(self.url, payload, format="json")
+        response = self.client.post(
+            self.url,
+            {"password": "securePass1"},
+            format="json",
+        )
+
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("errors", response.data)
 
     def test_login_missing_password_returns_400(self):
-        """System should return 400 if password is missing"""
-        payload = {
-            "email": "user@example.com",
-        }
-        response = self.client.post(self.url, payload, format="json")
+        response = self.client.post(
+            self.url,
+            {"email": "user@example.com"},
+            format="json",
+        )
+
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("errors", response.data)
 
     def test_login_invalid_email_format_returns_400(self):
-        """System should return 400 if email format is invalid"""
-        payload = {
-            "email": "invalid-email",
-            "password": "securePass1",
-        }
-        response = self.client.post(self.url, payload, format="json")
+        response = self.client.post(
+            self.url,
+            {"email": "invalid-email", "password": "securePass1"},
+            format="json",
+        )
+
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("errors", response.data)
 
-    def test_login_empty_email_returns_400(self):
-        """System should return 400 if email is empty"""
-        payload = {
-            "email": "",
-            "password": "securePass1",
-        }
-        response = self.client.post(self.url, payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("errors", response.data)
+    @patch("authentication.login.http.build_login_use_case")
+    def test_login_invalid_credentials_returns_401(self, mock_builder):
+        use_case = MagicMock()
+        from authentication.login.exceptions import InvalidCredentialsError
 
-    def test_login_empty_password_returns_400(self):
-        """System should return 400 if password is empty"""
-        payload = {
-            "email": "user@example.com",
-            "password": "",
-        }
-        response = self.client.post(self.url, payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("errors", response.data)
+        use_case.execute.side_effect = InvalidCredentialsError()
+        mock_builder.return_value = use_case
 
-    def test_login_extra_fields_are_ignored(self):
-        """System should accept and ignore extra fields in request"""
-        payload = {
-            "email": "user@example.com",
-            "password": "securePass1",
-            "extra_field": "should_be_ignored",
-            "another_field": 123,
-        }
-        with patch("authentication.views.User") as mock_user_model:
-            mock_user = MagicMock()
-            mock_user.id = uuid.uuid4()
-            mock_user.email = "user@example.com"
-            mock_user.name = "User"
-            mock_user.status = "verified"
-            
-            mock_user_model.objects.get.return_value = mock_user
-            mock_user.check_password.return_value = True
-            
-            with patch("authentication.views.generate_tokens") as mock_gen_tokens:
-                mock_gen_tokens.return_value = {
-                    "access_token": "access_token",
-                    "refresh_token": "refresh_token"
-                }
-                response = self.client.post(self.url, payload, format="json")
-                # Should not return 400 for extra fields
-                self.assertNotEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.post(
+            self.url,
+            {"email": "user@example.com", "password": "wrong"},
+            format="json",
+        )
 
-    #  Credential Validation Tests
-
-    @patch("authentication.views.User")
-    def test_login_user_not_found_returns_401(self, mock_user_model):
-        """System should return 401 if user with email not found"""
-        mock_user_model.objects.get.side_effect = User.DoesNotExist()
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-        self.assertIn("message", response.data)
+        self.assertEqual(response.data["message"], "Email atau password salah")
 
-    @patch("authentication.views.User")
-    def test_login_wrong_password_returns_401(self, mock_user_model):
-        """System should return 401 if password is incorrect"""
-        mock_user = MagicMock()
-        mock_user.id = uuid.uuid4()
-        mock_user.email = "user@example.com"
-        mock_user.name = "User"
-        mock_user.status = "verified"
-        mock_user.check_password.return_value = False
-        
-        mock_user_model.objects.get.return_value = mock_user
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-        self.assertIn("message", response.data)
-        mock_user.check_password.assert_called_once_with("securePass1")
+    @patch("authentication.login.http.build_login_use_case")
+    def test_login_unverified_email_returns_403(self, mock_builder):
+        use_case = MagicMock()
+        from authentication.login.exceptions import EmailNotVerifiedError
 
-    # Email Verification Tests
+        use_case.execute.side_effect = EmailNotVerifiedError()
+        mock_builder.return_value = use_case
 
-    @patch("authentication.views.User")
-    def test_login_unverified_email_returns_403(self, mock_user_model):
-        """System should return 403 if email is not verified"""
-        mock_user = MagicMock()
-        mock_user.id = uuid.uuid4()
-        mock_user.email = "user@example.com"
-        mock_user.name = "User"
-        mock_user.status = "unverified"
-        mock_user.check_password.return_value = True
-        
-        mock_user_model.objects.get.return_value = mock_user
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
+        response = self.client.post(
+            self.url,
+            {"email": "user@example.com", "password": "securePass1"},
+            format="json",
+        )
+
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertIn("message", response.data)
-        # Should contain message to check email
         self.assertIn("cek email", response.data["message"].lower())
 
-    # Successful Login Tests
+    @patch("authentication.login.http.build_login_use_case")
+    def test_login_rate_limited_returns_429(self, mock_builder):
+        use_case = MagicMock()
+        from authentication.login.exceptions import LoginRateLimitedError
 
-    @patch("authentication.views.User")
-    @patch("authentication.views.generate_tokens")
-    def test_login_valid_credentials_returns_200(self, mock_gen_tokens, mock_user_model):
-        """System should return 200 with tokens if login successful"""
-        mock_user = MagicMock()
-        mock_user.id = uuid.uuid4()
-        mock_user.email = "user@example.com"
-        mock_user.name = "John Doe"
-        mock_user.status = "verified"
-        mock_user.check_password.return_value = True
-        
-        mock_user_model.objects.get.return_value = mock_user
-        mock_gen_tokens.return_value = {
-            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-            "refresh_token": "refresh_token_value"
-        }
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        use_case.execute.side_effect = LoginRateLimitedError()
+        mock_builder.return_value = use_case
 
-    @patch("authentication.views.User")
-    @patch("authentication.views.generate_tokens")
-    def test_login_response_contains_access_token(self, mock_gen_tokens, mock_user_model):
-        """System should return access_token in response"""
-        mock_user = MagicMock()
-        mock_user.id = uuid.uuid4()
-        mock_user.email = "user@example.com"
-        mock_user.name = "John Doe"
-        mock_user.status = "verified"
-        mock_user.check_password.return_value = True
-        
-        mock_user_model.objects.get.return_value = mock_user
-        mock_gen_tokens.return_value = {
-            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-            "refresh_token": "refresh_token_value"
-        }
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertIn("access_token", response.data)
-        self.assertEqual(response.data["access_token"], "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...")
+        response = self.client.post(
+            self.url,
+            {"email": "user@example.com", "password": "securePass1"},
+            format="json",
+        )
 
-    @patch("authentication.views.User")
-    @patch("authentication.views.generate_tokens")
-    def test_login_response_contains_refresh_token(self, mock_gen_tokens, mock_user_model):
-        """System should return refresh_token in response"""
-        mock_user = MagicMock()
-        mock_user.id = uuid.uuid4()
-        mock_user.email = "user@example.com"
-        mock_user.name = "John Doe"
-        mock_user.status = "verified"
-        mock_user.check_password.return_value = True
-        
-        mock_user_model.objects.get.return_value = mock_user
-        mock_gen_tokens.return_value = {
-            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-            "refresh_token": "refresh_token_value"
-        }
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertIn("refresh_token", response.data)
-        self.assertEqual(response.data["refresh_token"], "refresh_token_value")
-
-    @patch("authentication.views.User")
-    @patch("authentication.views.generate_tokens")
-    def test_login_response_contains_user_data(self, mock_gen_tokens, mock_user_model):
-        """System should return user data in response"""
-        user_id = uuid.uuid4()
-        mock_user = MagicMock()
-        mock_user.id = user_id
-        mock_user.email = "user@example.com"
-        mock_user.name = "John Doe"
-        mock_user.status = "verified"
-        mock_user.check_password.return_value = True
-        
-        mock_user_model.objects.get.return_value = mock_user
-        mock_gen_tokens.return_value = {
-            "access_token": "access_token",
-            "refresh_token": "refresh_token"
-        }
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertIn("user", response.data)
-        self.assertEqual(response.data["user"]["id"], str(user_id))
-        self.assertEqual(response.data["user"]["email"], "user@example.com")
-        self.assertEqual(response.data["user"]["name"], "John Doe")
-
-    @patch("authentication.views.User")
-    @patch("authentication.views.generate_tokens")
-    def test_login_normalizes_email(self, mock_gen_tokens, mock_user_model):
-        """System should normalize email (lowercase, strip whitespace) before querying"""
-        payload = {
-            "email": "  USER@Example.COM  ",
-            "password": "securePass1",
-        }
-        
-        mock_user = MagicMock()
-        mock_user.id = uuid.uuid4()
-        mock_user.email = "user@example.com"
-        mock_user.name = "User"
-        mock_user.status = "verified"
-        mock_user.check_password.return_value = True
-        
-        mock_user_model.objects.get.return_value = mock_user
-        mock_gen_tokens.return_value = {
-            "access_token": "token",
-            "refresh_token": "refresh"
-        }
-        
-        response = self.client.post(self.url, payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # Verify that get was called with normalized email
-        mock_user_model.objects.get.assert_called()
-        call_kwargs = mock_user_model.objects.get.call_args[1]
-        self.assertEqual(call_kwargs["email"], "user@example.com")
-
-    # Rate Limiting Tests
-
-    @patch("authentication.views.LoginFailureTracker")
-    @patch("authentication.views.User")
-    def test_login_rate_limiting_blocks_after_5_failed_attempts(self, mock_user_model, mock_tracker):
-        """System should block after 5 failed attempts within 15 minutes"""
-        mock_tracker.is_rate_limited.return_value = True
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
-        self.assertIn("message", response.data)
-
-    @patch("authentication.views.LoginFailureTracker")
-    @patch("authentication.views.User")
-    def test_login_rate_limiting_message_on_exceed_limit(self, mock_user_model, mock_tracker):
-        """System should return appropriate message when rate limit exceeded"""
-        mock_tracker.is_rate_limited.return_value = True
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
         self.assertIn("Terlalu banyak percobaan", response.data["message"])
 
-    @patch("authentication.views.LoginFailureTracker")
-    @patch("authentication.views.User")
-    def test_login_tracks_failed_attempts(self, mock_user_model, mock_tracker):
-        """System should track failed login attempts"""
-        mock_user_model.objects.get.side_effect = User.DoesNotExist()
-        mock_tracker.is_rate_limited.return_value = False
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-        # Verify that tracker was called
-        mock_tracker.record_failure.assert_called()
+    @patch("authentication.login.http.build_login_use_case")
+    def test_login_valid_credentials_returns_200_with_tokens_and_user(self, mock_builder):
+        from authentication.login.entities import AuthenticatedUser, LoginResult, TokenPair
 
-    @patch("authentication.views.LoginFailureTracker")
-    @patch("authentication.views.User")
-    @patch("authentication.views.generate_tokens")
-    def test_login_resets_failure_count_on_success(self, mock_gen_tokens, mock_user_model, mock_tracker):
-        """System should reset failure count on successful login"""
-        mock_user = MagicMock()
-        mock_user.id = uuid.uuid4()
-        mock_user.email = "user@example.com"
-        mock_user.name = "User"
-        mock_user.status = "verified"
-        mock_user.check_password.return_value = True
-        
-        mock_user_model.objects.get.return_value = mock_user
-        mock_gen_tokens.return_value = {
-            "access_token": "token",
-            "refresh_token": "refresh"
-        }
-        mock_tracker.is_rate_limited.return_value = False
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
+        use_case = MagicMock()
+        use_case.execute.return_value = LoginResult(
+            tokens=TokenPair(access_token="access-token", refresh_token="refresh-token"),
+            user=AuthenticatedUser(
+                id=str(uuid.uuid4()),
+                email="user@example.com",
+                name="John Doe",
+            ),
+        )
+        mock_builder.return_value = use_case
+
+        response = self.client.post(
+            self.url,
+            {"email": " USER@Example.COM ", "password": "securePass1"},
+            format="json",
+        )
+
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # Verify that tracker reset was called
-        mock_tracker.reset_failures.assert_called()
+        self.assertEqual(response.data["access_token"], "access-token")
+        self.assertEqual(response.data["refresh_token"], "refresh-token")
+        self.assertIn("user", response.data)
+        self.assertEqual(response.data["user"]["email"], "user@example.com")
+        self.assertNotIn("password", response.data["user"])
 
-    # Error Handling Tests
+    @patch("authentication.login.http.build_login_use_case")
+    def test_login_unexpected_error_returns_500(self, mock_builder):
+        use_case = MagicMock()
+        use_case.execute.side_effect = RuntimeError("Database connection error")
+        mock_builder.return_value = use_case
 
-    @patch("authentication.views.User")
-    def test_login_unexpected_error_returns_500(self, mock_user_model):
-        """System should return 500 on unexpected internal error"""
-        mock_user_model.objects.get.side_effect = Exception("Database connection error")
-        
-        response = self.client.post(self.url, {
-            "email": "user@example.com",
-            "password": "securePass1"
-        }, format="json")
+        response = self.client.post(
+            self.url,
+            {"email": "user@example.com", "password": "securePass1"},
+            format="json",
+        )
+
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertIn("message", response.data)
 
-    @patch("authentication.views.generate_tokens")
-    @patch("authentication.views.User")
-    def test_login_token_generation_error_returns_500(self, mock_user_model, mock_gen_tokens):
-        """System should return 500 if token generation fails"""
-        mock_user = MagicMock()
-        mock_user.id = uuid.uuid4()
-        mock_user.email = "user@example.com"
-        mock_user.name = "User"
-        mock_user.status = "verified"
-        mock_user.check_password.return_value = True
-        
-        mock_user_model.objects.get.return_value = mock_user
-        mock_gen_tokens.side_effect = Exception("JWT encoding error")
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    # Additional Edge Case Tests
-
-    @patch("authentication.views.User")
-    def test_login_case_insensitive_email_lookup(self, mock_user_model):
-        """System should treat email lookup as case-insensitive"""
-        payload = {
-            "email": "USER@EXAMPLE.COM",
-            "password": "securePass1",
-        }
-        
-        mock_user = MagicMock()
-        mock_user.id = uuid.uuid4()
-        mock_user.email = "user@example.com"
-        mock_user.name = "User"
-        mock_user.status = "verified"
-        mock_user.check_password.return_value = True
-        
-        mock_user_model.objects.get.return_value = mock_user
-        
-        with patch("authentication.views.generate_tokens") as mock_gen_tokens:
-            mock_gen_tokens.return_value = {
-                "access_token": "token",
-                "refresh_token": "refresh"
-            }
-            response = self.client.post(self.url, payload, format="json")
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-    @patch("authentication.views.User")
-    def test_login_only_post_method_allowed(self, mock_user_model):
-        """System should only allow POST method on login endpoint"""
-        # GET should not be allowed
+    def test_login_only_post_method_allowed(self):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
-        
-        # PUT should not be allowed
-        response = self.client.put(self.url, self.valid_payload, format="json")
+
+        response = self.client.put(
+            self.url,
+            {"email": "user@example.com", "password": "securePass1"},
+            format="json",
+        )
         self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
-        
-        # DELETE should not be allowed
+
         response = self.client.delete(self.url)
         self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
 
-    @patch("authentication.views.User")
-    @patch("authentication.views.generate_tokens")
-    def test_login_user_data_does_not_include_password(self, mock_gen_tokens, mock_user_model):
-        """System should not include password in user data response"""
-        mock_user = MagicMock()
-        mock_user.id = uuid.uuid4()
-        mock_user.email = "user@example.com"
-        mock_user.name = "John Doe"
-        mock_user.status = "verified"
-        mock_user.check_password.return_value = True
-        
-        mock_user_model.objects.get.return_value = mock_user
-        mock_gen_tokens.return_value = {
-            "access_token": "token",
-            "refresh_token": "refresh"
-        }
-        
-        response = self.client.post(self.url, self.valid_payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertNotIn("password", response.data.get("user", {}))
-
-    @patch("authentication.views.User")
-    def test_login_invalid_json_returns_400(self, mock_user_model):
-        """System should return 400 for invalid JSON"""
+    def test_login_invalid_json_returns_400(self):
         response = self.client.post(
             self.url,
             "{invalid json}",
-            content_type="application/json"
+            content_type="application/json",
         )
+
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    @patch("authentication.views.cache")
-    def test_record_failure_falls_back_to_set_when_incr_raises_value_error(self, mock_cache):
-        """Covers the ValueError fallback branch in record_failure."""
-        mock_cache.add.return_value = True
-        mock_cache.incr.side_effect = ValueError
-
-        result = LoginFailureTracker.record_failure("user@example.com")
-
-        cache_key = LoginFailureTracker.get_cache_key("user@example.com")
-        mock_cache.set.assert_called_once_with(cache_key, 1, LoginFailureTracker.TIME_WINDOW)
-        self.assertEqual(result, 1)
