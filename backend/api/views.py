@@ -81,7 +81,6 @@ def _get_csv_direct_download_handler():
         strategy=_get_artifact_formats().get("csv"),
         resolve_download_filename=_resolve_download_filename,
         open_file=open,
-        resolver=resolve_csv_download_artifact,
     )
 
 
@@ -90,7 +89,6 @@ def _get_excel_direct_download_handler():
         strategy=_get_artifact_formats().get("xlsx"),
         resolve_download_filename=_resolve_download_filename,
         open_file=open,
-        resolver=resolve_excel_download_artifact,
     )
 
 

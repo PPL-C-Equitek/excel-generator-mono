@@ -13,6 +13,9 @@ class BaseDirectDownloadHandler:
         self.resolve_download_filename = resolve_download_filename
         self.open_file = open_file
 
+    def resolve_artifact(self, requested_id):
+        return self.strategy.resolve_direct_download(requested_id)
+
     def build_response(self, artifact, requested_name):
         safe_file_path = safe_join(
             self.strategy.export_storage_dir(),
@@ -34,36 +37,8 @@ class BaseDirectDownloadHandler:
 
 
 class CsvDirectDownloadHandler(BaseDirectDownloadHandler):
-    def __init__(
-        self,
-        strategy,
-        resolve_download_filename,
-        open_file,
-        resolver,
-    ):
-        super().__init__(strategy, resolve_download_filename, open_file)
-        self.resolver = resolver
-
-    def resolve_artifact(self, requested_id):
-        return self.resolver(
-            file_id=requested_id,
-            storage_dir=self.strategy.export_storage_dir(),
-        )
+    pass
 
 
 class ExcelDirectDownloadHandler(BaseDirectDownloadHandler):
-    def __init__(
-        self,
-        strategy,
-        resolve_download_filename,
-        open_file,
-        resolver,
-    ):
-        super().__init__(strategy, resolve_download_filename, open_file)
-        self.resolver = resolver
-
-    def resolve_artifact(self, requested_id):
-        return self.resolver(
-            export_id=requested_id,
-            storage_dir=self.strategy.export_storage_dir(),
-        )
+    pass
