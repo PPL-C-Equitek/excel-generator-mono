@@ -21,12 +21,12 @@ from artifact_history.services import (
     list_artifact_history_for_user,
     update_artifact_history_custom_name,
 )
-from api.services import (
+from api.handlers import (
     CsvDirectDownloadHandler,
     CsvExportHandler,
     ExcelDirectDownloadHandler,
     ExcelExportHandler,
-    HistoryDownloadCoordinator,
+    HistoryDownloadHandler,
 )
 from api.strategies import ArtifactFormatRegistry, CsvFormatStrategy, ExcelFormatStrategy
 from authentication.permissions import IsVerifiedUser
@@ -143,7 +143,7 @@ def _get_excel_export_handler():
 
 
 def _get_history_download_coordinator():
-    return HistoryDownloadCoordinator(
+    return HistoryDownloadHandler(
         resolve_history_download_artifact=_resolve_history_download_artifact,
         regenerate_history_download_artifact_after_stale_cache=(
             _regenerate_history_download_artifact_after_stale_cache
