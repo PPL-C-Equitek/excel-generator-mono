@@ -7,12 +7,13 @@ from django.conf import settings
 from django.utils import timezone
 from django.test import override_settings
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APITestCase, APIRequestFactory, force_authenticate
 
 from authentication.logout.adapters import (
     CallableTokenBlacklistRepository,
     DjangoTokenBlacklistRepository,
 )
+from authentication.logout.http import LogoutView as BaseLogoutView
 from authentication.models import User
 from authentication.services import generate_tokens
 from authentication.views import blacklist_refresh_token
@@ -322,3 +323,37 @@ class LogoutViewCompatibilityHelperTest(APITestCase):
         blacklist_refresh_token("refresh-token")
 
         mock_repo.blacklist.assert_called_once_with("refresh-token")
+
+
+class BaseLogoutViewErrorMappingTest(APITestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = User.objects.create_user(
+            email="base.logout@example.com",
+            name="Base Logout User",
+            password="securePass1",
+            status="verified",
+        )
+
+    def test_base_logout_view_returns_401_when_use_case_raises_value_error(self):
+        use_case = MagicMock()
+        use_case.execute.side_effect = ValueError("bad refresh token")
+
+        class TestableLogoutView(BaseLogoutView):
+            authentication_classes = []
+            permission_classes = []
+
+            def get_logout_use_case(self):  # type: ignore[override]
+                return use_case
+
+        request = self.factory.post(
+            "/auth/logout/",
+            {"refresh_token": "bad-token"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = TestableLogoutView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.data["message"], "Unauthorized")
