@@ -16,6 +16,10 @@ class RegistrationWriterPort(ABC):
     def create_unverified_user(self, name: str, email: str) -> RegistrationUser:
         pass  # pragma: no cover
 
+    @abstractmethod
+    def update_unverified_user_password(self, email: str, password: str) -> None:
+        pass  # pragma: no cover
+
 
 class VerificationNotificationPort(ABC):
     @abstractmethod
@@ -41,5 +45,9 @@ class RegistrationStrategyFactoryPort(ABC):
 
 class RegisterUserUseCase(ABC):
     @abstractmethod
-    def execute(self, command: RegisterCommand) -> RegistrationResult:
+    def execute(
+        self,
+        command: RegisterCommand,
+        password: str | None = None,
+    ) -> RegistrationResult:
         pass  # pragma: no cover

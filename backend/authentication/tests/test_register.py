@@ -3,10 +3,12 @@ from unittest.mock import patch, MagicMock
 
 from django.core.cache import cache
 from django.db import IntegrityError
+from django.test import override_settings
 from rest_framework.test import APISimpleTestCase, APITestCase
 from rest_framework import status
 
 from authentication.models import User
+from authentication.services import send_verification_email as real_send_verification_email
 
 
 class RegisterViewTest(APISimpleTestCase):
@@ -83,10 +85,13 @@ class RegisterViewTest(APISimpleTestCase):
         mock_send_email.assert_called_once()
 
     @patch("authentication.register.adapters.send_verification_email")
+    @patch("authentication.register.use_cases.transaction.atomic")
     @patch("authentication.register.adapters.User")
     def test_register_duplicate_unverified_email_returns_409_conflict_and_resends_verification(
-        self, mock_user_model, mock_send_email
+        self, mock_user_model, mock_atomic, mock_send_email
     ):
+        mock_atomic.return_value.__enter__.return_value = None
+        mock_atomic.return_value.__exit__.return_value = None
         existing_user = MagicMock()
         existing_user.status = "unverified"
         existing_user.email = "john@example.com"
@@ -143,6 +148,20 @@ class RegisterViewTest(APISimpleTestCase):
         response = self.client.post(self.url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_register_rejects_non_string_password_with_400(self):
+        response = self.client.post(
+            self.url,
+            {
+                "name": "John Doe",
+                "email": "john@example.com",
+                "password": {"invalid": "type"},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["errors"]["password"][0], "Not a valid string.")
 
     def test_register_requires_name_and_email_only(self):
         response = self.client.post(self.url, {}, format="json")
@@ -277,7 +296,11 @@ class UnverifiedUserReregistrationFlowTest(APITestCase):
         )
         self.previous_nonce = self.user.email_verification_nonce
 
-    @patch("authentication.register.adapters.send_verification_email")
+    @patch(
+        "authentication.register.adapters.send_verification_email",
+        wraps=real_send_verification_email,
+    )
+    @override_settings(RESEND_API_KEY="", FRONTEND_URL="http://localhost:3000")
     def test_reregister_unverified_user_updates_password_rotates_nonce_resends_email_and_returns_conflict(
         self, mock_send_verification_email
     ):
@@ -358,8 +381,9 @@ class UnverifiedUserReregistrationFlowTest(APITestCase):
             response.json(),
             {"message": "An internal server error occurred"},
         )
-        self.assertTrue(self.user.check_password(self.new_password))
-        self.assertNotEqual(self.user.email_verification_nonce, self.previous_nonce)
+        self.assertTrue(self.user.check_password(self.old_password))
+        self.assertFalse(self.user.check_password(self.new_password))
+        self.assertEqual(self.user.email_verification_nonce, self.previous_nonce)
         mock_send_verification_email.assert_called_once_with(self.user.email)
 
     @patch("authentication.register.adapters.send_verification_email")
@@ -387,38 +411,3 @@ class UnverifiedUserReregistrationFlowTest(APITestCase):
         self.assertFalse(self.user.check_password(invalid_password))
         self.assertEqual(self.user.email_verification_nonce, self.previous_nonce)
         mock_send_verification_email.assert_not_called()
-
-    @patch("authentication.register.use_cases.User")
-    @patch("authentication.register.adapters.send_verification_email")
-    def test_reregister_unverified_user_still_resends_when_second_user_lookup_is_missing(
-        self,
-        mock_send_verification_email,
-        mock_use_case_user_model,
-    ):
-        # Simulate a race where the direct ORM lookup in use case returns no row.
-        mock_use_case_user_model.objects.filter.return_value.first.return_value = None
-
-        response = self.client.post(
-            self.url,
-            {
-                "name": "Pending User",
-                "email": "pending@example.com",
-                "password": self.new_password,
-            },
-            format="json",
-        )
-
-        self.user.refresh_from_db()
-
-        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
-        self.assertEqual(
-            response.json(),
-            {
-                "code": "UNVERIFIED_EMAIL",
-                "message": "Email registered but unverified. A new link has been sent.",
-            },
-        )
-        self.assertTrue(self.user.check_password(self.old_password))
-        self.assertFalse(self.user.check_password(self.new_password))
-        self.assertEqual(self.user.email_verification_nonce, self.previous_nonce)
-        mock_send_verification_email.assert_called_once_with(self.user.email)
