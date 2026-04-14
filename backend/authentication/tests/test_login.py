@@ -54,7 +54,7 @@ class LoginViewTest(APISimpleTestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-        self.assertEqual(response.data["message"], "Email atau password salah")
+        self.assertEqual(response.data["message"], "Invalid email or password.")
 
     @patch("authentication.login.http.build_login_use_case")
     def test_login_unverified_email_returns_403(self, mock_builder):
@@ -71,7 +71,7 @@ class LoginViewTest(APISimpleTestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertIn("cek email", response.data["message"].lower())
+        self.assertIn("check your inbox", response.data["message"].lower())
 
     @patch("authentication.login.http.build_login_use_case")
     def test_login_rate_limited_returns_429(self, mock_builder):
@@ -88,7 +88,7 @@ class LoginViewTest(APISimpleTestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
-        self.assertIn("Terlalu banyak percobaan", response.data["message"])
+        self.assertIn("Too many failed attempts. Please try again in a few minutes.", response.data["message"])
 
     @patch("authentication.login.http.build_login_use_case")
     def test_login_valid_credentials_returns_200_with_tokens_and_user(self, mock_builder):
