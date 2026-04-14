@@ -26,6 +26,12 @@ def validate_password_strength(value):
 class RegisterSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=150, required=True)
     email = serializers.EmailField(required=True)
+    password = serializers.CharField(
+        max_length=128,
+        required=False,
+        write_only=True,
+        validators=[validate_password_strength],
+    )
 
 
 class EmailRequestSerializer(serializers.Serializer):
