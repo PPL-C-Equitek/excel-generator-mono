@@ -683,14 +683,15 @@ def export_excel(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def download_csv(request, file_id):
+    handler = _get_csv_direct_download_handler()
     try:
-        artifact = _get_csv_direct_download_handler().resolve_artifact(file_id)
+        artifact = handler.resolve_artifact(file_id)
     except OutputCSVDownloadLookupError:
         logger.warning("CSV download file not found or invalid file_id.", exc_info=True)
         return _csv_download_not_found_response()
 
     try:
-        return _get_csv_direct_download_handler().build_response(
+        return handler.build_response(
             artifact=artifact,
             requested_name=request.query_params.get("filename"),
         )
@@ -709,8 +710,9 @@ def download_csv(request, file_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def download_excel(request, export_id):
+    handler = _get_excel_direct_download_handler()
     try:
-        artifact = _get_excel_direct_download_handler().resolve_artifact(export_id)
+        artifact = handler.resolve_artifact(export_id)
     except OutputExcelDownloadLookupError as exc:
         if _is_invalid_excel_download_id_error(exc):
             logger.warning("Excel download received invalid export_id.", exc_info=True)
@@ -726,7 +728,7 @@ def download_excel(request, export_id):
         return _excel_download_internal_error_response()
 
     try:
-        return _get_excel_direct_download_handler().build_response(
+        return handler.build_response(
             artifact=artifact,
             requested_name=request.query_params.get("filename"),
         )
