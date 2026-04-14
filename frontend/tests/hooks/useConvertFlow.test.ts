@@ -2,6 +2,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useConvertFlow } from '../../src/hooks/useConvertFlow'
 import type { ILLMService } from '../../src/lib/ILLMService'
+import { FILE_TOO_LARGE_MESSAGE, MAX_UPLOAD_SIZE_BYTES } from '../../src/constants/upload'
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -200,7 +201,7 @@ describe('useConvertFlow', () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
             const oversizedFile = new File(['x'], 'big.pdf', { type: 'application/pdf' })
-            Object.defineProperty(oversizedFile, 'size', { value: 10 * 1024 * 1024 + 1 })
+            Object.defineProperty(oversizedFile, 'size', { value: MAX_UPLOAD_SIZE_BYTES + 1 })
 
             await act(async () => {
                 await result.current.handleFileSelect(oversizedFile)
@@ -208,7 +209,7 @@ describe('useConvertFlow', () => {
 
             expect(mockUploadFile).not.toHaveBeenCalled()
             expect(service.generate).not.toHaveBeenCalled()
-            expect(result.current.error).toBe('File size too big. Maximum allowed size is 10MB.')
+            expect(result.current.error).toBe(FILE_TOO_LARGE_MESSAGE)
             expect(result.current.isConverting).toBe(false)
         })
     })

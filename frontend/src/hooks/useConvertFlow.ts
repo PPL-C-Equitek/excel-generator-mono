@@ -14,9 +14,7 @@ import { isJsonObject } from '@/utils/schemaValidator'
 import { sanitizeCSVCell } from '@/utils/csvSanitizer'
 import type { ILLMService } from '@/lib/ILLMService'
 import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
-
-const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
-const FILE_TOO_LARGE_MESSAGE = 'File size too big. Maximum allowed size is 10MB.'
+import { FILE_TOO_LARGE_MESSAGE, MAX_UPLOAD_SIZE_BYTES } from '@/constants/upload'
 
 const defaultService: ILLMService = {
     generate: generateJson,
