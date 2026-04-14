@@ -195,6 +195,22 @@ describe('useConvertFlow', () => {
 
             expect(service.generate).not.toHaveBeenCalled()
         })
+
+        it('rejects files larger than 10MB on frontend before uploading', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+            const oversizedFile = new File(['x'], 'big.pdf', { type: 'application/pdf' })
+            Object.defineProperty(oversizedFile, 'size', { value: 10 * 1024 * 1024 + 1 })
+
+            await act(async () => {
+                await result.current.handleFileSelect(oversizedFile)
+            })
+
+            expect(mockUploadFile).not.toHaveBeenCalled()
+            expect(service.generate).not.toHaveBeenCalled()
+            expect(result.current.error).toBe('File size too big. Maximum allowed size is 10MB.')
+            expect(result.current.isConverting).toBe(false)
+        })
     })
 
     // -----------------------------------------------------------------------
