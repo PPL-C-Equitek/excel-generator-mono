@@ -5,8 +5,8 @@ from rest_framework.response import Response
 class BaseExportHandler:
     request_serializer_class = None
     response_serializer_class = None
-    validation_error_types = tuple()
-    generation_error_types = tuple()
+    validation_error_types = ()
+    generation_error_types = ()
     invalid_request_message = ""
     internal_error_message = ""
     validation_log_message = ""
