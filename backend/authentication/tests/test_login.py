@@ -9,6 +9,36 @@ class LoginViewTest(APISimpleTestCase):
     def setUp(self):
         self.url = "/auth/login/"
 
+    # Positive
+    @patch("authentication.login.http.build_login_use_case")
+    def test_login_valid_credentials_returns_200_with_tokens_and_user(self, mock_builder):
+        from authentication.login.entities import AuthenticatedUser, LoginResult, TokenPair
+
+        use_case = MagicMock()
+        use_case.execute.return_value = LoginResult(
+            tokens=TokenPair(access_token="access-token", refresh_token="refresh-token"),
+            user=AuthenticatedUser(
+                id=str(uuid.uuid4()),
+                email="user@example.com",
+                name="John Doe",
+            ),
+        )
+        mock_builder.return_value = use_case
+
+        response = self.client.post(
+            self.url,
+            {"email": " USER@Example.COM ", "password": "securePass1"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["access_token"], "access-token")
+        self.assertEqual(response.data["refresh_token"], "refresh-token")
+        self.assertIn("user", response.data)
+        self.assertEqual(response.data["user"]["email"], "user@example.com")
+        self.assertNotIn("password", response.data["user"])
+
+    # Negative
     def test_login_missing_email_returns_400(self):
         response = self.client.post(
             self.url,
@@ -74,6 +104,24 @@ class LoginViewTest(APISimpleTestCase):
         self.assertIn("check your inbox", response.data["message"].lower())
 
     @patch("authentication.login.http.build_login_use_case")
+    def test_login_service_error_returns_500(self, mock_builder):
+        use_case = MagicMock()
+        from authentication.login.exceptions import LoginServiceError
+
+        use_case.execute.side_effect = LoginServiceError("login failed")
+        mock_builder.return_value = use_case
+
+        response = self.client.post(
+            self.url,
+            {"email": "user@example.com", "password": "securePass1"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertIn("message", response.data)
+
+    # Edge Case
+    @patch("authentication.login.http.build_login_use_case")
     def test_login_rate_limited_returns_429(self, mock_builder):
         use_case = MagicMock()
         from authentication.login.exceptions import LoginRateLimitedError
@@ -89,34 +137,6 @@ class LoginViewTest(APISimpleTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
         self.assertIn("Too many failed attempts. Please try again in a few minutes.", response.data["message"])
-
-    @patch("authentication.login.http.build_login_use_case")
-    def test_login_valid_credentials_returns_200_with_tokens_and_user(self, mock_builder):
-        from authentication.login.entities import AuthenticatedUser, LoginResult, TokenPair
-
-        use_case = MagicMock()
-        use_case.execute.return_value = LoginResult(
-            tokens=TokenPair(access_token="access-token", refresh_token="refresh-token"),
-            user=AuthenticatedUser(
-                id=str(uuid.uuid4()),
-                email="user@example.com",
-                name="John Doe",
-            ),
-        )
-        mock_builder.return_value = use_case
-
-        response = self.client.post(
-            self.url,
-            {"email": " USER@Example.COM ", "password": "securePass1"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["access_token"], "access-token")
-        self.assertEqual(response.data["refresh_token"], "refresh-token")
-        self.assertIn("user", response.data)
-        self.assertEqual(response.data["user"]["email"], "user@example.com")
-        self.assertNotIn("password", response.data["user"])
 
     @patch("authentication.login.http.build_login_use_case")
     def test_login_unexpected_error_returns_500(self, mock_builder):
