@@ -5,23 +5,14 @@ const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
   .reduceRight((acc, ch) => (acc === "" && ch === "/" ? acc : ch + acc), "");
 
 function handleUnauthorizedResponse(): void {
-  if (typeof window === "undefined") {
+  if (typeof globalThis.window === "undefined") {
     return;
-  }
-
-  try {
-    window.localStorage.removeItem("access_token");
-    window.localStorage.removeItem("refresh_token");
-    window.sessionStorage.removeItem("access_token");
-    window.sessionStorage.removeItem("refresh_token");
-  } catch {
-    // Continue with best-effort cleanup below.
   }
 
   clearAuthTokens();
 
-  if (window.location.pathname !== "/login") {
-    window.location.assign("/login");
+  if (globalThis.window.location.pathname !== "/login") {
+    globalThis.window.location.assign("/login");
   }
 }
 

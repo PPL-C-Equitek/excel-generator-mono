@@ -7,9 +7,15 @@ import {
   useResendCooldown,
 } from '../../src/hooks/useResendCooldown';
 
+const defaultWindow = globalThis.window;
+
 describe('useResendCooldown', () => {
   afterEach(() => {
     vi.useRealTimers();
+    Object.defineProperty(globalThis, 'window', {
+      value: defaultWindow,
+      configurable: true,
+    });
     localStorage.clear();
   });
 
@@ -362,5 +368,15 @@ describe('useResendCooldown', () => {
 
     expect(result.current.cooldown).toBe(9);
     expect(localStorage.length).toBe(0);
+  });
+
+  it('does not start sync timers or storage listeners when no email is provided', () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
+
+    renderHook(() => useResendCooldown(0));
+
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+    expect(addEventListenerSpy).not.toHaveBeenCalledWith('storage', expect.any(Function));
   });
 });

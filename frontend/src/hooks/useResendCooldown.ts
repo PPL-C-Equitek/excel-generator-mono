@@ -13,7 +13,7 @@ function getStorageKey(email?: string): string | undefined {
 }
 
 function getStoredExpiryTime(email?: string): number | null {
-  if (typeof window === 'undefined') {
+  if (typeof globalThis.window === 'undefined') {
     return null;
   }
 
@@ -22,19 +22,19 @@ function getStoredExpiryTime(email?: string): number | null {
     return null;
   }
 
-  const rawValue = window.localStorage.getItem(storageKey);
+  const rawValue = globalThis.window.localStorage.getItem(storageKey);
   if (!rawValue) {
     return null;
   }
 
   const expiryTime = Number(rawValue);
   if (!Number.isFinite(expiryTime)) {
-    window.localStorage.removeItem(storageKey);
+    globalThis.window.localStorage.removeItem(storageKey);
     return null;
   }
 
   if (expiryTime <= Date.now()) {
-    window.localStorage.removeItem(storageKey);
+    globalThis.window.localStorage.removeItem(storageKey);
     return null;
   }
 
@@ -47,7 +47,7 @@ function getRemainingSecondsFromExpiry(expiryTime: number | null): number {
   }
 
   const remainingSeconds = Math.ceil((expiryTime - Date.now()) / 1000);
-  return remainingSeconds > 0 ? remainingSeconds : 0;
+  return Math.max(remainingSeconds, 0);
 }
 
 export function getRemainingResendCooldownForEmail(email?: string): number {
@@ -55,7 +55,7 @@ export function getRemainingResendCooldownForEmail(email?: string): number {
 }
 
 export function setResendCooldownForEmail(email: string, cooldownSeconds: number): void {
-  if (typeof window === 'undefined') {
+  if (typeof globalThis.window === 'undefined') {
     return;
   }
 
@@ -65,11 +65,11 @@ export function setResendCooldownForEmail(email: string, cooldownSeconds: number
   }
 
   if (cooldownSeconds <= 0) {
-    window.localStorage.removeItem(storageKey);
+    globalThis.window.localStorage.removeItem(storageKey);
     return;
   }
 
-  window.localStorage.setItem(
+  globalThis.window.localStorage.setItem(
     storageKey,
     String(Date.now() + cooldownSeconds * 1000)
   );
@@ -87,9 +87,7 @@ export function useResendCooldown(initialValue = 0, email?: string) {
   });
 
   useEffect(() => {
-    if (!storageKey || typeof window === 'undefined') {
-      return undefined;
-    }
+    const browserWindow = globalThis.window;
 
     const syncCooldown = () => {
       const storedCooldown = getStoredCooldown(email);
@@ -112,10 +110,12 @@ export function useResendCooldown(initialValue = 0, email?: string) {
 
     syncCooldown();
 
-    const timer = window.setInterval(syncCooldown, 1000);
+    const timer = storageKey
+      ? browserWindow.setInterval(syncCooldown, 1000)
+      : null;
 
     const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage) {
+      if (event.storageArea !== browserWindow.localStorage) {
         return;
       }
 
@@ -126,11 +126,18 @@ export function useResendCooldown(initialValue = 0, email?: string) {
       syncCooldown();
     };
 
-    window.addEventListener('storage', handleStorage);
+    if (storageKey) {
+      browserWindow.addEventListener('storage', handleStorage);
+    }
 
     return () => {
-      window.clearInterval(timer);
-      window.removeEventListener('storage', handleStorage);
+      if (timer !== null) {
+        browserWindow.clearInterval(timer);
+      }
+
+      if (storageKey) {
+        browserWindow.removeEventListener('storage', handleStorage);
+      }
     };
   }, [email, initialValue, storageKey]);
 
@@ -141,15 +148,18 @@ export function useResendCooldown(initialValue = 0, email?: string) {
           ? (value as (previousValue: number) => number)(prev)
           : value;
 
-      if (typeof window !== 'undefined' && storageKey) {
+      if (typeof globalThis.window !== 'undefined' && storageKey) {
         if (nextValue <= 0) {
-          window.localStorage.removeItem(storageKey);
+          globalThis.window.localStorage.removeItem(storageKey);
         } else {
-          window.localStorage.setItem(storageKey, String(Date.now() + nextValue * 1000));
+          globalThis.window.localStorage.setItem(
+            storageKey,
+            String(Date.now() + nextValue * 1000)
+          );
         }
       }
 
-      return nextValue > 0 ? nextValue : 0;
+      return Math.max(nextValue, 0);
     });
   };
 

@@ -41,7 +41,7 @@ class DjangoRegistrationWriterRepository(RegistrationWriterPort):
         return _map_user(user)
 
     def update_unverified_user_password(self, email: str, password: str) -> None:
-        user = User.objects.filter(email=email).first()
+        user = User.objects.filter(email=email, status="unverified").first()
         if user is None:
             return
 
