@@ -1094,6 +1094,10 @@ describe('buildCustomSchemaInput', () => {
 })
 
 describe('isCustomSchemaLimitExceededErrorMessage', () => {
+    it('returns false for an empty message', () => {
+        expect(isCustomSchemaLimitExceededErrorMessage('')).toBe(false)
+    })
+
     it('detects the dynamic custom schema limit message', () => {
         expect(
             isCustomSchemaLimitExceededErrorMessage('A user can only have up to 5 custom schemas.')

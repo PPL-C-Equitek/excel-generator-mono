@@ -30,7 +30,7 @@ const DEFAULT_API_ERROR_MESSAGE = "Request failed. Please try again.";
 const INVALID_EXCEL_DOWNLOAD_ERROR_MESSAGE =
   "The Excel download request is invalid.";
 
-type AuthTokenSource = "none" | "stored" | "stored-optional" | "valid";
+type AuthTokenSource = "stored-optional" | "valid";
 type ApiErrorFallbackMode = "mapped-only" | "mapped-or-default";
 
 function buildJsonRequestHeaders(accessToken: string | null): HeadersInit {
@@ -91,10 +91,6 @@ function rethrowMappedApiErrorWithDefault(err: unknown): never {
 }
 
 async function getAuthToken(source: AuthTokenSource): Promise<string | null> {
-  if (source === "stored") {
-    return getStoredAccessToken();
-  }
-
   if (source === "stored-optional") {
     return getStoredAccessToken();
   }
@@ -102,8 +98,6 @@ async function getAuthToken(source: AuthTokenSource): Promise<string | null> {
   if (source === "valid") {
     return getValidAccessToken();
   }
-
-  return null;
 }
 
 async function postJsonRequest(
@@ -115,12 +109,12 @@ async function postJsonRequest(
     errorMode?: ApiErrorFallbackMode;
   } = {}
 ): Promise<unknown> {
-  const authSource = options.authSource ?? "none";
+  const authSource = options.authSource ?? "stored-optional";
   const accessToken = await getAuthToken(authSource);
 
   if (
-    (authSource === "stored" || authSource === "valid")
-    && !accessToken
+    authSource === "valid" &&
+    !accessToken
   ) {
     throw new Error(AUTH_MISSING_ERROR_MESSAGE);
   }
