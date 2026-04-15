@@ -666,6 +666,10 @@ describe('CustomSchemaManager', () => {
             />
         )
 
+        await waitFor(() => {
+            expect(screen.getByTestId('add-schema-btn')).toBeEnabled()
+        })
+
         await user.click(screen.getByTestId('add-schema-btn'))
         const dialog = screen.getByRole('dialog', { name: /add schema/i })
         await user.type(within(dialog).getByLabelText(/schema name/i), 'Invoice Mapping')
