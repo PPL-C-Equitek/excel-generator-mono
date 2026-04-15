@@ -5,7 +5,7 @@ const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
   .reduceRight((acc, ch) => (acc === "" && ch === "/" ? acc : ch + acc), "");
 
 function handleUnauthorizedResponse(): void {
-  if (typeof globalThis.window === "undefined") {
+  if (globalThis.window === undefined) {
     return;
   }
 
