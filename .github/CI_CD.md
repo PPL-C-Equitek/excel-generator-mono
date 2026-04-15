@@ -1,11 +1,13 @@
 # CI/CD Documentation
 
-This repository uses 2 GitHub Actions workflows:
+This repository uses 3 GitHub Actions workflows:
 
 - `.github/workflows/backend.yml`
 - `.github/workflows/frontend.yml`
+- `.github/workflows/behavioral.yml`
 
-Both workflows implement CI (test, coverage, Sonar) and CD (deploy on push).
+`backend.yml` and `frontend.yml` implement CI (test, coverage, Sonar) and CD (deploy on push).
+`behavioral.yml` adds Playwright behavioral smoke coverage for key user flows.
 
 ## 1) Workflow Triggers
 
@@ -28,6 +30,19 @@ Both workflows implement CI (test, coverage, Sonar) and CD (deploy on push).
   - `frontend/**`
   - `scripts/deploy-frontend.sh`
   - `.github/workflows/frontend.yml`
+
+### Behavioral (`behavioral.yml`)
+
+- `push` to `main` when files change in:
+  - `frontend/**`
+  - `backend/**`
+  - `docker-compose.e2e.yml`
+  - `.github/workflows/behavioral.yml`
+- `pull_request` targeting `main` when files change in:
+  - `frontend/**`
+  - `backend/**`
+  - `docker-compose.e2e.yml`
+  - `.github/workflows/behavioral.yml`
 
 ## 2) CI Stages
 
@@ -68,7 +83,22 @@ Each workflow has 3 jobs: `test`, `sonar`, `deploy`.
   - backend: `bash scripts/deploy-backend.sh`
   - frontend: `bash scripts/deploy-frontend.sh`
 
-## 4) Coverage Badge Update Behavior
+## 4) Behavioral Smoke Stage (`behavioral.yml`)
+
+The behavioral workflow runs Playwright smoke tests against native app processes in CI:
+
+- starts a PostgreSQL service container in GitHub Actions
+- installs backend and frontend dependencies directly on the runner
+- Playwright starts Django on `localhost:8000` and Next.js on `localhost:3000`
+- global setup runs Django migrations and seeds deterministic e2e data
+- smoke coverage currently includes:
+  - login bootstrap
+  - logout
+  - protected-route redirect
+  - history rename/delete
+  - schema create/edit/delete
+
+## 5) Coverage Badge Update Behavior
 
 Coverage badge updates only run for:
 
@@ -87,7 +117,7 @@ Badge files:
 - `.github/badges/backend-coverage.svg`
 - `.github/badges/frontend-coverage.svg`
 
-## 5) Required GitHub Configuration
+## 6) Required GitHub Configuration
 
 ### Secrets
 
@@ -124,20 +154,27 @@ Badge files:
 - `EXCEL_EXPORT_DIR`
 - `TESSERACT_LANG`
 
-## 6) Failure Rules
+### Required Status Check
+
+To make behavioral testing mandatory before merge, enable a branch protection rule or ruleset in GitHub and mark the workflow job `Behavioral Smoke` as a required status check for `main`.
+
+This cannot be fully enforced from the repository files alone; it must be enabled in the repository settings.
+
+## 7) Failure Rules
 
 - If `test` fails: `sonar` and `deploy` do not run.
 - If `sonar` quality gate fails: `deploy` does not run.
 - If the badge update `git push` fails: the workflow retries the push command up to 3 times; failures in earlier git steps (`fetch`/`checkout`) fail immediately and are not retried.
 
-## 7) How to Monitor
+## 8) How to Monitor
 
 - CI/CD runs: GitHub tab `Actions`
 - Workflow files:
   - `.github/workflows/backend.yml`
   - `.github/workflows/frontend.yml`
+  - `.github/workflows/behavioral.yml`
 
-## 8) TLS / HTTPS Setup
+## 9) TLS / HTTPS Setup
 
 The application is served over HTTPS using **Nginx** as a reverse proxy and **Let's Encrypt** (via Certbot) for TLS certificates.
 

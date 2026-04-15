@@ -39,6 +39,7 @@ EXT_DOC = ".doc"
 MIME_OCTET_STREAM = "application/octet-stream"
 MIME_OLE_STORAGE = "application/x-ole-storage"
 MIME_ZIP = "application/zip"
+MIME_TEXT_PLAIN = "text/plain"
 
 EXT_TXT = ".txt"
 EXT_CSV = ".csv"
@@ -108,12 +109,12 @@ ALLOWED_MIME_TYPES = {
         MIME_OLE_STORAGE,
     ],
     EXT_TXT: [
-        "text/plain",
+        MIME_TEXT_PLAIN,
         "text/x-log",
     ],
     EXT_CSV: [
         "text/csv",
-        "text/plain",
+        MIME_TEXT_PLAIN,
         "application/csv",
         "application/vnd.ms-excel",
     ],
@@ -494,14 +495,36 @@ def _read_head(uploaded_file, size=2048):
     return head
 
 
+def _is_text_like_bytes(head):
+    if not head:
+        return False
+
+    if b"\x00" in head:
+        return False
+
+    try:
+        head.decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
 def _detect_mime(head, ext):
     try:
         return magic.from_buffer(head, mime=True)
+    except ImportError:
+        return _fallback_mime(head, ext, allow_zip_based_octet_fallback=True, allow_text_fallback=True)
     except Exception:
-        return _fallback_mime(head, ext)
+        return _fallback_mime(head, ext, allow_zip_based_octet_fallback=False, allow_text_fallback=False)
 
 
-def _fallback_mime(head, ext):
+def _fallback_mime(
+    head,
+    ext,
+    *,
+    allow_zip_based_octet_fallback=False,
+    allow_text_fallback=False,
+):
     if head.startswith(b"%PDF"):
         return "application/pdf"
     if head.startswith(ZIP_SIGNATURE_PREFIX):
@@ -510,6 +533,10 @@ def _fallback_mime(head, ext):
         return MIME_OLE_STORAGE
     if ext in {EXT_XLS, EXT_DOC}:
         return MIME_OCTET_STREAM
+    if allow_zip_based_octet_fallback and ext in {EXT_XLSX, EXT_DOCX}:
+        return MIME_OCTET_STREAM
+    if allow_text_fallback and ext in {EXT_TXT, EXT_CSV} and _is_text_like_bytes(head):
+        return MIME_TEXT_PLAIN
     return None
 
 

@@ -8,7 +8,17 @@ same validation contract.
 
 import os
 import logging
-import magic
+
+try:
+    import magic
+except Exception:  # pragma: no cover - optional dependency in local envs
+
+    class _MagicShim:
+        @staticmethod
+        def from_buffer(_buffer, mime=True):
+            raise ImportError("python-magic unavailable")
+
+    magic = _MagicShim()
 
 from file_processing.utils.image_validators import (
     validate_image_extension,
@@ -19,6 +29,8 @@ from file_processing.utils.image_validators import (
 
 logger = logging.getLogger(__name__)
 
+MIME_IMAGE_JPEG = "image/jpeg"
+
 # MIME types accepted for each image extension
 IMAGE_MIME_TYPES = {
     ".png": [
@@ -28,16 +40,42 @@ IMAGE_MIME_TYPES = {
         "application/x-png",
     ],
     ".jpg": [
-        "image/jpeg",
+        MIME_IMAGE_JPEG,
         "image/pjpeg",
         "image/x-citrix-jpeg",
     ],
     ".jpeg": [
-        "image/jpeg",
+        MIME_IMAGE_JPEG,
         "image/pjpeg",
         "image/x-citrix-jpeg",
     ],
 }
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+JPEG_SIGNATURE = b"\xff\xd8\xff"
+
+
+def _resolve_image_mime_fallback(uploaded_file, ext):
+    """
+    Best-effort MIME fallback for environments without libmagic.
+    """
+    expected = IMAGE_MIME_TYPES.get(ext, [])
+    content_type = (getattr(uploaded_file, "content_type", "") or "").lower()
+    if content_type in expected:
+        return content_type
+
+    try:
+        uploaded_file.seek(0)
+        header = uploaded_file.read(16)
+    except Exception:
+        return None
+
+    if header.startswith(PNG_SIGNATURE):
+        return "image/png"
+    if header.startswith(JPEG_SIGNATURE):
+        return MIME_IMAGE_JPEG
+
+    return None
 
 
 def validate_image(uploaded_file):
@@ -83,20 +121,24 @@ def validate_image_mime_type(uploaded_file, ext):
     Same approach as upload_service.validate_mime_type() but with
     image-specific allowed MIME types, avoiding a circular import.
     """
+    mime = None
+
     try:
         uploaded_file.seek(0)
         mime = magic.from_buffer(uploaded_file.read(2048), mime=True)
-
-        expected = IMAGE_MIME_TYPES.get(ext, [])
-        if mime not in expected:
-            return False, "File content does not match its extension."
-
-        return True, None
     except Exception:
         logger.exception("Error validating image MIME type.")
-        return False, "Unable to determine file type."
+        mime = _resolve_image_mime_fallback(uploaded_file, ext)
+        if not mime:
+            return False, "Unable to determine file type."
     finally:
         try:
             uploaded_file.seek(0)
         except Exception:
             logger.exception("Error resetting file pointer after MIME validation.")
+
+    expected = IMAGE_MIME_TYPES.get(ext, [])
+    if mime not in expected:
+        return False, "File content does not match its extension."
+
+    return True, None

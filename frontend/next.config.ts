@@ -6,7 +6,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  "connect-src 'self' https: http://localhost:8000 https://accounts.google.com https://oauth2.googleapis.com",
+  "connect-src 'self' https: http://localhost:8000 http://127.0.0.1:8000 https://accounts.google.com https://oauth2.googleapis.com",
   "frame-src 'self' https://accounts.google.com",
   "object-src 'none'",
   "base-uri 'self'",

@@ -1,0 +1,112 @@
+name: Behavioral Smoke
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'docker-compose.e2e.yml'
+      - '.github/workflows/behavioral.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'docker-compose.e2e.yml'
+      - '.github/workflows/behavioral.yml'
+
+concurrency:
+  group: behavioral-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavioral-smoke:
+    name: Behavioral Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: excel_generator_e2e
+          POSTGRES_USER: excel_e2e
+          POSTGRES_PASSWORD: excel_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U excel_e2e -d excel_generator_e2e"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Install Playwright browser
+        run: |
+          cd frontend
+          npx playwright install --with-deps chromium
+
+      - name: Run behavioral smoke tests
+        env:
+          CI: 'true'
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          PLAYWRIGHT_BACKEND_URL: http://localhost:8000
+          POSTGRES_DB: excel_generator_e2e
+          POSTGRES_USER: excel_e2e
+          POSTGRES_PASSWORD: excel_e2e
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_PORT: 5432
+          DJANGO_SECRET_KEY: e2e-django-secret
+          JWT_SECRET_KEY: e2e-jwt-secret
+          DJANGO_DEBUG: 'True'
+          DJANGO_ALLOWED_HOSTS: 127.0.0.1,localhost
+          DJANGO_CORS_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+          FRONTEND_URL: http://localhost:3000
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          GOOGLE_OAUTH_CLIENT_ID: mock-google-client-id
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: mock-google-client-id
+          RESEND_FROM_EMAIL: noreply@example.com
+          MEDIA_ROOT: ./media
+          CSV_EXPORT_DIR: ./media/exports/csv
+          EXCEL_EXPORT_DIR: ./media/exports/excel
+          TESSERACT_LANG: eng
+        run: |
+          cd frontend
+          npm run test:e2e
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-artifacts
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: ignore

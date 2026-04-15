@@ -13,6 +13,7 @@ from file_processing.utils.image_validators import (
     validate_image_integrity,
 )
 from file_processing.services.image_validation_service import (
+    _resolve_image_mime_fallback,
     validate_image,
     validate_image_mime_type,
 )
@@ -589,7 +590,13 @@ class TestValidateImageMimeType(SimpleTestCase):
         "file_processing.services.image_validation_service.magic.from_buffer",
         side_effect=Exception("magic failure"),
     )
-    def test_magic_exception_returns_unable_to_determine_file_type(self, _mock_from_buffer):
+    @patch(
+        "file_processing.services.image_validation_service._resolve_image_mime_fallback",
+        return_value=None,
+    )
+    def test_magic_exception_returns_unable_to_determine_file_type(
+        self, _mock_resolve, _mock_from_buffer
+    ):
         f = _make_uploaded("photo.png", b"x" * 64, "application/octet-stream")
 
         with patch("file_processing.services.image_validation_service.logger.exception") as mock_exception:
@@ -599,6 +606,43 @@ class TestValidateImageMimeType(SimpleTestCase):
         self.assertEqual(err, "Unable to determine file type.")
         mock_exception.assert_called_once_with("Error validating image MIME type.")
         self.assertEqual(f.tell(), 0)
+
+    @patch(
+        "file_processing.services.image_validation_service.magic.from_buffer",
+        side_effect=Exception("magic failure"),
+    )
+    def test_magic_exception_uses_content_type_fallback_when_expected(self, _mock_from_buffer):
+        f = _make_uploaded("photo.png", b"not-a-real-image", "image/png")
+
+        is_valid, err = validate_image_mime_type(f, ".png")
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+        self.assertEqual(f.tell(), 0)
+
+    def test_resolve_image_mime_fallback_detects_png_and_jpeg_signatures(self):
+        png_file = _make_uploaded(
+            "photo.png",
+            b"\x89PNG\r\n\x1a\n" + b"payload",
+            "application/octet-stream",
+        )
+        jpeg_file = _make_uploaded(
+            "photo.jpg",
+            b"\xff\xd8\xff" + b"payload",
+            "application/octet-stream",
+        )
+
+        self.assertEqual(_resolve_image_mime_fallback(png_file, ".png"), "image/png")
+        self.assertEqual(_resolve_image_mime_fallback(jpeg_file, ".jpg"), "image/jpeg")
+
+    def test_resolve_image_mime_fallback_returns_none_for_unknown_header(self):
+        unknown_file = _make_uploaded(
+            "photo.png",
+            b"not-png-or-jpeg",
+            "application/octet-stream",
+        )
+
+        self.assertIsNone(_resolve_image_mime_fallback(unknown_file, ".png"))
 
     @patch(
         "file_processing.services.image_validation_service.magic.from_buffer",
