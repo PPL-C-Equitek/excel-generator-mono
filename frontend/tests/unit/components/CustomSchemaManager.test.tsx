@@ -55,12 +55,14 @@ function createHookState(
         isSaving: false,
         deletingSchemaId: null,
         schemas: [],
+        saveError: null,
         error: null,
         message: null,
         reloadSchemas: vi.fn().mockResolvedValue(undefined),
         createSchema: vi.fn().mockResolvedValue(true),
         updateSchema: vi.fn().mockResolvedValue(true),
         deleteSchema: vi.fn().mockResolvedValue(true),
+        clearSaveError: vi.fn(),
         ...overrides,
     }
 }
@@ -330,7 +332,7 @@ describe('CustomSchemaManager', () => {
         ).toBeInTheDocument()
     })
 
-    it('shows the per-user limit and disables adding after five schemas', async () => {
+    it('disables adding after five schemas', async () => {
         const service = createService({
             list: vi.fn().mockResolvedValue([
                 createSchemaRecord({ id: '00000000-0000-0000-0000-000000000001', name: 'Schema 1' }),
@@ -351,7 +353,7 @@ describe('CustomSchemaManager', () => {
         await screen.findByText('Schema 5')
 
         expect(screen.getByTestId('schema-count')).toHaveTextContent('5/5 saved')
-        expect(screen.getByText(/you have reached the 5-schema limit/i)).toBeInTheDocument()
+        expect(screen.queryByTestId('schema-error')).not.toBeInTheDocument()
         expect(screen.getByTestId('add-schema-btn')).toBeDisabled()
     })
 
@@ -554,7 +556,40 @@ describe('CustomSchemaManager', () => {
         )
         await user.click(within(dialog).getByTestId('schema-save-btn'))
 
-        expect(await screen.findByText('Save failed.')).toBeInTheDocument()
+        expect(await within(dialog).findByText('Save failed.')).toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
+    })
+
+    it('shows duplicate schema name errors inside the modal instead of the page message', async () => {
+        const user = userEvent.setup()
+        const service = createService({
+            create: vi.fn().mockRejectedValue(
+                new Error('You already have a custom schema with this name.')
+            ),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await user.click(screen.getByTestId('add-schema-btn'))
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        await user.type(within(dialog).getByLabelText(/schema name/i), 'Invoice Mapping')
+        await user.type(within(dialog).getByLabelText(/column name/i), 'invoice_number')
+        await user.type(
+            within(dialog).getByLabelText(/column description/i),
+            'Invoice identifier'
+        )
+        await user.click(within(dialog).getByTestId('schema-save-btn'))
+
+        expect(
+            await within(dialog).findByText('You already have a custom schema with this name.')
+        ).toBeInTheDocument()
+        expect(screen.queryByTestId('schema-message')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('schema-error')).not.toBeInTheDocument()
         expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
     })
 
