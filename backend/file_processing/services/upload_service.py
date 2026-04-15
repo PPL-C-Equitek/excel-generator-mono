@@ -16,6 +16,7 @@ from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import word_validation_service
 from file_processing.services.image_validation_service import validate_image
 from file_processing.services.word_extraction_service import WordExtractionService
+from file_processing.services.contracts import ValidationResult, ExtractionResult
 from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
 
 try:
@@ -202,28 +203,37 @@ def _process_pdf(file_path, uploaded_file):
     return True, None, extracted_data
 
 
-def _process_image(file_path):
+def _process_image_result(file_path) -> ExtractionResult:
     try:
         extractor = ImageExtractor()
         extracted_data = extractor.extract(file_path)
-        return True, None, extracted_data
+        return ExtractionResult.ok(extracted_data)
     except ValueError as exc:
-        return False, str(exc), None
+        return ExtractionResult.fail(str(exc))
     except Exception:
         logger.exception("Image extraction failed.")
-        return False, "Image OCR extraction failed.", None
+        return ExtractionResult.fail("Image OCR extraction failed.")
 
 
-def process_word(file_path, ext):
+def _process_image(file_path):
+    return _process_image_result(file_path).to_legacy_tuple()
+
+
+def process_word_result(file_path, ext) -> ExtractionResult:
     try:
         extracted_data = WordExtractionService.extract_word_to_json(file_path, ext)
     except ValueError as exc:
-        return False, str(exc), None
+        return ExtractionResult.fail(str(exc))
     except Exception:
         logger.exception("Word extraction failed")
-        return False, WORD_CORRUPT_ERROR, None
+        return ExtractionResult.fail(WORD_CORRUPT_ERROR)
 
-    return True, None, extracted_data
+    return ExtractionResult.ok(extracted_data)
+
+
+def process_word(file_path, ext):
+    return process_word_result(file_path, ext).to_legacy_tuple()
+
 
 
 def _dispatch_upload_processing(ext, file_path, uploaded_file):
@@ -276,61 +286,71 @@ def process_upload(uploaded_file):
 
 
 def validate_file(uploaded_file):
+    return validate_file_result(uploaded_file).to_legacy_tuple()
+
+
+def validate_file_result(uploaded_file) -> ValidationResult:
     filename = uploaded_file.name
     ext = os.path.splitext(filename)[1].lower()
 
     if ext not in ALLOWED_EXTENSIONS:
-        return (
-            False,
+        return ValidationResult.fail(
             "Unsupported file type. Only PDF, XLS, XLSX, TXT, CSV, PNG, JPG, JPEG, DOC, and DOCX are allowed.",
         )
 
     if ext in IMAGE_EXTENSIONS:
-        return validate_image(uploaded_file)
+        is_valid, error = validate_image(uploaded_file)
+        if not is_valid:
+            return ValidationResult.fail(error or "Invalid image file.")
+        return ValidationResult.ok()
 
     if uploaded_file.size > MAX_FILE_SIZE:
-        return False, FILE_TOO_LARGE_ERROR
+        return ValidationResult.fail(FILE_TOO_LARGE_ERROR)
 
     is_valid_mime, mime_error = validate_mime_type(uploaded_file, ext)
     if not is_valid_mime:
-        return False, mime_error
+        return ValidationResult.fail(mime_error or "Unable to determine file type.")
 
     if ext in {EXT_XLS, EXT_XLSX}:
         is_valid_excel, excel_error = validate_excel_sheet_count(uploaded_file, ext)
         if not is_valid_excel:
-            return False, excel_error
+            return ValidationResult.fail(excel_error or EXCEL_CORRUPT_ERROR)
 
     if ext in {EXT_DOC, EXT_DOCX}:
         is_valid_word, word_error = word_validation_service.validate_word(
             uploaded_file, ext
         )
         if not is_valid_word:
-            return False, word_error
+            return ValidationResult.fail(word_error or WORD_CORRUPT_ERROR)
 
-    return True, None
+    return ValidationResult.ok()
 
 
 def validate_pdf(uploaded_file):
+    return validate_pdf_result(uploaded_file).to_legacy_tuple()
+
+
+def validate_pdf_result(uploaded_file) -> ValidationResult:
     try:
         uploaded_file.seek(0)
         reader = PdfReader(uploaded_file, strict=True)
     except Exception:
-        return False, PDF_CORRUPT_ERROR
+        return ValidationResult.fail(PDF_CORRUPT_ERROR)
 
     is_valid, error = check_pdf_encrypted(reader)
     if not is_valid:
-        return False, error
+        return ValidationResult.fail(error or PDF_CORRUPT_ERROR)
 
     is_valid, page_count_or_error = check_pdf_structure(reader)
     if not is_valid:
-        return False, page_count_or_error
+        return ValidationResult.fail(page_count_or_error or PDF_CORRUPT_ERROR)
 
     page_count = page_count_or_error
     is_valid, error = check_pdf_page_count(page_count)
     if not is_valid:
-        return False, error
+        return ValidationResult.fail(error or PDF_CORRUPT_ERROR)
 
-    return True, None
+    return ValidationResult.ok()
 
 
 def check_pdf_encrypted(reader):
