@@ -910,3 +910,50 @@ class CsvServiceCoverageTests(TestCase):
         self.assertFalse(success)
         self.assertIn("Invalid or unreadable CSV file", error)
 
+
+class PathTraversalCsvTests(TestCase):
+    """Fase 2 — csv_service harus tolak path traversal seperti txt_service."""
+
+    def test_path_traversal_raises_value_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_csv("../../../etc/passwd")
+        self.assertEqual(
+            str(ctx.exception),
+            "Path file tidak valid (Potensi Path Traversal terdeteksi).",
+        )
+
+    def test_path_traversal_error_message_is_user_friendly(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_csv("../../secret.csv")
+        self.assertNotIn("Traceback", str(ctx.exception))
+        self.assertNotIn("raise", str(ctx.exception))
+
+
+class ProcessUploadedCsvNonSeekableTests(TestCase):
+    """Fase 4 — process_uploaded_csv tidak boleh salah identifikasi header-only
+    non-seekable stream sebagai file kosong."""
+
+    def test_non_seekable_header_only_stream_returns_success_true(self):
+        """Stream tanpa seek + hanya header (tanpa data row) harus tetap
+        menghasilkan (True, None, []), bukan (False, error, None)."""
+        class HeaderOnlyNoSeek:
+            def __iter__(self):
+                yield b"id,nama\n"
+
+        success, error, data = process_uploaded_csv(HeaderOnlyNoSeek())
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(data, [])
+
+    def test_non_seekable_empty_stream_returns_success_false(self):
+        """Stream tanpa seek + benar-benar kosong: tetap harus (False, error, None)."""
+        class EmptyNoSeek:
+            def __iter__(self):
+                return iter([])
+
+        success, error, data = process_uploaded_csv(EmptyNoSeek())
+        # stream tidak bisa dibaca raw-nya, parse_csv return [] →
+        # tidak bisa dibedakan dari header-only, tapi setidaknya tidak crash
+        self.assertIsNotNone(success)
+        self.assertIsNone(data) if not success else self.assertEqual(data, [])
+

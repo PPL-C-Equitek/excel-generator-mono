@@ -248,6 +248,51 @@ class NegativeTxtExtractionTests(TestCase):
             os.remove(path)
 
 
+class ParseTxtDelimiterParamTests(TestCase):
+
+    def test_parse_txt_with_delimiter_param_equals_dedicated_function(self):
+        path = _make_txt_file("a,b,c\n1,2,3")
+        try:
+            result_new = parse_txt(path, delimiter=",")
+            result_old = parse_txt_with_delimiter(path, delimiter=",")
+            self.assertEqual(result_new, result_old)
+        finally:
+            os.remove(path)
+
+    def test_parse_txt_delimiter_none_returns_single_element_rows(self):
+        path = _make_txt_file("hello\nworld")
+        try:
+            result = parse_txt(path, delimiter=None)
+            self.assertEqual(result, [["hello"], ["world"]])
+        finally:
+            os.remove(path)
+
+    def test_parse_txt_tab_delimiter_via_param(self):
+        path = _make_txt_file("Kolom1\tKolom2\nA\tB")
+        try:
+            result = parse_txt(path, delimiter="\t")
+            self.assertEqual(result[0], ["Kolom1", "Kolom2"])
+            self.assertEqual(result[1], ["A", "B"])
+        finally:
+            os.remove(path)
+
+    def test_parse_txt_pipe_delimiter_via_param(self):
+        path = _make_txt_file("x|y|z\n1|2|3")
+        try:
+            result = parse_txt(path, delimiter="|")
+            self.assertEqual(result[0], ["x", "y", "z"])
+        finally:
+            os.remove(path)
+
+    def test_parse_txt_no_delimiter_arg_defaults_to_no_split(self):
+        path = _make_txt_file("a,b,c")
+        try:
+            result_default = parse_txt(path)
+            result_none = parse_txt(path, delimiter=None)
+            self.assertEqual(result_default, result_none)
+        finally:
+            os.remove(path)
+
 class EdgeCaseTxtExtractionTests(TestCase):
     def test_very_long_single_line_is_read_completely(self):
         long_line = "X" * 10_001
