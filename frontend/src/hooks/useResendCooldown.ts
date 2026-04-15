@@ -13,7 +13,7 @@ function getStorageKey(email?: string): string | undefined {
 }
 
 function getStoredExpiryTime(email?: string): number | null {
-  if (typeof globalThis.window === 'undefined') {
+  if (globalThis.window === undefined) {
     return null;
   }
 
@@ -55,7 +55,7 @@ export function getRemainingResendCooldownForEmail(email?: string): number {
 }
 
 export function setResendCooldownForEmail(email: string, cooldownSeconds: number): void {
-  if (typeof globalThis.window === 'undefined') {
+  if (globalThis.window === undefined) {
     return;
   }
 
@@ -148,7 +148,7 @@ export function useResendCooldown(initialValue = 0, email?: string) {
           ? (value as (previousValue: number) => number)(prev)
           : value;
 
-      if (typeof globalThis.window !== 'undefined' && storageKey) {
+      if (globalThis.window !== undefined && storageKey) {
         if (nextValue <= 0) {
           globalThis.window.localStorage.removeItem(storageKey);
         } else {
