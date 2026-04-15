@@ -23,6 +23,15 @@
   --danger-bg: #fef2f2;
   --danger-border: #f87171;
   --danger-text: #b91c1c;
+  --warning-bg: #fffbeb;
+  --warning-border: #f59e0b;
+  --warning-text: #92400e;
+  --success-bg: #f0fdf4;
+  --success-border: #22c55e;
+  --success-text: #166534;
+  --info-bg: #eff6ff;
+  --info-border: #3b82f6;
+  --info-text: #1d4ed8;
 }
 
 @theme inline {
@@ -50,6 +59,15 @@
     --danger-bg: #450a0a;
     --danger-border: #b91c1c;
     --danger-text: #fecaca;
+    --warning-bg: #422006;
+    --warning-border: #d97706;
+    --warning-text: #fde68a;
+    --success-bg: #052e16;
+    --success-border: #16a34a;
+    --success-text: #bbf7d0;
+    --info-bg: #172554;
+    --info-border: #2563eb;
+    --info-text: #bfdbfe;
   }
 }
 
@@ -88,6 +106,15 @@ samp {
   --danger-bg: #fef2f2;
   --danger-border: #f87171;
   --danger-text: #b91c1c;
+  --warning-bg: #fffbeb;
+  --warning-border: #f59e0b;
+  --warning-text: #92400e;
+  --success-bg: #f0fdf4;
+  --success-border: #22c55e;
+  --success-text: #166534;
+  --info-bg: #eff6ff;
+  --info-border: #3b82f6;
+  --info-text: #1d4ed8;
   --brand-primary: #b91c1c;
   --brand-primary-hover: #dc2626;
   --brand-primary-active: #991b1b;
