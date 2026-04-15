@@ -119,6 +119,16 @@ export function buildCustomSchemaInput(
     }
 }
 
+function getTrimmedDraftColumns(draft: CustomSchemaFormDraft): CustomSchemaFormDraft {
+    return {
+        ...draft,
+        columns: draft.columns.map((column) => ({
+            ...column,
+            name: column.name.trim(),
+        })),
+    }
+}
+
 export function getNextColumnsAfterRemoval(
     columns: SchemaColumnDraft[],
     columnId: number
@@ -276,14 +286,20 @@ export default function CustomSchemaManager({
     const handleSubmit = async (event: FormSubmitEvent) => {
         event.preventDefault()
 
-        const validationError = validateCustomSchemaDraft(draft)
+        const normalizedDraft = getTrimmedDraftColumns({
+            ...draft,
+            name: draft.name.trim(),
+            description: draft.description.trim(),
+        })
+
+        const validationError = validateCustomSchemaDraft(normalizedDraft)
         if (validationError) {
             setFormError(validationError)
             return
         }
 
         setFormError(null)
-        const schemaInput = buildCustomSchemaInput(draft)
+        const schemaInput = buildCustomSchemaInput(normalizedDraft)
         const wasSaved = editingSchemaId
             ? await updateSchema(editingSchemaId, schemaInput)
             : await createSchema(schemaInput)
@@ -527,6 +543,12 @@ export default function CustomSchemaManager({
                                             description: event.target.value,
                                         }))
                                     }}
+                                    onBlur={() => {
+                                        setDraft((prev) => ({
+                                            ...prev,
+                                            description: prev.description.trim(),
+                                        }))
+                                    }}
                                     disabled={isSaving}
                                     placeholder="Describe what this schema is for."
                                     rows={3}
@@ -594,6 +616,19 @@ export default function CustomSchemaManager({
                                                                 event.target.value
                                                             )
                                                         }}
+                                                        onBlur={() => {
+                                                            setDraft((prev) => ({
+                                                                ...prev,
+                                                                columns: prev.columns.map((draftColumn) =>
+                                                                    draftColumn.id === column.id
+                                                                        ? {
+                                                                              ...draftColumn,
+                                                                              name: draftColumn.name.trim(),
+                                                                          }
+                                                                        : draftColumn
+                                                                ),
+                                                            }))
+                                                        }}
                                                         disabled={isSaving}
                                                         placeholder="field_name"
                                                         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:bg-gray-100"
@@ -616,6 +651,20 @@ export default function CustomSchemaManager({
                                                                 'description',
                                                                 event.target.value
                                                             )
+                                                        }}
+                                                        onBlur={() => {
+                                                            setDraft((prev) => ({
+                                                                ...prev,
+                                                                columns: prev.columns.map((draftColumn) =>
+                                                                    draftColumn.id === column.id
+                                                                        ? {
+                                                                              ...draftColumn,
+                                                                              description:
+                                                                                  draftColumn.description.trim(),
+                                                                          }
+                                                                        : draftColumn
+                                                                ),
+                                                            }))
                                                         }}
                                                         disabled={isSaving}
                                                         placeholder="What this field stores"
