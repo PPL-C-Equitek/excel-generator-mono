@@ -48,6 +48,14 @@ describe('resolveDownloadFilename', () => {
         expect(resolveDownloadFilename(headers, 'fallback.csv')).toBe('fallback.csv')
     })
 
+    it('returns fallback when Content-Disposition has no filename token', () => {
+        const headers = new Headers({
+            'Content-Disposition': 'attachment',
+        })
+
+        expect(resolveDownloadFilename(headers, 'fallback.csv')).toBe('fallback.csv')
+    })
+
     it('returns fallback when a regex match exists without a captured filename value', () => {
         const headers = new Headers({
             'Content-Disposition': 'attachment; filename=report.csv',

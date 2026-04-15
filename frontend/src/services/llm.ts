@@ -32,6 +32,12 @@ const INVALID_EXCEL_DOWNLOAD_ERROR_MESSAGE =
 
 type AuthTokenSource = "stored-optional" | "valid";
 type ApiErrorFallbackMode = "mapped-only" | "mapped-or-default";
+type AuthTokenResolver = () => string | null | Promise<string | null>;
+
+const AUTH_TOKEN_RESOLVERS: Record<AuthTokenSource, AuthTokenResolver> = {
+  "stored-optional": getStoredAccessToken,
+  valid: getValidAccessToken,
+};
 
 function buildJsonRequestHeaders(accessToken: string | null): HeadersInit {
   if (!accessToken) {
@@ -91,15 +97,8 @@ function rethrowMappedApiErrorWithDefault(err: unknown): never {
 }
 
 async function getAuthToken(source: AuthTokenSource): Promise<string | null> {
-  if (source === "stored-optional") {
-    return getStoredAccessToken();
-  }
-
-  if (source === "valid") {
-    return getValidAccessToken();
-  }
-
-  throw new Error("Unsupported auth token source.");
+  const tokenValue = AUTH_TOKEN_RESOLVERS[source]();
+  return tokenValue instanceof Promise ? await tokenValue : tokenValue;
 }
 
 async function postJsonRequest(
@@ -161,7 +160,6 @@ export async function generateJson(
   }
 
   const data = await postJsonRequest("llm/generate/", requestBody, {
-    authSource: "stored-optional",
     signal,
     errorMode: "mapped-or-default",
   });
