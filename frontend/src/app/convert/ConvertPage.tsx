@@ -15,7 +15,7 @@ interface ConvertPageProps {
     onDismissError?: () => void
 }
 
-export default function ConvertPage({ llmService: injectedService, errorMessage, onDismissError }: ConvertPageProps) {
+export default function ConvertPage({ llmService: injectedService, errorMessage, onDismissError }: Readonly<ConvertPageProps>) {
     const [selectedSchema, setSelectedSchema] = useState<CustomSchemaRecord | null>(null)
     const {
         isConverting,

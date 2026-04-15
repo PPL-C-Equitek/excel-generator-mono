@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import { useGoogleLogin } from '@react-oauth/google'
 import LoginPage from '../../../src/app/login/LoginPage'
 import * as api from '@/lib/api'
@@ -224,6 +225,29 @@ describe('LoginPage', () => {
             await waitFor(() => {
                 expect(screen.getByText('Something went wrong')).toBeInTheDocument()
             })
+        })
+
+        it('dismisses Google API error feedback when close button is clicked', async () => {
+            process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID = 'mock-client-id'
+            const user = userEvent.setup()
+
+            vi.mocked(useGoogleLogin).mockImplementation((options) => {
+                return () => options.onSuccess?.({ access_token: 'google-token' } as never)
+            })
+
+            vi.mocked(api.loginWithGoogle).mockRejectedValueOnce(new Error('Google auth failed'))
+
+            render(<LoginPage />)
+            fireEvent.click(screen.getByRole('button', { name: /sign in with google/i }))
+
+            const closeButton = await screen.findByRole('button', { name: /tutup pesan/i })
+            await user.click(closeButton)
+
+            await waitFor(() => {
+                expect(screen.queryByText('Google auth failed')).not.toBeInTheDocument()
+            })
+
+            delete process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
         })
     })
 })

@@ -67,10 +67,14 @@ describe('FeedbackMessage', () => {
 
         it('renders all four variants without crashing', () => {
             const variants = ['success', 'warning', 'error', 'info'] as const
+
             variants.forEach((variant) => {
                 const { unmount } = render(
                     <FeedbackMessage message="Test" variant={variant} />
                 )
+
+                expect(screen.getByText('Test')).toBeInTheDocument()
+
                 unmount()
             })
         })
