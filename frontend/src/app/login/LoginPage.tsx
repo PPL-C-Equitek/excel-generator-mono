@@ -6,9 +6,11 @@ import type { LoginFormData } from '@/components/LoginForm'
 import { useGoogleLogin } from '@react-oauth/google'
 import { login, loginWithGoogle } from '@/lib/api'
 import { storeAuthTokens } from '@/lib/auth'
+import { useState } from 'react'
 
 export default function LoginPage() {
     const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    const [error, setError] = useState<string | null>(null)
 
     const saveTokensAndRedirect = (
         accessToken: string,
@@ -31,9 +33,9 @@ export default function LoginPage() {
             saveTokensAndRedirect(res.access_token, res.refresh_token, res.user)
         } catch (err: unknown) {
             if (err instanceof Error) {
-                alert(err.message)
+                setError(err.message || 'Login failed. Please try again.')
             } else {
-                alert('Something went wrong')
+                setError('Something went wrong')
             }
         }
     }
@@ -45,14 +47,14 @@ export default function LoginPage() {
                 saveTokensAndRedirect(res.access_token, res.refresh_token, res.user)
             } catch (err: unknown) {
                 if (err instanceof Error) {
-                    alert(err.message)
+                    setError(err.message || 'Google sign-in failed.')
                 } else {
-                    alert('Google sign-in failed')
+                    setError('Something went wrong')
                 }
             }
         },
         onError: () => {
-            alert('Google sign-in cancelled or failed')
+            setError('Google sign-in cancelled or failed')
         },
         scope: 'openid email profile',
     })
@@ -65,12 +67,14 @@ export default function LoginPage() {
                     onSubmit={handleLogin}
                     onGoogleSignIn={() => {
                         if (!googleClientId) {
-                            alert('Google OAuth belum dikonfigurasi. Isi NEXT_PUBLIC_GOOGLE_CLIENT_ID lalu restart frontend.')
+                            setError('Google OAuth belum dikonfigurasi. Isi NEXT_PUBLIC_GOOGLE_CLIENT_ID lalu restart frontend.')
                             return
                         }
 
                         triggerGoogleSignIn()
                     }}
+                    errorMessage={error}
+                    onDismissError={() => setError(null)}
                 />
             </main>
         </div>

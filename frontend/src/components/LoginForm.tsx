@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import FeedbackMessage from './FeedbackMessage'
 
 export interface LoginFormData {
     email: string
@@ -10,9 +11,11 @@ export interface LoginFormData {
 interface LoginFormProps {
     onSubmit?: (data: LoginFormData) => void
     onGoogleSignIn?: () => void
+    errorMessage?: string | null
+    onDismissError?: () => void
 }
 
-export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFormProps>) {
+export default function LoginForm({ onSubmit, onGoogleSignIn, errorMessage, onDismissError }: Readonly<LoginFormProps>) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [error, setError] = useState<string | null>(null)
@@ -54,18 +57,14 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
             </p>
 
             {/* Error */}
-            {error && (
-                <div
-                    role="alert"
-                    className="mb-4 rounded-lg border p-3 text-sm"
-                    style={{
-                        backgroundColor: 'var(--danger-bg)',
-                        borderColor: 'var(--danger-border)',
-                        color: 'var(--danger-text)',
-                    }}
-                >
-                    {error}
-                </div>
+            {(error || errorMessage) && (
+                <FeedbackMessage
+                    message={error ?? errorMessage!}
+                    variant="error"
+                    dismissible={!error}           // hanya API error yang bisa di-dismiss
+                    onDismiss={onDismissError}
+                    className="mb-4"
+                />
             )}
 
             {/* Email */}
