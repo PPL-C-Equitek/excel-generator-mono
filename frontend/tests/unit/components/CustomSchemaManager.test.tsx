@@ -218,6 +218,96 @@ describe('CustomSchemaManager', () => {
         expect(screen.getByText('Order Mapping')).toBeInTheDocument()
     })
 
+    it('trims whitespace on description fields when leaving them', async () => {
+        const user = userEvent.setup()
+
+        render(
+            <CustomSchemaManager
+                service={createService()}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await user.click(screen.getByTestId('add-schema-btn'))
+
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        const schemaDescription = within(dialog).getByLabelText(/^description$/i)
+        const columnDescription = within(dialog).getByLabelText(/column description/i)
+
+        fireEvent.change(schemaDescription, { target: { value: '   ' } })
+        fireEvent.blur(schemaDescription)
+
+        fireEvent.change(columnDescription, { target: { value: '   ' } })
+        fireEvent.blur(columnDescription)
+
+        expect(schemaDescription).toHaveValue('')
+        expect(columnDescription).toHaveValue('')
+    })
+
+    it('trims whitespace from column names before submitting the schema', async () => {
+        const user = userEvent.setup()
+        const createdSchema = createSchemaRecord({
+            id: '00000000-0000-0000-0000-000000000008',
+            name: 'Order Mapping',
+            definition: {
+                columns: [
+                    {
+                        name: 'order_id',
+                        description: 'Order identifier',
+                    },
+                ],
+            },
+        })
+        const service = createService({
+            create: vi.fn().mockResolvedValue(createdSchema),
+        })
+        const accessTokenResolver = vi.fn().mockReturnValue('access-token')
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={accessTokenResolver}
+            />
+        )
+
+        await waitFor(() => {
+            expect(service.list).toHaveBeenCalledWith('access-token')
+        })
+
+        await user.click(screen.getByTestId('add-schema-btn'))
+
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        fireEvent.change(within(dialog).getByLabelText(/schema name/i), {
+            target: { value: '  Order Mapping  ' },
+        })
+        fireEvent.change(within(dialog).getByLabelText(/^description$/i), {
+            target: { value: 'Maps order rows' },
+        })
+        fireEvent.change(within(dialog).getByLabelText(/column name/i), {
+            target: { value: '  order_id  ' },
+        })
+        fireEvent.change(within(dialog).getByLabelText(/column description/i), {
+            target: { value: 'Order identifier' },
+        })
+        await user.click(within(dialog).getByTestId('schema-save-btn'))
+
+        await waitFor(() => {
+            expect(service.create).toHaveBeenCalledWith(
+                {
+                    name: 'Order Mapping',
+                    description: 'Maps order rows',
+                    is_active: false,
+                    definition: {
+                        columns: [
+                            { name: 'order_id', description: 'Order identifier' },
+                        ],
+                    },
+                },
+                'access-token'
+            )
+        })
+    })
+
     it('deletes an existing schema from the rendered list', async () => {
         const user = userEvent.setup()
         const service = createService({
