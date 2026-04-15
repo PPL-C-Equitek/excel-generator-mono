@@ -11,7 +11,7 @@ export const CUSTOM_SCHEMA_DUPLICATE_NAME_ERROR_MESSAGE =
 export const CUSTOM_SCHEMA_LIMIT_EXCEEDED_ERROR_MESSAGE_PREFIX =
     'A user can only have up to '
 const CUSTOM_SCHEMA_LIMIT_EXCEEDED_ERROR_MESSAGE_PATTERN = new RegExp(
-    `^${CUSTOM_SCHEMA_LIMIT_EXCEEDED_ERROR_MESSAGE_PREFIX}\\d+ custom schemas\\.$`
+    String.raw`^${CUSTOM_SCHEMA_LIMIT_EXCEEDED_ERROR_MESSAGE_PREFIX}\d+ custom schemas\.$`
 )
 
 export function isCustomSchemaLimitExceededErrorMessage(message: string): boolean {

@@ -1,6 +1,6 @@
 'use client'
 
-import type { FormEvent } from 'react'
+import type { ComponentPropsWithoutRef } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCustomSchemas } from '@/hooks/useCustomSchemas'
 import { getValidAccessToken } from '@/lib/auth'
@@ -20,12 +20,13 @@ import {
     getNextColumnsAfterRemoval,
     getTrimmedDraftColumns,
     validateCustomSchemaDraft,
-    type SchemaColumnDraft,
     type CustomSchemaFormDraft,
 } from '@/lib/customSchemaDraft'
 
 type AccessTokenResolver = () => string | null | Promise<string | null>
-type FormSubmitEvent = FormEvent<HTMLFormElement>
+type FormSubmitEvent = Parameters<
+    NonNullable<ComponentPropsWithoutRef<'form'>['onSubmit']>
+>[0]
 
 interface UseCustomSchemaManagerProps {
     readonly service?: ICustomSchemaService
@@ -367,4 +368,4 @@ export function useCustomSchemaManager(
     }
 }
 
-export type { SchemaColumnDraft }
+export type { SchemaColumnDraft } from '@/lib/customSchemaDraft'
