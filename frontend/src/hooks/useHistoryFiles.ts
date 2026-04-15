@@ -76,8 +76,8 @@ export function useHistoryFiles(
     const [activeDownloads, setActiveDownloads] = useState<Record<string, boolean>>({})
 
     const loadHistory = useCallback(async (
-        nextLimit = limit,
-        nextOffset = offset,
+        nextLimit: number,
+        nextOffset: number,
         options?: { showLoader?: boolean }
     ) => {
         const showLoader = options?.showLoader ?? true
@@ -101,7 +101,7 @@ export function useHistoryFiles(
                 setIsLoading(false)
             }
         }
-    }, [limit, offset, service])
+    }, [service])
 
     useEffect(() => {
         void loadHistory(DEFAULT_LIMIT, 0)
