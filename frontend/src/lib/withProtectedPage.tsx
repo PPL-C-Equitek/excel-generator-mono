@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { getValidAccessToken } from '@/lib/auth'
+import { hasValidSession } from '@/lib/auth'
 
 type ProtectedPageOptions = {
     redirectTo?: string
@@ -23,13 +23,13 @@ export function withProtectedPage<P extends object>(
             let isCancelled = false
 
             const checkAuth = async () => {
-                const accessToken = await getValidAccessToken()
+                const isSessionValid = await hasValidSession()
 
                 if (isCancelled) {
                     return
                 }
 
-                if (!accessToken) {
+                if (!isSessionValid) {
                     router.replace(redirectTo)
                     return
                 }

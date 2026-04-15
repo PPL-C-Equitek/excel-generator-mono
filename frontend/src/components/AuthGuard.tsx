@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { getValidAccessToken } from '@/lib/auth'
+import { hasValidSession } from '@/lib/auth'
 
 type AuthGuardProps = {
     children: ReactNode
@@ -26,13 +26,13 @@ export default function AuthGuard({
         const verifyAccess = async () => {
             setIsChecking(true)
 
-            const token = await getValidAccessToken()
+            const isSessionValid = await hasValidSession()
 
             if (isCancelled) {
                 return
             }
 
-            if (!token) {
+            if (!isSessionValid) {
                 setIsAuthorized(false)
                 router.replace(redirectTo)
                 return

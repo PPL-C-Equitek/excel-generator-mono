@@ -1,8 +1,30 @@
 import { FILE_TOO_LARGE_MESSAGE } from "@/constants/upload";
+import { clearAuthTokens } from "@/lib/auth";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
   .split("")
   .reduceRight((acc, ch) => (acc === "" && ch === "/" ? acc : ch + acc), "");
+
+function handleUnauthorizedResponse(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem("access_token");
+    window.localStorage.removeItem("refresh_token");
+    window.sessionStorage.removeItem("access_token");
+    window.sessionStorage.removeItem("refresh_token");
+  } catch {
+    // Continue with best-effort cleanup below.
+  }
+
+  clearAuthTokens();
+
+  if (window.location.pathname !== "/login") {
+    window.location.assign("/login");
+  }
+}
 
 function mapUploadErrorMessage(message: string): string {
   const normalized = message.toLowerCase();
@@ -101,6 +123,10 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      handleUnauthorizedResponse();
+    }
+
     let message = "Request failed. Please try again."
 
     try {
