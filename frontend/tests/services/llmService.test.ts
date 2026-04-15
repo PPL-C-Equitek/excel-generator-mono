@@ -6,7 +6,6 @@ import * as llmService from "@/services/llm";
 import { downloadCsvFile, generateJson, exportToCsv, getDownloadUrl } from "@/services/llm";
 import { server } from "../mocks/server";
 import {
-  handler401,
   handler429,
   handler504,
   handlerArrayOutput,

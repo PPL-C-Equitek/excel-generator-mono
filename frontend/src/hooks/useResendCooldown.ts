@@ -87,11 +87,6 @@ export function useResendCooldown(initialValue = 0, email?: string) {
   });
 
   useEffect(() => {
-    const storedCooldown = getStoredCooldown(email);
-    setCooldown(storedCooldown > 0 ? storedCooldown : initialValue);
-  }, [email, initialValue]);
-
-  useEffect(() => {
     if (!storageKey || typeof window === 'undefined') {
       return undefined;
     }
