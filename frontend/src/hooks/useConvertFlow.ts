@@ -252,26 +252,45 @@ export function useConvertFlow(
             return
         }
 
+        const requestId = conversionRequestIdRef.current
+        const excelOutput = generatedOutput
+        const excelFilename = getExcelDownloadFilename(outputFile.filename)
+
         setExcelError(null)
         setExcelSuccessMessage(null)
         setIsExcelDownloading(true)
 
         try {
             const excelResult = await llmService.exportToExcel(
-                generatedOutput,
+                excelOutput,
                 getActiveSignal()
             )
+
+            if (requestId !== conversionRequestIdRef.current) {
+                return
+            }
+
             await llmService.downloadExcelFile(
                 excelResult.file_id,
-                getExcelDownloadFilename(outputFile.filename)
+                excelFilename
             )
+
+            if (requestId !== conversionRequestIdRef.current) {
+                return
+            }
+
             setExcelError(null)
             setExcelSuccessMessage('Successfully downloaded')
         } catch (err: unknown) {
+            if (requestId !== conversionRequestIdRef.current) {
+                return
+            }
             setExcelSuccessMessage(null)
             setExcelError(err instanceof Error ? err.message : 'Failed to export')
         } finally {
-            setIsExcelDownloading(false)
+            if (requestId === conversionRequestIdRef.current) {
+                setIsExcelDownloading(false)
+            }
         }
     }
 

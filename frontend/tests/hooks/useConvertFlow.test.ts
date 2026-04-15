@@ -1294,6 +1294,40 @@ describe('useConvertFlow', () => {
             expect(getExcelState(result).canDownloadExcel).toBe(true)
         })
 
+        it('ignores stale excel export failures after a newer conversion starts', async () => {
+            const firstExcelExport = deferred<typeof validExcelExportResponse>()
+            const service = makeMockService({
+                exportToExcel: vi.fn()
+                    .mockImplementationOnce(() => firstExcelExport.promise)
+                    .mockResolvedValue(validExcelExportResponse),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            act(() => {
+                void getExcelState(result).handleExcelDownload()
+            })
+
+            await waitFor(() => expect(service.exportToExcel).toHaveBeenCalledTimes(1))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                firstExcelExport.reject(new Error('stale excel export failure'))
+                await Promise.resolve()
+            })
+
+            expect(getExcelState(result).excelError).toBeNull()
+            expect(getExcelState(result).excelSuccessMessage).toBeNull()
+            expect(getExcelState(result).isExcelDownloading).toBe(false)
+            expect(service.downloadExcelFile).not.toHaveBeenCalled()
+        })
+
         it('re-exports excel on repeated download clicks', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
