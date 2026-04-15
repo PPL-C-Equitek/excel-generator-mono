@@ -1,4 +1,5 @@
 const UTF8_FILENAME_PREFIX = /^UTF-8''/i
+const NULL_CHARACTER = String.fromCharCode(0)
 
 function sanitizeDownloadFilename(candidate: string | null | undefined): string | null {
     if (typeof candidate !== 'string') {
@@ -9,7 +10,8 @@ function sanitizeDownloadFilename(candidate: string | null | undefined): string 
         .trim()
         .replace(/\r/g, '')
         .replace(/\n/g, '')
-        .replace(/\x00/g, '')
+        .split(NULL_CHARACTER)
+        .join('')
         .replace(/^"(.*)"$/, '$1')
 
     if (!normalized) {
