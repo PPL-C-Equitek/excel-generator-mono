@@ -1328,6 +1328,73 @@ describe('useConvertFlow', () => {
             expect(service.downloadExcelFile).not.toHaveBeenCalled()
         })
 
+        it('ignores stale excel export success after a newer conversion starts', async () => {
+            const firstExcelExport = deferred<typeof validExcelExportResponse>()
+            const service = makeMockService({
+                exportToExcel: vi.fn()
+                    .mockImplementationOnce(() => firstExcelExport.promise)
+                    .mockResolvedValue(validExcelExportResponse),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            act(() => {
+                void getExcelState(result).handleExcelDownload()
+            })
+
+            await waitFor(() => expect(service.exportToExcel).toHaveBeenCalledTimes(1))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                firstExcelExport.resolve(validExcelExportResponse)
+                await firstExcelExport.promise
+            })
+
+            expect(service.downloadExcelFile).not.toHaveBeenCalled()
+            expect(getExcelState(result).excelError).toBeNull()
+            expect(getExcelState(result).excelSuccessMessage).toBeNull()
+            expect(getExcelState(result).isExcelDownloading).toBe(false)
+        })
+
+        it('ignores stale excel download success after a newer conversion starts', async () => {
+            const firstDownload = deferred<void>()
+            const service = makeMockService({
+                downloadExcelFile: vi.fn()
+                    .mockImplementationOnce(() => firstDownload.promise)
+                    .mockResolvedValue(undefined),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            act(() => {
+                void getExcelState(result).handleExcelDownload()
+            })
+
+            await waitFor(() => expect(service.downloadExcelFile).toHaveBeenCalledTimes(1))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                firstDownload.resolve(undefined)
+                await firstDownload.promise
+            })
+
+            expect(getExcelState(result).excelError).toBeNull()
+            expect(getExcelState(result).excelSuccessMessage).toBeNull()
+            expect(getExcelState(result).isExcelDownloading).toBe(false)
+        })
+
         it('re-exports excel on repeated download clicks', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
