@@ -2303,3 +2303,29 @@ class TestWordValidationService(unittest.TestCase):
             ArchiveStaleAppPages()
         )
         self.assertGreater(page_count, word_validation_service.MAX_WORD_PAGES)
+
+    @patch(
+        "file_processing.services.word_validation_service._estimate_docx_pages_with_python_docx",
+        return_value=word_validation_service.MAX_WORD_PAGES + 10,
+    )
+    def test_validate_word_docx_rejects_over_limit_from_python_docx_fallback(
+        self, _mock_python_docx_estimate
+    ):
+        content = BytesIO()
+        with zipfile.ZipFile(content, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types></Types>")
+            archive.writestr("word/document.xml", "<w:document></w:document>")
+
+        f = SimpleUploadedFile(
+            "large.docx",
+            content.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = word_validation_service.validate_word(f, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(
+            error,
+            f"Word exceeds the maximum allowed page count of {word_validation_service.MAX_WORD_PAGES}.",
+        )
