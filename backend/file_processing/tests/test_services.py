@@ -2298,6 +2298,18 @@ class TestWordValidationService(unittest.TestCase):
             word_validation_service.extract_docx_page_count(ArchiveAppPagesOnly()), 7
         )
 
+    def test_extract_docx_page_count_breaks_after_first_positive_pages(self):
+        class ArchiveAppPagesBreak:
+            def read(self, name):
+                if name == "docProps/app.xml":
+                    # If break is not hit, second Pages=0 can overwrite app_pages.
+                    return b"<Properties><Pages>9</Pages><Pages>0</Pages></Properties>"
+                raise KeyError(name)
+
+        self.assertEqual(
+            word_validation_service.extract_docx_page_count(ArchiveAppPagesBreak()), 9
+        )
+
     def test_extract_docx_page_count_uses_document_fallback_when_app_xml_missing(self):
         class ArchiveNoAppPages:
             def read(self, name):
@@ -2584,6 +2596,23 @@ class TestWordValidationService(unittest.TestCase):
         cx, cy = word_validation_service._extract_extent_inches(_Node())
         self.assertEqual(cx, 0.0)
         self.assertGreater(cy, 0.0)
+
+    def test_extract_extent_inches_handles_cy_success_and_failure_paths(self):
+        class _NodeCySuccess:
+            attrib = {"other": "x", "cy": "1828800"}
+
+        class _NodeCyFailure:
+            attrib = {"other": "x", "cy": "not-a-number"}
+
+        cx_ok, cy_ok = word_validation_service._extract_extent_inches(_NodeCySuccess())
+        cx_bad, cy_bad = word_validation_service._extract_extent_inches(
+            _NodeCyFailure()
+        )
+
+        self.assertEqual(cx_ok, 0.0)
+        self.assertGreater(cy_ok, 0.0)
+        self.assertEqual(cx_bad, 0.0)
+        self.assertEqual(cy_bad, 0.0)
 
     def test_extract_extent_inches_reads_both_cx_and_cy_attributes(self):
         class _Node:
