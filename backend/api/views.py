@@ -50,6 +50,16 @@ logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
 
 
+def process_upload(uploaded_file):
+    """
+    Lazy wrapper so upload dependencies are imported only when needed while
+    still exposing a patchable symbol for unit tests.
+    """
+    from file_processing.services.upload_service import process_upload as _process_upload
+
+    return _process_upload(uploaded_file)
+
+
 def _sanitize_download_filename(candidate):
     if not isinstance(candidate, str):
         return None
@@ -514,8 +524,6 @@ def history_download(request, history_id):
 @parser_classes([MultiPartParser])
 def upload(request):
     try:
-        from file_processing.services.upload_service import process_upload
-
         raw_content_length = request.META.get("CONTENT_LENGTH")
         if raw_content_length is not None:
             try:
