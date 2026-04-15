@@ -2287,6 +2287,17 @@ class TestWordValidationService(unittest.TestCase):
             word_validation_service.extract_docx_page_count(ArchiveNoPages()), 0
         )
 
+    def test_extract_docx_page_count_uses_positive_app_pages(self):
+        class ArchiveAppPagesOnly:
+            def read(self, name):
+                if name == "docProps/app.xml":
+                    return b"<Properties><Pages>7</Pages></Properties>"
+                raise KeyError(name)
+
+        self.assertEqual(
+            word_validation_service.extract_docx_page_count(ArchiveAppPagesOnly()), 7
+        )
+
     def test_extract_docx_page_count_uses_document_fallback_when_app_xml_missing(self):
         class ArchiveNoAppPages:
             def read(self, name):
@@ -2541,6 +2552,24 @@ class TestWordValidationService(unittest.TestCase):
         self.assertEqual(word_validation_service._emu_to_inches("abc", 7.5), 7.5)
         self.assertEqual(word_validation_service._emu_to_inches(0, 3.2), 3.2)
         self.assertEqual(word_validation_service._emu_to_inches(-10, 4.1), 4.1)
+
+    def test_is_page_break_node_detects_type_attribute(self):
+        class _Node:
+            attrib = {"{w}type": "page"}
+
+        self.assertTrue(word_validation_service._is_page_break_node(_Node()))
+
+    def test_estimate_pages_from_blocks_returns_zero_for_non_positive(self):
+        self.assertEqual(word_validation_service._estimate_pages_from_blocks(0), 0)
+        self.assertEqual(word_validation_service._estimate_pages_from_blocks(-3), 0)
+
+    def test_extract_extent_inches_reads_cy_attribute(self):
+        class _Node:
+            attrib = {"cy": "1828800"}
+
+        cx, cy = word_validation_service._extract_extent_inches(_Node())
+        self.assertEqual(cx, 0.0)
+        self.assertGreater(cy, 0.0)
 
     def test_estimate_docx_pages_from_document_xml_counts_text_sections_and_page_break(
         self,
