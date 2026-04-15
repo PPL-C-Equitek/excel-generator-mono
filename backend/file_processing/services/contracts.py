@@ -34,7 +34,7 @@ class ExtractionResult:
     success: bool
     extracted_data: Any = None
     error: str | None = None
-    warnings: list[str] = field(default_factory=list)
+    warnings: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def ok(
@@ -45,7 +45,7 @@ class ExtractionResult:
         return cls(
             success=True,
             extracted_data=extracted_data,
-            warnings=warnings or [],
+            warnings=tuple(warnings) if warnings else (),
         )
 
     @classmethod
@@ -57,7 +57,7 @@ class ExtractionResult:
         return cls(
             success=False,
             error=error,
-            warnings=warnings or [],
+            warnings=tuple(warnings) if warnings else (),
         )
 
     @classmethod
