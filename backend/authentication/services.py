@@ -326,6 +326,10 @@ class RefreshTokenService:
         if user is None:
             raise InvalidRefreshTokenError("User is not valid for refresh.")
 
+        token_session_version = payload.get("session_version")
+        if token_session_version != user.session_version:
+            raise InvalidRefreshTokenError("Refresh token session is no longer valid.")
+
         return self.token_generator(user_id, email, user.session_version)
 
     def _decode_refresh_token(self, refresh_token: str):

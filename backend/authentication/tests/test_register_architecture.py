@@ -400,4 +400,25 @@ class DjangoRegistrationWriterRepositoryTest(APISimpleTestCase):
             password="Strong#123",
         )
 
-        mock_user_model.objects.filter.assert_called_once_with(email="missing@example.com")
+        mock_user_model.objects.filter.assert_called_once_with(
+            email="missing@example.com",
+            status="unverified",
+        )
+
+    @patch("authentication.register.adapters.User")
+    def test_update_unverified_user_password_only_targets_unverified_users(self, mock_user_model):
+        mock_user = MagicMock()
+        mock_user_model.objects.filter.return_value.first.return_value = mock_user
+
+        repository = DjangoRegistrationWriterRepository()
+        repository.update_unverified_user_password(
+            email="pending@example.com",
+            password="Strong#123",
+        )
+
+        mock_user_model.objects.filter.assert_called_once_with(
+            email="pending@example.com",
+            status="unverified",
+        )
+        mock_user.set_password.assert_called_once_with("Strong#123")
+        mock_user.save.assert_called_once_with(update_fields=["password"])
