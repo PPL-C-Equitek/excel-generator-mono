@@ -1,6 +1,7 @@
 import { fetchAPI } from "@/lib/api";
 import { getStoredAccessToken, getValidAccessToken } from "@/lib/auth";
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
+import { resolveDownloadFilename } from "@/utils/downloadFilename";
 import { isJsonObject } from "@/utils/schemaValidator";
 import type { JsonValue } from "@/utils/schemaValidator";
 export { ERROR_MESSAGES } from "@/constants/errorMessages";
@@ -237,11 +238,12 @@ export async function downloadCsvFile(
         }
 
         const blob = await response.blob();
+        const downloadFilename = resolveDownloadFilename(response.headers, filename);
         objectUrl = URL.createObjectURL(blob);
 
         downloadAnchor = document.createElement("a");
         downloadAnchor.href = objectUrl;
-        downloadAnchor.download = filename;
+        downloadAnchor.download = downloadFilename;
         document.body.appendChild(downloadAnchor);
         appendedToBody = true;
         downloadAnchor.click();
@@ -319,11 +321,12 @@ export async function downloadExcelFile(
         }
 
         const blob = await response.blob();
+        const downloadFilename = resolveDownloadFilename(response.headers, filename);
         objectUrl = URL.createObjectURL(blob);
 
         downloadAnchor = document.createElement("a");
         downloadAnchor.href = objectUrl;
-        downloadAnchor.download = filename;
+        downloadAnchor.download = downloadFilename;
         document.body.appendChild(downloadAnchor);
         appendedToBody = true;
         downloadAnchor.click();
