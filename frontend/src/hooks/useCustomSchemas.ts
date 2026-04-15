@@ -17,12 +17,14 @@ export interface UseCustomSchemasReturn {
     isSaving: boolean
     deletingSchemaId: string | null
     schemas: CustomSchemaRecord[]
+    saveError: string | null
     error: string | null
     message: string | null
     reloadSchemas: () => Promise<void>
     createSchema: (input: CreateCustomSchemaInput) => Promise<boolean>
     updateSchema: (schemaId: string, input: CreateCustomSchemaInput) => Promise<boolean>
     deleteSchema: (schemaId: string) => Promise<boolean>
+    clearSaveError: () => void
 }
 
 interface InitialAuthState {
@@ -75,6 +77,7 @@ export function useCustomSchemas(
     const [isSaving, setIsSaving] = useState(false)
     const [deletingSchemaId, setDeletingSchemaId] = useState<string | null>(null)
     const [schemas, setSchemas] = useState<CustomSchemaRecord[]>([])
+    const [saveError, setSaveError] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [message, setMessage] = useState<string | null>(null)
 
@@ -164,6 +167,7 @@ export function useCustomSchemas(
 
         setHasAccessToken(true)
         setIsSaving(true)
+        setSaveError(null)
         setError(null)
         setMessage(null)
 
@@ -171,9 +175,12 @@ export function useCustomSchemas(
             const createdSchema = await service.create(input, accessToken)
             setSchemas((prev) => sortSchemas([...prev, createdSchema]))
             setMessage(`"${createdSchema.name}" saved successfully.`)
+            setSaveError(null)
             return true
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : 'Failed to save custom schema.')
+            const message = err instanceof Error ? err.message : 'Failed to save custom schema.'
+            setSaveError(message)
+            setError(message)
             return false
         } finally {
             setIsSaving(false)
@@ -194,6 +201,7 @@ export function useCustomSchemas(
 
         setHasAccessToken(true)
         setIsSaving(true)
+        setSaveError(null)
         setError(null)
         setMessage(null)
 
@@ -207,9 +215,12 @@ export function useCustomSchemas(
                 )
             )
             setMessage(`"${updatedSchema.name}" updated successfully.`)
+            setSaveError(null)
             return true
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : 'Failed to update custom schema.')
+            const message = err instanceof Error ? err.message : 'Failed to update custom schema.'
+            setSaveError(message)
+            setError(message)
             return false
         } finally {
             setIsSaving(false)
@@ -228,6 +239,7 @@ export function useCustomSchemas(
         setHasAccessToken(true)
         setDeletingSchemaId(schemaId)
         setError(null)
+        setSaveError(null)
         setMessage(null)
 
         const schemaName = schemas.find((schema) => schema.id === schemaId)?.name
@@ -238,14 +250,20 @@ export function useCustomSchemas(
             if (schemaName) {
                 setMessage(`"${schemaName}" deleted successfully.`)
             }
+            setSaveError(null)
             return true
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Failed to delete custom schema.')
+            setSaveError(err instanceof Error ? err.message : 'Failed to delete custom schema.')
             return false
         } finally {
             setDeletingSchemaId(null)
         }
     }
+
+    const clearSaveError = useCallback(() => {
+        setSaveError(null)
+    }, [])
 
     return {
         hasAccessToken,
@@ -253,11 +271,13 @@ export function useCustomSchemas(
         isSaving,
         deletingSchemaId,
         schemas,
+        saveError,
         error,
         message,
         reloadSchemas,
         createSchema,
         updateSchema,
         deleteSchema,
+        clearSaveError,
     }
 }

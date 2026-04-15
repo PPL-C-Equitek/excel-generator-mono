@@ -32,6 +32,8 @@ interface CustomSchemaFormDraft {
 }
 
 const MAX_CUSTOM_SCHEMAS = 5
+const CUSTOM_SCHEMA_DUPLICATE_NAME_ERROR_MESSAGE =
+    'You already have a custom schema with this name.'
 type FormSubmitEvent = Parameters<
     NonNullable<ComponentPropsWithoutRef<'form'>['onSubmit']>
 >[0]
@@ -144,10 +146,12 @@ export default function CustomSchemaManager({
         schemas,
         error,
         message,
+        saveError,
         reloadSchemas,
         createSchema,
         updateSchema,
         deleteSchema,
+        clearSaveError,
     } = useCustomSchemas(service, accessTokenResolver)
 
     const isAtLimit = schemas.length >= MAX_CUSTOM_SCHEMAS
@@ -162,6 +166,7 @@ export default function CustomSchemaManager({
 
     const openCreateModal = () => {
         resetDraft()
+        clearSaveError()
         setIsModalOpen(true)
     }
 
@@ -172,6 +177,7 @@ export default function CustomSchemaManager({
             setDraft(nextDraft)
             setEditingSchemaId(schema.id)
             setFormError(null)
+            clearSaveError()
             setIsModalOpen(true)
         }
     }
@@ -192,6 +198,14 @@ export default function CustomSchemaManager({
 
         setSchemaPendingDeletion(null)
     }, [deletingSchemaId])
+
+    useEffect(() => {
+        if (!isModalOpen || !saveError) {
+            return
+        }
+
+        setFormError(saveError)
+    }, [isModalOpen, saveError])
 
     useEffect(() => {
         if (!isModalOpen) {
@@ -290,6 +304,8 @@ export default function CustomSchemaManager({
         ? 'Update the saved output columns for this schema.'
         : 'Define the output columns you want to reuse later.'
     const handleAddSchemaClick = isAddDisabled ? undefined : openCreateModal
+    const shouldShowPageError =
+        error !== null && error !== CUSTOM_SCHEMA_DUPLICATE_NAME_ERROR_MESSAGE ? error : null
     let saveButtonLabel = 'Save schema'
     if (isSaving) {
         saveButtonLabel = 'Saving...'
@@ -352,12 +368,12 @@ export default function CustomSchemaManager({
                     </div>
                 )}
 
-                {(error || isAtLimit) && (
+                {shouldShowPageError && (
                     <div
                         data-testid="schema-error"
                         className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
                     >
-                        {error || `You have reached the ${MAX_CUSTOM_SCHEMAS}-schema limit.`}
+                        {shouldShowPageError}
                     </div>
                 )}
 
