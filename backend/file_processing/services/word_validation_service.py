@@ -23,6 +23,7 @@ DOCX_IMAGE_SMALL_AREA_INCH2 = 1.5
 WORD_CORRUPT_ERROR = "Word file is corrupt or has an invalid structure."
 WORD_PROTECTED_ERROR = "Word file is password-protected."
 OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+WORD_DOCUMENT_XML = "word/document.xml"
 
 
 @dataclass
@@ -66,10 +67,7 @@ class DocxStructureValidationHandler(WordValidationHandler):
             docx_bytes = context.uploaded_file.read()
             with zipfile.ZipFile(BytesIO(docx_bytes)) as archive:
                 names = set(archive.namelist())
-                if (
-                    "[Content_Types].xml" not in names
-                    or "word/document.xml" not in names
-                ):
+                if "[Content_Types].xml" not in names or WORD_DOCUMENT_XML not in names:
                     return False, WORD_CORRUPT_ERROR
 
                 context.page_count = extract_docx_page_count(archive, docx_bytes)
@@ -168,7 +166,7 @@ def check_docx_structure(uploaded_file: Any) -> Tuple[bool, Any]:
         docx_bytes = uploaded_file.read()
         with zipfile.ZipFile(BytesIO(docx_bytes)) as archive:
             names = set(archive.namelist())
-            if "[Content_Types].xml" not in names or "word/document.xml" not in names:
+            if "[Content_Types].xml" not in names or WORD_DOCUMENT_XML not in names:
                 return False, WORD_CORRUPT_ERROR
 
             page_count = extract_docx_page_count(archive, docx_bytes)
@@ -195,7 +193,7 @@ def extract_docx_page_count(
         pass
 
     try:
-        document_xml = archive.read("word/document.xml")
+        document_xml = archive.read(WORD_DOCUMENT_XML)
     except Exception:
         return app_pages
 
@@ -208,82 +206,22 @@ def _estimate_docx_pages_with_python_docx(docx_bytes: Optional[bytes]) -> int:
     if not docx_bytes:
         return 0
 
-    try:
-        document = Document(BytesIO(docx_bytes))
-    except Exception:
+    document = _load_docx_document(docx_bytes)
+    if document is None:
         return 0
 
-    paragraph_count = 0
-    table_row_count = 0
-    word_count = 0
-    explicit_page_breaks = 0
-    image_count = 0
-    total_image_area = 0.0
-
     usable_page_area = _estimate_docx_usable_page_area(document)
+    paragraph_count, paragraph_word_count, explicit_page_breaks = (
+        _collect_paragraph_metrics(document)
+    )
+    image_count, total_image_area = _collect_body_image_metrics(document)
+    table_row_count, table_word_count = _collect_table_metrics(document)
 
-    for paragraph in document.paragraphs:
-        paragraph_count += 1
-        paragraph_text = paragraph.text.strip()
-        if paragraph_text:
-            word_count += len(paragraph_text.split())
-
-        for node in paragraph._p.iter():
-            node_name = _local_name(node.tag)
-            if node_name == "lastRenderedPageBreak":
-                explicit_page_breaks += 1
-            elif node_name == "br":
-                break_type = ""
-                for key, value in node.attrib.items():
-                    if key.endswith("type"):
-                        break_type = (value or "").strip().lower()
-                        break
-                if break_type == "page":
-                    explicit_page_breaks += 1
-
-    try:
-        body_node = document.element.body
-    except Exception:
-        body_node = None
-
-    if body_node is not None:
-        for node in body_node.iter():
-            node_name = _local_name(node.tag)
-            if node_name in {"drawing", "pict", "object"}:
-                image_count += 1
-            elif node_name == "extent":
-                cx, cy = _extract_extent_inches(node)
-                if cx > 0 and cy > 0:
-                    total_image_area += cx * cy
-
-    for table in document.tables:
-        for row in table.rows:
-            table_row_count += 1
-            for cell in row.cells:
-                cell_text = cell.text.strip()
-                if cell_text:
-                    word_count += len(cell_text.split())
-
-    break_estimate = explicit_page_breaks + 1 if explicit_page_breaks > 0 else 0
-
-    section_estimate = 0
-    try:
-        if len(document.sections) > 1:
-            section_estimate = len(document.sections)
-    except Exception:
-        section_estimate = 0
-
-    word_estimate = 0
-    if word_count > 0:
-        word_estimate = max(1, math.ceil(word_count / DOCX_WORDS_PER_PAGE_ESTIMATE))
-
-    structure_estimate = 0
-    block_count = paragraph_count + table_row_count
-    if block_count > 0:
-        structure_estimate = max(
-            1, math.ceil(block_count / DOCX_BLOCKS_PER_PAGE_ESTIMATE)
-        )
-
+    word_count = paragraph_word_count + table_word_count
+    section_estimate = _estimate_section_pages(document)
+    word_estimate = _estimate_pages_from_words(word_count)
+    structure_estimate = _estimate_pages_from_blocks(paragraph_count + table_row_count)
+    break_estimate = _estimate_pages_from_explicit_breaks(explicit_page_breaks)
     image_estimate = _estimate_pages_from_images(
         image_count=image_count,
         total_image_area=total_image_area,
@@ -297,6 +235,123 @@ def _estimate_docx_pages_with_python_docx(docx_bytes: Optional[bytes]) -> int:
         structure_estimate,
         image_estimate,
     )
+
+
+def _load_docx_document(docx_bytes: bytes) -> Optional[Document]:
+    try:
+        return Document(BytesIO(docx_bytes))
+    except Exception:
+        return None
+
+
+def _collect_paragraph_metrics(document: Document) -> Tuple[int, int, int]:
+    paragraph_count = 0
+    word_count = 0
+    explicit_page_breaks = 0
+
+    for paragraph in document.paragraphs:
+        paragraph_count += 1
+        word_count += _count_words(paragraph.text)
+        explicit_page_breaks += _count_explicit_breaks_in_paragraph(paragraph)
+
+    return paragraph_count, word_count, explicit_page_breaks
+
+
+def _count_words(text: str) -> int:
+    cleaned_text = (text or "").strip()
+    if not cleaned_text:
+        return 0
+    return len(cleaned_text.split())
+
+
+def _count_explicit_breaks_in_paragraph(paragraph: Any) -> int:
+    breaks = 0
+    for node in paragraph._p.iter():
+        node_name = _local_name(node.tag)
+        if node_name == "lastRenderedPageBreak":
+            breaks += 1
+            continue
+        if node_name == "br" and _is_page_break_node(node):
+            breaks += 1
+    return breaks
+
+
+def _is_page_break_node(node: Any) -> bool:
+    break_type = ""
+    for key, value in node.attrib.items():
+        if key.endswith("type"):
+            break_type = (value or "").strip().lower()
+            break
+    return break_type == "page"
+
+
+def _collect_body_image_metrics(document: Document) -> Tuple[int, float]:
+    body_node = _safe_document_body(document)
+    if body_node is None:
+        return 0, 0.0
+
+    image_count = 0
+    total_image_area = 0.0
+    for node in body_node.iter():
+        node_name = _local_name(node.tag)
+        if node_name in {"drawing", "pict", "object"}:
+            image_count += 1
+            continue
+        if node_name == "extent":
+            cx, cy = _extract_extent_inches(node)
+            if cx > 0 and cy > 0:
+                total_image_area += cx * cy
+
+    return image_count, total_image_area
+
+
+def _safe_document_body(document: Document) -> Any:
+    try:
+        return document.element.body
+    except Exception:
+        return None
+
+
+def _collect_table_metrics(document: Document) -> Tuple[int, int]:
+    table_row_count = 0
+    word_count = 0
+
+    for table in document.tables:
+        for row in table.rows:
+            table_row_count += 1
+            for cell in row.cells:
+                word_count += _count_words(cell.text)
+
+    return table_row_count, word_count
+
+
+def _estimate_pages_from_explicit_breaks(explicit_page_breaks: int) -> int:
+    if explicit_page_breaks <= 0:
+        return 0
+    return explicit_page_breaks + 1
+
+
+def _estimate_section_pages(document: Document) -> int:
+    try:
+        section_count = len(document.sections)
+    except Exception:
+        return 0
+
+    if section_count > 1:
+        return section_count
+    return 0
+
+
+def _estimate_pages_from_words(word_count: int) -> int:
+    if word_count <= 0:
+        return 0
+    return max(1, math.ceil(word_count / DOCX_WORDS_PER_PAGE_ESTIMATE))
+
+
+def _estimate_pages_from_blocks(block_count: int) -> int:
+    if block_count <= 0:
+        return 0
+    return max(1, math.ceil(block_count / DOCX_BLOCKS_PER_PAGE_ESTIMATE))
 
 
 def _estimate_docx_usable_page_area(document: Document) -> float:
@@ -411,41 +466,66 @@ def _emu_to_inches(value: Any, default: float) -> float:
 
 
 def _estimate_docx_pages_from_document_xml(document_xml: bytes) -> int:
+    root = _parse_docx_document_root(document_xml)
+    if root is None:
+        return 0
+
+    marker_counts, text_char_count = _collect_docx_xml_marker_counts(root)
+    marker_estimate = _estimate_pages_from_docx_xml_markers(marker_counts)
+    text_estimate = _estimate_pages_from_text_char_count(text_char_count)
+    return max(marker_estimate, text_estimate)
+
+
+def _parse_docx_document_root(document_xml: bytes) -> Optional[ET.Element]:
     try:
         root = ET.fromstring(document_xml)
     except Exception:
-        return 0
+        return None
 
     if _local_name(root.tag) != "document":
-        return 0
+        return None
+    return root
 
-    manual_page_breaks = 0
-    rendered_page_breaks = 0
-    page_break_before_count = 0
-    section_count = 0
+
+def _collect_docx_xml_marker_counts(root: ET.Element) -> Tuple[dict, int]:
+    marker_counts = {
+        "manual_page_breaks": 0,
+        "rendered_page_breaks": 0,
+        "page_break_before_count": 0,
+        "section_count": 0,
+    }
     text_char_count = 0
 
     for node in root.iter():
         node_name = _local_name(node.tag)
-
         if node_name == "lastRenderedPageBreak":
-            rendered_page_breaks += 1
+            marker_counts["rendered_page_breaks"] += 1
         elif node_name == "br":
-            break_type = ""
-            for key, value in node.attrib.items():
-                if key.endswith("type"):
-                    break_type = (value or "").strip().lower()
-                    break
-            if break_type == "page":
-                manual_page_breaks += 1
+            if _is_page_break_node(node):
+                marker_counts["manual_page_breaks"] += 1
         elif node_name == "pageBreakBefore":
-            page_break_before_count += 1
+            marker_counts["page_break_before_count"] += 1
         elif node_name == "sectPr":
-            section_count += 1
-        elif node_name == "t" and node.text:
-            text_char_count += len(node.text.strip())
+            marker_counts["section_count"] += 1
+        elif node_name == "t":
+            text_char_count += _count_text_characters(node.text)
 
+    return marker_counts, text_char_count
+
+
+def _count_text_characters(text: Optional[str]) -> int:
+    if not text:
+        return 0
+    return len(text.strip())
+
+
+def _estimate_pages_from_docx_xml_markers(marker_counts: dict) -> int:
     marker_estimate = 0
+    rendered_page_breaks = marker_counts["rendered_page_breaks"]
+    manual_page_breaks = marker_counts["manual_page_breaks"]
+    page_break_before_count = marker_counts["page_break_before_count"]
+    section_count = marker_counts["section_count"]
+
     if rendered_page_breaks > 0:
         marker_estimate = max(marker_estimate, rendered_page_breaks + 1)
     if manual_page_breaks > 0:
@@ -454,14 +534,13 @@ def _estimate_docx_pages_from_document_xml(document_xml: bytes) -> int:
         marker_estimate = max(marker_estimate, page_break_before_count + 1)
     if section_count > 1:
         marker_estimate = max(marker_estimate, section_count)
+    return marker_estimate
 
-    text_estimate = 0
-    if text_char_count > 0:
-        text_estimate = max(
-            1, math.ceil(text_char_count / DOCX_CHARS_PER_PAGE_ESTIMATE)
-        )
 
-    return max(marker_estimate, text_estimate)
+def _estimate_pages_from_text_char_count(text_char_count: int) -> int:
+    if text_char_count <= 0:
+        return 0
+    return max(1, math.ceil(text_char_count / DOCX_CHARS_PER_PAGE_ESTIMATE))
 
 
 def _local_name(tag_name: str) -> str:
