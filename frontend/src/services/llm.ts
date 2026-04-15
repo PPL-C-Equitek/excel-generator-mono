@@ -28,7 +28,7 @@ const EXCEL_EXPORT_ERROR_MESSAGE = "The Excel export response is invalid.";
 const EXCEL_DOWNLOAD_ERROR_MESSAGE = "Failed to export";
 const CSV_DOWNLOAD_ERROR_MESSAGE = "Failed to export";
 
-function buildJsonRequestHeaders(customSchemaId?: string | null): HeadersInit {
+function buildJsonRequestHeaders(): HeadersInit {
     const token = getStoredAccessToken();
 
     if (!token) {
@@ -93,7 +93,7 @@ export async function generateJson(
     try {
         data = await fetchAPI("llm/generate/", {
             method: "POST",
-            headers: buildJsonRequestHeaders(customSchemaId),
+            headers: buildJsonRequestHeaders(),
             body: JSON.stringify(requestBody),
             signal,
         });
