@@ -2392,6 +2392,177 @@ class TestWordValidationService(unittest.TestCase):
         area = word_validation_service._estimate_docx_usable_page_area(_BadDocument())
         self.assertGreater(area, 0)
 
+    def test_estimate_docx_usable_page_area_falls_back_to_defaults_when_sections_fail(
+        self,
+    ):
+        class _BadDocument:
+            @property
+            def sections(self):
+                raise RuntimeError("no sections")
+
+        area = word_validation_service._estimate_docx_usable_page_area(_BadDocument())
+        expected = (
+            word_validation_service.DOCX_DEFAULT_PAGE_WIDTH_INCH
+            - 2 * word_validation_service.DOCX_DEFAULT_MARGIN_INCH
+        ) * (
+            word_validation_service.DOCX_DEFAULT_PAGE_HEIGHT_INCH
+            - 2 * word_validation_service.DOCX_DEFAULT_MARGIN_INCH
+        )
+        self.assertAlmostEqual(area, expected)
+
+    def test_estimate_docx_pages_with_python_docx_handles_body_access_exception(self):
+        class _Node:
+            def __init__(self, tag, attrib=None):
+                self.tag = tag
+                self.attrib = attrib or {}
+
+        class _ParagraphXml:
+            def iter(self):
+                return [
+                    _Node("{w}br", {"{w}type": "page"}),
+                    _Node("{w}lastRenderedPageBreak"),
+                ]
+
+        class _Paragraph:
+            text = "hello world"
+            _p = _ParagraphXml()
+
+        class _Cell:
+            text = "table words"
+
+        class _Row:
+            cells = [_Cell()]
+
+        class _Table:
+            rows = [_Row()]
+
+        class _Document:
+            paragraphs = [_Paragraph()]
+            tables = [_Table()]
+
+            @property
+            def sections(self):
+                raise ValueError("section decode error")
+
+            @property
+            def element(self):
+                raise ValueError("no body")
+
+        with patch(
+            "file_processing.services.word_validation_service.Document",
+            return_value=_Document(),
+        ):
+            estimate = word_validation_service._estimate_docx_pages_with_python_docx(
+                b"fake"
+            )
+
+        self.assertGreaterEqual(estimate, 1)
+
+    def test_estimate_docx_pages_with_python_docx_counts_body_drawings_and_sections(
+        self,
+    ):
+        class _Node:
+            def __init__(self, tag, attrib=None):
+                self.tag = tag
+                self.attrib = attrib or {}
+
+        class _Body:
+            def iter(self):
+                return [
+                    _Node("{w}drawing"),
+                    _Node("{wp}extent", {"cx": "914400", "cy": "1828800"}),
+                ]
+
+        class _Element:
+            body = _Body()
+
+        class _ParagraphXml:
+            def iter(self):
+                return []
+
+        class _Paragraph:
+            text = ""
+            _p = _ParagraphXml()
+
+        class _Section:
+            page_width = 7772400
+            page_height = 10058400
+            left_margin = 914400
+            right_margin = 914400
+            top_margin = 914400
+            bottom_margin = 914400
+
+        class _Document:
+            paragraphs = [_Paragraph()]
+            tables = []
+            sections = [_Section(), _Section()]
+            element = _Element()
+
+        with patch(
+            "file_processing.services.word_validation_service.Document",
+            return_value=_Document(),
+        ):
+            estimate = word_validation_service._estimate_docx_pages_with_python_docx(
+                b"fake"
+            )
+
+        self.assertGreaterEqual(estimate, 2)
+
+    def test_estimate_pages_from_images_small_and_tiny_branches(self):
+        small_estimate = word_validation_service._estimate_pages_from_images(
+            image_count=9,
+            total_image_area=18.0,
+            usable_page_area=60.0,
+        )
+        tiny_estimate = word_validation_service._estimate_pages_from_images(
+            image_count=12,
+            total_image_area=6.0,
+            usable_page_area=60.0,
+        )
+        no_area_estimate = word_validation_service._estimate_pages_from_images(
+            image_count=12,
+            total_image_area=0.0,
+            usable_page_area=60.0,
+        )
+
+        self.assertEqual(small_estimate, 3)
+        self.assertEqual(tiny_estimate, 2)
+        self.assertEqual(no_area_estimate, 2)
+
+    def test_extract_extent_inches_handles_invalid_numeric_values(self):
+        class _Node:
+            attrib = {"cx": "invalid-cx", "cy": "invalid-cy"}
+
+        cx, cy = word_validation_service._extract_extent_inches(_Node())
+        self.assertEqual(cx, 0.0)
+        self.assertEqual(cy, 0.0)
+
+    def test_emu_to_inches_handles_invalid_and_non_positive_values(self):
+        self.assertEqual(word_validation_service._emu_to_inches("abc", 7.5), 7.5)
+        self.assertEqual(word_validation_service._emu_to_inches(0, 3.2), 3.2)
+        self.assertEqual(word_validation_service._emu_to_inches(-10, 4.1), 4.1)
+
+    def test_estimate_docx_pages_from_document_xml_counts_text_sections_and_page_break(
+        self,
+    ):
+        namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        document_xml = (
+            f'<w:document xmlns:w="{namespace}">'
+            "<w:body>"
+            "<w:p><w:r><w:br w:type='page'/></w:r></w:p>"
+            "<w:p><w:r><w:t>abc</w:t></w:r></w:p>"
+            "<w:sectPr></w:sectPr>"
+            "<w:sectPr></w:sectPr>"
+            "</w:body>"
+            "</w:document>"
+        ).encode("utf-8")
+
+        estimate = word_validation_service._estimate_docx_pages_from_document_xml(
+            document_xml
+        )
+
+        self.assertEqual(estimate, 2)
+
     @patch(
         "file_processing.services.word_validation_service._estimate_docx_pages_with_python_docx",
         return_value=word_validation_service.MAX_WORD_PAGES + 10,
