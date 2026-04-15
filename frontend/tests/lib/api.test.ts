@@ -88,7 +88,7 @@ describe("fetchAPI", () => {
         window.localStorage.setItem("access_token", "access-token");
         window.localStorage.setItem("refresh_token", "refresh-token");
 
-        const removeItemSpy = vi.spyOn(window.localStorage, "removeItem");
+        const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
         const assignSpy = vi.fn();
         Object.defineProperty(window, "location", {
             configurable: true,
