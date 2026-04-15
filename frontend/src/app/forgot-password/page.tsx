@@ -14,7 +14,6 @@ const DEFAULT_SUCCESS_MESSAGE =
   'If the email exists, we sent a reset link.';
 const DEFAULT_RESEND_SUCCESS_MESSAGE = 'If the email exists, we sent a new reset link.';
 const DEFAULT_RESEND_ERROR_MESSAGE = 'Failed to resend the password reset email.';
-const RESEND_COOLDOWN_STORAGE_PREFIX = 'forgot-password-resend-cooldown:';
 
 type ForgotPasswordErrors = {
   email: string;
@@ -107,11 +106,8 @@ function ForgotPasswordSuccessState({
   const [isResending, setIsResending] = useState(false);
   const [resendStatusMessage, setResendStatusMessage] = useState('');
   const [resendErrorMessage, setResendErrorMessage] = useState('');
-  const resendCooldownStorageKey = `${RESEND_COOLDOWN_STORAGE_PREFIX}${email
-    .trim()
-    .toLowerCase()}`;
   const { cooldown: resendCooldown, setCooldown: setResendCooldown } =
-    useResendCooldown(0, resendCooldownStorageKey);
+    useResendCooldown(0, email);
 
   const handleResendPasswordReset = async () => {
     await resendPasswordResetFlow({

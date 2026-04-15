@@ -32,6 +32,7 @@ describe('Registration Page', () => {
     mockedAxios.post.mockReset();
     mockRouterPush.mockReset();
     mockToastSuccess.mockReset();
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -481,8 +482,10 @@ describe('Registration Page', () => {
       });
 
       await waitFor(() => {
-        expect(mockRouterPush).toHaveBeenCalledWith('/auth/verify-email/pending?email=pending%40example.com');
+        expect(mockRouterPush).toHaveBeenCalledWith('/auth/verify-email/pending?email=pending%40example.com&resent=1');
       });
+
+      expect(localStorage.getItem('resend_cooldown_pending@example.com')).not.toBeNull();
     });
 
     test('uses UNVERIFIED_EMAIL fallback toast message when backend message is empty', async () => {
@@ -509,8 +512,31 @@ describe('Registration Page', () => {
       });
 
       await waitFor(() => {
-        expect(mockRouterPush).toHaveBeenCalledWith('/auth/verify-email/pending?email=pending.nomsg%40example.com');
+        expect(mockRouterPush).toHaveBeenCalledWith('/auth/verify-email/pending?email=pending.nomsg%40example.com&resent=1');
       });
+
+      expect(localStorage.getItem('resend_cooldown_pending.nomsg@example.com')).not.toBeNull();
+    });
+
+    test('does not call register again for an unverified email while resend cooldown is still active', async () => {
+      const { nameInput, emailInput, submitBtn } = setup();
+      const user = userEvent.setup();
+      localStorage.setItem(
+        'resend_cooldown_pending@example.com',
+        String(Date.now() + 45000)
+      );
+
+      await user.type(nameInput, 'Pending Again');
+      await user.type(emailInput, 'pending@example.com');
+      fireEvent.click(submitBtn);
+
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+      expect(mockToastSuccess).toHaveBeenCalledWith(
+        'Email ini belum diverifikasi. Silakan cek inbox Anda atau tunggu hingga cooldown selesai.'
+      );
+      expect(mockRouterPush).toHaveBeenCalledWith(
+        '/auth/verify-email/pending?email=pending%40example.com'
+      );
     });
 
     test('shows rate limit fallback message on 429 when no data.message is provided', async () => {

@@ -1,68 +1,143 @@
 'use client';
 
 import type React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-function getStoredCooldown(storageKey?: string): number {
-  if (!storageKey || globalThis.sessionStorage === undefined) {
-    return 0;
+function getStorageKey(email?: string): string | undefined {
+  const normalizedEmail = email?.trim().toLowerCase();
+  if (!normalizedEmail) {
+    return undefined;
   }
 
-  const rawValue = globalThis.sessionStorage.getItem(storageKey);
+  return `resend_cooldown_${normalizedEmail}`;
+}
+
+function getStoredExpiryTime(email?: string): number | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const storageKey = getStorageKey(email);
+  if (!storageKey) {
+    return null;
+  }
+
+  const rawValue = window.localStorage.getItem(storageKey);
   if (!rawValue) {
-    return 0;
+    return null;
   }
 
-  const cooldownUntil = Number(rawValue);
-  if (!Number.isFinite(cooldownUntil)) {
-    globalThis.sessionStorage.removeItem(storageKey);
-    return 0;
+  const expiryTime = Number(rawValue);
+  if (!Number.isFinite(expiryTime)) {
+    window.localStorage.removeItem(storageKey);
+    return null;
   }
 
-  const remainingSeconds = Math.ceil((cooldownUntil - Date.now()) / 1000);
-  if (remainingSeconds <= 0) {
-    globalThis.sessionStorage.removeItem(storageKey);
-    return 0;
+  if (expiryTime <= Date.now()) {
+    window.localStorage.removeItem(storageKey);
+    return null;
   }
 
-  return remainingSeconds;
+  return expiryTime;
 }
 
-function persistCooldown(storageKey: string | undefined, nextValue: number): void {
-  if (!storageKey || globalThis.sessionStorage === undefined) {
+function getRemainingSecondsFromExpiry(expiryTime: number | null): number {
+  if (expiryTime === null) {
+    return 0;
+  }
+
+  const remainingSeconds = Math.ceil((expiryTime - Date.now()) / 1000);
+  return remainingSeconds > 0 ? remainingSeconds : 0;
+}
+
+export function getRemainingResendCooldownForEmail(email?: string): number {
+  return getStoredCooldown(email);
+}
+
+export function setResendCooldownForEmail(email: string, cooldownSeconds: number): void {
+  if (typeof window === 'undefined') {
     return;
   }
 
-  if (nextValue <= 0) {
-    globalThis.sessionStorage.removeItem(storageKey);
+  const storageKey = getStorageKey(email);
+  if (!storageKey) {
     return;
   }
 
-  const cooldownUntil = Date.now() + nextValue * 1000;
-  globalThis.sessionStorage.setItem(storageKey, String(cooldownUntil));
+  if (cooldownSeconds <= 0) {
+    window.localStorage.removeItem(storageKey);
+    return;
+  }
+
+  window.localStorage.setItem(
+    storageKey,
+    String(Date.now() + cooldownSeconds * 1000)
+  );
 }
 
-export function useResendCooldown(initialValue = 0, storageKey?: string) {
+function getStoredCooldown(email?: string): number {
+  return getRemainingSecondsFromExpiry(getStoredExpiryTime(email));
+}
+
+export function useResendCooldown(initialValue = 0, email?: string) {
+  const storageKey = useMemo(() => getStorageKey(email), [email]);
   const [cooldown, setCooldown] = useState(() => {
-    const storedCooldown = getStoredCooldown(storageKey);
+    const storedCooldown = getStoredCooldown(email);
     return storedCooldown > 0 ? storedCooldown : initialValue;
   });
 
   useEffect(() => {
-    if (cooldown <= 0) return undefined;
+    const storedCooldown = getStoredCooldown(email);
+    setCooldown(storedCooldown > 0 ? storedCooldown : initialValue);
+  }, [email, initialValue]);
 
-    const timer = globalThis.setInterval(() => {
+  useEffect(() => {
+    if (!storageKey || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const syncCooldown = () => {
+      const storedCooldown = getStoredCooldown(email);
       setCooldown((prev) => {
-        if (prev <= 1) {
-          globalThis.clearInterval(timer);
+        if (storedCooldown > 0) {
+          return storedCooldown;
+        }
+
+        if (initialValue > 0 && prev > 0) {
+          return prev;
+        }
+
+        if (prev > 0 || initialValue <= 0) {
           return 0;
         }
-        return prev - 1;
-      });
-    }, 1000);
 
-    return () => globalThis.clearInterval(timer);
-  }, [cooldown]);
+        return initialValue;
+      });
+    };
+
+    syncCooldown();
+
+    const timer = window.setInterval(syncCooldown, 1000);
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage) {
+        return;
+      }
+
+      if (event.key !== storageKey) {
+        return;
+      }
+
+      syncCooldown();
+    };
+
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [email, initialValue, storageKey]);
 
   const setPersistedCooldown: React.Dispatch<React.SetStateAction<number>> = (value) => {
     setCooldown((prev) => {
@@ -70,8 +145,16 @@ export function useResendCooldown(initialValue = 0, storageKey?: string) {
         typeof value === 'function'
           ? (value as (previousValue: number) => number)(prev)
           : value;
-      persistCooldown(storageKey, nextValue);
-      return nextValue;
+
+      if (typeof window !== 'undefined' && storageKey) {
+        if (nextValue <= 0) {
+          window.localStorage.removeItem(storageKey);
+        } else {
+          window.localStorage.setItem(storageKey, String(Date.now() + nextValue * 1000));
+        }
+      }
+
+      return nextValue > 0 ? nextValue : 0;
     });
   };
 
