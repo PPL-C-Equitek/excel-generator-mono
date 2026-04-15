@@ -112,6 +112,52 @@ describe("fetchAPI", () => {
         expect(removeItemSpy).toHaveBeenCalledWith("refresh_token");
         expect(assignSpy).toHaveBeenCalledWith("/login");
     });
+
+    it("still throws the 401 error gracefully when window is unavailable", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+        vi.stubGlobal("window", undefined);
+
+        await expect(fetchAPI("history/")).rejects.toMatchObject({
+            status: 401,
+            message: "Unauthorized",
+        });
+    });
+
+    it("clears auth tokens without redirecting again when already on /login", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        window.localStorage.setItem("access_token", "access-token");
+        window.localStorage.setItem("refresh_token", "refresh-token");
+
+        const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
+        const assignSpy = vi.fn();
+        Object.defineProperty(window, "location", {
+            configurable: true,
+            value: {
+                ...window.location,
+                pathname: "/login",
+                assign: assignSpy,
+            },
+        });
+
+        await expect(fetchAPI("history/")).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(removeItemSpy).toHaveBeenCalledWith("access_token");
+        expect(removeItemSpy).toHaveBeenCalledWith("refresh_token");
+        expect(assignSpy).not.toHaveBeenCalled();
+    });
 });
 
 describe("uploadFile", () => {

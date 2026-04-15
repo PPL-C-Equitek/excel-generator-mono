@@ -165,7 +165,8 @@ describe("generateJson negative (HTTP errors)", () => {
   });
 
   it("maps 401 to user-friendly message", async () => {
-    server.use(handler401);
+    const unauthorizedError = Object.assign(new Error("Unauthorized"), { status: 401 });
+    vi.spyOn(api, "fetchAPI").mockRejectedValueOnce(unauthorizedError);
     await expect(generateJson({ key: "value" })).rejects.toThrow("Invalid API key.");
   });
 

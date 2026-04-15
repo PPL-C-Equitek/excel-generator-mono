@@ -15,6 +15,7 @@ export default defineConfig({
         "tests/**",
         // Pure TypeScript interface — compile-time only, tidak ada JS runtime yang bisa diukur
         "src/lib/ILLMService.ts",
+        "src/lib/ICustomSchemaService.ts",
       ],
       reporter: ["text", "lcov", "cobertura", "json-summary"],
       reportsDirectory: "coverage",
