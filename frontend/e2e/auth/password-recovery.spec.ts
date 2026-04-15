@@ -47,7 +47,7 @@ test('forgot password validates email and sends trimmed payload', async ({ page 
   ).toBeVisible()
 
   expect(resendCalled).toBe(true)
-  expect(resendPayload?.email).toBe('   user@example.com   ')
+  expect(resendPayload?.email).toBe('user@example.com')
 })
 
 test('forgot password blocks invalid emails before request', async ({ page }) => {
@@ -71,6 +71,59 @@ test('forgot password blocks invalid emails before request', async ({ page }) =>
     page.getByText('Please enter a valid email address.')
   ).toBeVisible()
   expect(requestCount).toBe(0)
+})
+
+test('forgot password shows backend error and keeps the request form visible', async ({ page }) => {
+  await page.route('**/auth/forgot-password/', async (route) => {
+    await route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'Failed to send reset email.' }),
+    })
+  })
+
+  await page.goto('/forgot-password')
+
+  await page.getByRole('textbox', { name: 'Email' }).fill('user@example.com')
+  await page.getByRole('button', { name: 'Send Reset Link' }).click()
+
+  await expect(page.getByText('Failed to send reset email.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Send Reset Link' })).toBeVisible()
+})
+
+test('forgot password shows resend error while staying on success card', async ({ page }) => {
+  let resendAttempts = 0
+
+  await page.route('**/auth/forgot-password/', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'If the email exists, we sent a reset link.' }),
+    })
+  })
+
+  await page.route('**/auth/resend-password-reset/', async (route) => {
+    resendAttempts += 1
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'Failed to resend reset email.' }),
+    })
+  })
+
+  await page.goto('/forgot-password')
+
+  await page.getByRole('textbox', { name: 'Email' }).fill('user@example.com')
+  await page.getByRole('button', { name: 'Send Reset Link' }).click()
+  await expect(
+    page.getByText('If the email exists, we sent a reset link.')
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: /^Resend Email$/ }).click()
+
+  await expect(page.getByText('Failed to resend reset email.')).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Resend Email$/ })).toBeVisible()
+  expect(resendAttempts).toBe(1)
 })
 
 test('reset password flow validates token and form inputs', async ({ page }) => {

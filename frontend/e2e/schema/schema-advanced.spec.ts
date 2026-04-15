@@ -150,6 +150,7 @@ test('shows backend duplicate-name message and keeps the modal open', async ({ p
 
   await page.goto('/schema')
   await page.getByTestId('add-schema-btn').click()
+  const createDialog = page.getByRole('dialog', { name: /add schema/i })
 
   await page.locator('#schema-name').fill('   E2E Baseline Schema   ')
   await page.locator('#schema-column-name-1').fill('  unit_name ')
@@ -160,10 +161,11 @@ test('shows backend duplicate-name message and keeps the modal open', async ({ p
   await page.getByTestId('schema-save-btn').click()
   await duplicateRequest
 
-  await expect(page.getByTestId('schema-error')).toHaveText(
-    'You already have a custom schema with this name.'
-  )
-  await expect(page.getByRole('dialog', { name: /add schema/i })).toBeVisible()
+  await expect(
+    createDialog.getByText('You already have a custom schema with this name.')
+  ).toBeVisible()
+  await expect(page.getByTestId('schema-error')).toHaveCount(0)
+  await expect(createDialog).toBeVisible()
   expect(createPayload).toMatchObject({ name: 'E2E Baseline Schema' })
 })
 
@@ -189,6 +191,152 @@ test('disables add action when schema limit is reached', async ({ page }) => {
 
   await expect(page.getByTestId('schema-count')).toHaveText('5/5 saved')
   await expect(page.getByTestId('add-schema-btn')).toBeDisabled()
-  await expect(page.getByText('You have reached the 5-schema limit.')).toBeVisible()
+  await expect(page.getByTestId('schema-error')).toHaveCount(0)
   await expect(page.getByRole('dialog', { name: /add schema/i })).not.toBeVisible()
+})
+
+test('trims column name and whitespace-only column description on blur', async ({ page }) => {
+  await page.route('**/schemas/', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
+      })
+      return
+    }
+
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'unexpected' }),
+    })
+  })
+
+  await page.goto('/schema')
+  await page.getByTestId('add-schema-btn').click()
+
+  const columnNameInput = page.locator('#schema-column-name-1')
+  await columnNameInput.fill('   unit_name   ')
+  await columnNameInput.blur()
+  await expect(columnNameInput).toHaveValue('unit_name')
+
+  const columnDescriptionInput = page.locator('#schema-column-description-1')
+  await columnDescriptionInput.fill('      ')
+  await columnDescriptionInput.blur()
+  await expect(columnDescriptionInput).toHaveValue('')
+})
+
+test('keeps edit modal open when schema update fails', async ({ page }) => {
+  let updatePayload: Record<string, unknown> | null = null
+
+  await page.route('**/schemas/**', async (route) => {
+    const method = route.request().method()
+
+    if (method === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([createSchemaRecord({ name: 'Baseline Schema' })]),
+      })
+      return
+    }
+
+    if (method === 'PATCH') {
+      const rawBody = route.request().postData()
+      updatePayload = rawBody ? JSON.parse(rawBody) : null
+      await route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Unable to update schema at the moment.' }),
+      })
+      return
+    }
+
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'unexpected' }),
+    })
+  })
+
+  await page.goto('/schema')
+
+  const schemaCard = page
+    .locator('article')
+    .filter({ has: page.getByRole('heading', { name: 'Baseline Schema' }) })
+    .first()
+
+  await schemaCard.getByRole('button', { name: 'Edit' }).click()
+  const editDialog = page.getByRole('dialog', { name: /edit schema/i })
+  await expect(editDialog).toBeVisible()
+
+  await page.locator('#schema-name').fill('Updated Schema Name')
+  const patchRequest = page.waitForResponse((response) => {
+    return (
+      response.request().method() === 'PATCH' &&
+      response.url().includes('/schemas/')
+    )
+  })
+  await page.getByTestId('schema-save-btn').click()
+  await patchRequest
+
+  await expect(editDialog).toBeVisible()
+  await expect(editDialog.getByText('Unable to update schema at the moment.')).toBeVisible()
+  await expect(page.getByTestId('schema-error')).toHaveText('Unable to update schema at the moment.')
+  expect(updatePayload).toMatchObject({ name: 'Updated Schema Name' })
+})
+
+test('keeps delete dialog open when schema delete fails', async ({ page }) => {
+  await page.route('**/schemas/**', async (route) => {
+    const method = route.request().method()
+
+    if (method === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([createSchemaRecord({ name: 'Delete Target Schema' })]),
+      })
+      return
+    }
+
+    if (method === 'DELETE') {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Failed to delete custom schema.' }),
+      })
+      return
+    }
+
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'unexpected' }),
+    })
+  })
+
+  await page.goto('/schema')
+
+  const schemaCard = page
+    .locator('article')
+    .filter({ has: page.getByRole('heading', { name: 'Delete Target Schema' }) })
+    .first()
+
+  await schemaCard.getByRole('button', { name: 'Delete' }).click()
+  const deleteDialog = page.getByRole('dialog')
+  await expect(deleteDialog).toBeVisible()
+
+  const deleteRequest = page.waitForResponse((response) => {
+    return (
+      response.request().method() === 'DELETE' &&
+      response.url().includes('/schemas/')
+    )
+  })
+  await deleteDialog.getByRole('button', { name: 'Delete schema' }).click()
+  await deleteRequest
+
+  await expect(deleteDialog).toBeVisible()
+  await expect(page.getByTestId('schema-error')).toHaveText('Failed to delete custom schema.')
+  await expect(page.getByRole('heading', { name: 'Delete Target Schema' })).toBeVisible()
 })
