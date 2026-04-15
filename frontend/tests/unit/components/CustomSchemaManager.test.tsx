@@ -7,6 +7,7 @@ import CustomSchemaManager, {
     getNextColumnsAfterRemoval,
     validateCustomSchemaDraft,
 } from '../../../src/components/CustomSchemaManager'
+import { isCustomSchemaLimitExceededErrorMessage } from '../../../src/lib/customSchemaDraft'
 import type {
     CreateCustomSchemaInput,
     CustomSchemaRecord,
@@ -683,6 +684,54 @@ describe('CustomSchemaManager', () => {
         expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
     })
 
+    it('shows max schema limit errors inside the modal instead of the page message', async () => {
+        const user = userEvent.setup()
+        const service = createService({
+            create: vi.fn().mockRejectedValue(
+                new Error('A user can only have up to 5 custom schemas.')
+            ),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await user.click(screen.getByTestId('add-schema-btn'))
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        await user.type(within(dialog).getByLabelText(/schema name/i), 'Invoice Mapping')
+        await user.type(within(dialog).getByLabelText(/column name/i), 'invoice_number')
+        await user.type(
+            within(dialog).getByLabelText(/column description/i),
+            'Invoice identifier'
+        )
+        await user.click(within(dialog).getByTestId('schema-save-btn'))
+
+        expect(
+            await within(dialog).findByText('A user can only have up to 5 custom schemas.')
+        ).toBeInTheDocument()
+        expect(screen.queryByTestId('schema-message')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('schema-error')).not.toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
+    })
+
+    it('does not show max schema limit errors in the page error banner', () => {
+        vi.spyOn(customSchemaHook, 'useCustomSchemas').mockReturnValue(
+            createHookState({
+                error: 'A user can only have up to 5 custom schemas.',
+            })
+        )
+
+        render(<CustomSchemaManager />)
+
+        expect(screen.queryByTestId('schema-error')).not.toBeInTheDocument()
+        expect(
+            screen.queryByText('A user can only have up to 5 custom schemas.')
+        ).not.toBeInTheDocument()
+    })
+
     it('keeps the modal open when the save callback reports failure', async () => {
         const user = userEvent.setup()
         const createSchema = vi.fn().mockResolvedValue(false)
@@ -1041,5 +1090,21 @@ describe('buildCustomSchemaInput', () => {
                 ],
             },
         })
+    })
+})
+
+describe('isCustomSchemaLimitExceededErrorMessage', () => {
+    it('detects the dynamic custom schema limit message', () => {
+        expect(
+            isCustomSchemaLimitExceededErrorMessage('A user can only have up to 5 custom schemas.')
+        ).toBe(true)
+    })
+
+    it('returns false for a non-limit message', () => {
+        expect(
+            isCustomSchemaLimitExceededErrorMessage(
+                'A user can only have up to five custom schemas.'
+            )
+        ).toBe(false)
     })
 })
