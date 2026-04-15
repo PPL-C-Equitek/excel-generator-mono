@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within, act, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -330,7 +330,7 @@ describe('ConvertPage', () => {
             const user = userEvent.setup()
             const mockService = {
                 generate: vi.fn().mockImplementationOnce(
-                    () => new Promise(() => {})
+                    () => new Promise(() => { })
                 ),
                 exportToCsv: vi.fn(),
                 downloadCsvFile: vi.fn(),
