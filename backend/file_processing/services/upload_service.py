@@ -257,17 +257,39 @@ def _dispatch_upload_processing(ext, file_path, uploaded_file):
     return processor()
 
 
+def _get_upload_extension(uploaded_file):
+    return os.path.splitext(uploaded_file.name)[1].lower()
+
+
+def _cleanup_temp_upload(file_path):
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        logger.exception("Failed to delete temporary upload file.")
+
+
+def _process_stored_upload(ext, file_path, uploaded_file):
+    success, error, extracted_data = _dispatch_upload_processing(
+        ext,
+        file_path,
+        uploaded_file,
+    )
+    if not success:
+        return False, error, None
+    return True, None, extracted_data
+
+
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
     if not is_valid:
         return False, error, None, None
 
-    ext = os.path.splitext(uploaded_file.name)[1].lower()
-
+    ext = _get_upload_extension(uploaded_file)
     file_path = save_temp_file(uploaded_file)
 
     try:
-        success, error, extracted_data = _dispatch_upload_processing(
+        success, error, extracted_data = _process_stored_upload(
             ext,
             file_path,
             uploaded_file,
@@ -276,11 +298,7 @@ def process_upload(uploaded_file):
             return False, error, None, None
 
     finally:
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        except Exception:
-            logger.exception("Failed to delete temporary upload file.")
+        _cleanup_temp_upload(file_path)
 
     return True, None, None, extracted_data
 
