@@ -13,12 +13,25 @@ interface LoginFormProps {
     onGoogleSignIn?: () => void
     errorMessage?: string | null
     onDismissError?: () => void
+    successMessage?: string | null
+    onDismissSuccess?: () => void
+    isLoading?: boolean
 }
 
-export default function LoginForm({ onSubmit, onGoogleSignIn, errorMessage, onDismissError }: Readonly<LoginFormProps>) {
+export default function LoginForm({
+    onSubmit,
+    onGoogleSignIn,
+    errorMessage,
+    onDismissError,
+    successMessage,
+    onDismissSuccess,
+    isLoading = false
+}: Readonly<LoginFormProps>) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [error, setError] = useState<string | null>(null)
+    const isSuccess = !!successMessage
+    const isFormDisabled = isSuccess || isLoading
 
     const handleSubmit = () => {
         setError(null)
@@ -67,6 +80,16 @@ export default function LoginForm({ onSubmit, onGoogleSignIn, errorMessage, onDi
                 />
             )}
 
+            {/* Success */}
+            {successMessage && (
+                <FeedbackMessage
+                    message={successMessage}
+                    variant="success"
+                    onDismiss={onDismissSuccess}
+                    className="mb-4"
+                />
+            )}
+
             {/* Email */}
             <div className="mb-4">
                 <label
@@ -81,7 +104,8 @@ export default function LoginForm({ onSubmit, onGoogleSignIn, errorMessage, onDi
                     placeholder="Enter your email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                    disabled={isFormDisabled}
+                    className="w-full px-4 py-3 rounded-xl text-sm outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{
                         backgroundColor: 'var(--surface-2)',
                         color: 'var(--foreground)',
@@ -104,7 +128,8 @@ export default function LoginForm({ onSubmit, onGoogleSignIn, errorMessage, onDi
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                    disabled={isFormDisabled}
+                    className="w-full px-4 py-3 rounded-xl text-sm outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{
                         backgroundColor: 'var(--surface-2)',
                         color: 'var(--foreground)',
@@ -125,21 +150,23 @@ export default function LoginForm({ onSubmit, onGoogleSignIn, errorMessage, onDi
             {/* Sign in */}
             <button
                 onClick={handleSubmit}
-                className="w-full py-3 rounded-xl font-bold text-sm mb-3 transition active:scale-[0.98]"
+                disabled={isFormDisabled}
+                className="w-full py-3 rounded-xl font-bold text-sm mb-3 transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: '#ffffff', color: 'var(--brand-primary)' }}
             >
-                Sign In
+                {isLoading ? 'Signing in...' : 'Sign In'}
             </button>
 
             {/* Sign in with Google */}
             <button
                 type="button"
                 onClick={() => onGoogleSignIn?.()}
-                className="w-full py-3 rounded-xl font-bold text-sm mb-6 flex items-center justify-center gap-2 transition active:scale-[0.98]"
+                disabled={isFormDisabled}
+                className="w-full py-3 rounded-xl font-bold text-sm mb-6 flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: '#ffffff', color: '#111827' }}
             >
                 <span className="text-base">G</span>{' '}
-                Sign In with Google
+                {isLoading ? 'Signing in...' : 'Sign In with Google'}
             </button>
 
             {/* Sign up */}
