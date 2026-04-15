@@ -39,6 +39,7 @@ EXT_DOC = ".doc"
 MIME_OCTET_STREAM = "application/octet-stream"
 MIME_OLE_STORAGE = "application/x-ole-storage"
 MIME_ZIP = "application/zip"
+MIME_TEXT_PLAIN = "text/plain"
 
 EXT_TXT = ".txt"
 EXT_CSV = ".csv"
@@ -108,12 +109,12 @@ ALLOWED_MIME_TYPES = {
         MIME_OLE_STORAGE,
     ],
     EXT_TXT: [
-        "text/plain",
+        MIME_TEXT_PLAIN,
         "text/x-log",
     ],
     EXT_CSV: [
         "text/csv",
-        "text/plain",
+        MIME_TEXT_PLAIN,
         "application/csv",
         "application/vnd.ms-excel",
     ],
@@ -535,7 +536,7 @@ def _fallback_mime(
     if allow_zip_based_octet_fallback and ext in {EXT_XLSX, EXT_DOCX}:
         return MIME_OCTET_STREAM
     if allow_text_fallback and ext in {EXT_TXT, EXT_CSV} and _is_text_like_bytes(head):
-        return "text/plain"
+        return MIME_TEXT_PLAIN
     return None
 
 

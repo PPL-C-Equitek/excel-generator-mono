@@ -29,6 +29,8 @@ from file_processing.utils.image_validators import (
 
 logger = logging.getLogger(__name__)
 
+MIME_IMAGE_JPEG = "image/jpeg"
+
 # MIME types accepted for each image extension
 IMAGE_MIME_TYPES = {
     ".png": [
@@ -38,12 +40,12 @@ IMAGE_MIME_TYPES = {
         "application/x-png",
     ],
     ".jpg": [
-        "image/jpeg",
+        MIME_IMAGE_JPEG,
         "image/pjpeg",
         "image/x-citrix-jpeg",
     ],
     ".jpeg": [
-        "image/jpeg",
+        MIME_IMAGE_JPEG,
         "image/pjpeg",
         "image/x-citrix-jpeg",
     ],
@@ -71,7 +73,7 @@ def _resolve_image_mime_fallback(uploaded_file, ext):
     if header.startswith(PNG_SIGNATURE):
         return "image/png"
     if header.startswith(JPEG_SIGNATURE):
-        return "image/jpeg"
+        return MIME_IMAGE_JPEG
 
     return None
 
