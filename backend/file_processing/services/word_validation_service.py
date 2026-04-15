@@ -1,13 +1,18 @@
 import zipfile
 import math
 import xml.etree.ElementTree as ET
+from io import BytesIO
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
+
+from docx import Document
 
 EXT_DOCX = ".docx"
 EXT_DOC = ".doc"
 MAX_WORD_PAGES = 100
 DOCX_CHARS_PER_PAGE_ESTIMATE = 2500
+DOCX_WORDS_PER_PAGE_ESTIMATE = 350
+DOCX_BLOCKS_PER_PAGE_ESTIMATE = 35
 WORD_CORRUPT_ERROR = "Word file is corrupt or has an invalid structure."
 WORD_PROTECTED_ERROR = "Word file is password-protected."
 OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -51,7 +56,8 @@ class DocxStructureValidationHandler(WordValidationHandler):
     def handle(self, context: WordValidationContext) -> Tuple[bool, Optional[str]]:
         try:
             context.uploaded_file.seek(0)
-            with zipfile.ZipFile(context.uploaded_file) as archive:
+            docx_bytes = context.uploaded_file.read()
+            with zipfile.ZipFile(BytesIO(docx_bytes)) as archive:
                 names = set(archive.namelist())
                 if (
                     "[Content_Types].xml" not in names
@@ -59,7 +65,7 @@ class DocxStructureValidationHandler(WordValidationHandler):
                 ):
                     return False, WORD_CORRUPT_ERROR
 
-                context.page_count = extract_docx_page_count(archive)
+                context.page_count = extract_docx_page_count(archive, docx_bytes)
         except Exception:
             return False, WORD_CORRUPT_ERROR
         finally:
@@ -152,12 +158,13 @@ def check_docx_encrypted(uploaded_file: Any) -> Tuple[bool, Optional[str]]:
 def check_docx_structure(uploaded_file: Any) -> Tuple[bool, Any]:
     try:
         uploaded_file.seek(0)
-        with zipfile.ZipFile(uploaded_file) as archive:
+        docx_bytes = uploaded_file.read()
+        with zipfile.ZipFile(BytesIO(docx_bytes)) as archive:
             names = set(archive.namelist())
             if "[Content_Types].xml" not in names or "word/document.xml" not in names:
                 return False, WORD_CORRUPT_ERROR
 
-            page_count = extract_docx_page_count(archive)
+            page_count = extract_docx_page_count(archive, docx_bytes)
             return True, page_count
     except Exception:
         return False, WORD_CORRUPT_ERROR
@@ -165,7 +172,7 @@ def check_docx_structure(uploaded_file: Any) -> Tuple[bool, Any]:
         uploaded_file.seek(0)
 
 
-def extract_docx_page_count(archive: zipfile.ZipFile) -> int:
+def extract_docx_page_count(archive: zipfile.ZipFile, docx_bytes: Optional[bytes] = None) -> int:
     app_pages = 0
     try:
         app_xml = archive.read("docProps/app.xml")
@@ -184,7 +191,72 @@ def extract_docx_page_count(archive: zipfile.ZipFile) -> int:
         return app_pages
 
     estimated_pages = _estimate_docx_pages_from_document_xml(document_xml)
-    return max(app_pages, estimated_pages)
+    python_docx_pages = _estimate_docx_pages_with_python_docx(docx_bytes)
+    return max(app_pages, estimated_pages, python_docx_pages)
+
+
+def _estimate_docx_pages_with_python_docx(docx_bytes: Optional[bytes]) -> int:
+    if not docx_bytes:
+        return 0
+
+    try:
+        document = Document(BytesIO(docx_bytes))
+    except Exception:
+        return 0
+
+    paragraph_count = 0
+    table_row_count = 0
+    word_count = 0
+    explicit_page_breaks = 0
+
+    for paragraph in document.paragraphs:
+        paragraph_count += 1
+        paragraph_text = paragraph.text.strip()
+        if paragraph_text:
+            word_count += len(paragraph_text.split())
+
+        for node in paragraph._p.iter():
+            node_name = _local_name(node.tag)
+            if node_name == "lastRenderedPageBreak":
+                explicit_page_breaks += 1
+            elif node_name == "br":
+                break_type = ""
+                for key, value in node.attrib.items():
+                    if key.endswith("type"):
+                        break_type = (value or "").strip().lower()
+                        break
+                if break_type == "page":
+                    explicit_page_breaks += 1
+
+    for table in document.tables:
+        for row in table.rows:
+            table_row_count += 1
+            for cell in row.cells:
+                cell_text = cell.text.strip()
+                if cell_text:
+                    word_count += len(cell_text.split())
+
+    break_estimate = explicit_page_breaks + 1 if explicit_page_breaks > 0 else 0
+
+    section_estimate = 0
+    try:
+        if len(document.sections) > 1:
+            section_estimate = len(document.sections)
+    except Exception:
+        section_estimate = 0
+
+    word_estimate = 0
+    if word_count > 0:
+        word_estimate = max(1, math.ceil(word_count / DOCX_WORDS_PER_PAGE_ESTIMATE))
+
+    structure_estimate = 0
+    block_count = paragraph_count + table_row_count
+    if block_count > 0:
+        structure_estimate = max(
+            1, math.ceil(block_count / DOCX_BLOCKS_PER_PAGE_ESTIMATE)
+        )
+
+    return max(break_estimate, section_estimate, word_estimate, structure_estimate)
 
 
 def _estimate_docx_pages_from_document_xml(document_xml: bytes) -> int:
