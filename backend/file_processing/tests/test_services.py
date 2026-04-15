@@ -1508,6 +1508,28 @@ class TestUploadServiceCoverageGaps(TestCase):
         mime = upload_service._fallback_mime(b"PK\x03\x04dummy", ".xlsx")
         self.assertEqual(mime, upload_service.MIME_ZIP)
 
+    def test_is_text_like_bytes_handles_empty_null_valid_and_invalid_utf8(self):
+        self.assertFalse(upload_service._is_text_like_bytes(b""))
+        self.assertFalse(upload_service._is_text_like_bytes(b"abc\x00def"))
+        self.assertTrue(upload_service._is_text_like_bytes("halo".encode("utf-8")))
+        self.assertFalse(upload_service._is_text_like_bytes(b"\xff\xfe\xfa"))
+
+    def test_detect_mime_import_error_uses_permissive_fallback_for_xlsx(self):
+        with patch(
+            "file_processing.services.upload_service.magic.from_buffer",
+            side_effect=ImportError("python-magic unavailable"),
+        ):
+            mime = upload_service._detect_mime(b"random bytes", upload_service.EXT_XLSX)
+        self.assertEqual(mime, upload_service.MIME_OCTET_STREAM)
+
+    def test_fallback_mime_returns_text_plain_when_text_fallback_is_enabled(self):
+        mime = upload_service._fallback_mime(
+            b"plain text payload",
+            upload_service.EXT_TXT,
+            allow_text_fallback=True,
+        )
+        self.assertEqual(mime, "text/plain")
+
     @patch(
         "file_processing.services.upload_service.validate_pdf",
         return_value=(False, "bad"),
