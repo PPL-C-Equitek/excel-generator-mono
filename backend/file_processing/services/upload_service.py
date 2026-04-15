@@ -140,6 +140,7 @@ CSV_PROTECTED_ERROR = (
     "File CSV terdeteksi sebagai format terproteksi atau terenkripsi. "
     "Pastikan file adalah CSV biasa yang tidak diproteksi."
 )
+MIME_TYPE_DETECTION_ERROR = "Unable to determine file type."
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
 ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
@@ -322,7 +323,7 @@ def _validate_file_content(uploaded_file, ext) -> ValidationResult:
 
     is_valid_mime, mime_error = validate_mime_type(uploaded_file, ext)
     if not is_valid_mime:
-        return ValidationResult.fail(mime_error or "Unable to determine file type.")
+        return ValidationResult.fail(mime_error or MIME_TYPE_DETECTION_ERROR)
 
     # Type-specific format validation
     if ext in {EXT_XLS, EXT_XLSX}:
@@ -500,7 +501,7 @@ def validate_mime_type(uploaded_file, ext):
         mime = _detect_mime(head, ext)
 
         if not mime:
-            return False, "Unable to determine file type."
+            return False, MIME_TYPE_DETECTION_ERROR
 
         expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
 
@@ -529,7 +530,7 @@ def validate_mime_type(uploaded_file, ext):
         return True, None
 
     except Exception:
-        return False, "Unable to determine file type."
+        return False, MIME_TYPE_DETECTION_ERROR
 
 
 def _read_head(uploaded_file, size=2048):
