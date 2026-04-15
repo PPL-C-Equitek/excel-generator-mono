@@ -6,6 +6,7 @@ import { useResendCooldown } from '../../src/hooks/useResendCooldown';
 describe('useResendCooldown', () => {
   afterEach(() => {
     vi.useRealTimers();
+    localStorage.clear();
     sessionStorage.clear();
   });
 
@@ -112,5 +113,33 @@ describe('useResendCooldown', () => {
     expect(
       sessionStorage.getItem('forgot-password-resend-cooldown:user@example.com')
     ).toBe(String(Date.now() + 15000));
+  });
+
+  it('restores the remaining cooldown from localStorage across unmounts for the same email', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-11T10:00:00.000Z'));
+
+    const email = 'test@example.com';
+    const storageKey = `verify-email-pending-resend-cooldown:${email}`;
+
+    const { result, unmount } = renderHook(() => useResendCooldown(0, storageKey));
+
+    act(() => {
+      result.current.setCooldown(60);
+    });
+
+    expect(localStorage.getItem(storageKey)).toBe(String(Date.now() + 60000));
+
+    act(() => {
+      vi.advanceTimersByTime(15000);
+    });
+
+    unmount();
+
+    const { result: remountedResult } = renderHook(() =>
+      useResendCooldown(0, storageKey)
+    );
+
+    expect(remountedResult.current.cooldown).toBe(45);
   });
 });
