@@ -98,6 +98,8 @@ async function getAuthToken(source: AuthTokenSource): Promise<string | null> {
   if (source === "valid") {
     return getValidAccessToken();
   }
+
+  throw new Error("Unsupported auth token source.");
 }
 
 async function postJsonRequest(
