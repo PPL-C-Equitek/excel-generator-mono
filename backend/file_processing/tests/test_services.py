@@ -3,12 +3,15 @@ import tempfile
 import builtins
 import zipfile
 import unittest
+import base64
 
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch, MagicMock, PropertyMock
 from PyPDF2.errors import PdfReadError
 from openpyxl import Workbook
+from docx import Document
+from docx.shared import Inches
 
 from file_processing.services.ocr_service import OCRService
 from io import BytesIO
@@ -124,7 +127,6 @@ class TestOCRService(TestCase):
         text = OCRService._ocr_single_image("mock_image")
 
         self.assertEqual(text, "OCR text")
-
 
     @patch("file_processing.services.ocr_service.OCRService._ocr_single_image")
     def test_process_image_success(self, mock_ocr_single):
@@ -2179,6 +2181,11 @@ class TestWordValidationServiceCoverage(TestCase):
 
 
 class TestWordValidationService(unittest.TestCase):
+    _ONE_PIXEL_PNG_BASE64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
+        "x8AAwMCAO2vN6kAAAAASUVORK5CYII="
+    )
+
     def _build_valid_docx(self, pages=1):
         content = BytesIO()
         with zipfile.ZipFile(content, "w") as archive:
@@ -2189,6 +2196,26 @@ class TestWordValidationService(unittest.TestCase):
                 f"<Properties><Pages>{pages}</Pages></Properties>",
             )
         return content.getvalue()
+
+    def _build_image_heavy_docx(self, image_count=101):
+        image_bytes = base64.b64decode(self._ONE_PIXEL_PNG_BASE64)
+        doc = Document()
+
+        for _ in range(image_count):
+            doc.add_picture(BytesIO(image_bytes), width=Inches(6.3), height=Inches(8.8))
+
+        out = BytesIO()
+        doc.save(out)
+        return out.getvalue()
+
+    def _build_blank_pages_docx(self, page_count=101):
+        doc = Document()
+        for _ in range(max(0, page_count - 1)):
+            doc.add_page_break()
+
+        out = BytesIO()
+        doc.save(out)
+        return out.getvalue()
 
     def test_validate_word_docx_happy_path(self):
         f = SimpleUploadedFile(
@@ -2266,7 +2293,9 @@ class TestWordValidationService(unittest.TestCase):
                 if name == "docProps/app.xml":
                     return b"<Properties><Template>Normal</Template></Properties>"
                 if name == "word/document.xml":
-                    namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    namespace = (
+                        "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    )
                     page_breaks = "".join(
                         "<w:lastRenderedPageBreak/>"
                         for _ in range(word_validation_service.MAX_WORD_PAGES)
@@ -2288,7 +2317,9 @@ class TestWordValidationService(unittest.TestCase):
                 if name == "docProps/app.xml":
                     return b"<Properties><Pages>2</Pages></Properties>"
                 if name == "word/document.xml":
-                    namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    namespace = (
+                        "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    )
                     page_break_before_nodes = "".join(
                         "<w:p><w:pPr><w:pageBreakBefore/></w:pPr></w:p>"
                         for _ in range(word_validation_service.MAX_WORD_PAGES)
@@ -2303,6 +2334,63 @@ class TestWordValidationService(unittest.TestCase):
             ArchiveStaleAppPages()
         )
         self.assertGreater(page_count, word_validation_service.MAX_WORD_PAGES)
+
+    def test_validate_word_docx_rejects_image_heavy_document_without_text(self):
+        f = SimpleUploadedFile(
+            "image-heavy.docx",
+            self._build_image_heavy_docx(image_count=101),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = word_validation_service.validate_word(f, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(
+            error,
+            f"Word exceeds the maximum allowed page count of {word_validation_service.MAX_WORD_PAGES}.",
+        )
+
+    def test_validate_word_docx_rejects_blank_pages_document(self):
+        f = SimpleUploadedFile(
+            "blank-pages.docx",
+            self._build_blank_pages_docx(page_count=101),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = word_validation_service.validate_word(f, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(
+            error,
+            f"Word exceeds the maximum allowed page count of {word_validation_service.MAX_WORD_PAGES}.",
+        )
+
+    def test_estimate_pages_from_images_medium_images_not_undercounted(self):
+        estimate = word_validation_service._estimate_pages_from_images(
+            image_count=221,
+            total_image_area=1990.4,
+            usable_page_area=58.5,
+        )
+        self.assertGreater(estimate, word_validation_service.MAX_WORD_PAGES)
+
+    def test_estimate_docx_usable_page_area_handles_invalid_section_values(self):
+        class _BadSection:
+            page_width = "7772400"
+            page_height = "10058400"
+
+            @property
+            def left_margin(self):
+                raise ValueError("invalid twips")
+
+            right_margin = "1440.0000000000002"
+            top_margin = "1440"
+            bottom_margin = "1440"
+
+        class _BadDocument:
+            sections = [_BadSection()]
+
+        area = word_validation_service._estimate_docx_usable_page_area(_BadDocument())
+        self.assertGreater(area, 0)
 
     @patch(
         "file_processing.services.word_validation_service._estimate_docx_pages_with_python_docx",
