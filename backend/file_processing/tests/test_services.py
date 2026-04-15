@@ -2310,6 +2310,17 @@ class TestWordValidationService(unittest.TestCase):
             word_validation_service.extract_docx_page_count(ArchiveAppPagesBreak()), 9
         )
 
+    def test_extract_docx_page_count_keeps_zero_when_pages_is_zero(self):
+        class ArchiveZeroPages:
+            def read(self, name):
+                if name == "docProps/app.xml":
+                    return b"<Properties><Pages>0</Pages></Properties>"
+                raise KeyError(name)
+
+        self.assertEqual(
+            word_validation_service.extract_docx_page_count(ArchiveZeroPages()), 0
+        )
+
     def test_extract_docx_page_count_uses_document_fallback_when_app_xml_missing(self):
         class ArchiveNoAppPages:
             def read(self, name):
