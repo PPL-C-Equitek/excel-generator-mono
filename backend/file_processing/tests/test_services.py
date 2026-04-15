@@ -2553,6 +2553,10 @@ class TestWordValidationService(unittest.TestCase):
         self.assertEqual(word_validation_service._emu_to_inches(0, 3.2), 3.2)
         self.assertEqual(word_validation_service._emu_to_inches(-10, 4.1), 4.1)
 
+    def test_count_text_characters_returns_zero_for_empty_text(self):
+        self.assertEqual(word_validation_service._count_text_characters(None), 0)
+        self.assertEqual(word_validation_service._count_text_characters(""), 0)
+
     def test_is_page_break_node_detects_type_attribute(self):
         class _Node:
             attrib = {"{w}type": "page"}
