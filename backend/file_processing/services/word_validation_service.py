@@ -13,6 +13,13 @@ MAX_WORD_PAGES = 100
 DOCX_CHARS_PER_PAGE_ESTIMATE = 2500
 DOCX_WORDS_PER_PAGE_ESTIMATE = 350
 DOCX_BLOCKS_PER_PAGE_ESTIMATE = 35
+DOCX_DEFAULT_PAGE_WIDTH_INCH = 8.5
+DOCX_DEFAULT_PAGE_HEIGHT_INCH = 11.0
+DOCX_DEFAULT_MARGIN_INCH = 1.0
+DOCX_IMAGE_DENSE_THRESHOLD = 0.35
+DOCX_IMAGE_PAGE_AREA_FACTOR = 0.65
+DOCX_IMAGE_MEDIUM_AREA_INCH2 = 6.0
+DOCX_IMAGE_SMALL_AREA_INCH2 = 1.5
 WORD_CORRUPT_ERROR = "Word file is corrupt or has an invalid structure."
 WORD_PROTECTED_ERROR = "Word file is password-protected."
 OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -172,7 +179,9 @@ def check_docx_structure(uploaded_file: Any) -> Tuple[bool, Any]:
         uploaded_file.seek(0)
 
 
-def extract_docx_page_count(archive: zipfile.ZipFile, docx_bytes: Optional[bytes] = None) -> int:
+def extract_docx_page_count(
+    archive: zipfile.ZipFile, docx_bytes: Optional[bytes] = None
+) -> int:
     app_pages = 0
     try:
         app_xml = archive.read("docProps/app.xml")
@@ -208,6 +217,10 @@ def _estimate_docx_pages_with_python_docx(docx_bytes: Optional[bytes]) -> int:
     table_row_count = 0
     word_count = 0
     explicit_page_breaks = 0
+    image_count = 0
+    total_image_area = 0.0
+
+    usable_page_area = _estimate_docx_usable_page_area(document)
 
     for paragraph in document.paragraphs:
         paragraph_count += 1
@@ -227,6 +240,21 @@ def _estimate_docx_pages_with_python_docx(docx_bytes: Optional[bytes]) -> int:
                         break
                 if break_type == "page":
                     explicit_page_breaks += 1
+
+    try:
+        body_node = document.element.body
+    except Exception:
+        body_node = None
+
+    if body_node is not None:
+        for node in body_node.iter():
+            node_name = _local_name(node.tag)
+            if node_name in {"drawing", "pict", "object"}:
+                image_count += 1
+            elif node_name == "extent":
+                cx, cy = _extract_extent_inches(node)
+                if cx > 0 and cy > 0:
+                    total_image_area += cx * cy
 
     for table in document.tables:
         for row in table.rows:
@@ -256,7 +284,130 @@ def _estimate_docx_pages_with_python_docx(docx_bytes: Optional[bytes]) -> int:
             1, math.ceil(block_count / DOCX_BLOCKS_PER_PAGE_ESTIMATE)
         )
 
-    return max(break_estimate, section_estimate, word_estimate, structure_estimate)
+    image_estimate = _estimate_pages_from_images(
+        image_count=image_count,
+        total_image_area=total_image_area,
+        usable_page_area=usable_page_area,
+    )
+
+    return max(
+        break_estimate,
+        section_estimate,
+        word_estimate,
+        structure_estimate,
+        image_estimate,
+    )
+
+
+def _estimate_docx_usable_page_area(document: Document) -> float:
+    try:
+        section = document.sections[0]
+    except Exception:
+        section = None
+
+    if section is None:
+        width = DOCX_DEFAULT_PAGE_WIDTH_INCH
+        height = DOCX_DEFAULT_PAGE_HEIGHT_INCH
+        left = right = top = bottom = DOCX_DEFAULT_MARGIN_INCH
+    else:
+        width = _safe_section_length_inches(
+            section, "page_width", DOCX_DEFAULT_PAGE_WIDTH_INCH
+        )
+        height = _safe_section_length_inches(
+            section, "page_height", DOCX_DEFAULT_PAGE_HEIGHT_INCH
+        )
+        left = _safe_section_length_inches(
+            section, "left_margin", DOCX_DEFAULT_MARGIN_INCH
+        )
+        right = _safe_section_length_inches(
+            section, "right_margin", DOCX_DEFAULT_MARGIN_INCH
+        )
+        top = _safe_section_length_inches(
+            section, "top_margin", DOCX_DEFAULT_MARGIN_INCH
+        )
+        bottom = _safe_section_length_inches(
+            section, "bottom_margin", DOCX_DEFAULT_MARGIN_INCH
+        )
+
+    usable_width = max(1.0, width - left - right)
+    usable_height = max(1.0, height - top - bottom)
+    return usable_width * usable_height
+
+
+def _estimate_pages_from_images(
+    image_count: int, total_image_area: float, usable_page_area: float
+) -> int:
+    if image_count <= 0:
+        return 0
+
+    area_based_estimate = 0
+    if total_image_area > 0 and usable_page_area > 0:
+        area_based_estimate = max(
+            1,
+            math.ceil(
+                total_image_area / (usable_page_area * DOCX_IMAGE_PAGE_AREA_FACTOR)
+            ),
+        )
+
+    image_count_based_estimate = 0
+    if total_image_area > 0 and usable_page_area > 0:
+        avg_image_area = total_image_area / image_count
+        if avg_image_area >= usable_page_area * DOCX_IMAGE_DENSE_THRESHOLD:
+            image_count_based_estimate = image_count
+        elif avg_image_area >= DOCX_IMAGE_MEDIUM_AREA_INCH2:
+            image_count_based_estimate = max(1, math.ceil(image_count / 2))
+        elif avg_image_area >= DOCX_IMAGE_SMALL_AREA_INCH2:
+            image_count_based_estimate = max(1, math.ceil(image_count / 3))
+        else:
+            image_count_based_estimate = max(1, math.ceil(image_count / 6))
+    else:
+        image_count_based_estimate = max(1, math.ceil(image_count / 6))
+
+    return max(area_based_estimate, image_count_based_estimate)
+
+
+def _extract_extent_inches(node: Any) -> Tuple[float, float]:
+    # wp:extent stores width/height in EMU; values are used to estimate page occupancy.
+    cx_emu = 0
+    cy_emu = 0
+
+    for key, value in getattr(node, "attrib", {}).items():
+        key_name = str(key)
+        if key_name.endswith("cx"):
+            try:
+                cx_emu = int(value)
+            except Exception:
+                cx_emu = 0
+        elif key_name.endswith("cy"):
+            try:
+                cy_emu = int(value)
+            except Exception:
+                cy_emu = 0
+
+    return _emu_to_inches(cx_emu, 0.0), _emu_to_inches(cy_emu, 0.0)
+
+
+def _safe_section_length_inches(
+    section: Any, attribute_name: str, default: float
+) -> float:
+    try:
+        raw_value = getattr(section, attribute_name)
+    except Exception:
+        return default
+
+    return _emu_to_inches(raw_value, default)
+
+
+def _emu_to_inches(value: Any, default: float) -> float:
+    try:
+        numeric_value = float(value)
+    except Exception:
+        return default
+
+    if numeric_value <= 0:
+        return default
+
+    return numeric_value / 914400.0
 
 
 def _estimate_docx_pages_from_document_xml(document_xml: bytes) -> int:
@@ -306,7 +457,9 @@ def _estimate_docx_pages_from_document_xml(document_xml: bytes) -> int:
 
     text_estimate = 0
     if text_char_count > 0:
-        text_estimate = max(1, math.ceil(text_char_count / DOCX_CHARS_PER_PAGE_ESTIMATE))
+        text_estimate = max(
+            1, math.ceil(text_char_count / DOCX_CHARS_PER_PAGE_ESTIMATE)
+        )
 
     return max(marker_estimate, text_estimate)
 
