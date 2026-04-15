@@ -24,6 +24,7 @@ opencv-python-headless==4.8.0.76
 numpy==1.26.4
 resend==2.26.0
 olefile==0.47
+hypothesis==6.138.14
 
 PyJWT
 google-auth-oauthlib

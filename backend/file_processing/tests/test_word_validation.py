@@ -1,7 +1,7 @@
 import unittest
 from hypothesis import given, settings, strategies as st
 from django.core.files.uploadedfile import SimpleUploadedFile
-from services import word_validation_service
+from file_processing.services import word_validation_service
 
 
 class TestWordValidationHypothesis(unittest.TestCase):
