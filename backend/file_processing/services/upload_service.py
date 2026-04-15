@@ -307,21 +307,16 @@ def validate_file(uploaded_file):
     return validate_file_result(uploaded_file).to_legacy_tuple()
 
 
-def validate_file_result(uploaded_file) -> ValidationResult:
-    filename = uploaded_file.name
-    ext = os.path.splitext(filename)[1].lower()
-
-    if ext not in ALLOWED_EXTENSIONS:
-        return ValidationResult.fail(
-            "Unsupported file type. Only PDF, XLS, XLSX, TXT, CSV, PNG, JPG, JPEG, DOC, and DOCX are allowed.",
-        )
-
+def _validate_file_content(uploaded_file, ext) -> ValidationResult:
+    """Validate file size, MIME type, and type-specific constraints."""
+    # Image files can return early without further checks
     if ext in IMAGE_EXTENSIONS:
         is_valid, error = validate_image(uploaded_file)
         if not is_valid:
             return ValidationResult.fail(error or "Invalid image file.")
         return ValidationResult.ok()
 
+    # All other file types: check size and MIME type
     if uploaded_file.size > MAX_FILE_SIZE:
         return ValidationResult.fail(FILE_TOO_LARGE_ERROR)
 
@@ -329,6 +324,7 @@ def validate_file_result(uploaded_file) -> ValidationResult:
     if not is_valid_mime:
         return ValidationResult.fail(mime_error or "Unable to determine file type.")
 
+    # Type-specific format validation
     if ext in {EXT_XLS, EXT_XLSX}:
         is_valid_excel, excel_error = validate_excel_sheet_count(uploaded_file, ext)
         if not is_valid_excel:
@@ -342,6 +338,17 @@ def validate_file_result(uploaded_file) -> ValidationResult:
             return ValidationResult.fail(word_error or WORD_CORRUPT_ERROR)
 
     return ValidationResult.ok()
+
+
+def validate_file_result(uploaded_file) -> ValidationResult:
+    ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+    if ext not in ALLOWED_EXTENSIONS:
+        return ValidationResult.fail(
+            "Unsupported file type. Only PDF, XLS, XLSX, TXT, CSV, PNG, JPG, JPEG, DOC, and DOCX are allowed.",
+        )
+
+    return _validate_file_content(uploaded_file, ext)
 
 
 def validate_pdf(uploaded_file):
