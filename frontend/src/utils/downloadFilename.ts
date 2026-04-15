@@ -1,5 +1,8 @@
 const UTF8_FILENAME_PREFIX = /^UTF-8''/i
-const NULL_CHARACTER = String.fromCharCode(0)
+const NULL_CHARACTER = String.fromCodePoint(0)
+const ENCODED_FILENAME_PATTERN = /filename\*\s*=\s*([^;]+)/i
+const QUOTED_FILENAME_PATTERN = /filename\s*=\s*"([^"]+)"/i
+const PLAIN_FILENAME_PATTERN = /filename\s*=\s*([^;]+)/i
 
 function sanitizeDownloadFilename(candidate: string | null | undefined): string | null {
     if (typeof candidate !== 'string') {
@@ -8,10 +11,9 @@ function sanitizeDownloadFilename(candidate: string | null | undefined): string 
 
     const normalized = candidate
         .trim()
-        .replace(/\r/g, '')
-        .replace(/\n/g, '')
-        .split(NULL_CHARACTER)
-        .join('')
+        .replaceAll('\r', '')
+        .replaceAll('\n', '')
+        .replaceAll(NULL_CHARACTER, '')
         .replace(/^"(.*)"$/, '$1')
 
     if (!normalized) {
@@ -42,7 +44,7 @@ export function resolveDownloadFilename(headers: Headers, fallback: string): str
         return fallback
     }
 
-    const encodedFilenameMatch = contentDisposition.match(/filename\*\s*=\s*([^;]+)/i)
+    const encodedFilenameMatch = ENCODED_FILENAME_PATTERN.exec(contentDisposition)
     if (encodedFilenameMatch) {
         const encodedFilename = sanitizeDownloadFilename(
             decodeHeaderFilename(encodedFilenameMatch[1])
@@ -52,7 +54,7 @@ export function resolveDownloadFilename(headers: Headers, fallback: string): str
         }
     }
 
-    const quotedFilenameMatch = contentDisposition.match(/filename\s*=\s*"([^"]+)"/i)
+    const quotedFilenameMatch = QUOTED_FILENAME_PATTERN.exec(contentDisposition)
     if (quotedFilenameMatch) {
         const quotedFilename = sanitizeDownloadFilename(quotedFilenameMatch[1])
         if (quotedFilename) {
@@ -60,7 +62,7 @@ export function resolveDownloadFilename(headers: Headers, fallback: string): str
         }
     }
 
-    const plainFilenameMatch = contentDisposition.match(/filename\s*=\s*([^;]+)/i)
+    const plainFilenameMatch = PLAIN_FILENAME_PATTERN.exec(contentDisposition)
     if (plainFilenameMatch) {
         const plainFilename = sanitizeDownloadFilename(plainFilenameMatch[1])
         if (plainFilename) {
