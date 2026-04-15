@@ -183,10 +183,14 @@ export async function generateJson(
 }
 
 function getApiBaseOrigin(): string {
-  return (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(
-    /\/+$/,
-    ""
-  );
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  let endIndex = apiBaseUrl.length;
+
+  while (endIndex > 0 && apiBaseUrl[endIndex - 1] === "/") {
+    endIndex -= 1;
+  }
+
+  return apiBaseUrl.slice(0, endIndex);
 }
 
 function isValidExcelExportResponse(data: unknown): data is ExcelExportResponse {
