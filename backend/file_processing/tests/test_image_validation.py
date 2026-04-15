@@ -635,6 +635,15 @@ class TestValidateImageMimeType(SimpleTestCase):
         self.assertEqual(_resolve_image_mime_fallback(png_file, ".png"), "image/png")
         self.assertEqual(_resolve_image_mime_fallback(jpeg_file, ".jpg"), "image/jpeg")
 
+    def test_resolve_image_mime_fallback_returns_none_for_unknown_header(self):
+        unknown_file = _make_uploaded(
+            "photo.png",
+            b"not-png-or-jpeg",
+            "application/octet-stream",
+        )
+
+        self.assertIsNone(_resolve_image_mime_fallback(unknown_file, ".png"))
+
     @patch(
         "file_processing.services.image_validation_service.magic.from_buffer",
         side_effect=Exception("magic failure"),
