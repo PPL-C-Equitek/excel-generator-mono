@@ -2563,6 +2563,16 @@ class TestWordValidationService(unittest.TestCase):
 
         self.assertTrue(word_validation_service._is_page_break_node(_Node()))
 
+    def test_is_page_break_node_ignores_non_page_type_and_missing_type(self):
+        class _NonPageNode:
+            attrib = {"{w}type": "textWrapping"}
+
+        class _NoTypeNode:
+            attrib = {"other": "value"}
+
+        self.assertFalse(word_validation_service._is_page_break_node(_NonPageNode()))
+        self.assertFalse(word_validation_service._is_page_break_node(_NoTypeNode()))
+
     def test_estimate_pages_from_blocks_returns_zero_for_non_positive(self):
         self.assertEqual(word_validation_service._estimate_pages_from_blocks(0), 0)
         self.assertEqual(word_validation_service._estimate_pages_from_blocks(-3), 0)
@@ -2574,6 +2584,39 @@ class TestWordValidationService(unittest.TestCase):
         cx, cy = word_validation_service._extract_extent_inches(_Node())
         self.assertEqual(cx, 0.0)
         self.assertGreater(cy, 0.0)
+
+    def test_extract_extent_inches_reads_both_cx_and_cy_attributes(self):
+        class _Node:
+            attrib = {"cx": "914400", "cy": "1828800"}
+
+        cx, cy = word_validation_service._extract_extent_inches(_Node())
+        self.assertGreater(cx, 0.0)
+        self.assertGreater(cy, 0.0)
+
+    def test_collect_body_image_metrics_does_not_add_area_when_extent_incomplete(self):
+        class _Node:
+            def __init__(self, tag, attrib=None):
+                self.tag = tag
+                self.attrib = attrib or {}
+
+        class _Body:
+            def iter(self):
+                return [
+                    _Node("{w}drawing"),
+                    _Node("{wp}extent", {"cx": "914400"}),
+                ]
+
+        class _Element:
+            body = _Body()
+
+        class _Document:
+            element = _Element()
+
+        image_count, total_area = word_validation_service._collect_body_image_metrics(
+            _Document()
+        )
+        self.assertEqual(image_count, 1)
+        self.assertEqual(total_area, 0.0)
 
     def test_estimate_docx_pages_from_document_xml_counts_text_sections_and_page_break(
         self,
@@ -2595,6 +2638,25 @@ class TestWordValidationService(unittest.TestCase):
         )
 
         self.assertEqual(estimate, 2)
+
+    def test_collect_docx_xml_marker_counts_br_non_page_not_counted(self):
+        namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        document_xml = (
+            f'<w:document xmlns:w="{namespace}">'
+            "<w:body>"
+            "<w:p><w:r><w:br w:type='textWrapping'/></w:r></w:p>"
+            "<w:p><w:r><w:br w:type='page'/></w:r></w:p>"
+            "</w:body>"
+            "</w:document>"
+        ).encode("utf-8")
+
+        root = word_validation_service._parse_docx_document_root(document_xml)
+        marker_counts, text_char_count = (
+            word_validation_service._collect_docx_xml_marker_counts(root)
+        )
+
+        self.assertEqual(marker_counts["manual_page_breaks"], 1)
+        self.assertEqual(text_char_count, 0)
 
     @patch(
         "file_processing.services.word_validation_service._estimate_docx_pages_with_python_docx",
