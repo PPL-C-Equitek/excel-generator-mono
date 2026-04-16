@@ -3,7 +3,6 @@ import logging
 
 from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
-from django.http import FileResponse
 from django.utils._os import safe_join
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from rest_framework.decorators import api_view, parser_classes, permission_classes
@@ -21,6 +20,14 @@ from artifact_history.services import (
     list_artifact_history_for_user,
     update_artifact_history_custom_name,
 )
+from api.handlers import (
+    CsvDirectDownloadHandler,
+    CsvExportHandler,
+    ExcelDirectDownloadHandler,
+    ExcelExportHandler,
+    HistoryDownloadHandler,
+)
+from api.strategies import ArtifactFormatRegistry, CsvFormatStrategy, ExcelFormatStrategy
 from authentication.permissions import IsVerifiedUser
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
@@ -49,6 +56,113 @@ from file_processing.services.export_service import (
 
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
+
+
+def _get_artifact_formats():
+    return ArtifactFormatRegistry(
+        [
+            CsvFormatStrategy(
+                storage_dir=settings.CSV_EXPORT_DIR,
+                export_to_filesystem=export_csv_to_filesystem,
+                resolve_direct_download=resolve_csv_download_artifact,
+            ),
+            ExcelFormatStrategy(
+                storage_dir=settings.EXCEL_EXPORT_DIR,
+                export_to_filesystem=export_excel_to_filesystem,
+                resolve_direct_download=resolve_excel_download_artifact,
+            ),
+        ]
+    )
+
+
+def _get_csv_direct_download_handler():
+    return CsvDirectDownloadHandler(
+        strategy=_get_artifact_formats().get("csv"),
+        resolve_download_filename=_resolve_download_filename,
+        open_file=open,
+    )
+
+
+def _get_excel_direct_download_handler():
+    return ExcelDirectDownloadHandler(
+        strategy=_get_artifact_formats().get("xlsx"),
+        resolve_download_filename=_resolve_download_filename,
+        open_file=open,
+    )
+
+
+def _get_csv_export_handler():
+    handler = CsvExportHandler(
+        strategy=_get_artifact_formats().get("csv"),
+        build_error_response=_build_export_error_response,
+        build_success_response=_build_export_success_response,
+    )
+    handler.request_serializer_class = CsvExportRequestSerializer
+    handler.response_serializer_class = CsvExportResponseSerializer
+    handler.validation_error_types = (
+        OutputLLMValidationError,
+        OutputCSVMappingError,
+    )
+    handler.generation_error_types = (OutputCSVGenerationError,)
+    handler.invalid_request_message = "Invalid CSV export request."
+    handler.internal_error_message = "Failed to generate CSV due to internal error."
+    handler.validation_log_message = "Validation or mapping error during CSV export."
+    handler.generation_log_message = "CSV generation error during CSV export."
+    handler.unexpected_log_message = "Unexpected error during CSV export."
+    handler.invalid_metadata_message = (
+        "Failed to generate CSV due to invalid response metadata."
+    )
+    return handler
+
+
+def _get_excel_export_handler():
+    handler = ExcelExportHandler(
+        strategy=_get_artifact_formats().get("xlsx"),
+        build_error_response=_build_export_error_response,
+        build_success_response=_build_export_success_response,
+    )
+    handler.request_serializer_class = ExcelExportRequestSerializer
+    handler.response_serializer_class = ExcelExportResponseSerializer
+    handler.validation_error_types = (
+        OutputLLMValidationError,
+        OutputCSVMappingError,
+    )
+    handler.generation_error_types = (OutputExcelGenerationError,)
+    handler.invalid_request_message = "Invalid Excel export request."
+    handler.internal_error_message = "Failed to generate Excel due to internal error."
+    handler.validation_log_message = "Validation or mapping error during Excel export."
+    handler.generation_log_message = "Excel generation error during Excel export."
+    handler.unexpected_log_message = "Unexpected error during Excel export."
+    handler.invalid_metadata_message = (
+        "Failed to generate Excel due to invalid response metadata."
+    )
+    return handler
+
+
+def _get_history_download_handler():
+    return HistoryDownloadHandler(
+        resolve_history_download_artifact=_resolve_history_download_artifact,
+        regenerate_history_download_artifact_after_stale_cache=(
+            _regenerate_history_download_artifact_after_stale_cache
+        ),
+        resolve_download_filename=_resolve_download_filename,
+        get_history_download_content_type=_get_history_download_content_type,
+        history_download_internal_error_response=_history_download_internal_error_response,
+        invalid_stored_output_error_types=(
+            OutputLLMValidationError,
+            OutputCSVMappingError,
+        ),
+        generation_error_types=(
+            OutputCSVGenerationError,
+            OutputExcelGenerationError,
+            SuspiciousFileOperation,
+            ValueError,
+            OSError,
+            KeyError,
+        ),
+        open_file=open,
+        logger=logger,
+    )
 
 
 def _sanitize_download_filename(candidate):
@@ -114,6 +228,36 @@ def _excel_download_internal_error_response():
     )
 
 
+def _csv_download_not_found_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "CSV file not found.",
+        },
+        status=status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _csv_download_internal_error_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "Failed to download CSV due to internal error.",
+        },
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
+
+def _excel_download_invalid_id_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "Invalid Excel export id.",
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
 def _history_not_found_response():
     return Response(
         {
@@ -153,31 +297,20 @@ def _get_owned_history_or_not_found(user, history_id):
 
 def _get_history_download_storage_dir(artifact_type):
     if artifact_type == "xlsx":
-        return settings.EXCEL_EXPORT_DIR
-    return settings.CSV_EXPORT_DIR
+        return _get_artifact_formats().get("xlsx").export_storage_dir()
+    return _get_artifact_formats().get("csv").export_storage_dir()
 
 
 def _get_history_download_content_type(artifact_type):
-    if artifact_type == "zip":
-        return "application/zip"
     if artifact_type == "xlsx":
-        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    return "text/csv"
+        return _get_artifact_formats().get("xlsx").resolve_history_content_type(artifact_type)
+    return _get_artifact_formats().get("csv").resolve_history_content_type(artifact_type)
 
 
 def _generate_history_download_artifact(history, owner, file_format):
-    if file_format == "csv":
-        artifact = export_csv_to_filesystem(
-            output_json=history.output_json,
-            storage_dir=settings.CSV_EXPORT_DIR,
-        )
-        safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
-    else:
-        artifact = export_excel_to_filesystem(
-            output_json=history.output_json,
-            storage_dir=settings.EXCEL_EXPORT_DIR,
-        )
-        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+    strategy = _get_artifact_formats().get(file_format)
+    artifact = strategy.export_to_filesystem(history.output_json)
+    safe_file_path = safe_join(strategy.export_storage_dir(), artifact["file_name"])
 
     cached_artifact = create_history_export_artifact(
         history=history,
@@ -457,57 +590,11 @@ def history_download(request, history_id):
     if error_response is not None:
         return error_response
 
-    try:
-        file_name, artifact_type, safe_file_path, used_cached_artifact = _resolve_history_download_artifact(
-            history=history,
-            owner=request.user,
-            file_format=file_format,
-        )
-        try:
-            file_handle = open(safe_file_path, "rb")
-        except OSError:
-            if not used_cached_artifact:
-                raise
-
-            logger.warning(
-                "History download cache artifact missing on disk; regenerating."
-            )
-            file_name, artifact_type, safe_file_path = (
-                _regenerate_history_download_artifact_after_stale_cache(
-                    history=history,
-                    owner=request.user,
-                    file_format=file_format,
-                )
-            )
-            file_handle = open(safe_file_path, "rb")
-    except (OutputLLMValidationError, OutputCSVMappingError):
-        logger.exception("History download failed due to invalid stored output.")
-        return _history_download_internal_error_response()
-    except (
-        OutputCSVGenerationError,
-        OutputExcelGenerationError,
-        SuspiciousFileOperation,
-        ValueError,
-        OSError,
-        KeyError,
-    ):
-        logger.exception("History download failed while generating artifact.")
-        return _history_download_internal_error_response()
-    except Exception:
-        logger.exception("Unexpected error while preparing history download.")
-        return _history_download_internal_error_response()
-
-    download_name = _resolve_download_filename(
+    return _get_history_download_handler().handle(
+        history=history,
+        owner=request.user,
+        file_format=file_format,
         requested_name=request.query_params.get("filename"),
-        default_name=file_name,
-        artifact_type=artifact_type,
-    )
-
-    return FileResponse(
-        file_handle,
-        as_attachment=True,
-        filename=download_name,
-        content_type=_get_history_download_content_type(artifact_type),
     )
 
 
@@ -579,153 +666,54 @@ def upload(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def export_csv(request):
-    serializer = CsvExportRequestSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        metadata = export_csv_to_filesystem(
-            output_json=serializer.validated_data["output_json"],
-            storage_dir=settings.CSV_EXPORT_DIR,
-        )
-    except Exception as exc:
-        return _build_export_error_response(
-            error=exc,
-            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
-            generation_error_types=(OutputCSVGenerationError,),
-            invalid_request_message="Invalid CSV export request.",
-            internal_error_message="Failed to generate CSV due to internal error.",
-            validation_log_message="Validation or mapping error during CSV export.",
-            generation_log_message="CSV generation error during CSV export.",
-            unexpected_log_message="Unexpected error during CSV export.",
-        )
-
-    return _build_export_success_response(
-        metadata=metadata,
-        response_serializer_class=CsvExportResponseSerializer,
-        invalid_metadata_message=(
-            "Failed to generate CSV due to invalid response metadata."
-        ),
-    )
+    return _get_csv_export_handler().handle(request)
 
 
 @require_POST
 @api_view(["POST"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def export_excel(request):
-    serializer = ExcelExportRequestSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        metadata = export_excel_to_filesystem(
-            output_json=serializer.validated_data["output_json"],
-            storage_dir=settings.EXCEL_EXPORT_DIR,
-        )
-    except Exception as exc:
-        return _build_export_error_response(
-            error=exc,
-            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
-            generation_error_types=(OutputExcelGenerationError,),
-            invalid_request_message="Invalid Excel export request.",
-            internal_error_message="Failed to generate Excel due to internal error.",
-            validation_log_message="Validation or mapping error during Excel export.",
-            generation_log_message="Excel generation error during Excel export.",
-            unexpected_log_message="Unexpected error during Excel export.",
-        )
-
-    return _build_export_success_response(
-        metadata=metadata,
-        response_serializer_class=ExcelExportResponseSerializer,
-        invalid_metadata_message=(
-            "Failed to generate Excel due to invalid response metadata."
-        ),
-    )
+    return _get_excel_export_handler().handle(request)
 
 
 @require_GET
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def download_csv(request, file_id):
+    handler = _get_csv_direct_download_handler()
     try:
-        artifact = resolve_csv_download_artifact(
-            file_id=file_id,
-            storage_dir=settings.CSV_EXPORT_DIR,
-        )
+        artifact = handler.resolve_artifact(file_id)
     except OutputCSVDownloadLookupError:
         logger.warning("CSV download file not found or invalid file_id.", exc_info=True)
-        return Response(
-            {
-                "status": "error",
-                "message": "CSV file not found.",
-            },
-            status=status.HTTP_404_NOT_FOUND,
-        )
+        return _csv_download_not_found_response()
 
     try:
-        safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
-        file_handle = open(safe_file_path, "rb")
+        return handler.build_response(
+            artifact=artifact,
+            requested_name=request.query_params.get("filename"),
+        )
     except (KeyError, SuspiciousFileOperation, ValueError):
         logger.warning("CSV download resolved unsafe artifact metadata.", exc_info=True)
-        return Response(
-            {
-                "status": "error",
-                "message": "CSV file not found.",
-            },
-            status=status.HTTP_404_NOT_FOUND,
-        )
+        return _csv_download_not_found_response()
     except OSError:
         logger.exception("CSV download failed while reading generated artifact.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to download CSV due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+        return _csv_download_internal_error_response()
     except Exception:
         logger.exception("Unexpected error while preparing CSV download.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to download CSV due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-
-    download_name = _resolve_download_filename(
-        requested_name=request.query_params.get("filename"),
-        default_name=artifact["file_name"],
-        artifact_type=artifact["artifact_type"],
-    )
-
-    return FileResponse(
-        file_handle,
-        as_attachment=True,
-        filename=download_name,
-        content_type=artifact["content_type"],
-    )
+        return _csv_download_internal_error_response()
 
 
 @require_GET
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def download_excel(request, export_id):
+    handler = _get_excel_direct_download_handler()
     try:
-        artifact = resolve_excel_download_artifact(
-            export_id=export_id,
-            storage_dir=settings.EXCEL_EXPORT_DIR,
-        )
+        artifact = handler.resolve_artifact(export_id)
     except OutputExcelDownloadLookupError as exc:
         if _is_invalid_excel_download_id_error(exc):
             logger.warning("Excel download received invalid export_id.", exc_info=True)
-            return Response(
-                {
-                    "status": "error",
-                    "message": "Invalid Excel export id.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return _excel_download_invalid_id_response()
 
         logger.warning("Excel download file not found.", exc_info=True)
         return _excel_download_not_found_response()
@@ -737,8 +725,10 @@ def download_excel(request, export_id):
         return _excel_download_internal_error_response()
 
     try:
-        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
-        file_handle = open(safe_file_path, "rb")
+        return handler.build_response(
+            artifact=artifact,
+            requested_name=request.query_params.get("filename"),
+        )
     except (KeyError, SuspiciousFileOperation, ValueError):
         logger.warning("Excel download resolved unsafe artifact metadata.", exc_info=True)
         return _excel_download_not_found_response()
@@ -748,15 +738,3 @@ def download_excel(request, export_id):
     except Exception:
         logger.exception("Unexpected error while preparing Excel download.")
         return _excel_download_internal_error_response()
-    download_name = _resolve_download_filename(
-        requested_name=request.query_params.get("filename"),
-        default_name=artifact["file_name"],
-        artifact_type=artifact["artifact_type"],
-    )
-
-    return FileResponse(
-        file_handle,
-        as_attachment=True,
-        filename=download_name,
-        content_type=artifact["content_type"],
-    )
