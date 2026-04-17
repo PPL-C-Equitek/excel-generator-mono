@@ -13,6 +13,7 @@ describe("history service", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   describe("getHistoryFiles", () => {
@@ -439,9 +440,8 @@ describe("history service", () => {
       expect(anchor.download).toBe("history-export.csv");
     });
 
-    it("falls back to localhost:8000 when NEXT_PUBLIC_API_URL is invalid", async () => {
-      const original = process.env.NEXT_PUBLIC_API_URL;
-      process.env.NEXT_PUBLIC_API_URL = "htt   p://in^valid\nurl";
+    it("preserves the configured API path when downloading history files", async () => {
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "https://example.com/api/v1/");
 
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi
@@ -478,7 +478,7 @@ describe("history service", () => {
       await historyService.downloadHistoryFile("history-1", "csv", "invoice.csv");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://localhost:8000/history/history-1/download/?file_format=csv",
+        "https://example.com/api/v1/history/history-1/download/?file_format=csv",
         {
           method: "GET",
           headers: {
@@ -486,8 +486,6 @@ describe("history service", () => {
           },
         }
       );
-
-      process.env.NEXT_PUBLIC_API_URL = original;
     });
   });
 
@@ -701,6 +699,22 @@ describe("history service", () => {
 
       await expect(historyService.deleteHistoryFile("history-1")).rejects.toThrow(
         "Your session is invalid or you no longer have access."
+      );
+    });
+
+    it("falls back to the delete error message when the error body cannot be parsed", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: vi.fn().mockRejectedValue(new Error("invalid json")),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(historyService.deleteHistoryFile("history-1")).rejects.toThrow(
+        "Failed to delete history item."
       );
     });
 

@@ -32,6 +32,10 @@ class EmailRequestSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
 
 
+class TokenValidationSerializer(serializers.Serializer):
+    token = serializers.CharField(required=True)
+
+
 class VerifyEmailSerializer(serializers.Serializer):
     token = serializers.CharField(required=True)
     password = serializers.CharField(
