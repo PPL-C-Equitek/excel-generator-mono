@@ -9,11 +9,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_ENCODING = "utf-8-sig"
 
 def _read_lines_from_file(file_or_path: str | IO[bytes] | IO[str] | Any):
-    """Yield raw lines (with newlines) from a path string or stream.
-
-    Lines are NOT stripped so that csv.reader can handle multi-line
-    quoted fields correctly.
-    """
     if isinstance(file_or_path, str):
         safe_path = validate_path(file_or_path)
         with open(safe_path, "r", encoding=DEFAULT_ENCODING, errors="strict") as fh:
@@ -96,13 +91,13 @@ def process_uploaded_csv(file_or_path):
             pass
 
         if raw is not None and not raw.strip():
-            return False, "File CSV kosong atau tidak memiliki data yang valid.", None
+            return False, "CSV file is empty or does not contain valid data.", None
 
         data = parse_csv(file_or_path)
         return True, None, data
 
     except UnicodeDecodeError:
-        return False, "File CSV rusak atau format karakter tidak didukung.", None
+        return False, "CSV file is corrupted or character format is not supported.", None
 
     except Exception:
         logger.exception("CSV parsing failed")

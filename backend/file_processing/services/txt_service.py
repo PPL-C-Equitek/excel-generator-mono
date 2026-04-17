@@ -32,9 +32,9 @@ def process_uploaded_txt(
     try:
         data = parse_txt(file_or_path)
     except FileNotFoundError:
-        return False, "File tidak ditemukan.", None
+        return False, "File not found.", None
     except UnicodeDecodeError:
-        return False, "File teks rusak atau format karakter tidak didukung.", None
+        return False, "Text file is corrupted or character format is not supported.", None
     except Exception:
         logger.exception("TXT parsing failed")
         return False, "Invalid or unreadable TXT file.", None

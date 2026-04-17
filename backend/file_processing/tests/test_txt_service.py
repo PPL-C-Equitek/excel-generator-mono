@@ -223,7 +223,7 @@ class NegativeTxtExtractionTests(TestCase):
         self.assertFalse(success)
         self.assertIsNotNone(error)
         self.assertIsNone(data)
-        self.assertIn("File tidak ditemukan", error)
+        self.assertIn("File not found", error)
 
     def test_process_uploaded_txt_error_message_is_user_friendly(self):
         abs_path = os.path.abspath("no_such_file.txt")
