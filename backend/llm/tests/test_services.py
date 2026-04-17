@@ -9,6 +9,7 @@ from llm.services.generation_service import (
     DjangoCustomSchemaPromptSource,
     JsonGenerationService,
     LlmGenerationService,
+    LlmReasoningService,
     compose_system_prompt,
 )
 from llm.services.openai_client import OpenAIServiceError, OpenAIUpstreamError, generate_json, generate_text
@@ -483,4 +484,141 @@ class LlmGenerationServiceTest(SimpleTestCase):
             prompt_source.get_prompt_fragment("schema-1")
 
         mock_get.assert_not_called()
+
+
+class LlmReasoningServiceTest(SimpleTestCase):
+    # Positive
+    def test_reasoning_service_returns_valid_reasoning_payload(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = json.dumps(
+            {
+                "final_answer": " Total payment is Rp1.250.000. ",
+                "reasoning_steps": [
+                    " Identify the total amount. ",
+                    " Confirm it is the final payable total. ",
+                ],
+                "thinking_log": " Summarized the invoice total for display. ",
+            }
+        )
+        service = LlmReasoningService(
+            text_provider=text_provider,
+            base_system_prompt_provider=lambda: "Base prompt.",
+            reasoning_system_prompt_provider=lambda: "Return strict reasoning JSON.",
+        )
+
+        result = service.generate("Summarize this invoice")
+
+        self.assertEqual(
+            result,
+            {
+                "final_answer": "Total payment is Rp1.250.000.",
+                "reasoning_steps": [
+                    "Identify the total amount.",
+                    "Confirm it is the final payable total.",
+                ],
+                "thinking_log": "Summarized the invoice total for display.",
+            },
+        )
+        text_provider.generate_text.assert_called_once_with(
+            prompt="Summarize this invoice",
+            system_prompt="Base prompt.\n\nReturn strict reasoning JSON.",
+        )
+
+    # Negative
+    def test_reasoning_service_rejects_empty_prompt(self):
+        service = LlmReasoningService(text_provider=Mock())
+
+        with self.assertRaises(ValueError):
+            service.generate("   ")
+
+    def test_reasoning_service_rejects_non_json_output(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = "not valid json"
+        service = LlmReasoningService(text_provider=text_provider)
+
+        with self.assertRaises(OpenAIServiceError) as exc_ctx:
+            service.generate("Summarize this invoice")
+
+        self.assertIsInstance(exc_ctx.exception.__cause__, json.JSONDecodeError)
+
+    def test_reasoning_service_rejects_non_object_output(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '["invalid"]'
+        service = LlmReasoningService(text_provider=text_provider)
+
+        with self.assertRaises(OpenAIServiceError):
+            service.generate("Summarize this invoice")
+
+    def test_reasoning_service_rejects_blank_reasoning_step(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = json.dumps(
+            {
+                "final_answer": "Answer",
+                "reasoning_steps": ["Valid", "   "],
+                "thinking_log": "Summary",
+            }
+        )
+        service = LlmReasoningService(text_provider=text_provider)
+
+        with self.assertRaises(OpenAIServiceError):
+            service.generate("Summarize this invoice")
+
+    # Negative
+    def test_reasoning_service_rejects_empty_reasoning_steps(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = json.dumps(
+            {
+                "final_answer": "Answer",
+                "reasoning_steps": [],
+                "thinking_log": "Summary",
+            }
+        )
+        service = LlmReasoningService(text_provider=text_provider)
+
+        with self.assertRaises(OpenAIServiceError):
+            service.generate("Summarize this invoice")
+
+    def test_reasoning_service_rejects_blank_thinking_log(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = json.dumps(
+            {
+                "final_answer": "Answer",
+                "reasoning_steps": ["Valid"],
+                "thinking_log": "   ",
+            }
+        )
+        service = LlmReasoningService(text_provider=text_provider)
+
+        with self.assertRaises(OpenAIServiceError):
+            service.generate("Summarize this invoice")
+
+    # Edge
+    def test_reasoning_service_omits_system_prompt_when_all_prompts_blank(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = json.dumps(
+            {
+                "final_answer": "Answer",
+                "reasoning_steps": ["Step one"],
+                "thinking_log": "Summary",
+            }
+        )
+        service = LlmReasoningService(
+            text_provider=text_provider,
+            base_system_prompt_provider=lambda: "   ",
+            reasoning_system_prompt_provider=lambda: "   ",
+        )
+
+        result = service.generate("Summarize this invoice")
+
+        self.assertEqual(
+            result,
+            {
+                "final_answer": "Answer",
+                "reasoning_steps": ["Step one"],
+                "thinking_log": "Summary",
+            },
+        )
+        text_provider.generate_text.assert_called_once_with(
+            prompt="Summarize this invoice"
+        )
 
