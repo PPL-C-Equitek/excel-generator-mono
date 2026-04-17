@@ -106,11 +106,56 @@ class LlmGenerationService:
         )
 
 
+class LlmReasoningService:
+    def __init__(
+        self,
+        text_provider: TextGenerationProvider,
+        base_system_prompt_provider: Callable[[], str] | None = None,
+        reasoning_system_prompt_provider: Callable[[], str] | None = None,
+    ):
+        self.text_provider = text_provider
+        self.base_system_prompt_provider = (
+            base_system_prompt_provider or get_base_system_prompt
+        )
+        self.reasoning_system_prompt_provider = (
+            reasoning_system_prompt_provider or get_reasoning_system_prompt
+        )
+
+    def generate(self, prompt: str) -> dict[str, Any]:
+        normalized_prompt = _normalize_prompt(prompt)
+        effective_system_prompt = compose_system_prompt(
+            self.base_system_prompt_provider(),
+            self.reasoning_system_prompt_provider(),
+        )
+        generate_text_kwargs = {"prompt": normalized_prompt}
+        if effective_system_prompt is not None:
+            generate_text_kwargs["system_prompt"] = effective_system_prompt
+
+        output_text = self.text_provider.generate_text(**generate_text_kwargs)
+        try:
+            parsed_output = json.loads(output_text)
+        except json.JSONDecodeError as exc:
+            raise OpenAIServiceError(
+                "OpenAI reasoning response is not valid JSON."
+            ) from exc
+
+        return validate_reasoning_response(parsed_output)
+
+
 def get_base_system_prompt() -> str:
     raw_prompt = getattr(settings, "OPENAI_SYSTEM_PROMPT", "")
     if not isinstance(raw_prompt, str):
         return ""
     return raw_prompt.strip()
+
+
+def get_reasoning_system_prompt() -> str:
+    return (
+        "Return a valid JSON object with exactly these keys: "
+        '"final_answer" (string), "reasoning_steps" (array of non-empty strings), '
+        'and "thinking_log" (string). Do not wrap the JSON in markdown or code fences. '
+        "Keep reasoning concise, safe for display, and do not reveal hidden chain-of-thought."
+    )
 
 
 def compose_system_prompt(
@@ -135,3 +180,41 @@ def compose_system_prompt(
         return None
 
     return "\n\n".join(parts)
+
+
+def _normalize_prompt(value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("prompt must be a non-empty string.")
+    return value.strip()
+
+
+def _normalize_reasoning_text(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise OpenAIServiceError(
+            f"OpenAI reasoning response must include {field_name} as a non-empty string."
+        )
+    return value.strip()
+
+
+def validate_reasoning_response(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise OpenAIServiceError("OpenAI reasoning response JSON must be an object.")
+
+    final_answer = _normalize_reasoning_text(payload.get("final_answer"), "final_answer")
+    thinking_log = _normalize_reasoning_text(payload.get("thinking_log"), "thinking_log")
+    reasoning_steps_payload = payload.get("reasoning_steps")
+    if not isinstance(reasoning_steps_payload, list) or not reasoning_steps_payload:
+        raise OpenAIServiceError(
+            "OpenAI reasoning response must include reasoning_steps as a non-empty array."
+        )
+
+    reasoning_steps = [
+        _normalize_reasoning_text(step, "reasoning_steps")
+        for step in reasoning_steps_payload
+    ]
+
+    return {
+        "final_answer": final_answer,
+        "reasoning_steps": reasoning_steps,
+        "thinking_log": thinking_log,
+    }
