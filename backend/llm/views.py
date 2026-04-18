@@ -18,8 +18,8 @@ from .services.generation_service import (
     DjangoCustomSchemaPromptSource,
     JsonGenerationService,
     LlmGenerationService,
-    LlmReasoningService,
 )
+from .services.reasoning_service import LlmReasoningService
 from .services.openai_client import (
     OpenAITextGenerationProvider,
     OpenAIConfigurationError,
