@@ -1,15 +1,10 @@
 import json
 from typing import Any, Callable, Protocol
 
-from django.conf import settings
-
 from custom_schemas.models import CustomSchema
 
 from .openai_client import OpenAIServiceError
-
-
-class TextGenerationProvider(Protocol):
-    def generate_text(self, prompt: str, system_prompt: str | None = None) -> str: ...
+from .reasoning_service import TextGenerationProvider, compose_system_prompt, get_base_system_prompt
 
 
 class JsonGenerationPort(Protocol):
@@ -106,38 +101,3 @@ class LlmGenerationService:
         )
 
 
-def get_base_system_prompt() -> str:
-    raw_prompt = getattr(settings, "OPENAI_SYSTEM_PROMPT", "")
-    if not isinstance(raw_prompt, str):
-        return ""
-    return raw_prompt.strip()
-
-
-def compose_system_prompt(
-    base_prompt: str | None,
-    schema_prompt_fragment: str | None = None,
-) -> str | None:
-    parts: list[str] = []
-
-    normalized_base_prompt = base_prompt.strip() if isinstance(base_prompt, str) else ""
-    if normalized_base_prompt:
-        parts.append(normalized_base_prompt)
-
-    normalized_schema_prompt = (
-        schema_prompt_fragment.strip()
-        if isinstance(schema_prompt_fragment, str)
-        else ""
-    )
-    if normalized_schema_prompt:
-        parts.append(normalized_schema_prompt)
-
-    if not parts:
-        return None
-
-    return "\n\n".join(parts)
-
-
-def _normalize_prompt(value: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError("prompt must be a non-empty string.")
-    return value.strip()

@@ -307,6 +307,20 @@ def _append_truncated_step(
     return len(steps) >= max_steps
 
 
+def _try_append_explicit_step(
+    steps: list[str],
+    line: str,
+    max_steps: int,
+    max_step_chars: int,
+) -> tuple[bool, bool]:
+    step_text = _extract_step_text(line)
+    if step_text is None:
+        return False, False
+
+    reached_limit = _append_truncated_step(steps, step_text, max_steps, max_step_chars)
+    return True, reached_limit
+
+
 def _collect_steps_from_lines(lines: list[str], max_steps: int, max_step_chars: int) -> list[str]:
     steps: list[str] = []
     inside_step_section = False
@@ -316,19 +330,26 @@ def _collect_steps_from_lines(lines: list[str], max_steps: int, max_step_chars: 
             inside_step_section = True
             continue
 
-        step_text = _extract_step_text(line)
-        if step_text is not None:
-            if _append_truncated_step(steps, step_text, max_steps, max_step_chars):
+        found_explicit_step, reached_limit = _try_append_explicit_step(
+            steps,
+            line,
+            max_steps,
+            max_step_chars,
+        )
+        if found_explicit_step:
+            if reached_limit:
                 break
             continue
 
-        if inside_step_section and line:
-            if _is_reasoning_control_line(line):
-                inside_step_section = False
-                continue
+        if not (inside_step_section and line):
+            continue
 
-            if _append_truncated_step(steps, line, max_steps, max_step_chars):
-                break
+        if _is_reasoning_control_line(line):
+            inside_step_section = False
+            continue
+
+        if _append_truncated_step(steps, line, max_steps, max_step_chars):
+            break
 
     return steps
 
