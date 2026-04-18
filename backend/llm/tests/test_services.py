@@ -531,24 +531,118 @@ class LlmReasoningServiceTest(SimpleTestCase):
         with self.assertRaises(ValueError):
             service.generate("   ")
 
-    def test_reasoning_service_rejects_non_json_output(self):
+    # Negative
+    def test_reasoning_service_falls_back_for_non_json_output(self):
         text_provider = Mock()
         text_provider.generate_text.return_value = "not valid json"
         service = LlmReasoningService(text_provider=text_provider)
 
-        with self.assertRaises(OpenAIServiceError) as exc_ctx:
-            service.generate("Summarize this invoice")
+        result = service.generate("Summarize this invoice")
 
-        self.assertIsInstance(exc_ctx.exception.__cause__, json.JSONDecodeError)
+        self.assertEqual(result["reasoning_steps"], ["not valid json"])
+        self.assertEqual(result["final_answer"], "not valid json")
+        self.assertEqual(result["thinking_log"], "not valid json")
 
-    def test_reasoning_service_rejects_non_object_output(self):
+    # Negative
+    def test_reasoning_service_falls_back_for_non_object_json_output(self):
         text_provider = Mock()
         text_provider.generate_text.return_value = '["invalid"]'
         service = LlmReasoningService(text_provider=text_provider)
 
-        with self.assertRaises(OpenAIServiceError):
-            service.generate("Summarize this invoice")
+        result = service.generate("Summarize this invoice")
 
+        self.assertEqual(result["reasoning_steps"], ['["invalid"]'])
+        self.assertEqual(result["final_answer"], '["invalid"]')
+        self.assertEqual(result["thinking_log"], '["invalid"]')
+
+    # Positive
+    def test_reasoning_service_parses_step_label_format(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = (
+            "Final Answer: Total payment is Rp1.250.000.\n"
+            "Step 1: Identify total from invoice summary.\n"
+            "Step 2: Confirm no additional fees.\n"
+            "Thinking Log: Parsed step-by-step summary for output."
+        )
+        service = LlmReasoningService(text_provider=text_provider)
+
+        result = service.generate("Summarize this invoice")
+
+        self.assertEqual(result["final_answer"], "Total payment is Rp1.250.000.")
+        self.assertEqual(
+            result["reasoning_steps"],
+            [
+                "Identify total from invoice summary.",
+                "Confirm no additional fees.",
+            ],
+        )
+        self.assertEqual(
+            result["thinking_log"],
+            "Parsed step-by-step summary for output.",
+        )
+
+    # Positive
+    def test_reasoning_service_parses_numbering_and_bullet_format(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = (
+            "Answer: Totals are validated.\n"
+            "1. Read subtotal row.\n"
+            "2) Add tax row.\n"
+            "- Verify grand total row."
+        )
+        service = LlmReasoningService(text_provider=text_provider)
+
+        result = service.generate("Summarize this invoice")
+
+        self.assertEqual(result["final_answer"], "Totals are validated.")
+        self.assertEqual(
+            result["reasoning_steps"],
+            [
+                "Read subtotal row.",
+                "Add tax row.",
+                "Verify grand total row.",
+            ],
+        )
+
+    # Edge
+    def test_reasoning_service_parses_narrative_format_when_no_markers_exist(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = (
+            "I checked the summary section. "
+            "The grand total line is Rp1.250.000. "
+            "No extra adjustment line appears."
+        )
+        service = LlmReasoningService(text_provider=text_provider)
+
+        result = service.generate("Summarize this invoice")
+
+        self.assertEqual(result["final_answer"], "No extra adjustment line appears.")
+        self.assertGreaterEqual(len(result["reasoning_steps"]), 1)
+        self.assertTrue(result["thinking_log"])
+
+    # Edge
+    def test_reasoning_service_parses_json_inside_code_fence(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = (
+            "Here is the output:\n"
+            "```json\n"
+            '{"final_answer":"Answer","reasoning_steps":["Step one"],"thinking_log":"Summary"}\n'
+            "```"
+        )
+        service = LlmReasoningService(text_provider=text_provider)
+
+        result = service.generate("Summarize this invoice")
+
+        self.assertEqual(
+            result,
+            {
+                "final_answer": "Answer",
+                "reasoning_steps": ["Step one"],
+                "thinking_log": "Summary",
+            },
+        )
+
+    # Negative
     def test_reasoning_service_rejects_blank_reasoning_step(self):
         text_provider = Mock()
         text_provider.generate_text.return_value = json.dumps(
@@ -591,6 +685,43 @@ class LlmReasoningServiceTest(SimpleTestCase):
 
         with self.assertRaises(OpenAIServiceError):
             service.generate("Summarize this invoice")
+
+    # Edge
+    @override_settings(
+        LLM_REASONING_OUTPUT_TEXT_MAX_CHARS=2000,
+        LLM_REASONING_FINAL_ANSWER_MAX_CHARS=10,
+        LLM_REASONING_THINKING_LOG_MAX_CHARS=12,
+        LLM_REASONING_STEP_MAX_CHARS=8,
+        LLM_REASONING_STEPS_MAX_ITEMS=2,
+    )
+    def test_reasoning_service_applies_safe_truncation_limits(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = json.dumps(
+            {
+                "final_answer": "A" * 100,
+                "reasoning_steps": ["B" * 50, "C" * 50, "D" * 50],
+                "thinking_log": "E" * 100,
+            }
+        )
+        service = LlmReasoningService(text_provider=text_provider)
+
+        result = service.generate("Summarize this invoice")
+
+        self.assertEqual(result["final_answer"], "A" * 10)
+        self.assertEqual(result["thinking_log"], "E" * 12)
+        self.assertEqual(result["reasoning_steps"], ["B" * 8, "C" * 8])
+
+    # Edge
+    def test_reasoning_service_falls_back_for_blank_output(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = "   "
+        service = LlmReasoningService(text_provider=text_provider)
+
+        result = service.generate("Summarize this invoice")
+
+        self.assertTrue(result["final_answer"])
+        self.assertEqual(len(result["reasoning_steps"]), 1)
+        self.assertTrue(result["thinking_log"])
 
     # Edge
     def test_reasoning_service_omits_system_prompt_when_all_prompts_blank(self):
