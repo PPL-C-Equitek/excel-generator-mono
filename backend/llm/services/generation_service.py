@@ -231,8 +231,42 @@ def _try_parse_json_candidate(text: str) -> Any | None:
 
     try:
         return json.loads(text)
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except (TypeError, ValueError):
         return None
+
+
+def _consume_spaces_or_tabs(text: str, index: int) -> int:
+    text_length = len(text)
+    while index < text_length and text[index] in " \t":
+        index += 1
+    return index
+
+
+def _consume_language_token(text: str, index: int) -> tuple[str, int]:
+    text_length = len(text)
+    token_start = index
+    while index < text_length and (text[index].isalnum() or text[index] in "_-"):
+        index += 1
+    return text[token_start:index].strip().lower(), index
+
+
+def _consume_optional_newline(text: str, index: int) -> int:
+    text_length = len(text)
+    if index >= text_length or text[index] not in "\r\n":
+        return index
+
+    if text[index] == "\r" and index + 1 < text_length and text[index + 1] == "\n":
+        return index + 2
+
+    return index + 1
+
+
+def _extract_fenced_block_metadata(text: str, fence_start: int) -> tuple[str, int]:
+    index = _consume_spaces_or_tabs(text, fence_start + 3)
+    language, index = _consume_language_token(text, index)
+    index = _consume_spaces_or_tabs(text, index)
+    index = _consume_optional_newline(text, index)
+    return language, index
 
 
 def _extract_json_from_fenced_blocks(text: str) -> list[str]:
@@ -245,23 +279,7 @@ def _extract_json_from_fenced_blocks(text: str) -> list[str]:
         if fence_start == -1:
             break
 
-        index = fence_start + 3
-        while index < text_length and text[index] in " \t":
-            index += 1
-
-        language_start = index
-        while index < text_length and (text[index].isalnum() or text[index] in "_-"):
-            index += 1
-        language = text[language_start:index].strip().lower()
-
-        while index < text_length and text[index] in " \t":
-            index += 1
-
-        if index < text_length and text[index] in "\r\n":
-            if text[index] == "\r" and index + 1 < text_length and text[index + 1] == "\n":
-                index += 2
-            else:
-                index += 1
+        language, index = _extract_fenced_block_metadata(text, fence_start)
 
         fence_end = text.find("```", index)
         if fence_end == -1:
@@ -322,56 +340,97 @@ def _is_step_section_header(line: str) -> bool:
     return normalized in STEP_SECTION_HEADERS
 
 
+def _consume_whitespace(text: str, index: int) -> int:
+    text_length = len(text)
+    while index < text_length and text[index].isspace():
+        index += 1
+    return index
+
+
+def _consume_digits(text: str, index: int) -> tuple[int, int]:
+    text_length = len(text)
+    start = index
+    while index < text_length and text[index].isdigit():
+        index += 1
+    return start, index
+
+
+def _consume_step_delimiters(text: str, index: int) -> int:
+    text_length = len(text)
+    while index < text_length and text[index] in ":.-)":
+        index += 1
+    return index
+
+
+def _extract_bullet_step_text(stripped_line: str) -> str | None:
+    if not stripped_line or stripped_line[0] not in "-*•":
+        return None
+
+    step_text = stripped_line[1:].lstrip()
+    return step_text or None
+
+
+def _extract_step_keyword_text(stripped_line: str) -> str | None:
+    if not stripped_line.lower().startswith(STEP_PREFIX_TOKEN):
+        return None
+
+    cursor = _consume_whitespace(stripped_line, len(STEP_PREFIX_TOKEN))
+    digit_start, cursor = _consume_digits(stripped_line, cursor)
+    if cursor == digit_start:
+        return None
+
+    cursor = _consume_step_delimiters(stripped_line, cursor)
+    cursor = _consume_whitespace(stripped_line, cursor)
+    step_text = stripped_line[cursor:].strip()
+    return step_text or None
+
+
+def _extract_numbered_step_text(stripped_line: str) -> str | None:
+    cursor_start, cursor = _consume_digits(stripped_line, 0)
+    if cursor == cursor_start:
+        return None
+
+    cursor = _consume_whitespace(stripped_line, cursor)
+    if cursor >= len(stripped_line) or stripped_line[cursor] not in ".)-":
+        return None
+
+    cursor = _consume_whitespace(stripped_line, cursor + 1)
+    step_text = stripped_line[cursor:].strip()
+    return step_text or None
+
+
 def _extract_step_text(line: str) -> str | None:
     stripped_line = line.strip()
     if not stripped_line:
         return None
 
-    first_char = stripped_line[0]
-    if first_char in "-*•":
-        step_text = stripped_line[1:].lstrip()
-        return step_text or None
+    step_text = _extract_bullet_step_text(stripped_line)
+    if step_text is not None:
+        return step_text
 
-    lower_line = stripped_line.lower()
-    if lower_line.startswith(STEP_PREFIX_TOKEN):
-        cursor = len(STEP_PREFIX_TOKEN)
-        while cursor < len(stripped_line) and stripped_line[cursor].isspace():
-            cursor += 1
+    step_text = _extract_step_keyword_text(stripped_line)
+    if step_text is not None:
+        return step_text
 
-        digit_start = cursor
-        while cursor < len(stripped_line) and stripped_line[cursor].isdigit():
-            cursor += 1
+    return _extract_numbered_step_text(stripped_line)
 
-        if cursor == digit_start:
-            return None
 
-        while cursor < len(stripped_line) and stripped_line[cursor] in ":.-)":
-            cursor += 1
-        while cursor < len(stripped_line) and stripped_line[cursor].isspace():
-            cursor += 1
+def _is_reasoning_control_line(line: str) -> bool:
+    final_answer_value = _extract_labeled_value(line, FINAL_ANSWER_LABELS)
+    thinking_log_value = _extract_labeled_value(line, THINKING_LOG_LABELS)
+    return final_answer_value is not None or thinking_log_value is not None
 
-        step_text = stripped_line[cursor:].strip()
-        return step_text or None
 
-    cursor = 0
-    while cursor < len(stripped_line) and stripped_line[cursor].isdigit():
-        cursor += 1
-
-    if cursor == 0:
-        return None
-
-    while cursor < len(stripped_line) and stripped_line[cursor].isspace():
-        cursor += 1
-
-    if cursor >= len(stripped_line) or stripped_line[cursor] not in ".)-":
-        return None
-
-    cursor += 1
-    while cursor < len(stripped_line) and stripped_line[cursor].isspace():
-        cursor += 1
-
-    step_text = stripped_line[cursor:].strip()
-    return step_text or None
+def _append_truncated_step(
+    steps: list[str],
+    step_text: str,
+    max_steps: int,
+    max_step_chars: int,
+) -> bool:
+    step = _truncate_text(step_text, max_step_chars)
+    if step:
+        steps.append(step)
+    return len(steps) >= max_steps
 
 
 def _collect_steps_from_lines(lines: list[str], max_steps: int, max_step_chars: int) -> list[str]:
@@ -385,24 +444,16 @@ def _collect_steps_from_lines(lines: list[str], max_steps: int, max_step_chars: 
 
         step_text = _extract_step_text(line)
         if step_text is not None:
-            step = _truncate_text(step_text, max_step_chars)
-            if step:
-                steps.append(step)
-            if len(steps) >= max_steps:
+            if _append_truncated_step(steps, step_text, max_steps, max_step_chars):
                 break
             continue
 
         if inside_step_section and line:
-            final_answer_value = _extract_labeled_value(line, FINAL_ANSWER_LABELS)
-            thinking_log_value = _extract_labeled_value(line, THINKING_LOG_LABELS)
-            if final_answer_value is not None or thinking_log_value is not None:
+            if _is_reasoning_control_line(line):
                 inside_step_section = False
                 continue
 
-            step = _truncate_text(line, max_step_chars)
-            if step:
-                steps.append(step)
-            if len(steps) >= max_steps:
+            if _append_truncated_step(steps, line, max_steps, max_step_chars):
                 break
 
     return steps
@@ -426,7 +477,7 @@ def _fallback_narrative_steps(text: str, max_steps: int, max_step_chars: int) ->
     return steps
 
 
-def parse_reasoning_response(raw_output: Any) -> dict[str, Any]:
+def _resolve_reasoning_limits() -> tuple[int, int, int, int, int]:
     max_output_chars = _get_positive_int_setting(
         "LLM_REASONING_OUTPUT_TEXT_MAX_CHARS",
         DEFAULT_REASONING_OUTPUT_TEXT_MAX_CHARS,
@@ -447,19 +498,36 @@ def parse_reasoning_response(raw_output: Any) -> dict[str, Any]:
         "LLM_REASONING_THINKING_LOG_MAX_CHARS",
         DEFAULT_REASONING_THINKING_LOG_MAX_CHARS,
     )
+    return (
+        max_output_chars,
+        max_steps,
+        max_step_chars,
+        max_final_answer_chars,
+        max_thinking_log_chars,
+    )
 
+
+def _normalize_raw_reasoning_output(raw_output: Any, max_output_chars: int) -> str:
     if isinstance(raw_output, str):
-        safe_text = _truncate_text(raw_output.strip(), max_output_chars)
+        normalized = raw_output.strip()
     else:
-        safe_text = _truncate_text(str(raw_output or "").strip(), max_output_chars)
+        normalized = str(raw_output or "").strip()
+    return _truncate_text(normalized, max_output_chars)
 
-    if not safe_text:
-        return {
-            "final_answer": _truncate_text(FALLBACK_FINAL_ANSWER, max_final_answer_chars),
-            "reasoning_steps": [_truncate_text(FALLBACK_REASONING_STEP, max_step_chars)],
-            "thinking_log": _truncate_text(FALLBACK_FINAL_ANSWER, max_thinking_log_chars),
-        }
 
+def _fallback_empty_reasoning_response(
+    max_final_answer_chars: int,
+    max_step_chars: int,
+    max_thinking_log_chars: int,
+) -> dict[str, Any]:
+    return {
+        "final_answer": _truncate_text(FALLBACK_FINAL_ANSWER, max_final_answer_chars),
+        "reasoning_steps": [_truncate_text(FALLBACK_REASONING_STEP, max_step_chars)],
+        "thinking_log": _truncate_text(FALLBACK_FINAL_ANSWER, max_thinking_log_chars),
+    }
+
+
+def _parse_structured_reasoning_object(safe_text: str) -> dict[str, Any] | None:
     direct_json = _try_parse_json_candidate(safe_text)
     if isinstance(direct_json, dict):
         return direct_json
@@ -470,12 +538,21 @@ def parse_reasoning_response(raw_output: Any) -> dict[str, Any]:
             return parsed_candidate
 
     braced_candidate = _extract_braced_json_candidate(safe_text)
-    if braced_candidate is not None:
-        parsed_candidate = _try_parse_json_candidate(braced_candidate)
-        if isinstance(parsed_candidate, dict):
-            return parsed_candidate
+    if braced_candidate is None:
+        return None
 
-    lines = _split_non_empty_lines(safe_text)
+    parsed_candidate = _try_parse_json_candidate(braced_candidate)
+    if isinstance(parsed_candidate, dict):
+        return parsed_candidate
+
+    return None
+
+
+def _extract_reasoning_fields_from_lines(
+    lines: list[str],
+    max_final_answer_chars: int,
+    max_thinking_log_chars: int,
+) -> tuple[str, str]:
     final_answer = ""
     thinking_log = ""
     for line in lines:
@@ -487,22 +564,69 @@ def parse_reasoning_response(raw_output: Any) -> dict[str, Any]:
         thinking_log_value = _extract_labeled_value(line, THINKING_LOG_LABELS)
         if thinking_log_value is not None and not thinking_log:
             thinking_log = _truncate_text(thinking_log_value, max_thinking_log_chars)
-            continue
 
+    return final_answer, thinking_log
+
+
+def _resolve_reasoning_steps(
+    lines: list[str],
+    safe_text: str,
+    max_steps: int,
+    max_step_chars: int,
+) -> list[str]:
     reasoning_steps = _collect_steps_from_lines(
         lines,
         max_steps=max_steps,
         max_step_chars=max_step_chars,
     )
-    if not reasoning_steps:
-        reasoning_steps = _fallback_narrative_steps(
-            safe_text,
-            max_steps=max_steps,
+    if reasoning_steps:
+        return reasoning_steps
+
+    reasoning_steps = _fallback_narrative_steps(
+        safe_text,
+        max_steps=max_steps,
+        max_step_chars=max_step_chars,
+    )
+    if reasoning_steps:
+        return reasoning_steps
+
+    return [_truncate_text(FALLBACK_REASONING_STEP, max_step_chars)]
+
+
+def parse_reasoning_response(raw_output: Any) -> dict[str, Any]:
+    (
+        max_output_chars,
+        max_steps,
+        max_step_chars,
+        max_final_answer_chars,
+        max_thinking_log_chars,
+    ) = _resolve_reasoning_limits()
+
+    safe_text = _normalize_raw_reasoning_output(raw_output, max_output_chars)
+
+    if not safe_text:
+        return _fallback_empty_reasoning_response(
+            max_final_answer_chars=max_final_answer_chars,
             max_step_chars=max_step_chars,
+            max_thinking_log_chars=max_thinking_log_chars,
         )
 
-    if not reasoning_steps:
-        reasoning_steps = [_truncate_text(FALLBACK_REASONING_STEP, max_step_chars)]
+    parsed_structured = _parse_structured_reasoning_object(safe_text)
+    if parsed_structured is not None:
+        return parsed_structured
+
+    lines = _split_non_empty_lines(safe_text)
+    final_answer, thinking_log = _extract_reasoning_fields_from_lines(
+        lines,
+        max_final_answer_chars=max_final_answer_chars,
+        max_thinking_log_chars=max_thinking_log_chars,
+    )
+    reasoning_steps = _resolve_reasoning_steps(
+        lines,
+        safe_text,
+        max_steps=max_steps,
+        max_step_chars=max_step_chars,
+    )
 
     if not final_answer:
         final_answer = _truncate_text(reasoning_steps[-1], max_final_answer_chars)
