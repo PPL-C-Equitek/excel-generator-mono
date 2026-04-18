@@ -18,22 +18,16 @@ DEFAULT_REASONING_STEPS_MAX_ITEMS = 20
 FALLBACK_FINAL_ANSWER = "Unable to parse final answer from model output."
 FALLBACK_REASONING_STEP = "Unable to parse structured reasoning steps from model output."
 
-STEP_LINE_PATTERN = re.compile(
-    r"^(?:step\s*\d+\s*[:.\-)]+\s*|\d+\s*[.)-]\s*|[-*•]\s+)(.+)$",
-    re.IGNORECASE,
-)
-FINAL_ANSWER_PATTERN = re.compile(
-    r"^(?:final\s*answer|answer|conclusion)\s*[:\-]\s*(.+)$",
-    re.IGNORECASE,
-)
-THINKING_LOG_PATTERN = re.compile(
-    r"^(?:thinking\s*log|thinking|reasoning|analysis|thought\s*process)\s*[:\-]\s*(.+)$",
-    re.IGNORECASE,
-)
-STEP_SECTION_PATTERN = re.compile(
-    r"^(?:reasoning\s*steps?|steps?|analysis)\s*[:\-]?\s*$",
-    re.IGNORECASE,
-)
+FINAL_ANSWER_LABELS = {"final answer", "answer", "conclusion"}
+THINKING_LOG_LABELS = {
+    "thinking log",
+    "thinking",
+    "reasoning",
+    "analysis",
+    "thought process",
+}
+STEP_SECTION_HEADERS = {"reasoning step", "reasoning steps", "step", "steps", "analysis"}
+STEP_PREFIX_TOKEN = "step"
 
 
 class TextGenerationProvider(Protocol):
@@ -242,8 +236,45 @@ def _try_parse_json_candidate(text: str) -> Any | None:
 
 
 def _extract_json_from_fenced_blocks(text: str) -> list[str]:
-    matches = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
-    return [candidate.strip() for candidate in matches if candidate.strip()]
+    blocks: list[str] = []
+    cursor = 0
+    text_length = len(text)
+
+    while cursor < text_length:
+        fence_start = text.find("```", cursor)
+        if fence_start == -1:
+            break
+
+        index = fence_start + 3
+        while index < text_length and text[index] in " \t":
+            index += 1
+
+        language_start = index
+        while index < text_length and (text[index].isalnum() or text[index] in "_-"):
+            index += 1
+        language = text[language_start:index].strip().lower()
+
+        while index < text_length and text[index] in " \t":
+            index += 1
+
+        if index < text_length and text[index] in "\r\n":
+            if text[index] == "\r" and index + 1 < text_length and text[index + 1] == "\n":
+                index += 2
+            else:
+                index += 1
+
+        fence_end = text.find("```", index)
+        if fence_end == -1:
+            break
+
+        if language in ("", "json"):
+            candidate = text[index:fence_end].strip()
+            if candidate:
+                blocks.append(candidate)
+
+        cursor = fence_end + 3
+
+    return blocks
 
 
 def _extract_braced_json_candidate(text: str) -> str | None:
@@ -264,18 +295,97 @@ def _split_non_empty_lines(text: str) -> list[str]:
     ]
 
 
+def _split_labeled_line(line: str) -> tuple[str, str] | tuple[None, None]:
+    for separator in (":", "-"):
+        separator_index = line.find(separator)
+        if separator_index <= 0:
+            continue
+
+        label = " ".join(line[:separator_index].strip().lower().split())
+        value = line[separator_index + 1 :].strip()
+        if label:
+            return label, value
+
+    return None, None
+
+
+def _extract_labeled_value(line: str, allowed_labels: set[str]) -> str | None:
+    label, value = _split_labeled_line(line)
+    if label in allowed_labels and value:
+        return value
+    return None
+
+
+def _is_step_section_header(line: str) -> bool:
+    candidate = line.strip().rstrip(":-").strip().lower()
+    normalized = " ".join(candidate.split())
+    return normalized in STEP_SECTION_HEADERS
+
+
+def _extract_step_text(line: str) -> str | None:
+    stripped_line = line.strip()
+    if not stripped_line:
+        return None
+
+    first_char = stripped_line[0]
+    if first_char in "-*•":
+        step_text = stripped_line[1:].lstrip()
+        return step_text or None
+
+    lower_line = stripped_line.lower()
+    if lower_line.startswith(STEP_PREFIX_TOKEN):
+        cursor = len(STEP_PREFIX_TOKEN)
+        while cursor < len(stripped_line) and stripped_line[cursor].isspace():
+            cursor += 1
+
+        digit_start = cursor
+        while cursor < len(stripped_line) and stripped_line[cursor].isdigit():
+            cursor += 1
+
+        if cursor == digit_start:
+            return None
+
+        while cursor < len(stripped_line) and stripped_line[cursor] in ":.-)":
+            cursor += 1
+        while cursor < len(stripped_line) and stripped_line[cursor].isspace():
+            cursor += 1
+
+        step_text = stripped_line[cursor:].strip()
+        return step_text or None
+
+    cursor = 0
+    while cursor < len(stripped_line) and stripped_line[cursor].isdigit():
+        cursor += 1
+
+    if cursor == 0:
+        return None
+
+    while cursor < len(stripped_line) and stripped_line[cursor].isspace():
+        cursor += 1
+
+    if cursor >= len(stripped_line) or stripped_line[cursor] not in ".)-":
+        return None
+
+    cursor += 1
+    while cursor < len(stripped_line) and stripped_line[cursor].isspace():
+        cursor += 1
+
+    step_text = stripped_line[cursor:].strip()
+    return step_text or None
+
+
 def _collect_steps_from_lines(lines: list[str], max_steps: int, max_step_chars: int) -> list[str]:
     steps: list[str] = []
     inside_step_section = False
 
     for line in lines:
-        if STEP_SECTION_PATTERN.match(line):
+        if _is_step_section_header(line):
             inside_step_section = True
             continue
 
-        step_match = STEP_LINE_PATTERN.match(line)
-        if step_match:
-            step = _truncate_text(step_match.group(1).strip(), max_step_chars)
+        step_text = _extract_step_text(line)
+        if step_text is not None:
+            step = _truncate_text(step_text, max_step_chars)
             if step:
                 steps.append(step)
             if len(steps) >= max_steps:
@@ -283,7 +393,9 @@ def _collect_steps_from_lines(lines: list[str], max_steps: int, max_step_chars: 
             continue
 
         if inside_step_section and line:
-            if FINAL_ANSWER_PATTERN.match(line) or THINKING_LOG_PATTERN.match(line):
+            final_answer_value = _extract_labeled_value(line, FINAL_ANSWER_LABELS)
+            thinking_log_value = _extract_labeled_value(line, THINKING_LOG_LABELS)
+            if final_answer_value is not None or thinking_log_value is not None:
                 inside_step_section = False
                 continue
 
@@ -367,14 +479,14 @@ def parse_reasoning_response(raw_output: Any) -> dict[str, Any]:
     final_answer = ""
     thinking_log = ""
     for line in lines:
-        final_match = FINAL_ANSWER_PATTERN.match(line)
-        if final_match and not final_answer:
-            final_answer = _truncate_text(final_match.group(1).strip(), max_final_answer_chars)
+        final_answer_value = _extract_labeled_value(line, FINAL_ANSWER_LABELS)
+        if final_answer_value is not None and not final_answer:
+            final_answer = _truncate_text(final_answer_value, max_final_answer_chars)
             continue
 
-        thinking_match = THINKING_LOG_PATTERN.match(line)
-        if thinking_match and not thinking_log:
-            thinking_log = _truncate_text(thinking_match.group(1).strip(), max_thinking_log_chars)
+        thinking_log_value = _extract_labeled_value(line, THINKING_LOG_LABELS)
+        if thinking_log_value is not None and not thinking_log:
+            thinking_log = _truncate_text(thinking_log_value, max_thinking_log_chars)
             continue
 
     reasoning_steps = _collect_steps_from_lines(
