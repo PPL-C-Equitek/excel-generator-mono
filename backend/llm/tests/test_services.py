@@ -11,9 +11,12 @@ from llm.services.generation_service import (
     LlmGenerationService,
     LlmReasoningService,
     _collect_steps_from_lines,
+    _extract_step_text,
+    _extract_json_from_fenced_blocks,
     _fallback_narrative_steps,
     _extract_braced_json_candidate,
     _get_positive_int_setting,
+    _split_labeled_line,
     _try_parse_json_candidate,
     compose_system_prompt,
     parse_reasoning_response,
@@ -762,6 +765,49 @@ class LlmReasoningServiceTest(SimpleTestCase):
 
 
 class ReasoningParserCoverageTest(SimpleTestCase):
+    def test_extract_json_from_fenced_blocks_supports_whitespace_and_crlf(self):
+        blocks = _extract_json_from_fenced_blocks(
+            """
+            ```   json   \r\n
+            {"final_answer":"A","reasoning_steps":["S1"],"thinking_log":"T"}
+            ```
+            """
+        )
+
+        self.assertEqual(
+            blocks,
+            ['{"final_answer":"A","reasoning_steps":["S1"],"thinking_log":"T"}'],
+        )
+
+    def test_extract_json_from_fenced_blocks_ignores_non_json_language_and_empty_blocks(self):
+        blocks = _extract_json_from_fenced_blocks(
+            """
+            ```python
+            print('hello')
+            ```
+            ```json
+            
+            ```
+            """
+        )
+
+        self.assertEqual(blocks, [])
+
+    def test_extract_json_from_fenced_blocks_stops_gracefully_on_unclosed_fence(self):
+        blocks = _extract_json_from_fenced_blocks("```json\n{\"a\": 1}")
+
+        self.assertEqual(blocks, [])
+
+    def test_extract_json_from_fenced_blocks_supports_inline_json_fence_without_newline(self):
+        blocks = _extract_json_from_fenced_blocks(
+            "prefix ```json{\"final_answer\":\"A\",\"reasoning_steps\":[\"S1\"],\"thinking_log\":\"T\"}``` suffix"
+        )
+
+        self.assertEqual(
+            blocks,
+            ['{"final_answer":"A","reasoning_steps":["S1"],"thinking_log":"T"}'],
+        )
+
     def test_get_positive_int_setting_falls_back_to_default_for_invalid_values(self):
         with override_settings(LLM_REASONING_STEP_MAX_CHARS="invalid"):
             result = _get_positive_int_setting("LLM_REASONING_STEP_MAX_CHARS", 123)
@@ -872,6 +918,39 @@ class ReasoningParserCoverageTest(SimpleTestCase):
         )
 
         self.assertEqual(steps, ["Keep this step."])
+
+    def test_collect_steps_from_lines_handles_zero_max_step_chars(self):
+        steps = _collect_steps_from_lines(
+            ["1. Keep this step."],
+            max_steps=5,
+            max_step_chars=0,
+        )
+
+        self.assertEqual(steps, [])
+
+    def test_extract_step_text_returns_none_for_blank_or_invalid_step_prefix(self):
+        self.assertIsNone(_extract_step_text("   "))
+        self.assertIsNone(_extract_step_text("Step : missing number"))
+        self.assertIsNone(_extract_step_text("12 no-delimiter"))
+        self.assertIsNone(_extract_step_text("1   "))
+
+    def test_parse_reasoning_response_supports_hyphen_labeled_fields(self):
+        result = parse_reasoning_response(
+            """
+            Final Answer - Done safely.
+            Thinking Log - Parsed with separator dash.
+            Step 1: Keep deterministic parsing.
+            """
+        )
+
+        self.assertEqual(result["final_answer"], "Done safely.")
+        self.assertEqual(result["thinking_log"], "Parsed with separator dash.")
+
+    def test_split_labeled_line_skips_empty_label_then_uses_next_separator(self):
+        label, value = _split_labeled_line("   :ignored - usable value")
+
+        self.assertEqual(label, ":ignored")
+        self.assertEqual(value, "usable value")
 
     @override_settings(LLM_REASONING_STEPS_MAX_ITEMS=1)
     def test_parse_reasoning_response_narrative_limits_steps_and_skips_empty_sentences(self):
