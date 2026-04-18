@@ -10,7 +10,14 @@ from llm.services.generation_service import (
     JsonGenerationService,
     LlmGenerationService,
     LlmReasoningService,
+    _collect_steps_from_lines,
+    _fallback_narrative_steps,
+    _extract_braced_json_candidate,
+    _get_positive_int_setting,
+    _try_parse_json_candidate,
     compose_system_prompt,
+    parse_reasoning_response,
+    validate_reasoning_response,
 )
 from llm.services.openai_client import OpenAIServiceError, OpenAIUpstreamError, generate_json, generate_text
 
@@ -752,4 +759,207 @@ class LlmReasoningServiceTest(SimpleTestCase):
         text_provider.generate_text.assert_called_once_with(
             prompt="Summarize this invoice"
         )
+
+
+class ReasoningParserCoverageTest(SimpleTestCase):
+    def test_get_positive_int_setting_falls_back_to_default_for_invalid_values(self):
+        with override_settings(LLM_REASONING_STEP_MAX_CHARS="invalid"):
+            result = _get_positive_int_setting("LLM_REASONING_STEP_MAX_CHARS", 123)
+
+        self.assertEqual(result, 123)
+
+    def test_try_parse_json_candidate_returns_none_for_blank_text(self):
+        self.assertIsNone(_try_parse_json_candidate("   "))
+
+    def test_extract_braced_json_candidate_returns_trimmed_candidate(self):
+        text = "prefix {\"final_answer\":\"ok\"} suffix"
+
+        result = _extract_braced_json_candidate(text)
+
+        self.assertEqual(result, '{"final_answer":"ok"}')
+
+    def test_parse_reasoning_response_handles_none_input_with_fallback(self):
+        result = parse_reasoning_response(None)
+
+        self.assertTrue(result["final_answer"])
+        self.assertEqual(len(result["reasoning_steps"]), 1)
+        self.assertTrue(result["thinking_log"])
+
+    def test_parse_reasoning_response_uses_braced_embedded_json(self):
+        result = parse_reasoning_response(
+            'raw output -> {"final_answer":"A","reasoning_steps":["S1"],"thinking_log":"T"} <- done'
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "final_answer": "A",
+                "reasoning_steps": ["S1"],
+                "thinking_log": "T",
+            },
+        )
+
+    def test_parse_reasoning_response_skips_non_dict_fenced_json_then_uses_next_dict(self):
+        result = parse_reasoning_response(
+            """
+            ```json
+            ["not-a-dict"]
+            ```
+            ```json
+            {"final_answer":"A","reasoning_steps":["S1"],"thinking_log":"T"}
+            ```
+            """
+        )
+
+        self.assertEqual(result["final_answer"], "A")
+        self.assertEqual(result["reasoning_steps"], ["S1"])
+        self.assertEqual(result["thinking_log"], "T")
+
+    @override_settings(LLM_REASONING_STEPS_MAX_ITEMS=1)
+    def test_parse_reasoning_response_respects_step_match_max_items(self):
+        result = parse_reasoning_response(
+            """
+            Step 1: Read subtotal.
+            Step 2: Add tax.
+            Final Answer: Done.
+            """
+        )
+
+        self.assertEqual(result["reasoning_steps"], ["Read subtotal."])
+
+    @override_settings(LLM_REASONING_STEPS_MAX_ITEMS=1)
+    def test_parse_reasoning_response_respects_section_step_max_items(self):
+        result = parse_reasoning_response(
+            """
+            Steps:
+            Read subtotal row.
+            Add tax row.
+            Final Answer: Done.
+            Thinking Log: section mode.
+            """
+        )
+
+        self.assertEqual(result["reasoning_steps"], ["Read subtotal row."])
+        self.assertEqual(result["final_answer"], "Done.")
+
+    def test_parse_reasoning_response_stops_section_steps_on_final_or_thinking_markers(self):
+        result = parse_reasoning_response(
+            """
+            Steps:
+            Collect values.
+            Final Answer: Completed.
+            Thinking Log: summary.
+            """
+        )
+
+        self.assertEqual(result["reasoning_steps"], ["Collect values."])
+
+    def test_parse_reasoning_response_handles_empty_step_from_step_marker_line(self):
+        result = parse_reasoning_response(
+            """
+            1.   
+            2. Keep this step.
+            """
+        )
+
+        self.assertIn("Keep this step.", result["reasoning_steps"])
+
+    def test_collect_steps_from_lines_skips_whitespace_only_step_match(self):
+        steps = _collect_steps_from_lines(
+            ["1.   ", "2. Keep this step."],
+            max_steps=5,
+            max_step_chars=100,
+        )
+
+        self.assertEqual(steps, ["Keep this step."])
+
+    @override_settings(LLM_REASONING_STEPS_MAX_ITEMS=1)
+    def test_parse_reasoning_response_narrative_limits_steps_and_skips_empty_sentences(self):
+        result = parse_reasoning_response("First sentence.   Second sentence?")
+
+        self.assertEqual(result["reasoning_steps"], ["First sentence."])
+
+    @patch("llm.services.generation_service._get_positive_int_setting")
+    def test_parse_reasoning_response_handles_empty_step_inside_section_when_step_truncates_empty(
+        self,
+        mock_get_positive_int_setting,
+    ):
+        def _setting(name, default):
+            if name == "LLM_REASONING_STEP_MAX_CHARS":
+                return 0
+            if name == "LLM_REASONING_STEPS_MAX_ITEMS":
+                return 2
+            return default
+
+        mock_get_positive_int_setting.side_effect = _setting
+        result = parse_reasoning_response(
+            """
+            Steps:
+            Collect values.
+            Final Answer: Done.
+            Thinking Log: Summary.
+            """
+        )
+
+        self.assertTrue(result["reasoning_steps"])
+
+    def test_parse_reasoning_response_continues_when_braced_candidate_is_not_json_object(self):
+        result = parse_reasoning_response(
+            "Final Answer: Completed. Payload: {not valid json}. Thinking Log: done."
+        )
+
+        self.assertEqual(result["final_answer"], "Completed. Payload: {not valid json}. Thinking Log: done.")
+
+    @patch("llm.services.generation_service.re.split", return_value=["", "First sentence.", ""])
+    def test_fallback_narrative_steps_skips_empty_sentences(self, _mock_split):
+        steps = _fallback_narrative_steps("placeholder", max_steps=5, max_step_chars=100)
+
+        self.assertEqual(steps, ["First sentence."])
+
+    @patch("llm.services.generation_service.re.split", return_value=["", ""])
+    def test_fallback_narrative_steps_uses_raw_text_when_split_produces_no_steps(self, _mock_split):
+        steps = _fallback_narrative_steps("Raw fallback text", max_steps=5, max_step_chars=100)
+
+        self.assertEqual(steps, ["Raw fallback text"])
+
+    @patch("llm.services.generation_service._fallback_narrative_steps", return_value=[])
+    @patch("llm.services.generation_service._collect_steps_from_lines", return_value=[])
+    def test_parse_reasoning_response_uses_last_resort_reasoning_step_when_no_steps(
+        self,
+        _mock_collect,
+        _mock_fallback,
+    ):
+        result = parse_reasoning_response("No parseable structure")
+
+        self.assertEqual(len(result["reasoning_steps"]), 1)
+        self.assertTrue(result["reasoning_steps"][0])
+
+    def test_validate_reasoning_response_rejects_non_object_payload(self):
+        with self.assertRaises(OpenAIServiceError):
+            validate_reasoning_response(["not", "an", "object"])
+
+    def test_validate_reasoning_response_accepts_reasoning_steps_string(self):
+        result = validate_reasoning_response(
+            {
+                "final_answer": "Done",
+                "reasoning_steps": "Single step",
+                "thinking_log": "Summary",
+            }
+        )
+
+        self.assertEqual(result["reasoning_steps"], ["Single step"])
+
+    @patch("llm.services.generation_service._get_positive_int_setting", return_value=0)
+    def test_validate_reasoning_response_raises_when_step_list_becomes_empty_after_limit(
+        self,
+        _mock_max_setting,
+    ):
+        with self.assertRaises(OpenAIServiceError):
+            validate_reasoning_response(
+                {
+                    "final_answer": "Done",
+                    "reasoning_steps": ["Step 1"],
+                    "thinking_log": "Summary",
+                }
+            )
 
