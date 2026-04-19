@@ -5,7 +5,11 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from artifact_history.services import create_artifact_history
-from .serializers import LlmGenerateRequestSerializer, LlmGenerateResponseSerializer
+from .serializers import (
+    LlmGenerateRequestSerializer,
+    LlmGenerateResponseSerializer,
+    SendMessageRequestSerializer,
+)
 from .services.generation_service import (
     CustomSchemaNotFoundError,
     DjangoCustomSchemaPromptSource,
@@ -17,6 +21,7 @@ from .services.openai_client import (
     OpenAIConfigurationError,
     OpenAIServiceError,
     OpenAIUpstreamError,
+    generate_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,3 +140,34 @@ def llm_generate(request):
             status_processing="completed",
         )
     return Response(response_serializer.data)
+
+@api_view(["POST"])
+@require_http_methods(["POST"])
+def send_message(request):
+    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type != "application/json":
+        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+
+    serializer = SendMessageRequestSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"detail": INVALID_REQUEST_DETAIL, "errors": serializer.errors},
+            status=400,
+        )
+
+    message = serializer.validated_data["message"]
+
+    try:
+        reply = generate_text(message)
+    except OpenAIConfigurationError:
+        return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
+    except OpenAIUpstreamError as exc:
+        logger.exception("Upstream LLM provider error while handling send_message request.")
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
+    except OpenAIServiceError:
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    except Exception:
+        logger.exception("Unexpected error while handling send_message request.")
+        return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+
+    return Response({"reply": reply})
