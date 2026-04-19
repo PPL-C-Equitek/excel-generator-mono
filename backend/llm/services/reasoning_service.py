@@ -50,21 +50,16 @@ def get_reasoning_system_prompt() -> str:
 
 def compose_system_prompt(
     base_prompt: str | None,
-    schema_prompt_fragment: str | None = None,
+    *additional_prompt_parts: str | None,
 ) -> str | None:
     parts: list[str] = []
 
-    normalized_base_prompt = base_prompt.strip() if isinstance(base_prompt, str) else ""
-    if normalized_base_prompt:
-        parts.append(normalized_base_prompt)
-
-    normalized_schema_prompt = (
-        schema_prompt_fragment.strip()
-        if isinstance(schema_prompt_fragment, str)
-        else ""
-    )
-    if normalized_schema_prompt:
-        parts.append(normalized_schema_prompt)
+    for prompt_part in (base_prompt, *additional_prompt_parts):
+        normalized_prompt_part = (
+            prompt_part.strip() if isinstance(prompt_part, str) else ""
+        )
+        if normalized_prompt_part:
+            parts.append(normalized_prompt_part)
 
     if not parts:
         return None
