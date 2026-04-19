@@ -1,6 +1,7 @@
 from django.test import SimpleTestCase
 
 from llm.prompts.extraction import build_extraction_prompt
+from llm.prompts.base import sanitize_user_input
 from llm.prompts.schemas import EXTRACTION_OUTPUT_SCHEMA_KEYS
 
 
@@ -49,3 +50,10 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
             EXTRACTION_OUTPUT_SCHEMA_KEYS,
             ["reasoning_steps", "headers", "rows", "final_answer"],
         )
+
+    def test_sanitize_user_input_returns_placeholder_for_blank_text(self):
+        self.assertEqual(sanitize_user_input("   \n\t   "), "[EMPTY_INPUT]")
+
+    def test_sanitize_user_input_raises_for_non_string_input(self):
+        with self.assertRaises(ValueError):
+            sanitize_user_input(None)
