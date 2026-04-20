@@ -74,7 +74,7 @@ class DatabaseHealthCheckTest(SimpleTestCase):
         mock_connection = MagicMock()
         mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
 
-        with patch("monitoring.checks.connections", {"default": mock_connection}):
+        with patch("monitoring.infrastructure.health_checks.connections", {"default": mock_connection}):
             DatabaseHealthCheck(alias="default").perform_check()
 
         mock_cursor.execute.assert_called_once_with("SELECT 1")
@@ -96,7 +96,7 @@ class StorageHealthCheckTest(SimpleTestCase):
     def test_perform_check_raises_when_directory_not_writable(self):
         with TemporaryDirectory() as directory:
             check = StorageHealthCheck(path=directory)
-            with patch("monitoring.checks.os.access", return_value=False):
+            with patch("monitoring.infrastructure.health_checks.os.access", return_value=False):
                 with self.assertRaises(PermissionError):
                     check.perform_check()
 
