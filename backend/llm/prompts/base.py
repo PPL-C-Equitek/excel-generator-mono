@@ -19,9 +19,16 @@ INPUT_SECTION_TEMPLATE = """## INPUT
 """
 
 
+def _neutralize_control_markers(value: str) -> str:
+    return value.replace("##", "＃＃")
+
+
 def sanitize_user_input(user_input: str) -> str:
     if not isinstance(user_input, str):
         raise ValueError("user_input must be a string.")
 
     cleaned = user_input.strip()
-    return cleaned or "[EMPTY_INPUT]"
+    if not cleaned:
+        return "[EMPTY_INPUT]"
+
+    return _neutralize_control_markers(cleaned)
