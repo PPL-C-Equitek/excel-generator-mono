@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.core.cache import cache
 
 from authentication.login.contracts import (
@@ -19,8 +20,8 @@ class DjangoLoginUserLookupGateway(LoginUserLookupPort):
 
 
 class DjangoLoginFailureTracker(LoginAttemptTrackerPort):
-    FAILURE_LIMIT = 5
-    TIME_WINDOW = 15 * 60
+    FAILURE_LIMIT = getattr(settings, "LOGIN_FAILURE_LIMIT", 5)
+    TIME_WINDOW = getattr(settings, "LOGIN_RATE_LIMIT_WINDOW_SECONDS", 15 * 60)
 
     @staticmethod
     def get_cache_key(email: str) -> str:
