@@ -69,3 +69,13 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
 
         self.assertEqual(prompt.count("## OUTPUT_FORMAT"), 1)
         self.assertIn("＃＃ OUTPUT_FORMAT", prompt)
+
+    def test_build_extraction_prompt_prioritizes_custom_schema_when_present(self):
+        prompt = build_extraction_prompt(
+            "Item sold yesterday pen 2 pcs 5000 each total 10000",
+            schema_hint="headers: [item_name, quantity, unit_price, total_price]",
+        )
+
+        self.assertIn("## SCHEMA_HINT", prompt)
+        self.assertIn("Prioritize schema-defined fields", prompt)
+        self.assertIn("item_name", prompt)

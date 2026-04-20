@@ -405,7 +405,10 @@ class LlmGenerationServiceTest(SimpleTestCase):
         result = service.generate({"sheet": "Sheet1"})
 
         self.assertEqual(result, {"status": "ok"})
-        mock_build_extraction_prompt.assert_called_once_with('{"sheet": "Sheet1"}')
+        mock_build_extraction_prompt.assert_called_once_with(
+            '{"sheet": "Sheet1"}',
+            schema_hint=None,
+        )
         schema_prompt_source.get_prompt_fragment.assert_not_called()
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
@@ -432,14 +435,14 @@ class LlmGenerationServiceTest(SimpleTestCase):
         result = service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-1")
 
         self.assertEqual(result, {"status": "ok"})
-        mock_build_extraction_prompt.assert_called_once_with('{"sheet": "Sheet1"}')
+        mock_build_extraction_prompt.assert_called_once_with(
+            '{"sheet": "Sheet1"}',
+            schema_hint="Use only invoice_number and total_amount.",
+        )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
-            system_prompt=(
-                "Base prompt.\n\nExtraction prompt.\n\n"
-                "Use only invoice_number and total_amount."
-            ),
+            system_prompt="Base prompt.\n\nExtraction prompt.",
         )
 
     @patch("llm.services.generation_service.build_extraction_prompt")
@@ -460,7 +463,10 @@ class LlmGenerationServiceTest(SimpleTestCase):
         result = service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-1")
 
         self.assertEqual(result, {"status": "ok"})
-        mock_build_extraction_prompt.assert_called_once_with('{"sheet": "Sheet1"}')
+        mock_build_extraction_prompt.assert_called_once_with(
+            '{"sheet": "Sheet1"}',
+            schema_hint="   ",
+        )
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             system_prompt="Extraction prompt.",
@@ -484,7 +490,8 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
-            '{"name": "Pen", "price": 5000}'
+            '{"name": "Pen", "price": 5000}',
+            schema_hint=None,
         )
         json_generator.generate.assert_called_once_with(
             input_json={"name": "Pen", "price": 5000},
@@ -515,14 +522,13 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
-            '{"name": "Pen", "price": 5000}'
+            '{"name": "Pen", "price": 5000}',
+            schema_hint="Use only invoice_number and total_amount.",
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
         json_generator.generate.assert_called_once_with(
             input_json={"name": "Pen", "price": 5000},
-            system_prompt=(
-                "Extraction prompt.\n\nUse only invoice_number and total_amount."
-            ),
+            system_prompt="Extraction prompt.",
         )
 
     @patch("llm.services.generation_service.CustomSchema.objects.get")

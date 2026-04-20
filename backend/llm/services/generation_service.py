@@ -87,18 +87,20 @@ class LlmGenerationService:
         input_json: dict[str, Any] | list[Any],
         custom_schema_id=None,
     ) -> dict[str, Any] | list[Any]:
-        extraction_prompt = build_extraction_prompt(json.dumps(input_json))
-
         schema_prompt_fragment = None
         if custom_schema_id is not None:
             schema_prompt_fragment = self.schema_prompt_source.get_prompt_fragment(
                 custom_schema_id
             )
 
+        extraction_prompt = build_extraction_prompt(
+            json.dumps(input_json),
+            schema_hint=schema_prompt_fragment,
+        )
+
         effective_system_prompt = compose_system_prompt(
             self.base_system_prompt_provider(),
             extraction_prompt,
-            schema_prompt_fragment,
         )
         return self.json_generator.generate(
             input_json=input_json,
