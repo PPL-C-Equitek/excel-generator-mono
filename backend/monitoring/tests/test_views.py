@@ -100,3 +100,15 @@ class MonitoringViewsTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"], "ok")
         mocked_get_service.assert_called_once()
+
+    def test_live_endpoint_rejects_post_method(self):
+        response = self.client.post("/monitoring/live/")
+        self.assertEqual(response.status_code, 405)
+
+    def test_ready_endpoint_rejects_post_method(self):
+        response = self.client.post("/monitoring/ready/")
+        self.assertEqual(response.status_code, 405)
+
+    def test_stats_endpoint_rejects_post_method(self):
+        response = self.client.post("/monitoring/stats/")
+        self.assertEqual(response.status_code, 405)
