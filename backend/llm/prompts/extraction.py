@@ -1,9 +1,7 @@
 from .base import (
-    INPUT_SECTION_TEMPLATE,
     QUALITY_SECTION,
     ROLE_SECTION,
     TASK_SECTION,
-    sanitize_user_input,
 )
 from .schemas import (
     AMBIGUOUS_CASE_SECTION,
@@ -25,8 +23,7 @@ def _build_schema_hint_section(schema_hint: str | None) -> str | None:
     )
 
 
-def build_extraction_prompt(user_input: str, schema_hint: str | None = None) -> str:
-    sanitized_user_input = sanitize_user_input(user_input)
+def build_extraction_prompt(schema_hint: str | None = None) -> str:
     schema_hint_section = _build_schema_hint_section(schema_hint)
 
     sections = [
@@ -40,9 +37,5 @@ def build_extraction_prompt(user_input: str, schema_hint: str | None = None) -> 
 
     if schema_hint_section:
         sections.append(schema_hint_section.strip())
-
-    sections.extend([
-        INPUT_SECTION_TEMPLATE.format(sanitized_user_input=sanitized_user_input).strip(),
-    ])
 
     return "\n\n".join(sections)

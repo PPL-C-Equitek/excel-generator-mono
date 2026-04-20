@@ -94,7 +94,6 @@ class LlmGenerationService:
             )
 
         extraction_prompt = build_extraction_prompt(
-            json.dumps(input_json),
             schema_hint=schema_prompt_fragment,
         )
 

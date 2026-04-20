@@ -406,7 +406,6 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
-            '{"sheet": "Sheet1"}',
             schema_hint=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_not_called()
@@ -436,7 +435,6 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
-            '{"sheet": "Sheet1"}',
             schema_hint="Use only invoice_number and total_amount.",
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
@@ -464,7 +462,6 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
-            '{"sheet": "Sheet1"}',
             schema_hint="   ",
         )
         json_generator.generate.assert_called_once_with(
@@ -490,7 +487,6 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
-            '{"name": "Pen", "price": 5000}',
             schema_hint=None,
         )
         json_generator.generate.assert_called_once_with(
@@ -522,7 +518,6 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
-            '{"name": "Pen", "price": 5000}',
             schema_hint="Use only invoice_number and total_amount.",
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
