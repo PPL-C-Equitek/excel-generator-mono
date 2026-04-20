@@ -172,3 +172,99 @@ class MonitoringViewsTest(APITestCase):
         response = self.client.post("/monitoring/stats/")
         self.assertEqual(response.status_code, 405)
 
+    def test_access_endpoint_returns_unauthenticated_decision(self):
+        response = self.client.get("/monitoring/access/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                "allowed": False,
+                "reason": "unauthenticated",
+            },
+        )
+
+    def test_access_endpoint_returns_no_account_decision_for_verified_user_without_monitoring_account(
+        self,
+    ):
+        user = User.objects.create_user(
+            email="access-no-account@example.com",
+            name="Access No Account",
+            status="verified",
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get("/monitoring/access/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                "allowed": False,
+                "reason": "no_account",
+            },
+        )
+
+    def test_access_endpoint_returns_unverified_decision(self):
+        user = User.objects.create_user(
+            email="access-unverified@example.com",
+            name="Access Unverified",
+            status="unverified",
+        )
+        MonitoringAccount.objects.create(user=user, is_active=True)
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get("/monitoring/access/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                "allowed": False,
+                "reason": "unverified",
+            },
+        )
+
+    def test_access_endpoint_returns_inactive_decision(self):
+        user = User.objects.create_user(
+            email="access-inactive@example.com",
+            name="Access Inactive",
+            status="verified",
+        )
+        MonitoringAccount.objects.create(user=user, is_active=False)
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get("/monitoring/access/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                "allowed": False,
+                "reason": "inactive",
+            },
+        )
+
+    def test_access_endpoint_returns_ok_decision(self):
+        user = User.objects.create_user(
+            email="access-ok@example.com",
+            name="Access OK",
+            status="verified",
+        )
+        MonitoringAccount.objects.create(user=user, is_active=True)
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get("/monitoring/access/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                "allowed": True,
+                "reason": "ok",
+            },
+        )
+
+    def test_access_endpoint_rejects_post_method(self):
+        response = self.client.post("/monitoring/access/")
+        self.assertEqual(response.status_code, 405)

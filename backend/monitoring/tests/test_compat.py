@@ -15,4 +15,4 @@ class MonitoringCompatibilityModuleTest(SimpleTestCase):
         self.assertIs(legacy_views.live, http_views.live)
         self.assertIs(legacy_views.ready, http_views.ready)
         self.assertIs(legacy_views.stats, http_views.stats)
-
+        self.assertIs(legacy_views.access, http_views.access)
