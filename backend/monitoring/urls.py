@@ -1,11 +1,3 @@
-from django.urls import path
+from monitoring.interfaces.http.urls import urlpatterns
 
-from . import views
-
-
-urlpatterns = [
-    path("monitoring/live/", views.live),
-    path("monitoring/ready/", views.ready),
-    path("monitoring/stats/", views.stats),
-]
-
+__all__ = ["urlpatterns"]

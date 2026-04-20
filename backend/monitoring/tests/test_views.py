@@ -7,7 +7,7 @@ from rest_framework.test import APISimpleTestCase
 
 @override_settings(ROOT_URLCONF="monitoring.urls")
 class MonitoringViewsTest(APISimpleTestCase):
-    @patch("monitoring.views.get_monitoring_service")
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
     def test_live_endpoint_returns_payload(self, mocked_get_service):
         service = Mock()
         service.live.return_value = {"status": "ok", "timestamp": "2026-04-20T10:00:00"}
@@ -22,7 +22,7 @@ class MonitoringViewsTest(APISimpleTestCase):
         )
         service.live.assert_called_once()
 
-    @patch("monitoring.views.get_monitoring_service")
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
     def test_ready_endpoint_uses_service_http_status(self, mocked_get_service):
         service = Mock()
         service.readiness.return_value = (
@@ -37,7 +37,7 @@ class MonitoringViewsTest(APISimpleTestCase):
         self.assertEqual(response.data["status"], "down")
         service.readiness.assert_called_once()
 
-    @patch("monitoring.views.get_monitoring_service")
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
     @override_settings(MONITORING_API_TOKEN="")
     def test_stats_endpoint_allows_access_when_token_not_configured(
         self,
@@ -58,7 +58,7 @@ class MonitoringViewsTest(APISimpleTestCase):
         self.assertEqual(response.data["status"], "ok")
         service.stats.assert_called_once()
 
-    @patch("monitoring.views.get_monitoring_service")
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
     @override_settings(MONITORING_API_TOKEN="secret-token")
     def test_stats_endpoint_rejects_missing_token_header(self, mocked_get_service):
         response = self.client.get("/monitoring/stats/")
@@ -68,7 +68,7 @@ class MonitoringViewsTest(APISimpleTestCase):
         self.assertEqual(response.data["message"], "Unauthorized monitoring access.")
         mocked_get_service.assert_not_called()
 
-    @patch("monitoring.views.get_monitoring_service")
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
     @override_settings(MONITORING_API_TOKEN="secret-token")
     def test_stats_endpoint_rejects_invalid_token_header(self, mocked_get_service):
         response = self.client.get(
@@ -79,7 +79,7 @@ class MonitoringViewsTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 403)
         mocked_get_service.assert_not_called()
 
-    @patch("monitoring.views.get_monitoring_service")
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
     @override_settings(MONITORING_API_TOKEN="secret-token")
     def test_stats_endpoint_accepts_valid_token_header(self, mocked_get_service):
         service = SimpleNamespace(
@@ -100,4 +100,3 @@ class MonitoringViewsTest(APISimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"], "ok")
         mocked_get_service.assert_called_once()
-
