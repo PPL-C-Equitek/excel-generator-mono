@@ -24,6 +24,15 @@ from authentication.serializers import LoginSerializer
 
 logger = logging.getLogger(__name__)
 
+LOGIN_HTTP_UNEXPECTED_ERRORS = (
+    RuntimeError,
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    OSError,
+)
+
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
@@ -81,7 +90,7 @@ class LoginView(APIView):
                 {"message": LOGIN_SERVER_ERROR_MESSAGE},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        except Exception:
+        except LOGIN_HTTP_UNEXPECTED_ERRORS:
             logger.exception("Unhandled error during login.")
             return Response(
                 {"message": LOGIN_SERVER_ERROR_MESSAGE},

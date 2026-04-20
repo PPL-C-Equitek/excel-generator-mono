@@ -24,6 +24,15 @@ from authentication.models import User
 
 logger = logging.getLogger(__name__)
 
+LOGIN_USE_CASE_OPERATION_ERRORS = (
+    RuntimeError,
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    OSError,
+)
+
 
 class DefaultLoginUserUseCase(LoginUserUseCase):
     def __init__(
@@ -69,7 +78,7 @@ class DefaultLoginUserUseCase(LoginUserUseCase):
             )
         except (LoginRateLimitedError, InvalidCredentialsError, EmailNotVerifiedError):
             raise
-        except Exception as exc:
+        except LOGIN_USE_CASE_OPERATION_ERRORS as exc:
             raise LoginServiceError("Login failed") from exc
 
     def _lookup_user(self, email: str) -> User:
