@@ -1,23 +1,21 @@
 from rest_framework.permissions import BasePermission
 
-from monitoring.models import MonitoringAccount
+from monitoring.application.access_policy import MonitoringAccessPolicy
 
 
 class IsMonitoringAccount(BasePermission):
     message = "Monitoring account access is required."
+    _messages_by_reason = {
+        "unauthenticated": "Authentication credentials were not provided.",
+        "unverified": "Verified account is required.",
+        "no_account": "Monitoring account access is required.",
+        "inactive": "Monitoring account is inactive.",
+    }
 
     def has_permission(self, request, view) -> bool:
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-
-        if getattr(user, "status", None) != "verified":
-            return False
-
-        try:
-            account = user.monitoring_account
-        except MonitoringAccount.DoesNotExist:
-            return False
-
-        return bool(account.has_access)
-
+        decision = MonitoringAccessPolicy().evaluate(getattr(request, "user", None))
+        self.message = self._messages_by_reason.get(
+            decision.reason,
+            "Monitoring account access is required.",
+        )
+        return decision.allowed
