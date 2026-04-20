@@ -1,6 +1,10 @@
-from .checks import DatabaseHealthCheck, OpenAIConfigHealthCheck, StorageHealthCheck
-from .repositories import InMemoryMetricsRepository
-from .services import MonitoringService, ReadinessService
+from monitoring.application.services import MonitoringService, ReadinessService
+from monitoring.infrastructure.health_checks import (
+    DatabaseHealthCheck,
+    OpenAIConfigHealthCheck,
+    StorageHealthCheck,
+)
+from monitoring.infrastructure.repositories import InMemoryMetricsRepository
 
 _monitoring_service: MonitoringService | None = None
 
@@ -29,4 +33,3 @@ def get_monitoring_service() -> MonitoringService:
 def reset_monitoring_service_for_tests() -> None:
     global _monitoring_service
     _monitoring_service = None
-
