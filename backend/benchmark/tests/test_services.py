@@ -125,6 +125,20 @@ class DatasetLoaderTest(TestCase):
         with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
             self.loader.load(dataset_path, self.schema)
 
+    def test_load_rejects_json_when_required_columns_are_missing(self):
+        dataset_path = self._write_json(
+            "dataset.json",
+            payload=[
+                {
+                    "question": "Largest planet?",
+                    "answer": "Jupiter",
+                }
+            ],
+        )
+
+        with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
+            self.loader.load(dataset_path, self.schema)
+
     def test_load_rejects_json_object_top_level_instead_of_list(self):
         dataset_path = self._write_json(
             "dataset.json",
@@ -165,12 +179,32 @@ class DatasetLoaderTest(TestCase):
         with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
             self.loader.load(dataset_path, None)
 
+    def test_load_rejects_malformed_schema_when_columns_is_not_a_list(self):
+        dataset_path = self._write_json(
+            "dataset.json",
+            payload=[],
+        )
+        malformed_schema = {"columns": "question,answer,score"}
+
+        with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
+            self.loader.load(dataset_path, malformed_schema)
+
     def test_load_rejects_malformed_schema_columns_shape(self):
         dataset_path = self._write_json(
             "dataset.json",
             payload=[],
         )
         malformed_schema = {"columns": [{"required": True}]}
+
+        with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
+            self.loader.load(dataset_path, malformed_schema)
+
+    def test_load_rejects_malformed_schema_when_column_entry_is_not_an_object(self):
+        dataset_path = self._write_json(
+            "dataset.json",
+            payload=[],
+        )
+        malformed_schema = {"columns": ["question"]}
 
         with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
             self.loader.load(dataset_path, malformed_schema)
@@ -271,6 +305,133 @@ class DatasetLoaderTest(TestCase):
                 },
             ],
         )
+
+    def test_load_skips_csv_row_with_empty_required_value_without_crashing(self):
+        dataset_path = self._write_csv(
+            "dataset.csv",
+            rows=[
+                {
+                    "question": "Largest ocean?",
+                    "answer": "",
+                    "score": "90",
+                    "evaluated_at": "2026-04-26",
+                },
+                {
+                    "question": "Smallest prime number?",
+                    "answer": "2",
+                    "score": "99",
+                    "evaluated_at": "2026-04-27",
+                },
+            ],
+        )
+
+        rows = self.loader.load(dataset_path, self.schema)
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "question": "Smallest prime number?",
+                    "answer": "2",
+                    "score": 99,
+                    "evaluated_at": "2026-04-27",
+                }
+            ],
+        )
+
+    def test_load_skips_non_mapping_json_items_when_required_columns_exist(self):
+        dataset_path = self._write_json(
+            "dataset.json",
+            payload=[
+                {
+                    "question": "Largest ocean?",
+                    "answer": "Pacific",
+                    "score": 90,
+                    "evaluated_at": "2026-04-26",
+                },
+                "corrupted-item",
+                {
+                    "question": "Smallest prime number?",
+                    "answer": "2",
+                    "score": 99,
+                    "evaluated_at": "2026-04-27",
+                },
+            ],
+        )
+
+        rows = self.loader.load(dataset_path, self.schema)
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "question": "Largest ocean?",
+                    "answer": "Pacific",
+                    "score": 90,
+                    "evaluated_at": "2026-04-26",
+                },
+                {
+                    "question": "Smallest prime number?",
+                    "answer": "2",
+                    "score": 99,
+                    "evaluated_at": "2026-04-27",
+                },
+            ],
+        )
+
+    def test_load_sets_optional_missing_value_to_none(self):
+        dataset_path = self._write_json(
+            "dataset.json",
+            payload=[
+                {
+                    "question": "Largest ocean?",
+                    "answer": "Pacific",
+                    "score": 90,
+                }
+            ],
+        )
+
+        rows = self.loader.load(dataset_path, self.schema)
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "question": "Largest ocean?",
+                    "answer": "Pacific",
+                    "score": 90,
+                    "evaluated_at": None,
+                }
+            ],
+        )
+
+    def test_parse_row_rejects_non_mapping_input(self):
+        with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
+            self.loader._parse_row("not-a-dict", self.schema["columns"])
+
+    def test_parse_row_rejects_empty_required_value(self):
+        with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
+            self.loader._parse_row(
+                {
+                    "question": "Largest ocean?",
+                    "answer": "",
+                    "score": 90,
+                    "evaluated_at": "2026-04-26",
+                },
+                self.schema["columns"],
+            )
+
+    def test_parse_row_keeps_value_for_unsupported_type(self):
+        columns = [
+            {"name": "metadata", "type": "boolean", "required": True},
+        ]
+
+        row = self.loader._parse_row({"metadata": "raw-value"}, columns)
+
+        self.assertEqual(row, {"metadata": "raw-value"})
+
+    def test_is_empty_value_returns_true_for_none(self):
+        self.assertTrue(self.loader._is_empty_value(None))
 
     def _write_csv(self, filename, rows, fieldnames=None):
         fieldnames = fieldnames or ["question", "answer", "score", "evaluated_at"]
