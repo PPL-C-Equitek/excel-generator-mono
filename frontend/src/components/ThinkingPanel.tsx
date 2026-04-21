@@ -6,7 +6,10 @@ export interface ThinkingPanelProps {
 const containerClassName =
   "max-h-[400px] overflow-y-auto rounded-md border border-gray-200 bg-white p-4";
 
-export default function ThinkingPanel({ status, content }: ThinkingPanelProps) {
+export default function ThinkingPanel({
+  status,
+  content,
+}: Readonly<ThinkingPanelProps>) {
   if (status === "error") {
     return (
       <section aria-live="polite" className={containerClassName}>
