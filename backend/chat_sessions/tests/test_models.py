@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -103,6 +104,20 @@ class ChatSessionModelTest(TestCase):
         session.delete()
 
         self.assertFalse(GeneratedOutput.objects.filter(id=generated_output.id).exists())
+
+    def test_generated_output_save_rejects_non_object_output_json(self):
+        session = Session.objects.create(
+            owner=self.user,
+            title="Transformasi Excel April",
+        )
+
+        generated_output = GeneratedOutput(
+            session=session,
+            output_json=[],
+        )
+
+        with self.assertRaises(ValidationError):
+            generated_output.save()
 
     def test_sessions_are_ordered_by_latest_activity_fields(self):
         older = Session.objects.create(
