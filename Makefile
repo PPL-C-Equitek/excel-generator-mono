@@ -6,7 +6,7 @@ BACKEND_DIR := $(ROOT_DIR)/backend
 FRONTEND_DIR := $(ROOT_DIR)/frontend
 SCRIPTS_DIR := $(ROOT_DIR)/scripts
 
-.PHONY: help deploy deploy-backend deploy-frontend init-db \
+.PHONY: help deploy deploy-backend deploy-frontend \
 	backend-install backend-migrate backend-seed backend-run backend-test backend-test-coverage \
 	frontend-install frontend-build frontend-run frontend-dev frontend-test frontend-test-coverage \
 	docker-up docker-down
