@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Callable, Iterable
 
 from monitoring.domain.contracts import HealthCheck, MetricsRepository
-from monitoring.domain.entities import CheckResult, RequestMetricEvent
+from monitoring.domain.entities import AuthMetricEvent, CheckResult, RequestMetricEvent
 
 
 class ReadinessService:
@@ -71,10 +71,24 @@ class MonitoringService:
         )
         self._metrics_repository.record_request(event)
 
+    def record_event(
+        self,
+        *,
+        event_name: str,
+        outcome: str,
+        endpoint: str = "",
+    ) -> None:
+        event = AuthMetricEvent(
+            event_name=event_name,
+            outcome=outcome,
+            endpoint=endpoint,
+            created_at=self._now(),
+        )
+        self._metrics_repository.record_event(event)
+
     def stats(self) -> dict[str, object]:
         snapshot = self._metrics_repository.get_snapshot()
         return {
             "status": "ok",
             **snapshot.to_dict(),
         }
-

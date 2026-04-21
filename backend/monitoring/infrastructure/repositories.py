@@ -3,7 +3,13 @@ from datetime import datetime
 from threading import Lock
 from typing import Callable
 
-from monitoring.domain.entities import MetricsSnapshot, RequestMetricEvent, RouteMetricSnapshot
+from monitoring.domain.entities import (
+    AuthMetricEvent,
+    EventMetricSnapshot,
+    MetricsSnapshot,
+    RequestMetricEvent,
+    RouteMetricSnapshot,
+)
 
 
 @dataclass
@@ -40,6 +46,7 @@ class InMemoryMetricsRepository:
         self._now = now or datetime.utcnow
         self._lock = Lock()
         self._routes: dict[tuple[str, str], _RouteAccumulator] = {}
+        self._events: dict[tuple[str, str], int] = {}
 
     def record_request(self, event: RequestMetricEvent) -> None:
         route = (event.route or "").strip() or "unknown"
@@ -52,9 +59,17 @@ class InMemoryMetricsRepository:
                 self._routes[key] = accumulator
             accumulator.register(event)
 
+    def record_event(self, event: AuthMetricEvent) -> None:
+        event_name = (event.event_name or "").strip().lower() or "unknown"
+        outcome = (event.outcome or "").strip().lower() or "unknown"
+        key = (event_name, outcome)
+        with self._lock:
+            self._events[key] = self._events.get(key, 0) + 1
+
     def get_snapshot(self) -> MetricsSnapshot:
         with self._lock:
             items = list(self._routes.items())
+            event_items = list(self._events.items())
 
         route_snapshots = [
             acc.to_snapshot(route=route, method=method)
@@ -62,6 +77,17 @@ class InMemoryMetricsRepository:
         ]
         route_snapshots.sort(
             key=lambda item: (-item.total_requests, item.route, item.method)
+        )
+        event_snapshots = [
+            EventMetricSnapshot(
+                event_name=event_name,
+                outcome=outcome,
+                count=count,
+            )
+            for (event_name, outcome), count in event_items
+        ]
+        event_snapshots.sort(
+            key=lambda item: (-item.count, item.event_name, item.outcome)
         )
 
         total_requests = sum(item.total_requests for item in route_snapshots)
@@ -71,9 +97,10 @@ class InMemoryMetricsRepository:
             total_requests=total_requests,
             total_errors=total_errors,
             routes=tuple(route_snapshots),
+            events=tuple(event_snapshots),
         )
 
     def reset(self) -> None:
         with self._lock:
             self._routes.clear()
-
+            self._events.clear()
