@@ -2,7 +2,7 @@ from datetime import datetime
 
 from django.test import SimpleTestCase
 
-from monitoring.entities import RequestMetricEvent
+from monitoring.entities import AuthMetricEvent, RequestMetricEvent
 from monitoring.repositories import InMemoryMetricsRepository, _RouteAccumulator
 
 
@@ -36,6 +36,20 @@ class InMemoryMetricsRepositoryTest(SimpleTestCase):
             created_at=datetime(2026, 4, 20, 11, 59, 0),
         )
 
+    def _auth_event(
+        self,
+        *,
+        event_name="login",
+        outcome="success",
+        endpoint="/auth/login/",
+    ):
+        return AuthMetricEvent(
+            event_name=event_name,
+            outcome=outcome,
+            endpoint=endpoint,
+            created_at=datetime(2026, 4, 20, 11, 59, 0),
+        )
+
     def test_get_snapshot_returns_empty_totals_when_no_data(self):
         snapshot = self.repo.get_snapshot()
 
@@ -43,6 +57,7 @@ class InMemoryMetricsRepositoryTest(SimpleTestCase):
         self.assertEqual(snapshot.total_requests, 0)
         self.assertEqual(snapshot.total_errors, 0)
         self.assertEqual(snapshot.routes, ())
+        self.assertEqual(snapshot.events, ())
 
     def test_record_request_aggregates_totals_and_errors(self):
         self.repo.record_request(self._event(status_code=200, duration_ms=100.0))
@@ -84,9 +99,38 @@ class InMemoryMetricsRepositoryTest(SimpleTestCase):
 
     def test_reset_clears_accumulated_metrics(self):
         self.repo.record_request(self._event())
+        self.repo.record_event(self._auth_event())
         self.repo.reset()
 
         snapshot = self.repo.get_snapshot()
         self.assertEqual(snapshot.total_requests, 0)
         self.assertEqual(snapshot.routes, ())
+        self.assertEqual(snapshot.events, ())
 
+    def test_record_event_aggregates_event_counters(self):
+        self.repo.record_event(self._auth_event(event_name="login", outcome="success"))
+        self.repo.record_event(self._auth_event(event_name="login", outcome="success"))
+        self.repo.record_event(self._auth_event(event_name="login", outcome="client_error"))
+
+        snapshot = self.repo.get_snapshot()
+        events = snapshot.to_dict()["events"]
+        self.assertEqual(events["login"]["success"], 2)
+        self.assertEqual(events["login"]["client_error"], 1)
+
+    def test_record_event_normalizes_empty_name_and_outcome(self):
+        self.repo.record_event(self._auth_event(event_name=" ", outcome=" "))
+
+        snapshot = self.repo.get_snapshot()
+        events = snapshot.to_dict()["events"]
+        self.assertEqual(events["unknown"]["unknown"], 1)
+
+    def test_get_snapshot_sorts_events_by_count_then_name_and_outcome(self):
+        self.repo.record_event(self._auth_event(event_name="register", outcome="success"))
+        self.repo.record_event(self._auth_event(event_name="login", outcome="success"))
+        self.repo.record_event(self._auth_event(event_name="login", outcome="success"))
+
+        events = self.repo.get_snapshot().events
+        self.assertEqual(
+            [(item.event_name, item.outcome, item.count) for item in events],
+            [("login", "success", 2), ("register", "success", 1)],
+        )
