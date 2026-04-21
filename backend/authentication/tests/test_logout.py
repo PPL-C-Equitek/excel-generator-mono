@@ -357,3 +357,33 @@ class BaseLogoutViewErrorMappingTest(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertEqual(response.data["message"], "Unauthorized")
+
+    @patch("authentication.logout.http.User")
+    def test_base_logout_view_increments_session_version_with_atomic_database_update(
+        self,
+        mock_user_model,
+    ):
+        use_case = MagicMock()
+        mock_queryset = mock_user_model.objects.filter.return_value
+        initial_session_version = self.user.session_version
+
+        class TestableLogoutView(BaseLogoutView):
+            authentication_classes = []
+            permission_classes = []
+
+            def get_logout_use_case(self):  # type: ignore[override]
+                return use_case
+
+        request = self.factory.post(
+            "/auth/logout/",
+            {"refresh_token": "valid-refresh-token"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = TestableLogoutView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_user_model.objects.filter.assert_called_once_with(pk=self.user.pk)
+        self.assertEqual(mock_queryset.update.call_count, 1)
+        self.assertEqual(request.user.session_version, initial_session_version + 1)

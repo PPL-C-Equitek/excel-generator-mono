@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.db.models import F
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -8,6 +9,7 @@ from rest_framework.views import APIView
 from authentication.jwt_authentication import JWTAuthentication
 from authentication.logout.adapters import build_logout_user_use_case
 from authentication.logout.entities import LogoutCommand
+from authentication.models import User
 
 
 class LogoutView(APIView):
@@ -29,8 +31,10 @@ class LogoutView(APIView):
         try:
             command = LogoutCommand(refresh_token=refresh_token)
             self.get_logout_use_case().execute(command)
+            User.objects.filter(pk=request.user.pk).update(
+                session_version=F("session_version") + 1
+            )
             request.user.session_version += 1
-            request.user.save(update_fields=["session_version"])
             return Response(status=status.HTTP_200_OK)
         except ValueError:
             return Response(
