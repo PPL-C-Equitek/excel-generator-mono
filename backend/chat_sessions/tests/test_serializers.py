@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase
+from rest_framework import serializers
 
 from chat_sessions.serializers import (
     SessionDetailSerializer,
@@ -76,3 +77,9 @@ class ChatSessionSerializerTest(SimpleTestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("title", serializer.errors)
+
+    def test_session_title_update_serializer_validate_title_rejects_whitespace_only_value(self):
+        serializer = SessionTitleUpdateSerializer()
+
+        with self.assertRaises(serializers.ValidationError):
+            serializer.validate_title("   ")
