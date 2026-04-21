@@ -15,6 +15,8 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "rest_framework",
+    "authentication",
+    "monitoring",
 ]
 
 MIDDLEWARE = [
@@ -44,4 +46,3 @@ TEMPLATES = [
 MEDIA_ROOT = str(BASE_DIR / "media")
 OPENAI_API_KEY = ""
 MONITORING_API_TOKEN = ""
-
