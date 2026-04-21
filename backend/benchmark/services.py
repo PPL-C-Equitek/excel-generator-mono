@@ -19,78 +19,112 @@ class DatasetLoader:
 
     def load_and_validate(self, dataset_path, schema):
         path = Path(dataset_path)
-        self._dataset_path = path
         extension = path.suffix.lower()
 
         if extension not in self.allowed_extensions:
             raise DatasetValidationError()
 
-        columns = schema.get("columns", [])
-        mandatory_columns = {
-            column["name"]
-            for column in columns
-            if column.get("required")
-        }
-        self._schema_columns = columns
+        columns, mandatory_columns = self._validate_schema(schema)
 
         if extension == ".csv":
-            return self._parse_csv(mandatory_columns)
+            return self._parse_csv(path, columns, mandatory_columns)
 
-        return self._parse_json(mandatory_columns)
+        return self._parse_json(path, columns, mandatory_columns)
 
-    def _parse_csv(self, mandatory_columns):
-        with self._dataset_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
-            reader = csv.DictReader(csv_file)
-            fieldnames = set(reader.fieldnames or [])
+    def _parse_csv(self, dataset_path, columns, mandatory_columns):
+        try:
+            with dataset_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+                reader = csv.DictReader(csv_file)
+                fieldnames = set(reader.fieldnames or [])
+
+                if not mandatory_columns.issubset(fieldnames):
+                    raise DatasetValidationError()
+
+                parsed_rows = []
+                for row in reader:
+                    if self._is_empty_mapping(row):
+                        continue
+
+                    try:
+                        parsed_rows.append(self._parse_row(row, columns))
+                    except (TypeError, ValueError, DatasetValidationError):
+                        continue
+
+                return parsed_rows
+        except DatasetValidationError:
+            raise
+        except (csv.Error, UnicodeDecodeError, OSError, Exception) as exc:
+            raise DatasetValidationError() from exc
+
+    def _parse_json(self, dataset_path, columns, mandatory_columns):
+        try:
+            with dataset_path.open("r", encoding="utf-8") as json_file:
+                payload = json.load(json_file)
+
+            if not isinstance(payload, list):
+                raise DatasetValidationError()
+
+            fieldnames = set()
+            for item in payload:
+                if isinstance(item, dict):
+                    fieldnames.update(item.keys())
 
             if not mandatory_columns.issubset(fieldnames):
                 raise DatasetValidationError()
 
             parsed_rows = []
-            for row in reader:
+            for row in payload:
                 if self._is_empty_mapping(row):
                     continue
 
                 try:
-                    parsed_rows.append(self._parse_row(row))
+                    parsed_rows.append(self._parse_row(row, columns))
                 except (TypeError, ValueError, DatasetValidationError):
                     continue
 
-        return parsed_rows
+            return parsed_rows
+        except DatasetValidationError:
+            raise
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError, Exception) as exc:
+            raise DatasetValidationError() from exc
 
-    def _parse_json(self, mandatory_columns):
-        with self._dataset_path.open("r", encoding="utf-8") as json_file:
-            payload = json.load(json_file)
-
-        if not isinstance(payload, list):
+    def _validate_schema(self, schema):
+        if not isinstance(schema, dict):
             raise DatasetValidationError()
 
-        fieldnames = set()
-        for item in payload:
-            if isinstance(item, dict):
-                fieldnames.update(item.keys())
-
-        if not mandatory_columns.issubset(fieldnames):
+        columns = schema.get("columns")
+        if not isinstance(columns, list):
             raise DatasetValidationError()
 
-        parsed_rows = []
-        for row in payload:
-            if self._is_empty_mapping(row):
-                continue
+        validated_columns = []
+        mandatory_columns = set()
+        for column in columns:
+            if not isinstance(column, dict):
+                raise DatasetValidationError()
 
-            try:
-                parsed_rows.append(self._parse_row(row))
-            except (TypeError, ValueError, DatasetValidationError):
-                continue
+            name = column.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise DatasetValidationError()
 
-        return parsed_rows
+            normalized_column = {
+                "name": name.strip(),
+                "type": column.get("type"),
+                "format": column.get("format"),
+                "required": bool(column.get("required")),
+            }
+            validated_columns.append(normalized_column)
 
-    def _parse_row(self, row):
+            if normalized_column["required"]:
+                mandatory_columns.add(normalized_column["name"])
+
+        return validated_columns, mandatory_columns
+
+    def _parse_row(self, row, columns):
         if not isinstance(row, dict):
             raise DatasetValidationError()
 
         parsed = {}
-        for column in self._schema_columns:
+        for column in columns:
             name = column["name"]
             raw_value = row.get(name)
 

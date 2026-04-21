@@ -1,14 +1,18 @@
 import csv
 import json
-import tempfile
+import shutil
+import uuid
 from pathlib import Path
 
 from django.core.exceptions import ValidationError
+from django.test import override_settings
 from django.test import TestCase
+from django.conf import settings
 
 from benchmark.services import DatasetLoader
 
 
+@override_settings(MEDIA_ROOT=settings.BASE_DIR / ".tmp-tests")
 class DatasetLoaderTest(TestCase):
     def setUp(self):
         self.loader = DatasetLoader()
@@ -120,6 +124,56 @@ class DatasetLoaderTest(TestCase):
 
         with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
             self.loader.load(dataset_path, self.schema)
+
+    def test_load_rejects_json_object_top_level_instead_of_list(self):
+        dataset_path = self._write_json(
+            "dataset.json",
+            payload={
+                "question": "Largest planet?",
+                "answer": "Jupiter",
+                "score": 88,
+            },
+        )
+
+        with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
+            self.loader.load(dataset_path, self.schema)
+
+    def test_load_rejects_corrupt_json_with_invalid_format_message(self):
+        dataset_path = self._write_text(
+            "dataset.json",
+            '{"question": "Largest planet?", "answer": "Jupiter",',
+        )
+
+        with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
+            self.loader.load(dataset_path, self.schema)
+
+    def test_load_rejects_corrupt_csv_with_invalid_encoding(self):
+        dataset_path = self._write_bytes(
+            "dataset.csv",
+            b"\xff\xfe\x00\x00question,answer,score,evaluated_at\n",
+        )
+
+        with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
+            self.loader.load(dataset_path, self.schema)
+
+    def test_load_rejects_malformed_schema_root(self):
+        dataset_path = self._write_json(
+            "dataset.json",
+            payload=[],
+        )
+
+        with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
+            self.loader.load(dataset_path, None)
+
+    def test_load_rejects_malformed_schema_columns_shape(self):
+        dataset_path = self._write_json(
+            "dataset.json",
+            payload=[],
+        )
+        malformed_schema = {"columns": [{"required": True}]}
+
+        with self.assertRaisesMessage(ValidationError, "Format Dataset Tidak Valid"):
+            self.loader.load(dataset_path, malformed_schema)
 
     def test_load_skips_empty_and_corrupted_csv_rows_without_crashing(self):
         dataset_path = self._write_csv(
@@ -237,13 +291,18 @@ class DatasetLoaderTest(TestCase):
         path.write_text(content, encoding="utf-8")
         return path
 
+    def _write_bytes(self, filename, content):
+        path = self._make_temp_path(filename)
+        path.write_bytes(content)
+        return path
+
     def _make_temp_path(self, filename):
-        temp_dir = Path(tempfile.mkdtemp())
+        root_dir = Path(settings.BASE_DIR) / ".tmp-tests" / "benchmark"
+        root_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = root_dir / f"tmp_{uuid.uuid4().hex}"
+        temp_dir.mkdir(parents=True, exist_ok=True)
         self.addCleanup(self._cleanup_dir, temp_dir)
         return temp_dir / filename
 
     def _cleanup_dir(self, path):
-        for child in path.iterdir():
-            if child.is_file():
-                child.unlink()
-        path.rmdir()
+        shutil.rmtree(path, ignore_errors=True)

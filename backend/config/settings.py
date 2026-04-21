@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "file_processing",
     "authentication",
     "artifact_history",
+    "benchmark"
 ]
 
 MIDDLEWARE = [
