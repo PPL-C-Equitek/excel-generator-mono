@@ -31,7 +31,7 @@ class JWTAuthentication(authentication.BaseAuthentication):
             raise exceptions.AuthenticationFailed("Invalid token payload.")
 
         try:
-            user = User.objects.get(id=user_id)
+            user = User.objects.select_related("monitoring_account").get(id=user_id)
         except User.DoesNotExist as exc:
             raise exceptions.AuthenticationFailed("User not found.") from exc
 

@@ -42,7 +42,7 @@ class JWTAuthenticationTest(SimpleTestCase):
         result = self.auth.authenticate(request)
 
         self.assertIsNone(result)
-        mock_user_model.objects.get.assert_not_called()
+        mock_user_model.objects.select_related.assert_not_called()
 
     @patch("authentication.jwt_authentication.User")
     @patch("authentication.jwt_authentication.settings")
@@ -53,7 +53,7 @@ class JWTAuthenticationTest(SimpleTestCase):
         result = self.auth.authenticate(request)
 
         self.assertIsNone(result)
-        mock_user_model.objects.get.assert_not_called()
+        mock_user_model.objects.select_related.assert_not_called()
 
     @patch("authentication.jwt_authentication.settings")
     def test_authenticate_raises_when_jwt_secret_not_configured(self, mock_settings):
@@ -141,7 +141,8 @@ class JWTAuthenticationTest(SimpleTestCase):
         request = self._request_with_header(f"Bearer {token}")
 
         mock_user_model.DoesNotExist = User.DoesNotExist
-        mock_user_model.objects.get.side_effect = User.DoesNotExist()
+        query = mock_user_model.objects.select_related.return_value
+        query.get.side_effect = User.DoesNotExist()
 
         with self.assertRaises(exceptions.AuthenticationFailed) as exc:
             self.auth.authenticate(request)
@@ -157,11 +158,13 @@ class JWTAuthenticationTest(SimpleTestCase):
         request = self._request_with_header(f"Bearer {token}")
 
         expected_user = MagicMock()
-        mock_user_model.objects.get.return_value = expected_user
+        query = mock_user_model.objects.select_related.return_value
+        query.get.return_value = expected_user
 
         user, payload = self.auth.authenticate(request)
 
         self.assertIs(user, expected_user)
         self.assertEqual(payload["user_id"], str(user_id))
         self.assertEqual(payload["type"], "access")
-        mock_user_model.objects.get.assert_called_once_with(id=str(user_id))
+        mock_user_model.objects.select_related.assert_called_once_with("monitoring_account")
+        query.get.assert_called_once_with(id=str(user_id))
