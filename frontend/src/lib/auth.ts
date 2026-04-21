@@ -110,6 +110,11 @@ function readRefreshTokenFromStorage(storage: Storage | undefined): string | nul
     return null
 }
 
+function buildApiUrl(path: string): string {
+    const normalizedPath = path.replace(/^\/+/, '')
+    return `${API_URL}/${normalizedPath}`
+}
+
 export function getStoredRefreshToken(): string | null {
     if (globalThis.window === undefined) {
         return null
@@ -133,15 +138,18 @@ export function storeAuthTokens(accessToken: string, refreshToken: string): void
     emitAuthStateChanged()
 }
 
-export function clearAuthTokens(): void {
+export function clearAuthTokens(options: { emitEvent?: boolean } = {}): void {
     const windowObject = globalThis.window
+    const shouldEmitEvent = options.emitEvent ?? true
 
     for (const key of [...ACCESS_TOKEN_KEYS, ...REFRESH_TOKEN_KEYS, ...USER_METADATA_KEYS]) {
         removeFromStorage(windowObject?.localStorage, key)
         removeFromStorage(windowObject?.sessionStorage, key)
     }
 
-    emitAuthStateChanged()
+    if (shouldEmitEvent) {
+        emitAuthStateChanged()
+    }
 }
 
 export async function refreshAccessToken(): Promise<string | null> {
@@ -197,6 +205,46 @@ export async function getValidAccessToken(): Promise<string | null> {
     }
 
     return refreshAccessToken()
+}
+
+export async function hasValidSession(): Promise<boolean> {
+    if (globalThis.window === undefined) {
+        return false
+    }
+
+    const storedAccessToken = getStoredAccessToken()
+    const storedRefreshToken = getStoredRefreshToken()
+
+    if (!storedAccessToken || !storedRefreshToken) {
+        clearAuthTokens({ emitEvent: false })
+        return false
+    }
+
+    const accessToken = await getValidAccessToken()
+    if (!accessToken) {
+        return false
+    }
+
+    try {
+        const response = await fetch(buildApiUrl('history/?limit=1&offset=0'), {
+            method: 'GET',
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+            },
+        })
+
+        if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                clearAuthTokens({ emitEvent: false })
+            }
+
+            return false
+        }
+
+        return true
+    } catch {
+        return false
+    }
 }
 
 export function getStoredAccessToken(): string | null {

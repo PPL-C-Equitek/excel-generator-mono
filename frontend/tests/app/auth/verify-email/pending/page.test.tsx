@@ -15,12 +15,15 @@ const mockedAxios = axios as Mocked<typeof axios>;
 describe('Verify Email Pending Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    globalThis.sessionStorage.clear();
+    globalThis.localStorage.clear();
   });
 
   test('renders email from query and enables resend button', () => {
     (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('pending@example.com'),
+      get: vi.fn((key: string) => {
+        if (key === 'email') return 'pending@example.com';
+        return null;
+      }),
     });
 
     render(<VerifyEmailPendingPage />);
@@ -31,7 +34,10 @@ describe('Verify Email Pending Page', () => {
 
   test('resend verification calls API and shows success status', async () => {
     (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('pending@example.com'),
+      get: vi.fn((key: string) => {
+        if (key === 'email') return 'pending@example.com';
+        return null;
+      }),
     });
 
     mockedAxios.post.mockResolvedValueOnce({
@@ -65,7 +71,10 @@ describe('Verify Email Pending Page', () => {
 
   test('shows resend error message when request fails', async () => {
     (useSearchParams as Mock).mockReturnValue({
-      get: vi.fn().mockReturnValue('pending@example.com'),
+      get: vi.fn((key: string) => {
+        if (key === 'email') return 'pending@example.com';
+        return null;
+      }),
     });
 
     mockedAxios.post.mockRejectedValueOnce(new Error('Mail service down'));
@@ -78,5 +87,36 @@ describe('Verify Email Pending Page', () => {
     await waitFor(() => {
       expect(screen.getByText(/mail service down/i)).toBeInTheDocument();
     });
+  });
+
+  test('shows resend-specific copy only when arriving from a fresh resend redirect', () => {
+    (useSearchParams as Mock).mockReturnValue({
+      get: vi.fn((key: string) => {
+        if (key === 'email') return 'pending@example.com';
+        if (key === 'resent') return '1';
+        return null;
+      }),
+    });
+
+    render(<VerifyEmailPendingPage />);
+
+    expect(
+      screen.getByText(/kami telah mengirim ulang link verifikasi/i)
+    ).toBeInTheDocument();
+  });
+
+  test('shows generic pending copy when reopening the page without a fresh resend', () => {
+    (useSearchParams as Mock).mockReturnValue({
+      get: vi.fn((key: string) => {
+        if (key === 'email') return 'pending@example.com';
+        return null;
+      }),
+    });
+
+    render(<VerifyEmailPendingPage />);
+
+    expect(
+      screen.getByText(/silakan cek inbox untuk link verifikasi terbaru/i)
+    ).toBeInTheDocument();
   });
 });

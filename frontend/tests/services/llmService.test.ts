@@ -6,7 +6,6 @@ import * as llmService from "@/services/llm";
 import { downloadCsvFile, generateJson, exportToCsv, getDownloadUrl } from "@/services/llm";
 import { server } from "../mocks/server";
 import {
-  handler401,
   handler429,
   handler504,
   handlerArrayOutput,
@@ -165,7 +164,8 @@ describe("generateJson negative (HTTP errors)", () => {
   });
 
   it("maps 401 to user-friendly message", async () => {
-    server.use(handler401);
+    const unauthorizedError = Object.assign(new Error("Unauthorized"), { status: 401 });
+    vi.spyOn(api, "fetchAPI").mockRejectedValueOnce(unauthorizedError);
     await expect(generateJson({ key: "value" })).rejects.toThrow("Invalid API key.");
   });
 
@@ -751,13 +751,23 @@ describe("downloadExcelFile", () => {
 
 describe("downloadCsvFile", () => {
   const originalCreateElement = document.createElement.bind(document);
-  const createSuccessfulDownloadResponse = () =>
+  const createSuccessfulDownloadResponse = (
+    contentType = "text/csv",
+    contentDisposition?: string
+  ) =>
     ({
       ok: true,
       status: 200,
-      headers: new Headers({
-        "Content-Type": "text/csv",
-      }),
+      headers: new Headers(
+        contentDisposition
+          ? {
+              "Content-Type": contentType,
+              "Content-Disposition": contentDisposition,
+            }
+          : {
+              "Content-Type": contentType,
+            }
+      ),
       blob: vi.fn().mockResolvedValue(new Blob(["csv-bytes"])),
     }) as unknown as Response;
 
@@ -776,7 +786,12 @@ describe("downloadCsvFile", () => {
 
   it("downloads the csv file from the csv download endpoint with bearer auth", async () => {
     vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
-    const fetchMock = vi.fn().mockResolvedValue(createSuccessfulDownloadResponse());
+    const fetchMock = vi.fn().mockResolvedValue(
+      createSuccessfulDownloadResponse(
+        "application/zip",
+        'attachment; filename="report.zip"'
+      )
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const createObjectURL = vi.fn().mockReturnValue("blob:csv-file");
@@ -819,7 +834,7 @@ describe("downloadCsvFile", () => {
       }
     );
     expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(anchor.download).toBe("report.csv");
+    expect(anchor.download).toBe("report.zip");
     expect(anchor.href).toBe("blob:csv-file");
     expect(appendSpy).toHaveBeenCalledWith(anchor);
     expect(clickSpy).toHaveBeenCalledTimes(1);
