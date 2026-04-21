@@ -3,3 +3,8 @@ node_modules/
 .env
 coverage/
 *.log
+out
+build
+npm-debug.log
+Dockerfile
+.dockerignore

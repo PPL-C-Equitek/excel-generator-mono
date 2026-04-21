@@ -59,6 +59,7 @@ services:
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
+      - frontend_next:/app/.next
     healthcheck:
       test:
         - CMD
@@ -81,3 +82,4 @@ networks:
 volumes:
   pgdata:
   frontend_node_modules:
+  frontend_next:
