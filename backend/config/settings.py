@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "file_processing",
     "authentication",
     "artifact_history",
+    "monitoring",
 ]
 
 MIDDLEWARE = [
@@ -64,10 +65,12 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "monitoring.interfaces.http.middleware.MonitoringRequestMetricsMiddleware",
 ]
 
 raw_cors = os.environ.get("DJANGO_CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 CORS_ALLOWED_ORIGINS = [o.strip() for o in raw_cors.split(",") if o.strip()]
+CORS_EXPOSE_HEADERS = ["Content-Disposition"]
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
