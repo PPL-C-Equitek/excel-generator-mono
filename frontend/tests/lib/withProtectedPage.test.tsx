@@ -4,7 +4,7 @@ import { withProtectedPage } from '../../src/lib/withProtectedPage'
 import type { ComponentType } from 'react'
 
 const mockReplace = vi.fn()
-const mockGetValidAccessToken = vi.fn<() => Promise<string | null>>()
+const mockHasValidSession = vi.fn<() => Promise<boolean>>()
 
 vi.mock('next/navigation', () => ({
     useRouter: () => ({
@@ -13,7 +13,7 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('@/lib/auth', () => ({
-    getValidAccessToken: () => mockGetValidAccessToken(),
+    hasValidSession: () => mockHasValidSession(),
 }))
 
 function DummyPage() {
@@ -23,7 +23,7 @@ function DummyPage() {
 describe('withProtectedPage', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        mockGetValidAccessToken.mockResolvedValue('valid-token')
+        mockHasValidSession.mockResolvedValue(true)
     })
 
     it('renders wrapped page when valid access token exists', async () => {
@@ -40,7 +40,7 @@ describe('withProtectedPage', () => {
 
     it('redirects to /login when token is missing', async () => {
         const ProtectedPage = withProtectedPage(DummyPage)
-        mockGetValidAccessToken.mockResolvedValue(null)
+        mockHasValidSession.mockResolvedValue(false)
 
         const { container } = render(<ProtectedPage />)
 
@@ -54,7 +54,7 @@ describe('withProtectedPage', () => {
 
     it('supports custom redirect path', async () => {
         const ProtectedPage = withProtectedPage(DummyPage, { redirectTo: '/auth/sign-in' })
-        mockGetValidAccessToken.mockResolvedValue(null)
+        mockHasValidSession.mockResolvedValue(false)
 
         render(<ProtectedPage />)
 
@@ -65,17 +65,17 @@ describe('withProtectedPage', () => {
 
     it('does not redirect after unmount when auth check resolves late', async () => {
         const ProtectedPage = withProtectedPage(DummyPage)
-        let resolveToken: ((value: string | null) => void) | undefined
-        const pendingToken = new Promise<string | null>((resolve) => {
+        let resolveToken: ((value: boolean) => void) | undefined
+        const pendingToken = new Promise<boolean>((resolve) => {
             resolveToken = resolve
         })
-        mockGetValidAccessToken.mockReturnValue(pendingToken)
+        mockHasValidSession.mockReturnValue(pendingToken)
 
         const { unmount } = render(<ProtectedPage />)
         unmount()
 
         if (resolveToken) {
-            resolveToken(null)
+            resolveToken(false)
         }
         await Promise.resolve()
 

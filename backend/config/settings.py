@@ -149,14 +149,12 @@ MEDIA_ROOT = os.environ.get("MEDIA_ROOT", os.path.join(BASE_DIR, "media"))
 MEDIA_URL = "/media/"
 
 
-UPLOAD_TEMP_DIR = os.path.join(MEDIA_ROOT, 'uploads', 'tmp')
+UPLOAD_TEMP_DIR = os.path.join(MEDIA_ROOT, "uploads", "tmp")
 CSV_EXPORT_DIR = os.environ.get(
-    'CSV_EXPORT_DIR',
-    os.path.join(MEDIA_ROOT, 'exports', 'csv')
+    "CSV_EXPORT_DIR", os.path.join(MEDIA_ROOT, "exports", "csv")
 )
 EXCEL_EXPORT_DIR = os.environ.get(
-    'EXCEL_EXPORT_DIR',
-    os.path.join(MEDIA_ROOT, 'exports', 'excel')
+    "EXCEL_EXPORT_DIR", os.path.join(MEDIA_ROOT, "exports", "excel")
 )
 
 # Default primary key field type

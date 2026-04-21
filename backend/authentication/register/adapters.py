@@ -40,6 +40,18 @@ class DjangoRegistrationWriterRepository(RegistrationWriterPort):
         user.save(update_fields=["password"])
         return _map_user(user)
 
+    def update_unverified_user_password(self, email: str, password: str) -> None:
+        user = (
+            User.objects.filter(email=email, status="unverified")
+            .select_for_update()
+            .first()
+        )
+        if user is None:
+            return
+
+        user.set_password(password)
+        user.save(update_fields=["password"])
+
 
 class DjangoVerificationNotificationService(VerificationNotificationPort):
     def send_verification_email(self, email: str) -> None:
@@ -67,9 +79,10 @@ class DefaultRegistrationStrategyFactory(RegistrationStrategyFactoryPort):
 
 def build_register_user_use_case() -> RegisterUserUseCase:
     notifier = DjangoVerificationNotificationService()
+    writer = DjangoRegistrationWriterRepository()
     strategy_factory = DefaultRegistrationStrategyFactory(
         new_user_strategy=NewUserRegistrationStrategy(
-            registration_writer=DjangoRegistrationWriterRepository(),
+            registration_writer=writer,
             notifier=notifier,
         ),
         existing_unverified_strategy=ExistingUnverifiedUserRegistrationStrategy(
@@ -79,6 +92,7 @@ def build_register_user_use_case() -> RegisterUserUseCase:
     )
     return DefaultRegisterUserUseCase(
         lookup_port=DjangoRegistrationLookupRepository(),
+        registration_writer=writer,
         strategy_factory=strategy_factory,
     )
 
