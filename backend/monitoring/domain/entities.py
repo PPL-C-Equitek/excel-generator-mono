@@ -99,11 +99,6 @@ class MetricsSnapshot:
         return self.total_errors / self.total_requests
 
     def to_dict(self) -> dict[str, object]:
-        events_payload: dict[str, dict[str, int]] = {}
-        for event in self.events:
-            per_event = events_payload.setdefault(event.event_name, {})
-            per_event[event.outcome] = event.count
-
         return {
             "generated_at": self.generated_at.isoformat(),
             "totals": {
@@ -112,5 +107,12 @@ class MetricsSnapshot:
                 "error_rate": self.error_rate,
             },
             "routes": [route.to_dict() for route in self.routes],
-            "events": events_payload,
+            "events": self._events_to_dict(),
         }
+
+    def _events_to_dict(self) -> dict[str, dict[str, int]]:
+        events_payload: dict[str, dict[str, int]] = {}
+        for event in self.events:
+            per_event = events_payload.setdefault(event.event_name, {})
+            per_event[event.outcome] = event.count
+        return events_payload

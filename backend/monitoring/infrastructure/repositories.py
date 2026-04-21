@@ -49,9 +49,7 @@ class InMemoryMetricsRepository:
         self._events: dict[tuple[str, str], int] = {}
 
     def record_request(self, event: RequestMetricEvent) -> None:
-        route = (event.route or "").strip() or "unknown"
-        method = (event.method or "").strip().upper() or "UNKNOWN"
-        key = (route, method)
+        key = self._route_key_from_event(event)
         with self._lock:
             accumulator = self._routes.get(key)
             if accumulator is None:
@@ -60,9 +58,7 @@ class InMemoryMetricsRepository:
             accumulator.register(event)
 
     def record_event(self, event: AuthMetricEvent) -> None:
-        event_name = (event.event_name or "").strip().lower() or "unknown"
-        outcome = (event.outcome or "").strip().lower() or "unknown"
-        key = (event_name, outcome)
+        key = self._event_key_from_event(event)
         with self._lock:
             self._events[key] = self._events.get(key, 0) + 1
 
@@ -71,24 +67,8 @@ class InMemoryMetricsRepository:
             items = list(self._routes.items())
             event_items = list(self._events.items())
 
-        route_snapshots = [
-            acc.to_snapshot(route=route, method=method)
-            for (route, method), acc in items
-        ]
-        route_snapshots.sort(
-            key=lambda item: (-item.total_requests, item.route, item.method)
-        )
-        event_snapshots = [
-            EventMetricSnapshot(
-                event_name=event_name,
-                outcome=outcome,
-                count=count,
-            )
-            for (event_name, outcome), count in event_items
-        ]
-        event_snapshots.sort(
-            key=lambda item: (-item.count, item.event_name, item.outcome)
-        )
+        route_snapshots = self._build_route_snapshots(items)
+        event_snapshots = self._build_event_snapshots(event_items)
 
         total_requests = sum(item.total_requests for item in route_snapshots)
         total_errors = sum(item.total_errors for item in route_snapshots)
@@ -104,3 +84,57 @@ class InMemoryMetricsRepository:
         with self._lock:
             self._routes.clear()
             self._events.clear()
+
+    @staticmethod
+    def _normalize_text(
+        value: str | None,
+        *,
+        default: str,
+        transform: Callable[[str], str] | None = None,
+    ) -> str:
+        normalized = (value or "").strip()
+        if not normalized:
+            return default
+        if transform is None:
+            return normalized
+        return transform(normalized)
+
+    @classmethod
+    def _route_key_from_event(cls, event: RequestMetricEvent) -> tuple[str, str]:
+        return (
+            cls._normalize_text(event.route, default="unknown"),
+            cls._normalize_text(event.method, default="UNKNOWN", transform=str.upper),
+        )
+
+    @classmethod
+    def _event_key_from_event(cls, event: AuthMetricEvent) -> tuple[str, str]:
+        return (
+            cls._normalize_text(event.event_name, default="unknown", transform=str.lower),
+            cls._normalize_text(event.outcome, default="unknown", transform=str.lower),
+        )
+
+    @staticmethod
+    def _build_route_snapshots(
+        items: list[tuple[tuple[str, str], _RouteAccumulator]]
+    ) -> list[RouteMetricSnapshot]:
+        route_snapshots = [
+            accumulator.to_snapshot(route=route, method=method)
+            for (route, method), accumulator in items
+        ]
+        route_snapshots.sort(
+            key=lambda item: (-item.total_requests, item.route, item.method)
+        )
+        return route_snapshots
+
+    @staticmethod
+    def _build_event_snapshots(
+        event_items: list[tuple[tuple[str, str], int]]
+    ) -> list[EventMetricSnapshot]:
+        event_snapshots = [
+            EventMetricSnapshot(event_name=event_name, outcome=outcome, count=count)
+            for (event_name, outcome), count in event_items
+        ]
+        event_snapshots.sort(
+            key=lambda item: (-item.count, item.event_name, item.outcome)
+        )
+        return event_snapshots

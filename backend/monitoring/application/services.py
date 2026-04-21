@@ -62,14 +62,14 @@ class MonitoringService:
         status_code: int,
         duration_ms: float,
     ) -> None:
-        event = RequestMetricEvent(
-            route=route,
-            method=method,
-            status_code=status_code,
-            duration_ms=duration_ms,
-            created_at=self._now(),
+        self._metrics_repository.record_request(
+            self._build_request_event(
+                route=route,
+                method=method,
+                status_code=status_code,
+                duration_ms=duration_ms,
+            )
         )
-        self._metrics_repository.record_request(event)
 
     def record_event(
         self,
@@ -78,13 +78,13 @@ class MonitoringService:
         outcome: str,
         endpoint: str = "",
     ) -> None:
-        event = AuthMetricEvent(
-            event_name=event_name,
-            outcome=outcome,
-            endpoint=endpoint,
-            created_at=self._now(),
+        self._metrics_repository.record_event(
+            self._build_auth_metric_event(
+                event_name=event_name,
+                outcome=outcome,
+                endpoint=endpoint,
+            )
         )
-        self._metrics_repository.record_event(event)
 
     def stats(self) -> dict[str, object]:
         snapshot = self._metrics_repository.get_snapshot()
@@ -92,3 +92,33 @@ class MonitoringService:
             "status": "ok",
             **snapshot.to_dict(),
         }
+
+    def _build_request_event(
+        self,
+        *,
+        route: str,
+        method: str,
+        status_code: int,
+        duration_ms: float,
+    ) -> RequestMetricEvent:
+        return RequestMetricEvent(
+            route=route,
+            method=method,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            created_at=self._now(),
+        )
+
+    def _build_auth_metric_event(
+        self,
+        *,
+        event_name: str,
+        outcome: str,
+        endpoint: str,
+    ) -> AuthMetricEvent:
+        return AuthMetricEvent(
+            event_name=event_name,
+            outcome=outcome,
+            endpoint=endpoint,
+            created_at=self._now(),
+        )

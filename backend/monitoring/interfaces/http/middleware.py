@@ -18,14 +18,14 @@ class MonitoringRequestMetricsMiddleware:
             self._record_request_metrics(
                 request=request,
                 status_code=500,
-                duration_ms=(perf_counter() - started) * 1000,
+                duration_ms=self._elapsed_ms(started),
             )
             raise
 
         self._record_request_metrics(
             request=request,
-            status_code=getattr(response, "status_code", 500) or 500,
-            duration_ms=(perf_counter() - started) * 1000,
+            status_code=self._resolve_status_code(response),
+            duration_ms=self._elapsed_ms(started),
         )
         return response
 
@@ -36,7 +36,7 @@ class MonitoringRequestMetricsMiddleware:
             get_monitoring_service().record_request(
                 route=route,
                 method=method,
-                status_code=int(status_code),
+                status_code=status_code,
                 duration_ms=duration_ms,
             )
         except Exception:
@@ -49,3 +49,10 @@ class MonitoringRequestMetricsMiddleware:
             return str(resolver_match.route)
         return str(getattr(request, "path", "unknown"))
 
+    @staticmethod
+    def _resolve_status_code(response) -> int:
+        return int(getattr(response, "status_code", 500) or 500)
+
+    @staticmethod
+    def _elapsed_ms(started: float) -> float:
+        return (perf_counter() - started) * 1000

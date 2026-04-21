@@ -29,12 +29,22 @@ def _resolve_auth_outcome(status_code: int | None) -> str:
     return "server_error"
 
 
+def _resolve_request(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    if len(args) > 1:
+        return args[1]
+    return kwargs.get("request")
+
+
+def _resolve_endpoint(request: Any) -> str:
+    return str(getattr(request, "path", "unknown"))
+
+
 def track_auth_metric(event_name: str):
     def decorator(view_method: Callable[..., Any]):
         @wraps(view_method)
         def wrapped(*args, **kwargs):
-            request = args[1] if len(args) > 1 else kwargs.get("request")
-            endpoint = str(getattr(request, "path", "unknown"))
+            request = _resolve_request(args=args, kwargs=kwargs)
+            endpoint = _resolve_endpoint(request)
             monitoring_service = get_monitoring_service()
 
             try:
@@ -47,9 +57,10 @@ def track_auth_metric(event_name: str):
                 )
                 raise
 
+            outcome = _resolve_auth_outcome(getattr(response, "status_code", None))
             monitoring_service.record_event(
                 event_name=event_name,
-                outcome=_resolve_auth_outcome(getattr(response, "status_code", None)),
+                outcome=outcome,
                 endpoint=endpoint,
             )
             return response
