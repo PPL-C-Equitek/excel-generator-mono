@@ -27,6 +27,7 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        curl \
         libmagic1 \
         libpq5 \
         poppler-utils \
@@ -38,6 +39,9 @@ RUN apt-get update \
 COPY --from=builder /opt/venv /opt/venv
 COPY . .
 
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8000
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
