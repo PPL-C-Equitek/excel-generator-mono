@@ -392,7 +392,7 @@ class RegisterViewDependencyInjectionTest(APISimpleTestCase):
 class DjangoRegistrationWriterRepositoryTest(APISimpleTestCase):
     @patch("authentication.register.adapters.User")
     def test_update_unverified_user_password_is_noop_when_user_missing(self, mock_user_model):
-        mock_user_model.objects.filter.return_value.first.return_value = None
+        mock_user_model.objects.filter.return_value.select_for_update.return_value.first.return_value = None
 
         repository = DjangoRegistrationWriterRepository()
         repository.update_unverified_user_password(
@@ -404,11 +404,12 @@ class DjangoRegistrationWriterRepositoryTest(APISimpleTestCase):
             email="missing@example.com",
             status="unverified",
         )
+        mock_user_model.objects.filter.return_value.select_for_update.assert_called_once_with()
 
     @patch("authentication.register.adapters.User")
     def test_update_unverified_user_password_only_targets_unverified_users(self, mock_user_model):
         mock_user = MagicMock()
-        mock_user_model.objects.filter.return_value.first.return_value = mock_user
+        mock_user_model.objects.filter.return_value.select_for_update.return_value.first.return_value = mock_user
 
         repository = DjangoRegistrationWriterRepository()
         repository.update_unverified_user_password(
@@ -420,5 +421,6 @@ class DjangoRegistrationWriterRepositoryTest(APISimpleTestCase):
             email="pending@example.com",
             status="unverified",
         )
+        mock_user_model.objects.filter.return_value.select_for_update.assert_called_once_with()
         mock_user.set_password.assert_called_once_with("Strong#123")
         mock_user.save.assert_called_once_with(update_fields=["password"])
