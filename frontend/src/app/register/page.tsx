@@ -9,7 +9,11 @@ import { toast } from 'sonner';
 import AuthEmailSuccessCard from '@/components/AuthEmailSuccessCard';
 import Navbar from '@/components/Navbar';
 import { LANDING_NAV_LINKS } from '@/constants/landing';
-import { useResendCooldown } from '@/hooks/useResendCooldown';
+import {
+  getRemainingResendCooldownForEmail,
+  setResendCooldownForEmail,
+  useResendCooldown,
+} from '@/hooks/useResendCooldown';
 import { resendEmailActionFlow, shouldSkipEmailResend } from '@/lib/authEmailAction';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -144,7 +148,10 @@ export default function RegisterPage() {
   const [isResending, setIsResending] = useState(false);
   const [resendStatusMessage, setResendStatusMessage] = useState('');
   const [resendErrorMessage, setResendErrorMessage] = useState('');
-  const { cooldown: resendCooldown, setCooldown: setResendCooldown } = useResendCooldown();
+  const { cooldown: resendCooldown, setCooldown: setResendCooldown } = useResendCooldown(
+    0,
+    formData.email
+  );
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -173,6 +180,18 @@ export default function RegisterPage() {
 
     try {
       const trimmedEmail = formData.email.trim();
+      const activeCooldown = getRemainingResendCooldownForEmail(trimmedEmail);
+
+      if (activeCooldown > 0) {
+        toast.success(
+          'Email ini belum diverifikasi. Silakan cek inbox Anda atau tunggu hingga cooldown selesai.'
+        );
+        router.push(
+          `/auth/verify-email/pending?email=${encodeURIComponent(trimmedEmail)}`
+        );
+        return;
+      }
+
       const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL || ''}/auth/register/`, {
         name: formData.name,
         email: trimmedEmail,
@@ -189,10 +208,13 @@ export default function RegisterPage() {
 
       if (status === 409 && code === 'UNVERIFIED_EMAIL') {
         const emailForRedirect = formData.email.trim();
+        setResendCooldownForEmail(emailForRedirect, 60);
         toast.success(
           message || 'Email belum diverifikasi. Kami telah mengirim ulang link verifikasi.'
         );
-        router.push(`/auth/verify-email/pending?email=${encodeURIComponent(emailForRedirect)}`);
+        router.push(
+          `/auth/verify-email/pending?email=${encodeURIComponent(emailForRedirect)}&resent=1`
+        );
         return;
       }
 

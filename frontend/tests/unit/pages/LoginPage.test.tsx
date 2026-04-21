@@ -4,6 +4,14 @@ import { useGoogleLogin } from '@react-oauth/google'
 import LoginPage from '../../../src/app/login/LoginPage'
 import * as api from '@/lib/api'
 
+const mockHasValidSession = vi.fn<() => Promise<boolean>>()
+const mockStoreAuthTokens = vi.fn((accessToken: string, refreshToken: string) => {
+    localStorage.setItem('access_token', accessToken)
+    localStorage.setItem('refresh_token', refreshToken)
+    sessionStorage.setItem('access_token', accessToken)
+    sessionStorage.setItem('refresh_token', refreshToken)
+})
+
 vi.mock('@react-oauth/google', () => ({
     useGoogleLogin: vi.fn(() => vi.fn()),
 }))
@@ -12,11 +20,23 @@ vi.mock('@/components/LogoutButton', () => ({
     default: () => <button type="button">Logout</button>,
 }))
 
+vi.mock('@/lib/auth', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
+
+    return {
+        ...actual,
+        hasValidSession: () => mockHasValidSession(),
+        storeAuthTokens: (accessToken: string, refreshToken: string) =>
+            mockStoreAuthTokens(accessToken, refreshToken),
+    }
+})
+
 describe('LoginPage', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         window.localStorage.clear()
         window.sessionStorage.clear()
+        mockHasValidSession.mockResolvedValue(false)
     })
 
     describe('positive', () => {

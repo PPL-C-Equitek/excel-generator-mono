@@ -7,12 +7,13 @@ from django.conf import settings
 from django.utils import timezone
 from django.test import override_settings
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APITestCase, APIRequestFactory, force_authenticate
 
 from authentication.logout.adapters import (
     CallableTokenBlacklistRepository,
     DjangoTokenBlacklistRepository,
 )
+from authentication.logout.http import LogoutView as BaseLogoutView
 from authentication.models import User
 from authentication.services import generate_tokens
 from authentication.views import blacklist_refresh_token
@@ -83,7 +84,7 @@ class LogoutViewTest(APITestCase):
             [status.HTTP_200_OK, status.HTTP_204_NO_CONTENT],
         )
         self.assertEqual(second_response.status_code, status.HTTP_401_UNAUTHORIZED)
-        self.assertEqual(mock_blacklist_refresh_token.call_count, 2)
+        self.assertEqual(mock_blacklist_refresh_token.call_count, 1)
 
     @patch("authentication.views.blacklist_refresh_token", create=True)
     def test_logout_with_expired_access_token_returns_401_before_blacklist_logic(
@@ -322,3 +323,67 @@ class LogoutViewCompatibilityHelperTest(APITestCase):
         blacklist_refresh_token("refresh-token")
 
         mock_repo.blacklist.assert_called_once_with("refresh-token")
+
+
+class BaseLogoutViewErrorMappingTest(APITestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = User.objects.create_user(
+            email="base.logout@example.com",
+            name="Base Logout User",
+            password="securePass1",
+            status="verified",
+        )
+
+    def test_base_logout_view_returns_401_when_use_case_raises_value_error(self):
+        use_case = MagicMock()
+        use_case.execute.side_effect = ValueError("bad refresh token")
+
+        class TestableLogoutView(BaseLogoutView):
+            authentication_classes = []
+            permission_classes = []
+
+            def get_logout_use_case(self):  # type: ignore[override]
+                return use_case
+
+        request = self.factory.post(
+            "/auth/logout/",
+            {"refresh_token": "bad-token"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = TestableLogoutView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.data["message"], "Unauthorized")
+
+    @patch("authentication.logout.http.User")
+    def test_base_logout_view_increments_session_version_with_atomic_database_update(
+        self,
+        mock_user_model,
+    ):
+        use_case = MagicMock()
+        mock_queryset = mock_user_model.objects.filter.return_value
+        initial_session_version = self.user.session_version
+
+        class TestableLogoutView(BaseLogoutView):
+            authentication_classes = []
+            permission_classes = []
+
+            def get_logout_use_case(self):  # type: ignore[override]
+                return use_case
+
+        request = self.factory.post(
+            "/auth/logout/",
+            {"refresh_token": "valid-refresh-token"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = TestableLogoutView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_user_model.objects.filter.assert_called_once_with(pk=self.user.pk)
+        self.assertEqual(mock_queryset.update.call_count, 1)
+        self.assertEqual(request.user.session_version, initial_session_version + 1)

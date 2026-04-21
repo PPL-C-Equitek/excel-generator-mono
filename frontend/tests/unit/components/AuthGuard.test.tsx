@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AuthGuard from '@/components/AuthGuard'
 
 const mockReplace = vi.fn()
-const mockGetValidAccessToken = vi.fn<() => Promise<string | null>>()
+const mockHasValidSession = vi.fn<() => Promise<boolean>>()
 const mockRouter = { replace: mockReplace }
 let mockPathname = '/convert'
 
@@ -13,14 +13,14 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('@/lib/auth', () => ({
-    getValidAccessToken: () => mockGetValidAccessToken(),
+    hasValidSession: () => mockHasValidSession(),
 }))
 
 describe('AuthGuard', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mockPathname = '/convert'
-        mockGetValidAccessToken.mockResolvedValue('valid-token')
+        mockHasValidSession.mockResolvedValue(true)
     })
 
     it('renders children when a valid token exists', async () => {
@@ -38,7 +38,7 @@ describe('AuthGuard', () => {
     })
 
     it('redirects to /login and hides children when token is missing', async () => {
-        mockGetValidAccessToken.mockResolvedValue(null)
+        mockHasValidSession.mockResolvedValue(false)
 
         const { container } = render(
             <AuthGuard>
@@ -55,9 +55,9 @@ describe('AuthGuard', () => {
     })
 
     it('supports custom redirect and loading fallback', async () => {
-        let resolveToken: ((value: string | null) => void) | undefined
-        mockGetValidAccessToken.mockReturnValue(
-            new Promise<string | null>((resolve) => {
+        let resolveToken: ((value: boolean) => void) | undefined
+        mockHasValidSession.mockReturnValue(
+            new Promise<boolean>((resolve) => {
                 resolveToken = resolve
             })
         )
@@ -70,7 +70,7 @@ describe('AuthGuard', () => {
 
         expect(screen.getByTestId('loading')).toBeInTheDocument()
 
-        resolveToken?.(null)
+        resolveToken?.(false)
 
         await waitFor(() => {
             expect(mockReplace).toHaveBeenCalledWith('/auth/sign-in')
@@ -96,7 +96,7 @@ describe('AuthGuard', () => {
         )
 
         await waitFor(() => {
-            expect(mockGetValidAccessToken.mock.calls.length).toBeGreaterThanOrEqual(2)
+            expect(mockHasValidSession.mock.calls.length).toBeGreaterThanOrEqual(2)
         })
     })
 
@@ -111,7 +111,7 @@ describe('AuthGuard', () => {
             expect(screen.getByTestId('protected-content')).toBeInTheDocument()
         })
 
-        mockGetValidAccessToken.mockResolvedValue(null)
+        mockHasValidSession.mockResolvedValue(false)
         await act(async () => {
             window.dispatchEvent(new PopStateEvent('popstate'))
         })
@@ -132,7 +132,7 @@ describe('AuthGuard', () => {
             expect(screen.getByTestId('protected-content')).toBeInTheDocument()
         })
 
-        mockGetValidAccessToken.mockResolvedValue(null)
+        mockHasValidSession.mockResolvedValue(false)
         await act(async () => {
             window.dispatchEvent(new Event('pageshow'))
         })
@@ -143,9 +143,9 @@ describe('AuthGuard', () => {
     })
 
     it('does not update state or redirect after unmount when auth check resolves late', async () => {
-        let resolveToken: ((value: string | null) => void) | undefined
-        mockGetValidAccessToken.mockReturnValue(
-            new Promise<string | null>((resolve) => {
+        let resolveToken: ((value: boolean) => void) | undefined
+        mockHasValidSession.mockReturnValue(
+            new Promise<boolean>((resolve) => {
                 resolveToken = resolve
             })
         )
@@ -157,7 +157,7 @@ describe('AuthGuard', () => {
         )
 
         unmount()
-        resolveToken?.(null)
+        resolveToken?.(false)
         await Promise.resolve()
 
         expect(mockReplace).not.toHaveBeenCalled()
