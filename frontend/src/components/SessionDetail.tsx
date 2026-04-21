@@ -12,7 +12,10 @@ export interface SessionDetailProps {
     isNotFound: boolean
 }
 
-export default function SessionDetail({ session, isNotFound }: SessionDetailProps) {
+export default function SessionDetail({
+    session,
+    isNotFound,
+}: Readonly<SessionDetailProps>) {
     if (isNotFound || !session) {
         return (
             <section role="alert" aria-live="polite">
