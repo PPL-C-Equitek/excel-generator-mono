@@ -1,6 +1,7 @@
 import sys
 import jwt
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 from django.utils import timezone
 
@@ -255,6 +256,26 @@ class RefreshTokenServiceTest(SimpleTestCase):
         token = self._make_refresh_token({"email": ""})
         with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
             with self.assertRaises(InvalidRefreshTokenError, msg="Invalid token payload."):
+                RefreshTokenService().refresh(token)
+
+    @patch("authentication.services.User")
+    def test_raises_when_refresh_token_session_version_does_not_match_user(self, mock_user_model):
+        token = self._make_refresh_token(
+            {
+                "user_id": str(uuid.uuid4()),
+                "email": "user@example.com",
+                "session_version": 1,
+            }
+        )
+        mock_user_model.objects.filter.return_value.first.return_value = SimpleNamespace(
+            session_version=2
+        )
+
+        with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
+            with self.assertRaises(
+                InvalidRefreshTokenError,
+                msg="Refresh token session is no longer valid.",
+            ):
                 RefreshTokenService().refresh(token)
 
 
