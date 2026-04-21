@@ -6,24 +6,12 @@ EXTRACTION_OUTPUT_SCHEMA_KEYS = [
 ]
 
 OUTPUT_FORMAT_SECTION = """## OUTPUT_FORMAT
-Return ONLY valid JSON.
-Use the same schema for all cases:
-{
-  "reasoning_steps": [
-    "step 1",
-    "step 2"
-  ],
-  "headers": ["Column A", "Column B"],
-  "rows": [
-    ["value1", "value2"]
-  ],
-  "final_answer": "Structured extraction completed."
-}
+Return ONLY valid JSON object with exactly these keys:
+- "reasoning_steps" (array of strings)
+- "headers" (array of strings)
+- "rows" (array of arrays)
+- "final_answer" (string)
 Rules:
-- reasoning_steps: array of strings
-- headers: array of strings
-- rows: array of arrays
-- final_answer: string
 - no markdown
 - no code fences
 - no extra explanation outside JSON
