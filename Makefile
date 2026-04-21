@@ -8,7 +8,7 @@ SCRIPTS_DIR := $(ROOT_DIR)/scripts
 
 .PHONY: help deploy deploy-backend deploy-frontend \
 	backend-install backend-migrate backend-seed backend-run backend-test backend-test-coverage \
-	frontend-install frontend-build frontend-run frontend-dev frontend-test frontend-test-coverage \
+	frontend-install frontend-build frontend-run frontend-dev frontend-lint frontend-test frontend-test-coverage \
 	docker-up docker-down
 
 help:
@@ -30,6 +30,7 @@ help:
 	@echo "  make frontend-build         - Build frontend"
 	@echo "  make frontend-run           - Start frontend production server"
 	@echo "  make frontend-dev           - Start frontend dev server"
+	@echo "  make frontend-lint          - Run frontend lint checks"
 	@echo "  make frontend-test          - Run frontend tests"
 	@echo "  make frontend-test-coverage - Run frontend tests with coverage"
 	@echo ""
@@ -74,6 +75,9 @@ frontend-run:
 
 frontend-dev:
 	@cd "$(FRONTEND_DIR)" && npm run dev
+
+frontend-lint:
+	@cd "$(FRONTEND_DIR)" && npm run lint
 
 frontend-test:
 	@cd "$(FRONTEND_DIR)" && npm run test
