@@ -1,5 +1,6 @@
 import { fetchAPI } from "@/lib/api";
 import { getValidAccessToken } from "@/lib/auth";
+import { resolveDownloadFilename } from "@/utils/downloadFilename";
 
 export interface HistoryItem {
   id: string;
@@ -100,16 +101,25 @@ function readHistoryErrorMessage(data: unknown, fallback: string): string {
 }
 
 function getApiBaseOrigin(): string {
-  try {
-    return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").origin;
-  } catch {
-    return "http://localhost:8000";
-  }
+  return (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 }
 
 function buildHistoryApiUrl(path: string): string {
   const normalizedPath = path.replace(/^\/+/, "");
   return `${getApiBaseOrigin()}/${normalizedPath}`;
+}
+
+function buildHistoryDownloadUrl(
+  historyId: string,
+  fileFormat: "csv" | "xlsx",
+  filename: string
+): string {
+  const params = new URLSearchParams({
+    file_format: fileFormat,
+    filename,
+  });
+
+  return buildHistoryApiUrl(`history/${historyId}/download/?${params.toString()}`);
 }
 
 function isValidHistoryItem(data: unknown): data is HistoryItem {
@@ -261,6 +271,10 @@ export async function downloadHistoryFile(
   filename?: string
 ): Promise<void> {
   assertValidHistoryDownloadFormat(fileFormat);
+  const requestedFilename =
+    typeof filename === "string" && filename.trim().length > 0
+      ? filename
+      : `history-export.${fileFormat}`;
 
   const accessToken = await getValidAccessToken();
   if (!accessToken) {
@@ -273,7 +287,7 @@ export async function downloadHistoryFile(
 
   try {
     const response = await fetch(
-      buildHistoryApiUrl(`history/${historyId}/download/?file_format=${fileFormat}`),
+      buildHistoryDownloadUrl(historyId, fileFormat, requestedFilename),
       {
         method: "GET",
         headers: {
@@ -287,11 +301,15 @@ export async function downloadHistoryFile(
     }
 
     const blob = await response.blob();
+    const downloadFilename = resolveDownloadFilename(
+      response.headers,
+      requestedFilename
+    );
     objectUrl = URL.createObjectURL(blob);
 
     downloadAnchor = document.createElement("a");
     downloadAnchor.href = objectUrl;
-    downloadAnchor.download = filename || `history-export.${fileFormat}`;
+    downloadAnchor.download = downloadFilename;
     document.body.appendChild(downloadAnchor);
     appendedToBody = true;
     downloadAnchor.click();

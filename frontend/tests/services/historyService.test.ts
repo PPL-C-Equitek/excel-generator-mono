@@ -13,6 +13,7 @@ describe("history service", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   describe("getHistoryFiles", () => {
@@ -142,13 +143,23 @@ describe("history service", () => {
   describe("downloadHistoryFile", () => {
     const originalCreateElement = document.createElement.bind(document);
 
-    const createSuccessfulDownloadResponse = (contentType: string) =>
+    const createSuccessfulDownloadResponse = (
+      contentType: string,
+      contentDisposition?: string
+    ) =>
       ({
         ok: true,
         status: 200,
-        headers: new Headers({
-          "Content-Type": contentType,
-        }),
+        headers: new Headers(
+          contentDisposition
+            ? {
+                "Content-Type": contentType,
+                "Content-Disposition": contentDisposition,
+              }
+            : {
+                "Content-Type": contentType,
+              }
+        ),
         blob: vi.fn().mockResolvedValue(new Blob(["file-bytes"])),
       }) as unknown as Response;
 
@@ -156,7 +167,12 @@ describe("history service", () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(createSuccessfulDownloadResponse("text/csv"));
+        .mockResolvedValue(
+          createSuccessfulDownloadResponse(
+            "application/zip",
+            'attachment; filename="invoice.zip"'
+          )
+        );
       vi.stubGlobal("fetch", fetchMock);
 
       const createObjectURL = vi.fn().mockReturnValue("blob:history-csv");
@@ -191,7 +207,7 @@ describe("history service", () => {
       await historyService.downloadHistoryFile("history-1", "csv", "invoice.csv");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        `${API_BASE}/history/history-1/download/?file_format=csv`,
+        `${API_BASE}/history/history-1/download/?file_format=csv&filename=invoice.csv`,
         {
           method: "GET",
           headers: {
@@ -199,7 +215,7 @@ describe("history service", () => {
           },
         }
       );
-      expect(anchor.download).toBe("invoice.csv");
+      expect(anchor.download).toBe("invoice.zip");
       expect(appendSpy).toHaveBeenCalledWith(anchor);
       expect(clickSpy).toHaveBeenCalledTimes(1);
       expect(removeSpy).toHaveBeenCalledTimes(1);
@@ -245,7 +261,7 @@ describe("history service", () => {
       await historyService.downloadHistoryFile("history-1", "xlsx", "invoice.xlsx");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        `${API_BASE}/history/history-1/download/?file_format=xlsx`,
+        `${API_BASE}/history/history-1/download/?file_format=xlsx&filename=invoice.xlsx`,
         {
           method: "GET",
           headers: {
@@ -405,7 +421,12 @@ describe("history service", () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(createSuccessfulDownloadResponse("text/csv"));
+        .mockResolvedValue(
+          createSuccessfulDownloadResponse(
+            "application/zip",
+            'attachment; filename="history-export.zip"'
+          )
+        );
       vi.stubGlobal("fetch", fetchMock);
 
       const createObjectURL = vi.fn().mockReturnValue("blob:history-csv");
@@ -436,12 +457,20 @@ describe("history service", () => {
       const historyService = await import("@/services/history");
       await historyService.downloadHistoryFile("history-1", "csv");
 
-      expect(anchor.download).toBe("history-export.csv");
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${API_BASE}/history/history-1/download/?file_format=csv&filename=history-export.csv`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: "Bearer access-token",
+          },
+        }
+      );
+      expect(anchor.download).toBe("history-export.zip");
     });
 
-    it("falls back to localhost:8000 when NEXT_PUBLIC_API_URL is invalid", async () => {
-      const original = process.env.NEXT_PUBLIC_API_URL;
-      process.env.NEXT_PUBLIC_API_URL = "htt   p://in^valid\nurl";
+    it("preserves the configured API path when downloading history files", async () => {
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "https://example.com/api/v1/");
 
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi
@@ -478,7 +507,7 @@ describe("history service", () => {
       await historyService.downloadHistoryFile("history-1", "csv", "invoice.csv");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://localhost:8000/history/history-1/download/?file_format=csv",
+        "https://example.com/api/v1/history/history-1/download/?file_format=csv&filename=invoice.csv",
         {
           method: "GET",
           headers: {
@@ -486,8 +515,6 @@ describe("history service", () => {
           },
         }
       );
-
-      process.env.NEXT_PUBLIC_API_URL = original;
     });
   });
 
