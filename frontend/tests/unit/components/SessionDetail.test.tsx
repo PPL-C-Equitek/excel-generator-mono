@@ -1,10 +1,9 @@
+import type { ComponentProps } from 'react'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import SessionDetail from '../../../src/components/SessionDetail'
 
-// RED phase reminder: run `npm run test` and confirm this suite fails because `SessionDetail` does not exist yet.
-
-type SessionDetailProps = React.ComponentProps<typeof SessionDetail>
+type SessionDetailProps = ComponentProps<typeof SessionDetail>
 
 describe('SessionDetail', () => {
     const validSession: NonNullable<SessionDetailProps['session']> = {
