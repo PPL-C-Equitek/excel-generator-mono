@@ -1,4 +1,4 @@
-interface Session {
+export interface Session {
     id: string
     prompt: string
     score: number
@@ -6,28 +6,43 @@ interface Session {
     output: string
 }
 
-interface SessionDetailProps {
+// Props for rendering either a valid session detail view or a not-found state.
+export interface SessionDetailProps {
     session: Session | null
     isNotFound: boolean
 }
 
 export default function SessionDetail({ session, isNotFound }: SessionDetailProps) {
     if (isNotFound || !session) {
-        return <p>Sesi Tidak Ditemukan</p>
+        return (
+            <section role="alert" aria-live="polite">
+                <h1>Sesi Tidak Ditemukan</h1>
+            </section>
+        )
     }
 
     return (
-        <section className="space-y-4">
-            <div>
-                <p>{session.id}</p>
-                <p>{session.prompt}</p>
-                <p>{session.score}</p>
-                <p>{session.evaluatedAt}</p>
-            </div>
+        <article className="space-y-4" aria-labelledby="session-detail-title">
+            <header>
+                <h1 id="session-detail-title">{session.id}</h1>
+            </header>
 
-            <div className="overflow-x-auto">
-                <p className="break-words whitespace-pre-wrap">{session.output}</p>
-            </div>
-        </section>
+            <dl>
+                <dt>Prompt</dt>
+                <dd>{session.prompt}</dd>
+
+                <dt>Score</dt>
+                <dd>{session.score}</dd>
+
+                <dt>Evaluated At</dt>
+                <dd>{session.evaluatedAt}</dd>
+            </dl>
+
+            <section aria-label="Session Output">
+                <div className="overflow-x-auto">
+                    <p className="break-words whitespace-pre-wrap">{session.output}</p>
+                </div>
+            </section>
+        </article>
     )
 }
