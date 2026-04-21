@@ -20,6 +20,12 @@ describe('SessionDetail', () => {
 const extremelyLongLine = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";`,
     }
 
+    const getOutputElement = () =>
+        screen.getByText((_, element) =>
+            element?.tagName.toLowerCase() === 'p' &&
+            element.textContent === validSession.output
+        )
+
     describe('negative', () => {
         it('renders "Sesi Tidak Ditemukan" when isNotFound is true', () => {
             render(<SessionDetail session={null} isNotFound />)
@@ -38,7 +44,7 @@ const extremelyLongLine = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             expect(screen.getByText(validSession.prompt)).toBeInTheDocument()
             expect(screen.getByText(String(validSession.score))).toBeInTheDocument()
             expect(screen.getByText(validSession.evaluatedAt)).toBeInTheDocument()
-            expect(screen.getByText(validSession.output, { exact: false })).toBeInTheDocument()
+            expect(getOutputElement()).toBeInTheDocument()
         })
 
         it('renders metadata for the session id alongside the rest of the session information', () => {
@@ -52,7 +58,7 @@ const extremelyLongLine = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         it('applies overflow protection classes to the output container', () => {
             render(<SessionDetail session={validSession} isNotFound={false} />)
 
-            const outputElement = screen.getByText(validSession.output, { exact: false })
+            const outputElement = getOutputElement()
             const outputContainer = outputElement.closest('div')
 
             expect(outputContainer).not.toBeNull()
