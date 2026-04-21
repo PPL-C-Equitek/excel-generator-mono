@@ -4,11 +4,12 @@ from monitoring.application.access_policy import MonitoringAccessPolicy
 
 
 class IsMonitoringAccount(BasePermission):
-    message = "Monitoring account access is required."
+    DEFAULT_MESSAGE = "Monitoring account access is required."
+    message = DEFAULT_MESSAGE
     _messages_by_reason = {
         "unauthenticated": "Authentication credentials were not provided.",
         "unverified": "Verified account is required.",
-        "no_account": "Monitoring account access is required.",
+        "no_account": DEFAULT_MESSAGE,
         "inactive": "Monitoring account is inactive.",
     }
 
@@ -16,6 +17,6 @@ class IsMonitoringAccount(BasePermission):
         decision = MonitoringAccessPolicy().evaluate(getattr(request, "user", None))
         self.message = self._messages_by_reason.get(
             decision.reason,
-            "Monitoring account access is required.",
+            self.DEFAULT_MESSAGE,
         )
         return decision.allowed
