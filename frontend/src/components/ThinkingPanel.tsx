@@ -12,15 +12,15 @@ export default function ThinkingPanel({
 }: Readonly<ThinkingPanelProps>) {
   if (status === "error") {
     return (
-      <section aria-live="polite" className={containerClassName}>
+      <div className={containerClassName}>
         <p role="alert">Gagal memuat proses</p>
-      </section>
+      </div>
     );
   }
 
   return (
-    <section aria-live="polite" className={containerClassName}>
-      <p>{content}</p>
-    </section>
+    <div aria-live="polite" className={containerClassName}>
+      <p className="whitespace-pre-wrap">{content}</p>
+    </div>
   );
 }
