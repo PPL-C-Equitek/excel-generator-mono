@@ -15,30 +15,35 @@ class DatasetLoader:
     allowed_extensions = {".csv", ".json"}
 
     def load(self, dataset_path, schema):
+        return self.load_and_validate(dataset_path, schema)
+
+    def load_and_validate(self, dataset_path, schema):
         path = Path(dataset_path)
+        self._dataset_path = path
         extension = path.suffix.lower()
 
         if extension not in self.allowed_extensions:
             raise DatasetValidationError()
 
         columns = schema.get("columns", [])
-        required_columns = {
+        mandatory_columns = {
             column["name"]
             for column in columns
             if column.get("required")
         }
+        self._schema_columns = columns
 
         if extension == ".csv":
-            return self._load_csv(path, columns, required_columns)
+            return self._parse_csv(mandatory_columns)
 
-        return self._load_json(path, columns, required_columns)
+        return self._parse_json(mandatory_columns)
 
-    def _load_csv(self, path, columns, required_columns):
-        with path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+    def _parse_csv(self, mandatory_columns):
+        with self._dataset_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
             reader = csv.DictReader(csv_file)
             fieldnames = set(reader.fieldnames or [])
 
-            if not required_columns.issubset(fieldnames):
+            if not mandatory_columns.issubset(fieldnames):
                 raise DatasetValidationError()
 
             parsed_rows = []
@@ -47,14 +52,14 @@ class DatasetLoader:
                     continue
 
                 try:
-                    parsed_rows.append(self._parse_row(row, columns))
+                    parsed_rows.append(self._parse_row(row))
                 except (TypeError, ValueError, DatasetValidationError):
                     continue
 
         return parsed_rows
 
-    def _load_json(self, path, columns, required_columns):
-        with path.open("r", encoding="utf-8") as json_file:
+    def _parse_json(self, mandatory_columns):
+        with self._dataset_path.open("r", encoding="utf-8") as json_file:
             payload = json.load(json_file)
 
         if not isinstance(payload, list):
@@ -65,7 +70,7 @@ class DatasetLoader:
             if isinstance(item, dict):
                 fieldnames.update(item.keys())
 
-        if not required_columns.issubset(fieldnames):
+        if not mandatory_columns.issubset(fieldnames):
             raise DatasetValidationError()
 
         parsed_rows = []
@@ -74,18 +79,18 @@ class DatasetLoader:
                 continue
 
             try:
-                parsed_rows.append(self._parse_row(row, columns))
+                parsed_rows.append(self._parse_row(row))
             except (TypeError, ValueError, DatasetValidationError):
                 continue
 
         return parsed_rows
 
-    def _parse_row(self, row, columns):
+    def _parse_row(self, row):
         if not isinstance(row, dict):
             raise DatasetValidationError()
 
         parsed = {}
-        for column in columns:
+        for column in self._schema_columns:
             name = column["name"]
             raw_value = row.get(name)
 
