@@ -11,6 +11,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.views import APIView
 from .models import GroupMember
 from artifact_history.serializers import HistoryItemSerializer, HistoryRenameSerializer
 from artifact_history.services import (
@@ -772,15 +773,17 @@ def session_delete(request, session_id):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-@require_http_methods(["GET", "PATCH", "DELETE"])
-@api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAuthenticated, IsVerifiedUser])
-def session_resource(request, session_id):
-    if request.method == "GET":
+class SessionResourceView(APIView):
+    permission_classes = [IsAuthenticated, IsVerifiedUser]
+
+    def get(self, request, session_id):
         return session_detail(request, session_id)
-    if request.method == "PATCH":
+
+    def patch(self, request, session_id):
         return session_update(request, session_id)
-    return session_delete(request, session_id)
+
+    def delete(self, request, session_id):
+        return session_delete(request, session_id)
 
 
 

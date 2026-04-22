@@ -2520,6 +2520,7 @@ class HistoryArtifactCleanupHelperTest(APISimpleTestCase):
 class SessionEndpointTests(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
+        self.session_resource_view = views.SessionResourceView.as_view()
         self.user = User.objects.create_user(
             email="owner@example.com",
             name="Owner",
@@ -2696,37 +2697,37 @@ class SessionEndpointTests(TestCase):
         mock_get_session.assert_called_once_with(self.user, "session-1")
         mock_delete_session.assert_not_called()
 
-    @patch("api.views.session_detail")
+    @patch.object(views.SessionResourceView, "get")
     def test_session_resource_dispatches_get_to_detail(self, mock_session_detail):
         mock_session_detail.return_value = Response(status=status.HTTP_200_OK)
         request = self.factory.get("/sessions/session-1/")
         force_authenticate(request, user=self.user)
 
-        response = views.session_resource(request, "session-1")
+        response = self.session_resource_view(request, "session-1")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_session_detail.assert_called_once()
         self.assertEqual(mock_session_detail.call_args.args[1], "session-1")
 
-    @patch("api.views.session_update")
+    @patch.object(views.SessionResourceView, "patch")
     def test_session_resource_dispatches_patch_to_update(self, mock_session_update):
         mock_session_update.return_value = Response(status=status.HTTP_200_OK)
         request = self.factory.patch("/sessions/session-1/", {"title": "Renamed"}, format="json")
         force_authenticate(request, user=self.user)
 
-        response = views.session_resource(request, "session-1")
+        response = self.session_resource_view(request, "session-1")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_session_update.assert_called_once()
         self.assertEqual(mock_session_update.call_args.args[1], "session-1")
 
-    @patch("api.views.session_delete")
+    @patch.object(views.SessionResourceView, "delete")
     def test_session_resource_dispatches_delete_to_delete(self, mock_session_delete):
         mock_session_delete.return_value = Response(status=status.HTTP_204_NO_CONTENT)
         request = self.factory.delete("/sessions/session-1/")
         force_authenticate(request, user=self.user)
 
-        response = views.session_resource(request, "session-1")
+        response = self.session_resource_view(request, "session-1")
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         mock_session_delete.assert_called_once()
