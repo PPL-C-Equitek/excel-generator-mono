@@ -330,7 +330,7 @@ describe('ConvertPage', () => {
             const user = userEvent.setup()
             const mockService = {
                 generate: vi.fn().mockImplementationOnce(
-                    () => new Promise(() => {})
+                    () => new Promise(() => { })
                 ),
                 exportToCsv: vi.fn(),
                 downloadCsvFile: vi.fn(),

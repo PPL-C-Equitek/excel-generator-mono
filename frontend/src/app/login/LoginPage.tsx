@@ -6,9 +6,23 @@ import type { LoginFormData } from '@/components/LoginForm'
 import { useGoogleLogin } from '@react-oauth/google'
 import { login, loginWithGoogle } from '@/lib/api'
 import { storeAuthTokens } from '@/lib/auth'
+import { useState, useRef, useEffect } from 'react'
 
 export default function LoginPage() {
     const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    const [error, setError] = useState<string | null>(null)
+    const [success, setSuccess] = useState<string | null>(null)
+    const [isLoading, setIsLoading] = useState(false)
+    const redirectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+    // Cleanup timeout on unmount
+    useEffect(() => {
+        return () => {
+            if (redirectTimeoutRef.current) {
+                clearTimeout(redirectTimeoutRef.current)
+            }
+        }
+    }, [])
 
     const saveTokensAndRedirect = (
         accessToken: string,
@@ -22,18 +36,27 @@ export default function LoginPage() {
             localStorage.setItem('user_email', user.email)
         }
 
-        globalThis.location.href = '/convert'
+        // Redirect setelah 2 detik agar user bisa melihat success message
+        redirectTimeoutRef.current = setTimeout(() => {
+            globalThis.location.href = '/convert'
+        }, 2000)
     }
 
     const handleLogin = async (data: LoginFormData) => {
         try {
+            setIsLoading(true)
+            setError(null)
+            setSuccess(null)
+
             const res = await login(data.email, data.password)
+            setSuccess(`Welcome back! You're being redirected to your workspace...`)
             saveTokensAndRedirect(res.access_token, res.refresh_token, res.user)
         } catch (err: unknown) {
+            setIsLoading(false)
             if (err instanceof Error) {
-                alert(err.message)
+                setError(err.message || 'Login failed. Please try again.')
             } else {
-                alert('Something went wrong')
+                setError('Something went wrong')
             }
         }
     }
@@ -41,18 +64,24 @@ export default function LoginPage() {
     const triggerGoogleSignIn = useGoogleLogin({
         onSuccess: async (tokenResponse) => {
             try {
+                setIsLoading(true)
+                setError(null)
+                setSuccess(null)
+
                 const res = await loginWithGoogle(tokenResponse.access_token)
+                setSuccess(`Welcome! You're being redirected to your workspace...`)
                 saveTokensAndRedirect(res.access_token, res.refresh_token, res.user)
             } catch (err: unknown) {
+                setIsLoading(false)
                 if (err instanceof Error) {
-                    alert(err.message)
+                    setError(err.message || 'Google sign-in failed.')
                 } else {
-                    alert('Google sign-in failed')
+                    setError('Something went wrong')
                 }
             }
         },
         onError: () => {
-            alert('Google sign-in cancelled or failed')
+            setError('Google sign-in cancelled or failed')
         },
         scope: 'openid email profile',
     })
@@ -65,12 +94,17 @@ export default function LoginPage() {
                     onSubmit={handleLogin}
                     onGoogleSignIn={() => {
                         if (!googleClientId) {
-                            alert('Google OAuth belum dikonfigurasi. Isi NEXT_PUBLIC_GOOGLE_CLIENT_ID lalu restart frontend.')
+                            setError('Google OAuth belum dikonfigurasi. Isi NEXT_PUBLIC_GOOGLE_CLIENT_ID lalu restart frontend.')
                             return
                         }
 
                         triggerGoogleSignIn()
                     }}
+                    errorMessage={error}
+                    onDismissError={() => setError(null)}
+                    successMessage={success}
+                    onDismissSuccess={() => setSuccess(null)}
+                    isLoading={isLoading}
                 />
             </main>
         </div>

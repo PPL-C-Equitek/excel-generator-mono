@@ -7,12 +7,15 @@ import UploadZone from '@/components/UploadZone'
 import { useConvertFlow } from '@/hooks/useConvertFlow'
 import type { ILLMService } from '@/lib/ILLMService'
 import type { CustomSchemaRecord } from '@/lib/ICustomSchemaService'
+import FeedbackMessage from '@/components/FeedbackMessage'
 
 interface ConvertPageProps {
     readonly llmService?: ILLMService
+    errorMessage?: string | null
+    onDismissError?: () => void
 }
 
-export default function ConvertPage({ llmService: injectedService }: ConvertPageProps) {
+export default function ConvertPage({ llmService: injectedService, errorMessage, onDismissError }: Readonly<ConvertPageProps>) {
     const [selectedSchema, setSelectedSchema] = useState<CustomSchemaRecord | null>(null)
     const {
         isConverting,
@@ -62,14 +65,14 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
                         </output>
                     )}
 
-                    {error && (
-                        <div
-                            role="alert"
-                            className="mt-4 flex items-start gap-2 rounded-lg border border-red-400 bg-red-50 p-3 text-sm text-red-700"
-                        >
-                            <span aria-hidden>!</span>
-                            <span>{error}</span>
-                        </div>
+                    {(error || errorMessage) && (
+                        <FeedbackMessage
+                            message={error ?? errorMessage!}
+                            variant="error"
+                            dismissible={!error}
+                            onDismiss={onDismissError}
+                            className="mb-4"
+                        />
                     )}
 
                     {outputFile && !error && (
