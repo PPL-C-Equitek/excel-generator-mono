@@ -739,6 +739,62 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.data["results"][0]["session_id"], "session-1")
         self.assertEqual(response.data["results"][0]["request_id"], "request-a")
 
+    def test_thinking_log_list_filters_by_request_id_without_session_filter(self):
+        matched = self._create_history(
+            self.verified_user,
+            session_id="session-x",
+            request_id="request-target",
+            thinking_log="Request filtered record.",
+        )
+        self._create_history(
+            self.verified_user,
+            session_id="session-y",
+            request_id="request-other",
+            thinking_log="Non matching request.",
+        )
+        self._create_history(
+            self.other_user,
+            session_id="session-z",
+            request_id="request-target",
+            thinking_log="Other owner record.",
+        )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get("/llm/thinking-logs/?request_id=request-target")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["id"], str(matched.id))
+        self.assertEqual(response.data["results"][0]["request_id"], "request-target")
+
+    def test_thinking_log_list_without_filters_returns_all_owned_records(self):
+        self._create_history(
+            self.verified_user,
+            session_id="session-a",
+            request_id="request-a",
+            thinking_log="Owned record A.",
+        )
+        self._create_history(
+            self.verified_user,
+            session_id="session-b",
+            request_id="request-b",
+            thinking_log="Owned record B.",
+        )
+        self._create_history(
+            self.other_user,
+            session_id="session-c",
+            request_id="request-c",
+            thinking_log="Other owner record.",
+        )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get("/llm/thinking-logs/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(len(response.data["results"]), 2)
+
     def test_thinking_log_detail_returns_record_for_owner(self):
         record = self._create_history(
             self.verified_user,
