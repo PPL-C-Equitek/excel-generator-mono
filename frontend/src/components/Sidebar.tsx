@@ -4,16 +4,17 @@ import Link from 'next/link'
 import { useState } from "react"
 import { getStoredUser } from "@/lib/auth"
 import LogoutButton from "@/components/LogoutButton"
+import HistorySidebarList from "@/components/HistorySidebarList"
 interface SidebarProps {
     readonly activeMenu: 'home' | 'convert' | 'schema' | 'history' | 'change-password'
     readonly onLogout?: () => void
+    readonly selectedHistoryId?: string | null
 }
 
-export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
+export default function Sidebar({ activeMenu, onLogout, selectedHistoryId }: SidebarProps) {
     const menus = [
         { key: 'convert', label: 'Convert', href: '/convert' },
         { key: 'schema', label: 'Schema', href: '/schema' },
-        { key: 'history', label: 'History', href: '/history' },
         { key: 'change-password', label: 'Change Password', href: '/change-password' },
     ]
 
@@ -37,7 +38,7 @@ export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
                     <a
                         key={menu.key}
                         href={menu.href}
-                        className={`px-4 py-2 rounded font-semibold text-sm transition
+                        className={`px-4 py-2 rounded font-semibold text-base transition
               ${activeMenu === menu.key
                                 ? 'bg-white text-red-700'
                                 : 'text-white hover:bg-red-600'}`}
@@ -46,6 +47,10 @@ export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
                     </a>
                 ))}
             </nav>
+
+            <div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-white/20 px-3 pt-3">
+                <HistorySidebarList selectedHistoryId={selectedHistoryId} />
+            </div>
 
             <div className="mt-auto border-t border-white/20 px-4 py-4">
                 <div className="mb-3 flex min-w-0 items-center gap-3">

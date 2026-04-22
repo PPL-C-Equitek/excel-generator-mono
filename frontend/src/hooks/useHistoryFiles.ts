@@ -43,6 +43,11 @@ interface UseHistoryFilesReturn {
     deleteHistory: (historyId: string) => Promise<boolean>
 }
 
+interface UseHistoryFilesOptions {
+    readonly loadAll?: boolean
+    readonly pageSize?: number
+}
+
 const DEFAULT_LIMIT = 10
 
 const historyService: HistoryService = {
@@ -60,12 +65,39 @@ function getDownloadKey(historyId: string, fileFormat: 'csv' | 'xlsx'): string {
     return `${historyId}:${fileFormat}`
 }
 
+function isHistoryService(value: unknown): value is HistoryService {
+    if (typeof value !== 'object' || value === null) {
+        return false
+    }
+
+    const candidate = value as Partial<HistoryService>
+    return (
+        typeof candidate.getHistoryFiles === 'function' &&
+        typeof candidate.downloadHistoryFile === 'function' &&
+        typeof candidate.renameHistoryFile === 'function' &&
+        typeof candidate.deleteHistoryFile === 'function'
+    )
+}
+
+export function useHistoryFiles(): UseHistoryFilesReturn
+export function useHistoryFiles(options: UseHistoryFilesOptions): UseHistoryFilesReturn
 export function useHistoryFiles(
-    service: HistoryService = historyService
+    service: HistoryService,
+    options?: UseHistoryFilesOptions
+): UseHistoryFilesReturn
+
+export function useHistoryFiles(
+    serviceOrOptions: HistoryService | UseHistoryFilesOptions = historyService,
+    optionsArg: UseHistoryFilesOptions = {}
 ): UseHistoryFilesReturn {
+    const service = isHistoryService(serviceOrOptions) ? serviceOrOptions : historyService
+    const options = isHistoryService(serviceOrOptions) ? optionsArg : serviceOrOptions
+
+    const loadAllHistory = options.loadAll ?? false
+    const initialLimit = options.pageSize ?? DEFAULT_LIMIT
     const [items, setItems] = useState<HistoryItem[]>([])
     const [count, setCount] = useState(0)
-    const [limit, setLimit] = useState(DEFAULT_LIMIT)
+    const [limit, setLimit] = useState(initialLimit)
     const [offset, setOffset] = useState(0)
     const [isLoading, setIsLoading] = useState(true)
     const [renamingHistoryId, setRenamingHistoryId] = useState<string | null>(null)
@@ -84,11 +116,33 @@ export function useHistoryFiles(
             setLoadError(null)
 
             try {
-                const response = await service.getHistoryFiles(nextLimit, nextOffset)
-                setItems(response.results)
-                setCount(response.count)
-                setLimit(response.limit)
-                setOffset(response.offset)
+                if (loadAllHistory) {
+                    const firstResponse = await service.getHistoryFiles(nextLimit, 0)
+                    const aggregatedResults = [...firstResponse.results]
+                    const safeLimit = Math.max(1, firstResponse.limit)
+
+                    let nextBatchOffset = firstResponse.offset + firstResponse.results.length
+                    while (nextBatchOffset < firstResponse.count) {
+                        const nextResponse = await service.getHistoryFiles(safeLimit, nextBatchOffset)
+                        if (!nextResponse.results.length) {
+                            break
+                        }
+
+                        aggregatedResults.push(...nextResponse.results)
+                        nextBatchOffset += nextResponse.results.length
+                    }
+
+                    setItems(aggregatedResults)
+                    setCount(firstResponse.count)
+                    setLimit(aggregatedResults.length)
+                    setOffset(0)
+                } else {
+                    const response = await service.getHistoryFiles(nextLimit, nextOffset)
+                    setItems(response.results)
+                    setCount(response.count)
+                    setLimit(response.limit)
+                    setOffset(response.offset)
+                }
             } catch (error: unknown) {
                 setItems([])
                 setCount(0)
@@ -99,18 +153,22 @@ export function useHistoryFiles(
                 }
             }
         },
-        [service]
+        [loadAllHistory, service]
     )
 
     useEffect(() => {
-        void loadHistory(DEFAULT_LIMIT, 0)
-    }, [loadHistory])
+        void loadHistory(initialLimit, 0)
+    }, [initialLimit, loadHistory])
 
     const reloadHistory = async () => {
-        await loadHistory(limit, offset)
+        await loadHistory(loadAllHistory ? initialLimit : limit, offset)
     }
 
     const goToNextPage = async () => {
+        if (loadAllHistory) {
+            return
+        }
+
         const nextOffset = offset + limit
         if (nextOffset >= count) {
             return
@@ -120,6 +178,10 @@ export function useHistoryFiles(
     }
 
     const goToPreviousPage = async () => {
+        if (loadAllHistory) {
+            return
+        }
+
         if (offset === 0) {
             return
         }
@@ -187,9 +249,9 @@ export function useHistoryFiles(
             await service.deleteHistoryFile(historyId)
             const nextCount = Math.max(0, count - 1)
             const remainingItems = items.filter((item) => item.id !== historyId)
-            const shouldLoadPreviousPage = nextCount > 0 && offset >= nextCount
+            const shouldLoadPreviousPage = !loadAllHistory && nextCount > 0 && offset >= nextCount
             const shouldRefillCurrentPage =
-                nextCount > offset + remainingItems.length
+                !loadAllHistory && nextCount > offset + remainingItems.length
 
             if (shouldLoadPreviousPage) {
                 await loadHistory(limit, Math.max(0, offset - limit), { showLoader: false })

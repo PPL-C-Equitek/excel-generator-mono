@@ -62,7 +62,7 @@ export default function HistorySidebarList({
         reloadHistory,
         renameHistory,
         deleteHistory,
-    } = useHistoryFiles(undefined, {
+    } = useHistoryFiles({
         loadAll: true,
         pageSize: 50,
     })
