@@ -5,6 +5,10 @@ from monitoring.container import get_monitoring_service
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_ERROR_STATUS = 500
+DEFAULT_UNKNOWN_METHOD = "UNKNOWN"
+DEFAULT_UNKNOWN_PATH = "unknown"
+
 
 class MonitoringRequestMetricsMiddleware:
     def __init__(self, get_response):
@@ -12,26 +16,21 @@ class MonitoringRequestMetricsMiddleware:
 
     def __call__(self, request):
         started = perf_counter()
+        status_code = DEFAULT_ERROR_STATUS
         try:
             response = self.get_response(request)
-        except Exception:
+            status_code = self._resolve_status_code(response)
+            return response
+        finally:
             self._record_request_metrics(
                 request=request,
-                status_code=500,
+                status_code=status_code,
                 duration_ms=self._elapsed_ms(started),
             )
-            raise
-
-        self._record_request_metrics(
-            request=request,
-            status_code=self._resolve_status_code(response),
-            duration_ms=self._elapsed_ms(started),
-        )
-        return response
 
     def _record_request_metrics(self, *, request, status_code: int, duration_ms: float) -> None:
         route = self._resolve_route(request)
-        method = getattr(request, "method", "UNKNOWN")
+        method = self._resolve_method(request)
         try:
             get_monitoring_service().record_request(
                 route=route,
@@ -47,11 +46,15 @@ class MonitoringRequestMetricsMiddleware:
         resolver_match = getattr(request, "resolver_match", None)
         if resolver_match and getattr(resolver_match, "route", None):
             return str(resolver_match.route)
-        return str(getattr(request, "path", "unknown"))
+        return str(getattr(request, "path", DEFAULT_UNKNOWN_PATH))
+
+    @staticmethod
+    def _resolve_method(request) -> str:
+        return str(getattr(request, "method", DEFAULT_UNKNOWN_METHOD))
 
     @staticmethod
     def _resolve_status_code(response) -> int:
-        return int(getattr(response, "status_code", 500) or 500)
+        return int(getattr(response, "status_code", DEFAULT_ERROR_STATUS) or DEFAULT_ERROR_STATUS)
 
     @staticmethod
     def _elapsed_ms(started: float) -> float:

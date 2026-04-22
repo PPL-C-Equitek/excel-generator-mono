@@ -2,6 +2,12 @@ from dataclasses import dataclass
 from datetime import datetime
 
 
+def _ratio_or_zero(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return numerator / denominator
+
+
 @dataclass(frozen=True)
 class CheckResult:
     name: str
@@ -54,9 +60,7 @@ class RouteMetricSnapshot:
 
     @property
     def error_rate(self) -> float:
-        if self.total_requests <= 0:
-            return 0.0
-        return self.total_errors / self.total_requests
+        return _ratio_or_zero(self.total_errors, self.total_requests)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -94,9 +98,7 @@ class MetricsSnapshot:
 
     @property
     def error_rate(self) -> float:
-        if self.total_requests <= 0:
-            return 0.0
-        return self.total_errors / self.total_requests
+        return _ratio_or_zero(self.total_errors, self.total_requests)
 
     def to_dict(self) -> dict[str, object]:
         return {
