@@ -172,6 +172,18 @@ describe('useHistoryFiles', () => {
         expect(result.current.error).toBe('Failed to load history.')
     })
 
+    it('uses fallback message when loading history fails with a non-Error value', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi.fn().mockRejectedValue('fatal'),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        expect(result.current.items).toEqual([])
+        expect(result.current.error).toBe('Failed to load history.')
+    })
+
     it('loads all history records across multiple pages when loadAll is enabled', async () => {
         const pagedItems = [
             {
@@ -636,6 +648,37 @@ describe('useHistoryFiles', () => {
         expect(result.current.offset).toBe(10)
     })
 
+    it('reloads using the current offset after moving to a later page', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi
+                .fn()
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({ count: 25, limit: 10, offset: 0 })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({ count: 25, limit: 10, offset: 10 })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({ count: 25, limit: 10, offset: 10 })
+                ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.goToNextPage()
+        })
+
+        await act(async () => {
+            await result.current.reloadHistory()
+        })
+
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(2, 10, 10)
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(3, 10, 10)
+        expect(result.current.offset).toBe(10)
+    })
+
     it('does not move to the next page when no more records are available', async () => {
         const service = makeServiceMock({
             getHistoryFiles: vi
@@ -721,5 +764,30 @@ describe('useHistoryFiles', () => {
 
         expect(service.getHistoryFiles).toHaveBeenCalledTimes(1)
         expect(result.current.offset).toBe(0)
+    })
+
+    it('deletes locally without refetching in loadAll mode', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi.fn().mockResolvedValue(
+                makeHistoryResponse({
+                    count: 2,
+                    limit: 2,
+                    offset: 0,
+                    results: historyItems,
+                })
+            ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service, { loadAll: true, pageSize: 2 }))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.deleteHistory(historyItems[0].id)
+        })
+
+        expect(service.deleteHistoryFile).toHaveBeenCalledWith(historyItems[0].id)
+        expect(service.getHistoryFiles).toHaveBeenCalledTimes(1)
+        expect(result.current.items).toEqual([historyItems[1]])
+        expect(result.current.count).toBe(1)
     })
 })
