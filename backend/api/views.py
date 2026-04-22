@@ -738,7 +738,11 @@ def session_list(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_detail(request, session_id):
-    session = get_session_for_user(request.user, session_id)
+    return _build_session_detail_response(request.user, session_id)
+
+
+def _build_session_detail_response(user, session_id):
+    session = get_session_for_user(user, session_id)
     if session is None:
         return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
 
@@ -748,11 +752,15 @@ def session_detail(request, session_id):
 @api_view(["PATCH"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_update(request, session_id):
-    session = get_session_for_user(request.user, session_id)
+    return _build_session_update_response(request.user, request.data, session_id)
+
+
+def _build_session_update_response(user, data, session_id):
+    session = get_session_for_user(user, session_id)
     if session is None:
         return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
 
-    serializer = SessionTitleUpdateSerializer(data=request.data)
+    serializer = SessionTitleUpdateSerializer(data=data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -766,7 +774,11 @@ def session_update(request, session_id):
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_delete(request, session_id):
-    session = get_session_for_user(request.user, session_id)
+    return _build_session_delete_response(request.user, session_id)
+
+
+def _build_session_delete_response(user, session_id):
+    session = get_session_for_user(user, session_id)
     if session is None:
         return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
 
@@ -778,13 +790,13 @@ class SessionResourceView(APIView):
     permission_classes = [IsAuthenticated, IsVerifiedUser]
 
     def get(self, request, session_id):
-        return session_detail(request, session_id)
+        return _build_session_detail_response(request.user, session_id)
 
     def patch(self, request, session_id):
-        return session_update(request, session_id)
+        return _build_session_update_response(request.user, request.data, session_id)
 
     def delete(self, request, session_id):
-        return session_delete(request, session_id)
+        return _build_session_delete_response(request.user, session_id)
 
 
 

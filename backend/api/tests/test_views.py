@@ -2697,7 +2697,7 @@ class SessionEndpointTests(TestCase):
         mock_get_session.assert_called_once_with(self.user, "session-1")
         mock_delete_session.assert_not_called()
 
-    @patch("api.views.session_detail")
+    @patch("api.views._build_session_detail_response")
     def test_session_resource_dispatches_get_to_detail(self, mock_session_detail):
         mock_session_detail.return_value = Response(status=status.HTTP_200_OK)
         request = self.factory.get("/sessions/session-1/")
@@ -2707,9 +2707,10 @@ class SessionEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_session_detail.assert_called_once()
+        self.assertEqual(mock_session_detail.call_args.args[0], self.user)
         self.assertEqual(mock_session_detail.call_args.args[1], "session-1")
 
-    @patch("api.views.session_update")
+    @patch("api.views._build_session_update_response")
     def test_session_resource_dispatches_patch_to_update(self, mock_session_update):
         mock_session_update.return_value = Response(status=status.HTTP_200_OK)
         request = self.factory.patch("/sessions/session-1/", {"title": "Renamed"}, format="json")
@@ -2719,9 +2720,11 @@ class SessionEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_session_update.assert_called_once()
-        self.assertEqual(mock_session_update.call_args.args[1], "session-1")
+        self.assertEqual(mock_session_update.call_args.args[0], self.user)
+        self.assertEqual(mock_session_update.call_args.args[1], {"title": "Renamed"})
+        self.assertEqual(mock_session_update.call_args.args[2], "session-1")
 
-    @patch("api.views.session_delete")
+    @patch("api.views._build_session_delete_response")
     def test_session_resource_dispatches_delete_to_delete(self, mock_session_delete):
         mock_session_delete.return_value = Response(status=status.HTTP_204_NO_CONTENT)
         request = self.factory.delete("/sessions/session-1/")
@@ -2731,4 +2734,5 @@ class SessionEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         mock_session_delete.assert_called_once()
+        self.assertEqual(mock_session_delete.call_args.args[0], self.user)
         self.assertEqual(mock_session_delete.call_args.args[1], "session-1")
