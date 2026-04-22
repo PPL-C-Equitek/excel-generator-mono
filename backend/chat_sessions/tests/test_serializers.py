@@ -5,6 +5,7 @@ from django.test import SimpleTestCase
 from rest_framework import serializers
 
 from chat_sessions.serializers import (
+    PaginatedGeneratedOutputCollectionSerializer,
     SessionDetailSerializer,
     SessionListItemSerializer,
     SessionTitleUpdateSerializer,
@@ -65,6 +66,72 @@ class ChatSessionSerializerTest(SimpleTestCase):
             serializer.data["generated_outputs"][0]["output_json"]["document_info"]["filename"],
             "example.xlsx",
         )
+
+    def test_session_detail_serializer_returns_paginated_messages_and_outputs(self):
+        session = self._session_stub()
+        session.messages = {
+            "count": 2,
+            "limit": 1,
+            "offset": 1,
+            "results": [
+                SimpleNamespace(
+                    id="message-2",
+                    role="assistant",
+                    content="Here is the result",
+                    thinking_log="Reasoning summary",
+                    created_at=datetime(2026, 4, 21, 10, 3, tzinfo=timezone.utc),
+                )
+            ],
+        }
+        session.generated_outputs = {
+            "count": 1,
+            "limit": 10,
+            "offset": 0,
+            "results": [
+                SimpleNamespace(
+                    id="output-1",
+                    output_json={
+                        "document_info": {"source_type": "Excel", "filename": "example.xlsx"},
+                        "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
+                        "content_data": [],
+                    },
+                    created_at=datetime(2026, 4, 21, 10, 4, tzinfo=timezone.utc),
+                )
+            ],
+        }
+
+        serializer = SessionDetailSerializer(session)
+
+        self.assertEqual(serializer.data["messages"]["count"], 2)
+        self.assertEqual(serializer.data["messages"]["limit"], 1)
+        self.assertEqual(serializer.data["messages"]["offset"], 1)
+        self.assertEqual(serializer.data["messages"]["results"][0]["role"], "assistant")
+        self.assertEqual(serializer.data["generated_outputs"]["count"], 1)
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["output_json"]["document_info"]["filename"],
+            "example.xlsx",
+        )
+
+    def test_session_detail_serializer_supports_empty_paginated_collections(self):
+        session = self._session_stub()
+        session.messages = {"count": 0, "limit": 20, "offset": 0, "results": []}
+        session.generated_outputs = {"count": 0, "limit": 10, "offset": 0, "results": []}
+
+        serializer = SessionDetailSerializer(session)
+
+        self.assertEqual(serializer.data["messages"], {"count": 0, "limit": 20, "offset": 0, "results": []})
+        self.assertEqual(
+            serializer.data["generated_outputs"],
+            {"count": 0, "limit": 10, "offset": 0, "results": []},
+        )
+
+    def test_paginated_generated_output_collection_serializer_rejects_missing_results(self):
+        serializer = PaginatedGeneratedOutputCollectionSerializer(
+            data={"count": 1, "limit": 10, "offset": 0}
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("results", serializer.errors)
 
     def test_session_title_update_serializer_accepts_trimmed_title(self):
         serializer = SessionTitleUpdateSerializer(data={"title": "  New Title  "})
