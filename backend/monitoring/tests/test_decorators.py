@@ -63,6 +63,24 @@ class TrackAuthMetricDecoratorTest(SimpleTestCase):
         )
 
     @patch("monitoring.interfaces.http.decorators.get_monitoring_service")
+    def test_track_auth_metric_resolves_request_from_single_positional_arg(self, mocked_get_service):
+        monitoring_service = Mock()
+        mocked_get_service.return_value = monitoring_service
+
+        @track_auth_metric("login")
+        def wrapped_view(request):
+            return SimpleNamespace(status_code=204)
+
+        request = self.factory.post("/auth/login/")
+        wrapped_view(request)
+
+        monitoring_service.record_event.assert_called_once_with(
+            event_name="login",
+            outcome="success",
+            endpoint="/auth/login/",
+        )
+
+    @patch("monitoring.interfaces.http.decorators.get_monitoring_service")
     def test_track_auth_metric_records_exception_outcome_and_reraises(self, mocked_get_service):
         monitoring_service = Mock()
         mocked_get_service.return_value = monitoring_service
