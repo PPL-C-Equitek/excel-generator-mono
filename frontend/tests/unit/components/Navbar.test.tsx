@@ -3,6 +3,7 @@ import { act } from '@testing-library/react'
 import { beforeEach, describe, it, expect } from 'vitest'
 import { vi } from 'vitest'
 import Navbar from '../../../src/components/Navbar'
+import * as authModule from '../../../src/lib/auth'
 import { AUTH_STATE_CHANGE_EVENT } from '../../../src/lib/auth'
 import type { NavLink } from '../../../src/constants/landing'
 
@@ -18,6 +19,7 @@ const mockNavLinks: NavLink[] = [
 
 describe('Navbar', () => {
     beforeEach(() => {
+        vi.restoreAllMocks()
         window.localStorage.clear()
         window.sessionStorage.clear()
     })
@@ -105,10 +107,16 @@ describe('Navbar', () => {
             expect(screen.queryByText('Register')).not.toBeInTheDocument()
         })
 
-        it('does not render Login and Register links when user is already authenticated', () => {
+        it('does not render Login and Register links when user is already authenticated', async () => {
             window.localStorage.setItem('access_token', 'existing-token')
+            window.localStorage.setItem('refresh_token', 'refresh-token')
+            vi.spyOn(authModule, 'hasValidSession').mockResolvedValue(true)
 
             render(<Navbar links={mockNavLinks} />)
+
+            await act(async () => {
+                await Promise.resolve()
+            })
 
             expect(screen.queryByText('Login')).not.toBeInTheDocument()
             expect(screen.queryByText('Register')).not.toBeInTheDocument()
@@ -119,22 +127,111 @@ describe('Navbar', () => {
             expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
         })
 
-        it('updates the navbar immediately when auth state changes on the current page', () => {
+        it('updates the navbar immediately when auth state changes on the current page', async () => {
             window.localStorage.setItem('access_token', 'existing-token')
+            window.localStorage.setItem('refresh_token', 'refresh-token')
+            const hasValidSessionSpy = vi.spyOn(authModule, 'hasValidSession')
+            hasValidSessionSpy.mockResolvedValueOnce(true)
+            hasValidSessionSpy.mockResolvedValueOnce(false)
 
             render(<Navbar links={mockNavLinks} />)
+
+            await act(async () => {
+                await Promise.resolve()
+            })
 
             expect(screen.queryByText('Login')).not.toBeInTheDocument()
             expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
 
             window.localStorage.removeItem('access_token')
 
-            act(() => {
+            await act(async () => {
                 window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT))
+                await Promise.resolve()
             })
 
             expect(screen.getByText('Login')).toBeInTheDocument()
             expect(screen.getByText('Register')).toBeInTheDocument()
+        })
+
+        it('keeps guest navbar when an older auth check resolves after a newer state change', async () => {
+            window.localStorage.setItem('access_token', 'existing-token')
+            window.localStorage.setItem('refresh_token', 'refresh-token')
+
+            let resolveFirstCheck: ((value: boolean) => void) | null = null
+            const firstCheck = new Promise<boolean>((resolve) => {
+                resolveFirstCheck = resolve
+            })
+
+            const hasValidSessionSpy = vi.spyOn(authModule, 'hasValidSession')
+            hasValidSessionSpy
+                .mockImplementationOnce(() => firstCheck)
+                .mockResolvedValueOnce(false)
+
+            render(<Navbar links={mockNavLinks} />)
+
+            window.localStorage.removeItem('access_token')
+            window.localStorage.removeItem('refresh_token')
+
+            act(() => {
+                window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT))
+            })
+
+            await act(async () => {
+                await Promise.resolve()
+            })
+
+            expect(screen.getByText('Login')).toBeInTheDocument()
+            expect(screen.getByText('Register')).toBeInTheDocument()
+            expect(screen.queryByText('Convert')).not.toBeInTheDocument()
+
+            if (resolveFirstCheck) {
+                await act(async () => {
+                    resolveFirstCheck(true)
+                    await Promise.resolve()
+                })
+            }
+
+            expect(screen.getByText('Login')).toBeInTheDocument()
+            expect(screen.getByText('Register')).toBeInTheDocument()
+            expect(screen.queryByText('Convert')).not.toBeInTheDocument()
+            expect(hasValidSessionSpy).toHaveBeenCalledTimes(2)
+        })
+
+        it('falls back to guest navbar when stored token is invalid or unauthorized', async () => {
+            window.localStorage.setItem('access_token', 'manually-inserted-invalid-token')
+            window.localStorage.setItem('refresh_token', 'stale-refresh-token')
+
+            vi.spyOn(authModule, 'hasValidSession').mockResolvedValue(false)
+
+            render(<Navbar links={mockNavLinks} />)
+
+            await act(async () => {
+                await Promise.resolve()
+            })
+
+            expect(screen.getByText('Login')).toBeInTheDocument()
+            expect(screen.getByText('Register')).toBeInTheDocument()
+            expect(screen.queryByText('Convert')).not.toBeInTheDocument()
+            expect(screen.queryByRole('button', { name: /logout/i })).not.toBeInTheDocument()
+        })
+
+        it('falls back to guest navbar when only an access token remains in storage', async () => {
+            window.localStorage.setItem('access_token', 'orphan-access-token')
+
+            const hasValidSessionSpy = vi.spyOn(authModule, 'hasValidSession').mockResolvedValue(false)
+
+            render(<Navbar links={mockNavLinks} />)
+
+            await act(async () => {
+                await Promise.resolve()
+            })
+
+            expect(screen.getByText('Login')).toBeInTheDocument()
+            expect(screen.getByText('Register')).toBeInTheDocument()
+            expect(screen.queryByText('Convert')).not.toBeInTheDocument()
+            expect(screen.queryByRole('button', { name: /logout/i })).not.toBeInTheDocument()
+            expect(hasValidSessionSpy).toHaveBeenCalledTimes(1)
         })
     })
 })

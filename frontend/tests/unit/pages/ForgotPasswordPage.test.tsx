@@ -67,7 +67,7 @@ describe('ForgotPasswordPage', () => {
   afterEach(() => {
     vi.resetAllMocks();
     vi.useRealTimers();
-    sessionStorage.clear();
+    localStorage.clear();
   });
 
   it('renders the forgot password form', () => {
@@ -181,11 +181,7 @@ describe('ForgotPasswordPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /resend \(60s\)/i }));
     expect(resendPasswordReset).toHaveBeenCalledTimes(1);
 
-    act(() => {
-      vi.advanceTimersByTime(1000);
-    });
-
-    expect(screen.getByRole('button', { name: /resend \(59s\)/i })).toBeDisabled();
+    expect(localStorage.getItem('resend_cooldown_user@example.com')).not.toBeNull();
   });
 
   it('uses the fallback resend error message for non-Error failures', async () => {

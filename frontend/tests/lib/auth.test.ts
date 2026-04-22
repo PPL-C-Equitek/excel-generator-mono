@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     clearAuthTokens,
+    hasValidSession,
     getStoredAccessToken,
     getStoredRefreshToken,
     getStoredUser,
@@ -425,6 +426,137 @@ describe('auth token refresh helpers', () => {
                 method: 'POST',
             })
         )
+    })
+
+    it('returns true when both tokens exist and the backend accepts the current session', async () => {
+        const futureExp = Math.floor(Date.now() / 1000) + 3600
+        const accessToken = makeJwt({ exp: futureExp })
+
+        storeAuthTokens(accessToken, 'refresh-token')
+
+        const mockedFetch = vi.fn().mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: async () => ({ results: [] }),
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(hasValidSession()).resolves.toBe(true)
+        expect(mockedFetch).toHaveBeenNthCalledWith(
+            1,
+            expect.stringContaining('/history/?limit=1&offset=0'),
+            expect.objectContaining({
+                method: 'GET',
+                headers: expect.objectContaining({
+                    Authorization: `Bearer ${accessToken}`,
+                }),
+            })
+        )
+    })
+
+    it('clears tokens and returns false when the backend rejects the current session as unauthorized', async () => {
+        const futureExp = Math.floor(Date.now() / 1000) + 3600
+        const accessToken = makeJwt({ exp: futureExp })
+
+        storeAuthTokens(accessToken, 'refresh-token')
+
+        const mockedFetch = vi.fn().mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: 'Unauthorized' }),
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(hasValidSession()).resolves.toBe(false)
+        expect(window.localStorage.getItem('access_token')).toBeNull()
+        expect(window.localStorage.getItem('refresh_token')).toBeNull()
+    })
+
+    it('clears tokens and returns false when the backend rejects the current session as forbidden', async () => {
+        const futureExp = Math.floor(Date.now() / 1000) + 3600
+        const accessToken = makeJwt({ exp: futureExp })
+
+        storeAuthTokens(accessToken, 'refresh-token')
+
+        const mockedFetch = vi.fn().mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            json: async () => ({ message: 'Forbidden' }),
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(hasValidSession()).resolves.toBe(false)
+        expect(window.localStorage.getItem('access_token')).toBeNull()
+        expect(window.localStorage.getItem('refresh_token')).toBeNull()
+    })
+
+    it('returns false without clearing tokens when the backend session probe fails with a non-auth server error', async () => {
+        const futureExp = Math.floor(Date.now() / 1000) + 3600
+        const accessToken = makeJwt({ exp: futureExp })
+
+        storeAuthTokens(accessToken, 'refresh-token')
+
+        const mockedFetch = vi.fn().mockResolvedValueOnce({
+            ok: false,
+            status: 500,
+            json: async () => ({ message: 'Internal Server Error' }),
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(hasValidSession()).resolves.toBe(false)
+        expect(window.localStorage.getItem('access_token')).toBe(accessToken)
+        expect(window.localStorage.getItem('refresh_token')).toBe('refresh-token')
+    })
+
+    it('returns false without probing the backend when the refresh token is missing', async () => {
+        const futureExp = Math.floor(Date.now() / 1000) + 3600
+        const accessToken = makeJwt({ exp: futureExp })
+
+        window.localStorage.setItem('access_token', accessToken)
+
+        const mockedFetch = vi.fn()
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(hasValidSession()).resolves.toBe(false)
+        expect(mockedFetch).not.toHaveBeenCalled()
+        expect(window.localStorage.getItem('access_token')).toBeNull()
+    })
+
+    it('returns false when window is unavailable during session validation', async () => {
+        vi.stubGlobal('window', undefined)
+
+        await expect(hasValidSession()).resolves.toBe(false)
+    })
+
+    it('returns false when token refresh fails before the backend session probe runs', async () => {
+        const expiredAccessToken = makeJwt({ exp: Math.floor(Date.now() / 1000) - 10 })
+        storeAuthTokens(expiredAccessToken, 'refresh-token')
+
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: 'Token expired' }),
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(hasValidSession()).resolves.toBe(false)
+        expect(mockedFetch).toHaveBeenCalledTimes(1)
+        expect(window.localStorage.getItem('access_token')).toBeNull()
+        expect(window.localStorage.getItem('refresh_token')).toBeNull()
+    })
+
+    it('returns false when the backend session probe throws a network error', async () => {
+        const futureExp = Math.floor(Date.now() / 1000) + 3600
+        const accessToken = makeJwt({ exp: futureExp })
+
+        storeAuthTokens(accessToken, 'refresh-token')
+
+        const mockedFetch = vi.fn().mockRejectedValue(new TypeError('Network down'))
+        vi.stubGlobal('fetch', mockedFetch)
+
+        await expect(hasValidSession()).resolves.toBe(false)
+        expect(window.localStorage.getItem('access_token')).toBe(accessToken)
+        expect(window.localStorage.getItem('refresh_token')).toBe('refresh-token')
     })
 })
 

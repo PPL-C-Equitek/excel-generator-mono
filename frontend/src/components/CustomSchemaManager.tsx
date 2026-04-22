@@ -1,301 +1,60 @@
 'use client'
 
 import type {
-    ComponentPropsWithoutRef,
-} from 'react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useCustomSchemas } from '@/hooks/useCustomSchemas'
-import { getValidAccessToken } from '@/lib/auth'
-import type {
-    CreateCustomSchemaInput,
-    CustomSchemaDefinition,
-    CustomSchemaRecord,
     ICustomSchemaService,
 } from '@/lib/ICustomSchemaService'
-import { customSchemaService } from '@/services/customSchemas'
+import {
+    MAX_CUSTOM_SCHEMAS,
+} from '@/lib/customSchemaDraft'
+import { useCustomSchemaManager } from '@/hooks/useCustomSchemaManager'
 
 interface CustomSchemaManagerProps {
     readonly service?: ICustomSchemaService
     readonly accessTokenResolver?: () => string | null | Promise<string | null>
 }
 
-interface SchemaColumnDraft {
-    id: number
-    name: string
-    description: string
-}
-
-interface CustomSchemaFormDraft {
-    name: string
-    description: string
-    columns: SchemaColumnDraft[]
-}
-
-const MAX_CUSTOM_SCHEMAS = 5
-type FormSubmitEvent = Parameters<
-    NonNullable<ComponentPropsWithoutRef<'form'>['onSubmit']>
->[0]
-
-function createEmptyColumn(id: number): SchemaColumnDraft {
-    return {
-        id,
-        name: '',
-        description: '',
-    }
-}
-
-function createEmptyDraft(): CustomSchemaFormDraft {
-    return {
-        name: '',
-        description: '',
-        columns: [createEmptyColumn(1)],
-    }
-}
-
-function buildDraftFromSchema(schema: CustomSchemaRecord): CustomSchemaFormDraft {
-    return {
-        name: schema.name,
-        description: schema.description,
-        columns: schema.definition.columns.map((column, index) => ({
-            id: index + 1,
-            name: column.name,
-            description: column.description,
-        })),
-    }
-}
-
-export function validateCustomSchemaDraft(draft: CustomSchemaFormDraft): string | null {
-    if (!draft.name.trim()) {
-        return 'Schema name is required.'
-    }
-
-    if (draft.columns.length === 0) {
-        return 'Add at least one column.'
-    }
-
-    const seenColumnNames = new Set<string>()
-
-    for (let index = 0; index < draft.columns.length; index += 1) {
-        const column = draft.columns[index]
-        const columnName = column.name.trim()
-        const columnDescription = column.description.trim()
-
-        if (!columnName) {
-            return `Column ${index + 1} name is required.`
-        }
-
-        if (!columnDescription) {
-            return `Column ${index + 1} description is required.`
-        }
-
-        const normalizedName = columnName.toLowerCase()
-        if (seenColumnNames.has(normalizedName)) {
-            return 'Column names must be unique.'
-        }
-
-        seenColumnNames.add(normalizedName)
-    }
-
-    return null
-}
-
-export function buildCustomSchemaInput(
-    draft: CustomSchemaFormDraft
-): CreateCustomSchemaInput {
-    const definition: CustomSchemaDefinition = {
-        columns: draft.columns.map((column) => ({
-            name: column.name.trim(),
-            description: column.description.trim(),
-        })),
-    }
-
-    return {
-        name: draft.name.trim(),
-        description: draft.description.trim(),
-        is_active: false,
-        definition,
-    }
-}
-
-export function getNextColumnsAfterRemoval(
-    columns: SchemaColumnDraft[],
-    columnId: number
-): SchemaColumnDraft[] {
-    const remainingColumns = columns.filter((column) => column.id !== columnId)
-    return remainingColumns.length === 0 ? columns : remainingColumns
-}
-
 export default function CustomSchemaManager({
-    service = customSchemaService,
-    accessTokenResolver = getValidAccessToken,
+    service,
+    accessTokenResolver,
 }: CustomSchemaManagerProps) {
-    const [draft, setDraft] = useState<CustomSchemaFormDraft>(createEmptyDraft)
-    const [formError, setFormError] = useState<string | null>(null)
-    const [isModalOpen, setIsModalOpen] = useState(false)
-    const [editingSchemaId, setEditingSchemaId] = useState<string | null>(null)
-    const [schemaPendingDeletion, setSchemaPendingDeletion] =
-        useState<CustomSchemaRecord | null>(null)
-    const nextColumnIdRef = useRef(2)
     const {
+        draft,
         hasAccessToken,
         isLoading,
         isSaving,
         deletingSchemaId,
         schemas,
-        error,
         message,
         reloadSchemas,
-        createSchema,
-        updateSchema,
-        deleteSchema,
-    } = useCustomSchemas(service, accessTokenResolver)
-
-    const isAtLimit = schemas.length >= MAX_CUSTOM_SCHEMAS
-    const isAddDisabled = !hasAccessToken || isLoading || isSaving || isAtLimit
-
-    const resetDraft = useCallback(() => {
-        nextColumnIdRef.current = 2
-        setDraft(createEmptyDraft())
-        setEditingSchemaId(null)
-        setFormError(null)
-    }, [])
-
-    const openCreateModal = () => {
-        resetDraft()
-        setIsModalOpen(true)
-    }
-
-    const openEditModal = (schema: CustomSchemaRecord) => {
-        if (hasAccessToken && !isLoading && !isSaving) {
-            const nextDraft = buildDraftFromSchema(schema)
-            nextColumnIdRef.current = nextDraft.columns.length + 1
-            setDraft(nextDraft)
-            setEditingSchemaId(schema.id)
-            setFormError(null)
-            setIsModalOpen(true)
-        }
-    }
-
-    const closeSchemaModal = useCallback(() => {
-        if (isSaving) {
-            return
-        }
-
-        setIsModalOpen(false)
-        resetDraft()
-    }, [isSaving, resetDraft])
-
-    const closeDeleteDialog = useCallback(() => {
-        if (deletingSchemaId) {
-            return
-        }
-
-        setSchemaPendingDeletion(null)
-    }, [deletingSchemaId])
-
-    useEffect(() => {
-        if (!isModalOpen) {
-            return
-        }
-
-        const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                closeSchemaModal()
-            }
-        }
-
-        globalThis.addEventListener('keydown', handleKeyDown)
-
-        return () => {
-            globalThis.removeEventListener('keydown', handleKeyDown)
-        }
-    }, [isModalOpen, closeSchemaModal])
-
-    useEffect(() => {
-        if (!schemaPendingDeletion) {
-            return
-        }
-
-        const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                closeDeleteDialog()
-            }
-        }
-
-        globalThis.addEventListener('keydown', handleKeyDown)
-
-        return () => {
-            globalThis.removeEventListener('keydown', handleKeyDown)
-        }
-    }, [schemaPendingDeletion, closeDeleteDialog])
-
-    const handleColumnChange = (
-        columnId: number,
-        field: 'name' | 'description',
-        value: string
-    ) => {
-        setFormError(null)
-        setDraft((prev) => ({
-            ...prev,
-            columns: prev.columns.map((column) =>
-                column.id === columnId ? { ...column, [field]: value } : column
-            ),
-        }))
-    }
-
-    const handleAddColumn = () => {
-        setFormError(null)
-        setDraft((prev) => ({
-            ...prev,
-            columns: [...prev.columns, createEmptyColumn(nextColumnIdRef.current++)],
-        }))
-    }
-
-    const handleRemoveColumn = (columnId: number) => {
-        setFormError(null)
-        setDraft((prev) => ({
-            ...prev,
-            columns: getNextColumnsAfterRemoval(prev.columns, columnId),
-        }))
-    }
-
-    const handleSubmit = async (event: FormSubmitEvent) => {
-        event.preventDefault()
-
-        const validationError = validateCustomSchemaDraft(draft)
-        if (validationError) {
-            setFormError(validationError)
-            return
-        }
-
-        setFormError(null)
-        const schemaInput = buildCustomSchemaInput(draft)
-        const wasSaved = editingSchemaId
-            ? await updateSchema(editingSchemaId, schemaInput)
-            : await createSchema(schemaInput)
-        if (wasSaved) {
-            closeSchemaModal()
-        }
-    }
-
-    const handleConfirmDelete = async (schema: CustomSchemaRecord) => {
-        const wasDeleted = await deleteSchema(schema.id)
-        if (wasDeleted) {
-            setSchemaPendingDeletion(null)
-        }
-    }
-
-    const modalTitle = editingSchemaId ? 'Edit Schema' : 'Add Schema'
-    const modalDescription = editingSchemaId
-        ? 'Update the saved output columns for this schema.'
-        : 'Define the output columns you want to reuse later.'
+        isModalOpen,
+        isDeleteDialogOpen,
+        schemaPendingDeletion,
+        formError,
+        isAddDisabled,
+        modalTitle,
+        modalDescription,
+        saveButtonLabel,
+        shouldShowPageError,
+        openCreateModal,
+        openEditModal,
+        openDeleteDialog,
+        closeSchemaModal,
+        closeDeleteDialog,
+        handleColumnChange,
+        handleAddColumn,
+        handleRemoveColumn,
+        handleSubmit,
+        handleConfirmDelete,
+        setDraftName,
+        setDraftDescription,
+        trimDraftDescription,
+        trimDraftColumnName,
+        trimDraftColumnDescription,
+    } = useCustomSchemaManager({
+        service,
+        accessTokenResolver,
+    })
     const handleAddSchemaClick = isAddDisabled ? undefined : openCreateModal
-    let saveButtonLabel = 'Save schema'
-    if (isSaving) {
-        saveButtonLabel = 'Saving...'
-    } else if (editingSchemaId) {
-        saveButtonLabel = 'Save changes'
-    }
 
     return (
         <>
@@ -344,20 +103,30 @@ export default function CustomSchemaManager({
                         className="mt-4 flex items-center gap-4 rounded-2xl border border-red-100 bg-red-50/60 px-4 py-4 text-sm text-slate-800 shadow-sm"
                     >
                         <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-700 text-white shadow-sm">
-                            <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m6 2.25A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z" />
+                            <svg
+                                className="h-4.5 w-4.5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth="2.2"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M9 12.75 11.25 15 15 9.75m6 2.25A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z"
+                                />
                             </svg>
                         </span>
                         <span className="font-medium leading-relaxed">{message}</span>
                     </div>
                 )}
 
-                {(error || isAtLimit) && (
+                {shouldShowPageError && (
                     <div
                         data-testid="schema-error"
                         className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
                     >
-                        {error || `You have reached the ${MAX_CUSTOM_SCHEMAS}-schema limit.`}
+                        {shouldShowPageError}
                     </div>
                 )}
 
@@ -409,7 +178,7 @@ export default function CustomSchemaManager({
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => setSchemaPendingDeletion(schema)}
+                                            onClick={() => openDeleteDialog(schema)}
                                             disabled={deletingSchemaId === schema.id}
                                             className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
@@ -449,9 +218,7 @@ export default function CustomSchemaManager({
                                 >
                                     {modalTitle}
                                 </h3>
-                                <p className="mt-1 text-sm text-gray-500">
-                                    {modalDescription}
-                                </p>
+                                <p className="mt-1 text-sm text-gray-500">{modalDescription}</p>
                             </div>
                             <button
                                 type="button"
@@ -481,13 +248,7 @@ export default function CustomSchemaManager({
                                 <input
                                     id="schema-name"
                                     value={draft.name}
-                                    onChange={(event) => {
-                                        setFormError(null)
-                                        setDraft((prev) => ({
-                                            ...prev,
-                                            name: event.target.value,
-                                        }))
-                                    }}
+                                    onChange={(event) => setDraftName(event.target.value)}
                                     disabled={isSaving}
                                     placeholder="Custom Output Schema"
                                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:bg-gray-100"
@@ -504,13 +265,8 @@ export default function CustomSchemaManager({
                                 <textarea
                                     id="schema-description"
                                     value={draft.description}
-                                    onChange={(event) => {
-                                        setFormError(null)
-                                        setDraft((prev) => ({
-                                            ...prev,
-                                            description: event.target.value,
-                                        }))
-                                    }}
+                                    onChange={(event) => setDraftDescription(event.target.value)}
+                                    onBlur={trimDraftDescription}
                                     disabled={isSaving}
                                     placeholder="Describe what this schema is for."
                                     rows={3}
@@ -551,9 +307,7 @@ export default function CustomSchemaManager({
                                                 <button
                                                     type="button"
                                                     onClick={() => handleRemoveColumn(column.id)}
-                                                    disabled={
-                                                        isSaving || draft.columns.length === 1
-                                                    }
+                                                    disabled={isSaving || draft.columns.length === 1}
                                                     className="text-sm font-medium text-red-700 transition hover:text-red-800 disabled:cursor-not-allowed disabled:text-gray-400"
                                                 >
                                                     Remove
@@ -578,6 +332,7 @@ export default function CustomSchemaManager({
                                                                 event.target.value
                                                             )
                                                         }}
+                                                        onBlur={() => trimDraftColumnName(column.id)}
                                                         disabled={isSaving}
                                                         placeholder="field_name"
                                                         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:bg-gray-100"
@@ -601,6 +356,9 @@ export default function CustomSchemaManager({
                                                                 event.target.value
                                                             )
                                                         }}
+                                                        onBlur={() =>
+                                                            trimDraftColumnDescription(column.id)
+                                                        }
                                                         disabled={isSaving}
                                                         placeholder="What this field stores"
                                                         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:bg-gray-100"
@@ -635,7 +393,7 @@ export default function CustomSchemaManager({
                 </dialog>
             )}
 
-            {schemaPendingDeletion && (
+            {isDeleteDialogOpen && schemaPendingDeletion && (
                 <dialog
                     open
                     aria-labelledby="delete-schema-title"
@@ -691,3 +449,9 @@ export default function CustomSchemaManager({
         </>
     )
 }
+
+export {
+    buildCustomSchemaInput,
+    getNextColumnsAfterRemoval,
+    validateCustomSchemaDraft,
+} from '@/lib/customSchemaDraft'

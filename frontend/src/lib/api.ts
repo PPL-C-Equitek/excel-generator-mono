@@ -1,6 +1,21 @@
+import { FILE_TOO_LARGE_MESSAGE } from "@/constants/upload";
+import { clearAuthTokens } from "@/lib/auth";
+
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
   .split("")
   .reduceRight((acc, ch) => (acc === "" && ch === "/" ? acc : ch + acc), "");
+
+function handleUnauthorizedResponse(): void {
+  if (globalThis.window === undefined) {
+    return;
+  }
+
+  clearAuthTokens();
+
+  if (globalThis.window.location.pathname !== "/login") {
+    globalThis.window.location.assign("/login");
+  }
+}
 
 function mapUploadErrorMessage(message: string): string {
   const normalized = message.toLowerCase();
@@ -15,7 +30,7 @@ function mapUploadErrorMessage(message: string): string {
     normalized.includes("file too large") ||
     normalized.includes("maximum allowed size is 10mb")
   ) {
-    return "File size too big.";
+    return FILE_TOO_LARGE_MESSAGE;
   }
 
   if (
@@ -99,6 +114,10 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      handleUnauthorizedResponse();
+    }
+
     let message = "Request failed. Please try again."
 
     try {
