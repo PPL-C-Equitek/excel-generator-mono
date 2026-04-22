@@ -11,6 +11,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.views import APIView
 from .models import GroupMember
 from artifact_history.serializers import HistoryItemSerializer, HistoryRenameSerializer
 from artifact_history.services import (
@@ -22,6 +23,17 @@ from artifact_history.services import (
     update_artifact_history_custom_name,
 )
 from authentication.permissions import IsVerifiedUser
+from chat_sessions.serializers import (
+    SessionDetailSerializer,
+    SessionListItemSerializer,
+    SessionTitleUpdateSerializer,
+)
+from chat_sessions.services import (
+    delete_session,
+    get_session_for_user,
+    list_sessions_for_user,
+    update_session_title,
+)
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
     MAX_FILE_SIZE,
@@ -49,6 +61,7 @@ from file_processing.services.export_service import (
 
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
+NOT_FOUND_DETAIL = "Not found."
 
 
 def _sanitize_download_filename(candidate):
@@ -705,6 +718,87 @@ def download_csv(request, file_id):
         filename=download_name,
         content_type=artifact["content_type"],
     )
+
+
+@require_GET
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_list(request):
+    sessions = list(list_sessions_for_user(request.user))
+    serializer = SessionListItemSerializer(sessions, many=True)
+    return Response(
+        {
+            "count": len(sessions),
+            "results": serializer.data,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_detail(request, session_id):
+    return _build_session_detail_response(request.user, session_id)
+
+
+def _build_session_detail_response(user, session_id):
+    session = get_session_for_user(user, session_id)
+    if session is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response(SessionDetailSerializer(session).data, status=status.HTTP_200_OK)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_update(request, session_id):
+    return _build_session_update_response(request.user, request.data, session_id)
+
+
+def _build_session_update_response(user, data, session_id):
+    session = get_session_for_user(user, session_id)
+    if session is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = SessionTitleUpdateSerializer(data=data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    updated_session = update_session_title(session, serializer.validated_data["title"])
+    return Response(
+        SessionListItemSerializer(updated_session).data,
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_delete(request, session_id):
+    return _build_session_delete_response(request.user, session_id)
+
+
+def _build_session_delete_response(user, session_id):
+    session = get_session_for_user(user, session_id)
+    if session is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    delete_session(session)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SessionResourceView(APIView):
+    permission_classes = [IsAuthenticated, IsVerifiedUser]
+
+    def get(self, request, session_id):
+        return _build_session_detail_response(request.user, session_id)
+
+    def patch(self, request, session_id):
+        return _build_session_update_response(request.user, request.data, session_id)
+
+    def delete(self, request, session_id):
+        return _build_session_delete_response(request.user, session_id)
+
+
 
 
 @require_GET
