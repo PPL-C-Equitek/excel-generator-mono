@@ -15,6 +15,20 @@ class GeneratedOutputSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField()
 
 
+class PaginatedChatMessageCollectionSerializer(serializers.Serializer):
+    count = serializers.IntegerField(min_value=0)
+    limit = serializers.IntegerField(min_value=1)
+    offset = serializers.IntegerField(min_value=0)
+    results = ChatMessageSerializer(many=True)
+
+
+class PaginatedGeneratedOutputCollectionSerializer(serializers.Serializer):
+    count = serializers.IntegerField(min_value=0)
+    limit = serializers.IntegerField(min_value=1)
+    offset = serializers.IntegerField(min_value=0)
+    results = GeneratedOutputSerializer(many=True)
+
+
 class SessionListItemSerializer(serializers.Serializer):
     id = serializers.UUIDField()
     title = serializers.CharField()
@@ -25,8 +39,8 @@ class SessionListItemSerializer(serializers.Serializer):
 
 
 class SessionDetailSerializer(SessionListItemSerializer):
-    messages = ChatMessageSerializer(many=True)
-    generated_outputs = GeneratedOutputSerializer(many=True)
+    messages = PaginatedChatMessageCollectionSerializer()
+    generated_outputs = PaginatedGeneratedOutputCollectionSerializer()
 
 
 class SessionTitleUpdateSerializer(serializers.Serializer):

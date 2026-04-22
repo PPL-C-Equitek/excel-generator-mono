@@ -37,33 +37,43 @@ class ChatSessionSerializerTest(SimpleTestCase):
 
     def test_session_detail_serializer_includes_messages_and_outputs(self):
         session = self._session_stub()
-        session.messages = [
-            SimpleNamespace(
-                id="message-1",
-                role="user",
-                content="Transform this file",
-                thinking_log="",
-                created_at=datetime(2026, 4, 21, 10, 1, tzinfo=timezone.utc),
-            )
-        ]
-        session.generated_outputs = [
-            SimpleNamespace(
-                id="output-1",
-                output_json={
-                    "document_info": {"source_type": "Excel", "filename": "example.xlsx"},
-                    "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
-                    "content_data": [],
-                },
-                created_at=datetime(2026, 4, 21, 10, 2, tzinfo=timezone.utc),
-            )
-        ]
+        session.messages = {
+            "count": 1,
+            "limit": 20,
+            "offset": 0,
+            "results": [
+                SimpleNamespace(
+                    id="message-1",
+                    role="user",
+                    content="Transform this file",
+                    thinking_log="",
+                    created_at=datetime(2026, 4, 21, 10, 1, tzinfo=timezone.utc),
+                )
+            ],
+        }
+        session.generated_outputs = {
+            "count": 1,
+            "limit": 10,
+            "offset": 0,
+            "results": [
+                SimpleNamespace(
+                    id="output-1",
+                    output_json={
+                        "document_info": {"source_type": "Excel", "filename": "example.xlsx"},
+                        "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
+                        "content_data": [],
+                    },
+                    created_at=datetime(2026, 4, 21, 10, 2, tzinfo=timezone.utc),
+                )
+            ],
+        }
 
         serializer = SessionDetailSerializer(session)
 
         self.assertEqual(serializer.data["id"], "session-1")
-        self.assertEqual(serializer.data["messages"][0]["role"], "user")
+        self.assertEqual(serializer.data["messages"]["results"][0]["role"], "user")
         self.assertEqual(
-            serializer.data["generated_outputs"][0]["output_json"]["document_info"]["filename"],
+            serializer.data["generated_outputs"]["results"][0]["output_json"]["document_info"]["filename"],
             "example.xlsx",
         )
 
