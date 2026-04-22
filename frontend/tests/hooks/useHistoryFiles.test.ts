@@ -533,6 +533,86 @@ describe('useHistoryFiles', () => {
         expect(service.getHistoryFiles).toHaveBeenNthCalledWith(2, 10, 0)
     })
 
+    it('uses latest response limit when reloading in paged mode', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi
+                .fn()
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({ count: 25, limit: 5, offset: 0 })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({ count: 25, limit: 5, offset: 0 })
+                ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.reloadHistory()
+        })
+
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(1, 10, 0)
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(2, 5, 0)
+    })
+
+    it('uses initial page size when reloading in loadAll mode', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi
+                .fn()
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 3,
+                        limit: 2,
+                        offset: 0,
+                        results: [historyItems[0], historyItems[1]],
+                    })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 3,
+                        limit: 2,
+                        offset: 2,
+                        results: [{
+                            ...historyItems[0],
+                            id: '33333333-3333-3333-3333-333333333333',
+                        }],
+                    })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 3,
+                        limit: 2,
+                        offset: 0,
+                        results: [historyItems[0], historyItems[1]],
+                    })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 3,
+                        limit: 2,
+                        offset: 2,
+                        results: [{
+                            ...historyItems[0],
+                            id: '44444444-4444-4444-4444-444444444444',
+                        }],
+                    })
+                ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service, { loadAll: true, pageSize: 2 }))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.reloadHistory()
+        })
+
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(1, 2, 0)
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(2, 2, 2)
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(3, 2, 0)
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(4, 2, 2)
+    })
+
     it('reloads the next page of history items', async () => {
         const service = makeServiceMock({
             getHistoryFiles: vi
