@@ -96,12 +96,18 @@ def extract_original_name(input_json, output_json) -> str:
 
 
 def _thinking_log_not_found_response():
+    return Response({"detail": THINKING_LOG_NOT_FOUND_DETAIL}, status=404)
+
+
+def _invalid_thinking_log_pagination_response():
     return Response(
         {
-            "status": "error",
-            "message": THINKING_LOG_NOT_FOUND_DETAIL,
+            "detail": INVALID_REQUEST_DETAIL,
+            "errors": {
+                "pagination": [INVALID_THINKING_LOG_PAGINATION_DETAIL],
+            },
         },
-        status=404,
+        status=400,
     )
 
 
@@ -250,13 +256,7 @@ def thinking_log_list(request):
             default=10,
         )
     except (TypeError, ValueError):
-        return Response(
-            {
-                "status": "error",
-                "message": INVALID_THINKING_LOG_PAGINATION_DETAIL,
-            },
-            status=400,
-        )
+        return _invalid_thinking_log_pagination_response()
 
     session_id = request.query_params.get("session_id")
     request_id = request.query_params.get("request_id")

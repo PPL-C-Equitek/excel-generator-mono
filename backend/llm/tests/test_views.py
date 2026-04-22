@@ -821,7 +821,7 @@ class ThinkingLogEndpointTest(TestCase):
         response = self.client.get("/llm/thinking-logs/00000000-0000-0000-0000-000000000000/")
 
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.data, {"status": "error", "message": "Thinking log not found."})
+        self.assertEqual(response.data, {"detail": "Thinking log not found."})
 
     def test_thinking_log_detail_blocks_access_to_other_user_record(self):
         foreign_record = self._create_history(
@@ -835,7 +835,7 @@ class ThinkingLogEndpointTest(TestCase):
         response = self.client.get(f"/llm/thinking-logs/{foreign_record.id}/")
 
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.data, {"status": "error", "message": "Thinking log not found."})
+        self.assertEqual(response.data, {"detail": "Thinking log not found."})
 
     def test_thinking_log_list_supports_large_dataset_pagination(self):
         for index in range(25):
@@ -873,4 +873,8 @@ class ThinkingLogEndpointTest(TestCase):
         response = self.client.get("/llm/thinking-logs/?page=0&page_size=10")
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {"status": "error", "message": "Invalid thinking log pagination request."})
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(
+            response.data["errors"],
+            {"pagination": ["Invalid thinking log pagination request."]},
+        )
