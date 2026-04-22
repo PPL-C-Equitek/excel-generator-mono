@@ -52,10 +52,6 @@ export interface EmailRequestActionConfig {
   validateEmail: (email: string) => EmailActionValidationResult;
 }
 
-function getResendCooldownStorageKey(prefix: string, email: string): string {
-  return `${prefix}${email.trim().toLowerCase()}`;
-}
-
 function EmailRequestActionSuccessState({
   email,
   successMessage,
@@ -68,9 +64,8 @@ function EmailRequestActionSuccessState({
   const [isResending, setIsResending] = React.useState(false);
   const [resendStatusMessage, setResendStatusMessage] = React.useState('');
   const [resendErrorMessage, setResendErrorMessage] = React.useState('');
-  const cooldownStorageKey = getResendCooldownStorageKey(config.resendCooldownStoragePrefix, email);
   const { cooldown: resendCooldown, setCooldown: setResendCooldown } =
-    useResendCooldown(0, cooldownStorageKey);
+    useResendCooldown(0, email);
 
   const handleResend = async () => {
     if (shouldSkipEmailResend(email, isResending, resendCooldown)) {
