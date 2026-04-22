@@ -1,3 +1,4 @@
+import { FILE_TOO_LARGE_MESSAGE } from "@/constants/upload";
 import { clearAuthTokens } from "@/lib/auth";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
@@ -29,7 +30,7 @@ function mapUploadErrorMessage(message: string): string {
     normalized.includes("file too large") ||
     normalized.includes("maximum allowed size is 10mb")
   ) {
-    return "File size too big.";
+    return FILE_TOO_LARGE_MESSAGE;
   }
 
   if (

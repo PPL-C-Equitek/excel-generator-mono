@@ -3,6 +3,7 @@ import tempfile
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
+from hypothesis import given, settings, strategies as st
 from PIL import Image
 
 from file_processing.extractors.image_extractor import ImageExtractor
@@ -181,6 +182,53 @@ class TestProcessImage(SimpleTestCase):
         self.assertFalse(success)
         self.assertEqual(error, "Image OCR extraction failed.")
         self.assertIsNone(data)
+
+
+class TestImageExtractionHypothesis(SimpleTestCase):
+    @settings(max_examples=40, deadline=None)
+    @given(text=st.text())
+    def test_split_lines_invariant_removes_empty_and_trims(self, text):
+        lines = ImageExtractor._split_lines(text)
+
+        expected = [line.strip() for line in text.splitlines() if line.strip()]
+        self.assertEqual(lines, expected)
+        self.assertTrue(all(line.strip() == line for line in lines))
+        self.assertTrue(all(line != "" for line in lines))
+
+    @settings(max_examples=40, deadline=None)
+    @given(
+        pixels=st.lists(
+            st.integers(min_value=0, max_value=255),
+            min_size=1,
+            max_size=256,
+        ),
+        threshold=st.integers(min_value=0, max_value=255),
+    )
+    def test_threshold_preprocessor_outputs_binary_pixels(self, pixels, threshold):
+        image = Image.new("L", (len(pixels), 1))
+        image.putdata(pixels)
+
+        preprocessor = GrayscaleThresholdPreprocessor(
+            apply_thresholding=True,
+            threshold_value=threshold,
+        )
+        processed = preprocessor.preprocess(image)
+
+        self.assertEqual(processed.mode, "1")
+        output_pixels = list(processed.getdata())
+        self.assertTrue(all(pixel in (0, 255) for pixel in output_pixels))
+
+    @settings(max_examples=40, deadline=None)
+    @given(ext=st.sampled_from([".PNG", ".JpG", ".jPeG", ".png", ".jpg", ".jpeg"]))
+    def test_extension_validation_is_case_insensitive(self, ext):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
+            path = temp_file.name
+
+        try:
+            extractor = ImageExtractor(ocr_engine=_DummyEngine("ok", 90.0))
+            extractor._validate_extension(path)
+        finally:
+            os.unlink(path)
 
     @patch("file_processing.services.upload_service.ImageExtractor")
     def test_process_image_unexpected_exception_returns_generic_error(self, mock_extractor_cls):
