@@ -718,6 +718,7 @@ def download_csv(request, file_id):
     )
 
 
+@require_GET
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_list(request):
@@ -771,6 +772,7 @@ def session_delete(request, session_id):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+@require_http_methods(["GET", "PATCH", "DELETE"])
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_resource(request, session_id):
