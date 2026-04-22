@@ -1,6 +1,20 @@
+import { clearAuthTokens } from "@/lib/auth";
+
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
   .split("")
   .reduceRight((acc, ch) => (acc === "" && ch === "/" ? acc : ch + acc), "");
+
+function handleUnauthorizedResponse(): void {
+  if (globalThis.window === undefined) {
+    return;
+  }
+
+  clearAuthTokens();
+
+  if (globalThis.window.location.pathname !== "/login") {
+    globalThis.window.location.assign("/login");
+  }
+}
 
 function mapUploadErrorMessage(message: string): string {
   const normalized = message.toLowerCase();
@@ -99,6 +113,10 @@ export async function fetchAPI(endpoint: string, options?: RequestInit) {
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      handleUnauthorizedResponse();
+    }
+
     let message = "Request failed. Please try again."
 
     try {
