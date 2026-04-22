@@ -51,6 +51,48 @@ class ChatSessionServiceTest(TestCase):
 
         self.assertEqual([session.id for session in sessions], [owned_newer.id, owned_older.id])
 
+    def test_list_sessions_for_user_applies_limit_and_offset(self):
+        owned_oldest = Session.objects.create(
+            owner=self.owner,
+            title="Owned Oldest",
+        )
+        owned_middle = Session.objects.create(
+            owner=self.owner,
+            title="Owned Middle",
+        )
+        owned_newest = Session.objects.create(
+            owner=self.owner,
+            title="Owned Newest",
+        )
+
+        sessions = list(list_sessions_for_user(self.owner, limit=1, offset=1))
+
+        self.assertEqual([session.id for session in sessions], [owned_middle.id])
+        self.assertNotIn(owned_newest.id, [session.id for session in sessions])
+        self.assertNotIn(owned_oldest.id, [session.id for session in sessions])
+
+    def test_list_sessions_for_user_rejects_non_positive_limit(self):
+        with self.assertRaisesMessage(ValueError, "limit must be greater than 0."):
+            list(list_sessions_for_user(self.owner, limit=0, offset=0))
+
+    def test_list_sessions_for_user_rejects_negative_offset(self):
+        with self.assertRaisesMessage(ValueError, "offset must be greater than or equal to 0."):
+            list(list_sessions_for_user(self.owner, limit=10, offset=-1))
+
+    def test_list_sessions_for_user_rejects_limit_above_maximum(self):
+        with self.assertRaisesMessage(ValueError, "limit must be less than or equal to 50."):
+            list(list_sessions_for_user(self.owner, limit=51, offset=0))
+
+    def test_list_sessions_for_user_defers_unused_fields_for_list_view(self):
+        Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+
+        session = list(list_sessions_for_user(self.owner, limit=10, offset=0))[0]
+
+        self.assertSetEqual(session.get_deferred_fields(), {"owner_id"})
+
     def test_get_session_for_user_returns_owned_session(self):
         session = Session.objects.create(
             owner=self.owner,
