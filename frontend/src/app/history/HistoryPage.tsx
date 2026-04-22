@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import { useHistoryFiles } from '@/hooks/useHistoryFiles'
@@ -80,13 +80,6 @@ export default function HistoryPage() {
         [items, selectedHistoryId]
     )
 
-    useEffect(() => {
-        if (editingHistoryId && selectedHistoryItem?.id !== editingHistoryId) {
-            setEditingHistoryId(null)
-            setRenameValue('')
-        }
-    }, [editingHistoryId, selectedHistoryItem])
-
     const startEditing = (item: HistoryItem) => {
         setEditingHistoryId(item.id)
         setRenameValue(getDisplayName(item.custom_name, item.original_name))
@@ -107,9 +100,7 @@ export default function HistoryPage() {
     const handleDeleteConfirm = async (item: HistoryItem) => {
         const didDelete = await deleteHistory(item.id)
         if (didDelete) {
-            if (editingHistoryId === item.id) {
-                stopEditing()
-            }
+            stopEditing()
             setHistoryToDelete(null)
         }
     }

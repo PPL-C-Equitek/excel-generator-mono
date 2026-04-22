@@ -120,24 +120,16 @@ export default function HistorySidebarList({
         setOpenMenuHistoryId(null)
     }
 
-    const handleRenameSubmit = async () => {
-        if (!renameTarget) {
-            return
-        }
-
-        const didRename = await renameHistory(renameTarget.id, renameValue.trim())
+    const handleRenameSubmit = async (target: HistoryItem) => {
+        const didRename = await renameHistory(target.id, renameValue.trim())
         if (didRename) {
             setRenameTarget(null)
             setRenameValue('')
         }
     }
 
-    const handleDeleteConfirm = async () => {
-        if (!deleteTarget) {
-            return
-        }
-
-        const didDelete = await deleteHistory(deleteTarget.id)
+    const handleDeleteConfirm = async (target: HistoryItem) => {
+        const didDelete = await deleteHistory(target.id)
         if (didDelete) {
             setDeleteTarget(null)
         }
@@ -327,7 +319,7 @@ export default function HistorySidebarList({
                                 type="button"
                                 className="rounded-lg bg-red-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
                                 onClick={() => {
-                                    void handleRenameSubmit()
+                                    void handleRenameSubmit(renameTarget)
                                 }}
                                 disabled={isRenaming}
                             >
@@ -364,7 +356,7 @@ export default function HistorySidebarList({
                                 type="button"
                                 className="rounded-lg bg-red-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
                                 onClick={() => {
-                                    void handleDeleteConfirm()
+                                    void handleDeleteConfirm(deleteTarget)
                                 }}
                                 disabled={isDeleting}
                             >

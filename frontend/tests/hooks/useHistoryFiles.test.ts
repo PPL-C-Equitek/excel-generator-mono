@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useHistoryFiles } from '../../src/hooks/useHistoryFiles'
 import type {
     HistoryItem,
@@ -82,6 +82,59 @@ function deferred() {
 describe('useHistoryFiles', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        window.localStorage.clear()
+    })
+
+    afterEach(() => {
+        vi.unstubAllGlobals()
+    })
+
+    it('supports default no-argument signature via built-in service', async () => {
+        window.localStorage.setItem('access_token', 'access-token')
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue(
+                makeHistoryResponse({
+                    count: 0,
+                    limit: 10,
+                    offset: 0,
+                    results: [],
+                })
+            ),
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useHistoryFiles())
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        expect(fetchMock).toHaveBeenCalled()
+        expect(String(fetchMock.mock.calls[0][0])).toContain('history/?limit=10&offset=0')
+    })
+
+    it('supports options-only signature via built-in service', async () => {
+        window.localStorage.setItem('access_token', 'access-token')
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue(
+                makeHistoryResponse({
+                    count: 0,
+                    limit: 3,
+                    offset: 0,
+                    results: [],
+                })
+            ),
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useHistoryFiles({ pageSize: 3 }))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        expect(fetchMock).toHaveBeenCalled()
+        expect(String(fetchMock.mock.calls[0][0])).toContain('history/?limit=3&offset=0')
     })
 
     it('loads history items on mount', async () => {
@@ -126,6 +179,76 @@ describe('useHistoryFiles', () => {
 
         expect(result.current.items).toEqual([])
         expect(result.current.error).toBe('Failed to load history.')
+    })
+
+    it('loads all history records across multiple pages when loadAll is enabled', async () => {
+        const pagedItems = [
+            {
+                ...historyItems[0],
+                id: '33333333-3333-3333-3333-333333333333',
+            },
+        ]
+
+        const service = makeServiceMock({
+            getHistoryFiles: vi
+                .fn()
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 3,
+                        limit: 2,
+                        offset: 0,
+                        results: [historyItems[0], historyItems[1]],
+                    })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 3,
+                        limit: 2,
+                        offset: 2,
+                        results: pagedItems,
+                    })
+                ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service, { loadAll: true, pageSize: 2 }))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(1, 2, 0)
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(2, 2, 2)
+        expect(result.current.items).toHaveLength(3)
+        expect(result.current.count).toBe(3)
+        expect(result.current.limit).toBe(3)
+        expect(result.current.offset).toBe(0)
+    })
+
+    it('uses safe fallback limit and stops loadAll loop when next page has no results', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi
+                .fn()
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 5,
+                        limit: 0,
+                        offset: 0,
+                        results: [historyItems[0], historyItems[1]],
+                    })
+                )
+                .mockResolvedValueOnce(
+                    makeHistoryResponse({
+                        count: 5,
+                        limit: 0,
+                        offset: 2,
+                        results: [],
+                    })
+                ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service, { loadAll: true, pageSize: 2 }))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(1, 2, 0)
+        expect(service.getHistoryFiles).toHaveBeenNthCalledWith(2, 1, 2)
+        expect(result.current.items).toHaveLength(2)
     })
 
     it('downloads a csv file for a selected history item', async () => {
@@ -498,6 +621,30 @@ describe('useHistoryFiles', () => {
         await waitFor(() => expect(result.current.isLoading).toBe(false))
 
         await act(async () => {
+            await result.current.goToPreviousPage()
+        })
+
+        expect(service.getHistoryFiles).toHaveBeenCalledTimes(1)
+        expect(result.current.offset).toBe(0)
+    })
+
+    it('keeps pagination actions as no-op in loadAll mode', async () => {
+        const service = makeServiceMock({
+            getHistoryFiles: vi.fn().mockResolvedValue(
+                makeHistoryResponse({
+                    count: 2,
+                    limit: 2,
+                    offset: 0,
+                    results: historyItems,
+                })
+            ),
+        })
+        const { result } = renderHook(() => useHistoryFiles(service, { loadAll: true, pageSize: 2 }))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.goToNextPage()
             await result.current.goToPreviousPage()
         })
 

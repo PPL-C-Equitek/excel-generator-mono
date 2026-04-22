@@ -7,6 +7,10 @@ vi.mock('@/components/LogoutButton', () => ({
     default: () => <button type="button">Logout</button>,
 }))
 
+vi.mock('@/components/HistorySidebarList', () => ({
+    default: () => <div data-testid="history-sidebar-list">History Sidebar List</div>,
+}))
+
 describe('Sidebar', () => {
     it('renders brand name EQUITEK', () => {
         render(<Sidebar activeMenu="convert" />)
@@ -18,12 +22,16 @@ describe('Sidebar', () => {
         expect(screen.getByText('EQUITEK')).toHaveAttribute('href', '/')
     })
 
-    it('renders Convert, Schema, History, and Change Password menu', () => {
+    it('renders Convert, Schema, and Change Password menu', () => {
         render(<Sidebar activeMenu="convert" />)
         expect(screen.getByText('Convert')).toBeInTheDocument()
         expect(screen.getByText('Schema')).toBeInTheDocument()
-        expect(screen.getByText('History')).toBeInTheDocument()
         expect(screen.getByText('Change Password')).toBeInTheDocument()
+    })
+
+    it('renders the history sidebar list block', () => {
+        render(<Sidebar activeMenu="convert" />)
+        expect(screen.getByTestId('history-sidebar-list')).toBeInTheDocument()
     })
 
     it('marks Convert as active when activeMenu is convert', () => {

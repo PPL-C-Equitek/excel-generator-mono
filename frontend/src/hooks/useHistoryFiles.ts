@@ -66,16 +66,12 @@ function getDownloadKey(historyId: string, fileFormat: 'csv' | 'xlsx'): string {
 }
 
 function isHistoryService(value: unknown): value is HistoryService {
-    if (typeof value !== 'object' || value === null) {
-        return false
-    }
-
-    const candidate = value as Partial<HistoryService>
+    const candidate = value as Partial<HistoryService> | null | undefined
     return (
-        typeof candidate.getHistoryFiles === 'function' &&
-        typeof candidate.downloadHistoryFile === 'function' &&
-        typeof candidate.renameHistoryFile === 'function' &&
-        typeof candidate.deleteHistoryFile === 'function'
+        typeof candidate?.getHistoryFiles === 'function' &&
+        typeof candidate?.downloadHistoryFile === 'function' &&
+        typeof candidate?.renameHistoryFile === 'function' &&
+        typeof candidate?.deleteHistoryFile === 'function'
     )
 }
 
