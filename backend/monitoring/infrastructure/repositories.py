@@ -11,6 +11,10 @@ from monitoring.domain.entities import (
     RouteMetricSnapshot,
 )
 
+UNKNOWN_ROUTE = "unknown"
+UNKNOWN_METHOD = "UNKNOWN"
+UNKNOWN_VALUE = "unknown"
+
 
 @dataclass
 class _RouteAccumulator:
@@ -28,17 +32,19 @@ class _RouteAccumulator:
             self.total_errors += 1
 
     def to_snapshot(self, route: str, method: str) -> RouteMetricSnapshot:
-        avg_latency = 0.0
-        if self.total_requests > 0:
-            avg_latency = self.total_latency_ms / self.total_requests
         return RouteMetricSnapshot(
             route=route,
             method=method,
             total_requests=self.total_requests,
             total_errors=self.total_errors,
-            avg_latency_ms=avg_latency,
+            avg_latency_ms=self._average_latency_ms(),
             max_latency_ms=self.max_latency_ms,
         )
+
+    def _average_latency_ms(self) -> float:
+        if self.total_requests <= 0:
+            return 0.0
+        return self.total_latency_ms / self.total_requests
 
 
 class InMemoryMetricsRepository:
@@ -101,16 +107,39 @@ class InMemoryMetricsRepository:
 
     @classmethod
     def _route_key_from_event(cls, event: RequestMetricEvent) -> tuple[str, str]:
-        return (
-            cls._normalize_text(event.route, default="unknown"),
-            cls._normalize_text(event.method, default="UNKNOWN", transform=str.upper),
+        return cls._normalize_pair(
+            first=event.route,
+            second=event.method,
+            first_default=UNKNOWN_ROUTE,
+            second_default=UNKNOWN_METHOD,
+            second_transform=str.upper,
         )
 
     @classmethod
     def _event_key_from_event(cls, event: AuthMetricEvent) -> tuple[str, str]:
+        return cls._normalize_pair(
+            first=event.event_name,
+            second=event.outcome,
+            first_default=UNKNOWN_VALUE,
+            second_default=UNKNOWN_VALUE,
+            first_transform=str.lower,
+            second_transform=str.lower,
+        )
+
+    @classmethod
+    def _normalize_pair(
+        cls,
+        *,
+        first: str | None,
+        second: str | None,
+        first_default: str,
+        second_default: str,
+        first_transform: Callable[[str], str] | None = None,
+        second_transform: Callable[[str], str] | None = None,
+    ) -> tuple[str, str]:
         return (
-            cls._normalize_text(event.event_name, default="unknown", transform=str.lower),
-            cls._normalize_text(event.outcome, default="unknown", transform=str.lower),
+            cls._normalize_text(first, default=first_default, transform=first_transform),
+            cls._normalize_text(second, default=second_default, transform=second_transform),
         )
 
     @staticmethod
