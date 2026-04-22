@@ -68,6 +68,38 @@ interface HistorySidebarGroupSectionProps {
     readonly onDelete: (item: HistoryItem) => void
 }
 
+interface HistorySidebarContentProps {
+    readonly isLoading: boolean
+    readonly loadError: string | null
+    readonly shouldShowLoadError: boolean
+    readonly shouldShowEmptyState: boolean
+    readonly shouldShowNoMatches: boolean
+    readonly shouldShowGroups: boolean
+    readonly groupedItems: HistoryGroup[]
+    readonly selectedHistoryId: string | null
+    readonly openMenuHistoryId: string | null
+    readonly onToggleMenu: (itemId: string) => void
+    readonly onRename: (item: HistoryItem) => void
+    readonly onDelete: (item: HistoryItem) => void
+    readonly onRetry: () => void
+}
+
+interface RenameHistoryDialogProps {
+    readonly target: HistoryItem | null
+    readonly value: string
+    readonly isPending: boolean
+    readonly onChangeValue: (value: string) => void
+    readonly onCancel: () => void
+    readonly onSubmit: (target: HistoryItem) => void
+}
+
+interface DeleteHistoryDialogProps {
+    readonly target: HistoryItem | null
+    readonly isPending: boolean
+    readonly onCancel: () => void
+    readonly onConfirm: (target: HistoryItem) => void
+}
+
 function HistorySidebarItemRow({
     item,
     selectedHistoryId,
@@ -169,6 +201,170 @@ function HistorySidebarGroupSection({
     )
 }
 
+function HistorySidebarContent({
+    isLoading,
+    loadError,
+    shouldShowLoadError,
+    shouldShowEmptyState,
+    shouldShowNoMatches,
+    shouldShowGroups,
+    groupedItems,
+    selectedHistoryId,
+    openMenuHistoryId,
+    onToggleMenu,
+    onRename,
+    onDelete,
+    onRetry,
+}: HistorySidebarContentProps) {
+    return (
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto pb-2">
+            {isLoading ? <p className="px-4 text-sm text-white/75">Loading history...</p> : null}
+
+            {shouldShowLoadError ? (
+                <div className="mx-1 rounded-xl border border-red-200/50 bg-red-50/90 p-3 text-xs text-red-700">
+                    <p>{loadError}</p>
+                    <button
+                        type="button"
+                        className="mt-2 rounded-md bg-red-700 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300"
+                        onClick={onRetry}
+                    >
+                        Retry
+                    </button>
+                </div>
+            ) : null}
+
+            {shouldShowEmptyState ? (
+                <p className="px-4 text-sm text-white/75">No history yet.</p>
+            ) : null}
+
+            {shouldShowNoMatches ? (
+                <p className="px-4 text-sm text-white/75">No matches.</p>
+            ) : null}
+
+            {shouldShowGroups
+                ? groupedItems.map((group) => (
+                    <HistorySidebarGroupSection
+                        key={group.label}
+                        group={group}
+                        selectedHistoryId={selectedHistoryId}
+                        openMenuHistoryId={openMenuHistoryId}
+                        onToggleMenu={onToggleMenu}
+                        onRename={onRename}
+                        onDelete={onDelete}
+                    />
+                ))
+                : null}
+        </div>
+    )
+}
+
+function RenameHistoryDialog({
+    target,
+    value,
+    isPending,
+    onChangeValue,
+    onCancel,
+    onSubmit,
+}: RenameHistoryDialogProps) {
+    if (!target) {
+        return null
+    }
+
+    return (
+        <>
+            <div className="fixed inset-0 z-40 bg-slate-900/70" />
+            <dialog
+                open
+                className="fixed inset-0 z-50 m-auto w-full max-w-sm rounded-2xl border border-red-100 bg-white p-5 shadow-2xl shadow-slate-900/15"
+            >
+                <h3 className="text-base font-bold text-slate-900">Rename History</h3>
+                <p className="mt-1 text-xs text-slate-600">Update the display name for this history item.</p>
+                <label className="mt-4 block">
+                    <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                        File Name
+                    </span>
+                    <input
+                        type="text"
+                        value={value}
+                        onChange={(event) => {
+                            onChangeValue(event.target.value)
+                        }}
+                        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                        maxLength={HISTORY_FILE_NAME_MAX_LENGTH}
+                        disabled={isPending}
+                    />
+                </label>
+                <div className="mt-4 flex justify-end gap-2">
+                    <button
+                        type="button"
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                        onClick={onCancel}
+                        disabled={isPending}
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        className="rounded-lg bg-red-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => {
+                            onSubmit(target)
+                        }}
+                        disabled={isPending}
+                    >
+                        {isPending ? 'Saving...' : 'Save'}
+                    </button>
+                </div>
+            </dialog>
+        </>
+    )
+}
+
+function DeleteHistoryDialog({
+    target,
+    isPending,
+    onCancel,
+    onConfirm,
+}: DeleteHistoryDialogProps) {
+    if (!target) {
+        return null
+    }
+
+    return (
+        <>
+            <div className="fixed inset-0 z-40 bg-slate-900/70" />
+            <dialog
+                open
+                className="fixed inset-0 z-50 m-auto w-full max-w-sm rounded-2xl border border-red-100 bg-white p-5 shadow-2xl shadow-slate-900/15"
+            >
+                <h3 className="text-base font-bold text-slate-900">Delete History</h3>
+                <p className="mt-2 text-sm text-slate-600">
+                    Remove this history item from the list?
+                </p>
+                <div className="mt-4 flex justify-end gap-2">
+                    <button
+                        type="button"
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                        onClick={onCancel}
+                        disabled={isPending}
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        className="rounded-lg bg-red-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => {
+                            onConfirm(target)
+                        }}
+                        disabled={isPending}
+                    >
+                        {isPending ? 'Deleting...' : 'Delete'}
+                    </button>
+                </div>
+            </dialog>
+        </>
+    )
+}
+
 export default function HistorySidebarList({
     selectedHistoryId = null,
 }: HistorySidebarListProps) {
@@ -267,6 +463,19 @@ export default function HistorySidebarList({
         }
     }
 
+    const handleRetry = () => {
+        void reloadHistory()
+    }
+
+    const closeRenameDialog = () => {
+        setRenameTarget(null)
+        setRenameValue('')
+    }
+
+    const closeDeleteDialog = () => {
+        setDeleteTarget(null)
+    }
+
     return (
         <div className="flex min-h-0 flex-1 flex-col">
             <div className="px-4">
@@ -301,134 +510,41 @@ export default function HistorySidebarList({
                 </label>
             </div>
 
-            <div className="mt-3 min-h-0 flex-1 overflow-y-auto pb-2">
-                {isLoading ? <p className="px-4 text-sm text-white/75">Loading history...</p> : null}
+            <HistorySidebarContent
+                isLoading={isLoading}
+                loadError={loadError}
+                shouldShowLoadError={shouldShowLoadError}
+                shouldShowEmptyState={shouldShowEmptyState}
+                shouldShowNoMatches={shouldShowNoMatches}
+                shouldShowGroups={shouldShowGroups}
+                groupedItems={groupedItems}
+                selectedHistoryId={selectedHistoryId}
+                openMenuHistoryId={openMenuHistoryId}
+                onToggleMenu={toggleMenu}
+                onRename={openRenameDialog}
+                onDelete={openDeleteDialog}
+                onRetry={handleRetry}
+            />
 
-                {shouldShowLoadError ? (
-                    <div className="mx-1 rounded-xl border border-red-200/50 bg-red-50/90 p-3 text-xs text-red-700">
-                        <p>{loadError}</p>
-                        <button
-                            type="button"
-                            className="mt-2 rounded-md bg-red-700 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300"
-                            onClick={() => {
-                                void reloadHistory()
-                            }}
-                        >
-                            Retry
-                        </button>
-                    </div>
-                ) : null}
+            <RenameHistoryDialog
+                target={renameTarget}
+                value={renameValue}
+                isPending={isRenaming}
+                onChangeValue={setRenameValue}
+                onCancel={closeRenameDialog}
+                onSubmit={(target) => {
+                    void handleRenameSubmit(target)
+                }}
+            />
 
-                {shouldShowEmptyState ? (
-                    <p className="px-4 text-sm text-white/75">No history yet.</p>
-                ) : null}
-
-                {shouldShowNoMatches ? (
-                    <p className="px-4 text-sm text-white/75">No matches.</p>
-                ) : null}
-
-                {shouldShowGroups
-                    ? groupedItems.map((group) => (
-                        <HistorySidebarGroupSection
-                            key={group.label}
-                            group={group}
-                            selectedHistoryId={selectedHistoryId}
-                            openMenuHistoryId={openMenuHistoryId}
-                            onToggleMenu={toggleMenu}
-                            onRename={openRenameDialog}
-                            onDelete={openDeleteDialog}
-                        />
-                    ))
-                    : null}
-            </div>
-
-            {renameTarget ? (
-                <>
-                    <div className="fixed inset-0 z-40 bg-slate-900/70" />
-                    <dialog
-                        open
-                        className="fixed inset-0 z-50 m-auto w-full max-w-sm rounded-2xl border border-red-100 bg-white p-5 shadow-2xl shadow-slate-900/15"
-                    >
-                        <h3 className="text-base font-bold text-slate-900">Rename History</h3>
-                        <p className="mt-1 text-xs text-slate-600">Update the display name for this history item.</p>
-                        <label className="mt-4 block">
-                            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                                File Name
-                            </span>
-                            <input
-                                type="text"
-                                value={renameValue}
-                                onChange={(event) => {
-                                    setRenameValue(event.target.value)
-                                }}
-                                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
-                                maxLength={HISTORY_FILE_NAME_MAX_LENGTH}
-                                disabled={isRenaming}
-                            />
-                        </label>
-                        <div className="mt-4 flex justify-end gap-2">
-                            <button
-                                type="button"
-                                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                                onClick={() => {
-                                    setRenameTarget(null)
-                                    setRenameValue('')
-                                }}
-                                disabled={isRenaming}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                className="rounded-lg bg-red-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                onClick={() => {
-                                    void handleRenameSubmit(renameTarget)
-                                }}
-                                disabled={isRenaming}
-                            >
-                                {isRenaming ? 'Saving...' : 'Save'}
-                            </button>
-                        </div>
-                    </dialog>
-                </>
-            ) : null}
-
-            {deleteTarget ? (
-                <>
-                    <div className="fixed inset-0 z-40 bg-slate-900/70" />
-                    <dialog
-                        open
-                        className="fixed inset-0 z-50 m-auto w-full max-w-sm rounded-2xl border border-red-100 bg-white p-5 shadow-2xl shadow-slate-900/15"
-                    >
-                        <h3 className="text-base font-bold text-slate-900">Delete History</h3>
-                        <p className="mt-2 text-sm text-slate-600">
-                            Remove this history item from the list?
-                        </p>
-                        <div className="mt-4 flex justify-end gap-2">
-                            <button
-                                type="button"
-                                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                                onClick={() => {
-                                    setDeleteTarget(null)
-                                }}
-                                disabled={isDeleting}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                className="rounded-lg bg-red-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                onClick={() => {
-                                    void handleDeleteConfirm(deleteTarget)
-                                }}
-                                disabled={isDeleting}
-                            >
-                                {isDeleting ? 'Deleting...' : 'Delete'}
-                            </button>
-                        </div>
-                    </dialog>
-                </>
-            ) : null}
+            <DeleteHistoryDialog
+                target={deleteTarget}
+                isPending={isDeleting}
+                onCancel={closeDeleteDialog}
+                onConfirm={(target) => {
+                    void handleDeleteConfirm(target)
+                }}
+            />
         </div>
     )
 }
