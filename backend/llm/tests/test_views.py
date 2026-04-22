@@ -16,6 +16,7 @@ from llm.services.openai_client import (
 )
 from llm.views import (
     build_llm_generation_service,
+    build_llm_reasoning_service,
     extract_original_name,
     get_authenticated_user_id,
 )
@@ -352,6 +353,238 @@ class LlmGenerateEndpointTest(SimpleTestCase):
     #     self.assertEqual(blocked.status_code, 429)
     #     self.assertIn("detail", blocked.data)
     #     self.assertEqual(blocked["X-RateLimit-Limit"], "5")
+
+
+class LlmReasoningEndpointTest(SimpleTestCase):
+    # Positive
+    def test_build_llm_reasoning_service_returns_default_dependencies(self):
+        service = build_llm_reasoning_service()
+
+        self.assertEqual(service.__class__.__name__, "LlmReasoningService")
+        self.assertIsInstance(service.text_provider, OpenAITextGenerationProvider)
+
+    # Positive
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_llm_reasoning_returns_200_for_authenticated_user(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "final_answer": "Total payment is Rp1.250.000.",
+            "reasoning_steps": [
+                "Identify the total amount.",
+                "Confirm it is the final payable total.",
+            ],
+            "thinking_log": "The invoice total was identified and summarized.",
+        }
+        client = APIClient()
+        client.force_authenticate(user=SimpleNamespace(is_authenticated=True, id="user-1"))
+
+        response = client.post(
+            "/llm/reasoning/",
+            {"prompt": "Summarize this invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["final_answer"], "Total payment is Rp1.250.000.")
+        self.assertEqual(
+            response.data["reasoning_steps"],
+            [
+                "Identify the total amount.",
+                "Confirm it is the final payable total.",
+            ],
+        )
+        self.assertEqual(
+            response.data["thinking_log"],
+            "The invoice total was identified and summarized.",
+        )
+        mock_service.generate.assert_called_once_with(prompt="Summarize this invoice")
+
+    # Negative
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_llm_reasoning_requires_authentication(self, mock_build_service):
+        client = APIClient()
+
+        response = client.post(
+            "/llm/reasoning/",
+            {"prompt": "Summarize this invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        mock_build_service.assert_not_called()
+
+    # Negative
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_llm_reasoning_rejects_invalid_token(self, mock_build_service):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION="Bearer invalid.token")
+
+        response = client.post(
+            "/llm/reasoning/",
+            {"prompt": "Summarize this invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        mock_build_service.assert_not_called()
+
+    # Edge
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_llm_reasoning_rejects_blank_prompt_without_calling_service(
+        self, mock_build_service
+    ):
+        client = APIClient()
+        client.force_authenticate(user=SimpleNamespace(is_authenticated=True, id="user-1"))
+
+        response = client.post(
+            "/llm/reasoning/",
+            {"prompt": "   "},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertIn("errors", response.data)
+        mock_build_service.assert_not_called()
+
+    # Negative
+    @patch("llm.views.LlmReasoningResponseSerializer")
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_llm_reasoning_returns_502_when_response_serializer_invalid(
+        self, mock_build_service, mock_response_serializer_class
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "final_answer": "Answer",
+            "reasoning_steps": ["Step one"],
+            "thinking_log": "Summary",
+        }
+        mock_response_serializer = mock_response_serializer_class.return_value
+        mock_response_serializer.is_valid.return_value = False
+        client = APIClient()
+        client.force_authenticate(user=SimpleNamespace(is_authenticated=True, id="user-1"))
+
+        response = client.post(
+            "/llm/reasoning/",
+            {"prompt": "Summarize this invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
+
+    # Negative
+    @patch("llm.views.logger")
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_llm_reasoning_returns_400_for_value_error(self, mock_build_service, mock_logger):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = ValueError("prompt must be a non-empty string.")
+        client = APIClient()
+        client.force_authenticate(user=SimpleNamespace(is_authenticated=True, id="user-1"))
+
+        response = client.post(
+            "/llm/reasoning/",
+            {"prompt": "Summarize this invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(response.data["errors"]["prompt"], ["Invalid prompt payload."])
+        mock_logger.exception.assert_called_once_with("Invalid prompt payload.")
+
+    # Negative
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_llm_reasoning_returns_503_for_configuration_error(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
+        client = APIClient()
+        client.force_authenticate(user=SimpleNamespace(is_authenticated=True, id="user-1"))
+
+        response = client.post(
+            "/llm/reasoning/",
+            {"prompt": "Summarize this invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data["detail"], "Service unavailable. Please try again later.")
+
+    # Negative
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_llm_reasoning_returns_502_for_provider_failure(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = OpenAIServiceError("invalid response")
+        client = APIClient()
+        client.force_authenticate(user=SimpleNamespace(is_authenticated=True, id="user-1"))
+
+        response = client.post(
+            "/llm/reasoning/",
+            {"prompt": "Summarize this invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
+
+    # Negative
+    @patch("llm.views.logger")
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_llm_reasoning_returns_upstream_status_code(self, mock_build_service, mock_logger):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = OpenAIUpstreamError(
+            "LLM rate limit exceeded.",
+            status_code=429,
+        )
+        client = APIClient()
+        client.force_authenticate(user=SimpleNamespace(is_authenticated=True, id="user-1"))
+
+        response = client.post(
+            "/llm/reasoning/",
+            {"prompt": "Summarize this invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
+        mock_logger.exception.assert_called_once_with(
+            "Upstream LLM provider error while handling llm_reasoning request."
+        )
+
+    # Edge
+    @patch("llm.views.logger")
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_llm_reasoning_returns_500_for_unexpected_error(self, mock_build_service, mock_logger):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = RuntimeError("unexpected")
+        client = APIClient()
+        client.force_authenticate(user=SimpleNamespace(is_authenticated=True, id="user-1"))
+
+        response = client.post(
+            "/llm/reasoning/",
+            {"prompt": "Summarize this invoice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["detail"], "Internal server error.")
+        mock_logger.exception.assert_called_once_with(
+            "Unexpected error while handling llm_reasoning request."
+        )
+
+    # Negative
+    def test_llm_reasoning_rejects_non_json_content_type(self):
+        client = APIClient()
+        client.force_authenticate(user=SimpleNamespace(is_authenticated=True, id="user-1"))
+
+        response = client.post(
+            "/llm/reasoning/",
+            data="plain text",
+            content_type="text/plain",
+        )
+
+        self.assertEqual(response.status_code, 415)
+        self.assertEqual(response.data["detail"], "Content-Type must be application/json.")
 
 
 class LlmGenerateHistoryIntegrationTest(TestCase):
