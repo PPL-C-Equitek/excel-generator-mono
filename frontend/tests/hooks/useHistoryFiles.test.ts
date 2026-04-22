@@ -1,6 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useHistoryFiles } from '../../src/hooks/useHistoryFiles'
+import * as api from '../../src/lib/api'
+import * as auth from '../../src/lib/auth'
 import type {
     HistoryItem,
     HistoryListResponse,
@@ -86,55 +88,44 @@ describe('useHistoryFiles', () => {
     })
 
     afterEach(() => {
+        vi.restoreAllMocks()
         vi.unstubAllGlobals()
     })
 
     it('supports default no-argument signature via built-in service', async () => {
-        window.localStorage.setItem('access_token', 'access-token')
-        const fetchMock = vi.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: vi.fn().mockResolvedValue(
-                makeHistoryResponse({
-                    count: 0,
-                    limit: 10,
-                    offset: 0,
-                    results: [],
-                })
-            ),
-        })
-        vi.stubGlobal('fetch', fetchMock)
+        vi.spyOn(auth, 'getValidAccessToken').mockResolvedValue('access-token')
+        const fetchApiSpy = vi.spyOn(api, 'fetchAPI').mockResolvedValue(
+            makeHistoryResponse({
+                count: 0,
+                limit: 10,
+                offset: 0,
+                results: [],
+            })
+        )
 
         const { result } = renderHook(() => useHistoryFiles())
 
         await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-        expect(fetchMock).toHaveBeenCalled()
-        expect(String(fetchMock.mock.calls[0][0])).toContain('history/?limit=10&offset=0')
+        expect(fetchApiSpy).toHaveBeenCalledWith('history/?limit=10&offset=0', expect.any(Object))
     })
 
     it('supports options-only signature via built-in service', async () => {
-        window.localStorage.setItem('access_token', 'access-token')
-        const fetchMock = vi.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: vi.fn().mockResolvedValue(
-                makeHistoryResponse({
-                    count: 0,
-                    limit: 3,
-                    offset: 0,
-                    results: [],
-                })
-            ),
-        })
-        vi.stubGlobal('fetch', fetchMock)
+        vi.spyOn(auth, 'getValidAccessToken').mockResolvedValue('access-token')
+        const fetchApiSpy = vi.spyOn(api, 'fetchAPI').mockResolvedValue(
+            makeHistoryResponse({
+                count: 0,
+                limit: 3,
+                offset: 0,
+                results: [],
+            })
+        )
 
         const { result } = renderHook(() => useHistoryFiles({ pageSize: 3 }))
 
         await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-        expect(fetchMock).toHaveBeenCalled()
-        expect(String(fetchMock.mock.calls[0][0])).toContain('history/?limit=3&offset=0')
+        expect(fetchApiSpy).toHaveBeenCalledWith('history/?limit=3&offset=0', expect.any(Object))
     })
 
     it('loads history items on mount', async () => {
