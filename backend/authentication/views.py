@@ -1,7 +1,6 @@
 import logging
 import uuid
 from datetime import timedelta
-from django.core.cache import cache
 
 from django.core.signing import SignatureExpired, BadSignature
 from rest_framework import status
@@ -22,7 +21,6 @@ from authentication.logout.adapters import (
 from authentication.logout.http import LogoutView as CleanLogoutView
 from authentication.models import User
 from authentication.serializers import (
-    LoginSerializer,
     RefreshTokenSerializer,
     TokenValidationSerializer,
     VerifyEmailSerializer,
@@ -31,12 +29,7 @@ from authentication.services import (
     decode_verification_token,
     send_verification_email,
     generate_tokens,
-    LoginFailureTracker as BaseLoginFailureTracker,
-    LoginService,
     RefreshTokenService,
-    LoginRateLimitedError,
-    InvalidCredentialsError,
-    EmailNotVerifiedError,
     BlacklistedRefreshTokenError,
     RefreshTokenExpiredError,
     InvalidRefreshTokenError,
@@ -186,73 +179,6 @@ class ResendVerificationView(APIView):
             {"message": "Verification email has been resent"},
             status=status.HTTP_200_OK,
         )
-
-
-class LoginFailureTracker(BaseLoginFailureTracker):
-    @classmethod
-    def get_cache_backend(cls):
-        return cache
-
-
-class DjangoUserLookupGateway:
-    def get_by_email(self, email: str) -> User:
-        return User.objects.get(email=email)
-
-class LoginView(APIView):
-    """Login endpoint with JWT token generation and rate limiting"""
-
-    @track_auth_metric("auth.login")
-    def post(self, request):
-        serializer = LoginSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                {"errors": serializer.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        email = serializer.validated_data["email"]
-        password = serializer.validated_data["password"]
-
-        login_service = LoginService(
-            user_gateway=DjangoUserLookupGateway(),
-            failure_tracker=LoginFailureTracker,
-            token_generator=generate_tokens,
-        )
-
-        try:
-            result = login_service.authenticate(email=email, password=password)
-            return Response(
-                {
-                    "access_token": result.tokens.access_token,
-                    "refresh_token": result.tokens.refresh_token,
-                    "user": {
-                        "id": result.user.id,
-                        "email": result.user.email,
-                        "name": result.user.name,
-                    },
-                },
-                status=status.HTTP_200_OK,
-            )
-        except LoginRateLimitedError:
-            return Response(
-                {"message": "Terlalu banyak percobaan gagal. Coba lagi dalam beberapa menit."},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
-        except InvalidCredentialsError:
-            return Response(
-                {"message": "Email atau password salah"},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-        except EmailNotVerifiedError:
-            return Response(
-                {"message": "Email Anda belum diverifikasi. Cek email untuk link verifikasi."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        except Exception:
-            logger.exception("Unexpected error during login for email: %s", email)
-            return Response(
-                {"message": SERVER_ERROR_MESSAGE},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
 
 
 class RefreshTokenView(APIView):
