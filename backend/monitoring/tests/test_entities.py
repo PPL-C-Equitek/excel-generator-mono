@@ -2,7 +2,12 @@ from datetime import datetime
 
 from django.test import SimpleTestCase
 
-from monitoring.entities import CheckResult, MetricsSnapshot, RouteMetricSnapshot
+from monitoring.entities import (
+    CheckResult,
+    EventMetricSnapshot,
+    MetricsSnapshot,
+    RouteMetricSnapshot,
+)
 
 
 class CheckResultEntityTest(SimpleTestCase):
@@ -96,6 +101,18 @@ class MetricsSnapshotEntityTest(SimpleTestCase):
                     max_latency_ms=500.0,
                 ),
             ),
+            events=(
+                EventMetricSnapshot(
+                    event_name="login",
+                    outcome="success",
+                    count=4,
+                ),
+                EventMetricSnapshot(
+                    event_name="login",
+                    outcome="client_error",
+                    count=2,
+                ),
+            ),
         )
 
         self.assertEqual(snapshot.error_rate, 0.3)
@@ -119,6 +136,12 @@ class MetricsSnapshotEntityTest(SimpleTestCase):
                         "max_latency_ms": 500.0,
                     }
                 ],
+                "events": {
+                    "login": {
+                        "success": 4,
+                        "client_error": 2,
+                    }
+                },
             },
         )
 
@@ -131,4 +154,22 @@ class MetricsSnapshotEntityTest(SimpleTestCase):
         )
 
         self.assertEqual(snapshot.error_rate, 0.0)
+        self.assertEqual(snapshot.to_dict()["events"], {})
 
+
+class EventMetricSnapshotEntityTest(SimpleTestCase):
+    def test_to_dict(self):
+        event = EventMetricSnapshot(
+            event_name="register",
+            outcome="success",
+            count=3,
+        )
+
+        self.assertEqual(
+            event.to_dict(),
+            {
+                "event_name": "register",
+                "outcome": "success",
+                "count": 3,
+            },
+        )
