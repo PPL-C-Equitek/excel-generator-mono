@@ -3,6 +3,8 @@ from typing import Any, Callable, Protocol
 
 from custom_schemas.models import CustomSchema
 
+from llm.prompts.extraction import build_extraction_prompt
+
 from .openai_client import OpenAIServiceError
 from .reasoning_service import TextGenerationProvider, compose_system_prompt, get_base_system_prompt
 
@@ -91,9 +93,13 @@ class LlmGenerationService:
                 custom_schema_id
             )
 
+        extraction_prompt = build_extraction_prompt(
+            schema_hint=schema_prompt_fragment,
+        )
+
         effective_system_prompt = compose_system_prompt(
             self.base_system_prompt_provider(),
-            schema_prompt_fragment,
+            extraction_prompt,
         )
         return self.json_generator.generate(
             input_json=input_json,
