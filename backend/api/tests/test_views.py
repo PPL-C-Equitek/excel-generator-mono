@@ -2787,6 +2787,28 @@ class SessionEndpointTests(TestCase):
         mock_get_session_detail.assert_not_called()
 
     @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_rejects_zero_messages_limit(self, mock_get_session_detail):
+        request = self.factory.get("/sessions/session-1/?messages_limit=0")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "messages_limit must be greater than 0."})
+        mock_get_session_detail.assert_not_called()
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_rejects_outputs_limit_above_maximum(self, mock_get_session_detail):
+        request = self.factory.get("/sessions/session-1/?outputs_limit=51")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "outputs_limit must be less than or equal to 50."})
+        mock_get_session_detail.assert_not_called()
+
+    @patch("api.views.get_paginated_session_detail_for_user")
     def test_session_detail_hides_non_whitelisted_service_validation_error(
         self,
         mock_get_session_detail,
@@ -2901,7 +2923,7 @@ class SessionEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_session_detail.assert_called_once()
-        self.assertEqual(mock_session_detail.call_args.args[0], self.user)
+        self.assertEqual(mock_session_detail.call_args.args[0].user, self.user)
         self.assertEqual(mock_session_detail.call_args.args[1], "session-1")
 
     @patch("api.views._build_session_update_response")
