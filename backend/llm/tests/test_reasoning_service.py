@@ -11,6 +11,7 @@ from llm.services.reasoning_service import (
     _collect_steps_from_lines,
     _extract_braced_json_candidate,
     _extract_json_from_fenced_blocks,
+    _parse_structured_reasoning_object,
     _extract_step_text,
     _fallback_narrative_steps,
     _get_positive_int_setting,
@@ -371,6 +372,41 @@ class ReasoningParserCoverageTest(SimpleTestCase):
             },
         )
 
+    def test_parse_reasoning_response_uses_fast_path_for_direct_json_object(self):
+        result = parse_reasoning_response(
+            '{"final_answer":"A","reasoning_steps":["S1"],"thinking_log":"T"}'
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "final_answer": "A",
+                "reasoning_steps": ["S1"],
+                "thinking_log": "T",
+            },
+        )
+
+    def test_parse_reasoning_response_braced_invalid_json_uses_safe_placeholders(self):
+        result = parse_reasoning_response("{not valid json}")
+
+        self.assertEqual(result["final_answer"], FALLBACK_FINAL_ANSWER)
+        self.assertEqual(result["reasoning_steps"], [FALLBACK_REASONING_STEP])
+        self.assertEqual(result["thinking_log"], FALLBACK_THINKING_LOG)
+
+    def test_parse_structured_reasoning_object_uses_direct_json_when_enabled(self):
+        result = _parse_structured_reasoning_object(
+            '{"final_answer":"A","reasoning_steps":["S1"],"thinking_log":"T"}',
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "final_answer": "A",
+                "reasoning_steps": ["S1"],
+                "thinking_log": "T",
+            },
+        )
+
     def test_parse_reasoning_response_skips_non_dict_fenced_json_then_uses_next_dict(self):
         result = parse_reasoning_response(
             """
@@ -517,20 +553,29 @@ class ReasoningParserCoverageTest(SimpleTestCase):
 
         self.assertEqual(result["final_answer"], "Completed. Payload: {not valid json}. Thinking Log: done.")
 
-    @patch("llm.services.reasoning_service.re.split", return_value=["", "First sentence.", ""])
-    def test_fallback_narrative_steps_skips_empty_sentences(self, _mock_split):
+    @patch("llm.services.reasoning_service.SENTENCE_SPLIT_RE")
+    def test_fallback_narrative_steps_skips_empty_sentences(self, mock_sentence_split_re):
+        mock_sentence_split_re.split.return_value = ["", "First sentence.", ""]
         steps = _fallback_narrative_steps("placeholder", max_steps=5, max_step_chars=100)
 
         self.assertEqual(steps, ["First sentence."])
 
-    @patch("llm.services.reasoning_service.re.split", return_value=["", ""])
-    def test_fallback_narrative_steps_uses_raw_text_when_split_produces_no_steps(self, _mock_split):
+    @patch("llm.services.reasoning_service.SENTENCE_SPLIT_RE")
+    def test_fallback_narrative_steps_uses_raw_text_when_split_produces_no_steps(
+        self,
+        mock_sentence_split_re,
+    ):
+        mock_sentence_split_re.split.return_value = ["", ""]
         steps = _fallback_narrative_steps("Raw fallback text", max_steps=5, max_step_chars=100)
 
         self.assertEqual(steps, ["Raw fallback text"])
 
-    @patch("llm.services.reasoning_service.re.split", return_value=["", ""])
-    def test_fallback_narrative_steps_returns_empty_for_blank_raw_text(self, _mock_split):
+    @patch("llm.services.reasoning_service.SENTENCE_SPLIT_RE")
+    def test_fallback_narrative_steps_returns_empty_for_blank_raw_text(
+        self,
+        mock_sentence_split_re,
+    ):
+        mock_sentence_split_re.split.return_value = ["", ""]
         steps = _fallback_narrative_steps("   ", max_steps=5, max_step_chars=100)
 
         self.assertEqual(steps, [])
