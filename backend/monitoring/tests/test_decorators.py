@@ -82,3 +82,24 @@ class TrackAuthMetricDecoratorTest(SimpleTestCase):
             endpoint="/auth/login/",
         )
 
+    @patch("monitoring.interfaces.http.decorators.logger")
+    @patch("monitoring.interfaces.http.decorators.get_monitoring_service")
+    def test_track_auth_metric_swallows_monitoring_errors(
+        self,
+        mocked_get_service,
+        mocked_logger,
+    ):
+        monitoring_service = Mock()
+        monitoring_service.record_event.side_effect = RuntimeError("metrics down")
+        mocked_get_service.return_value = monitoring_service
+
+        class _View:
+            @track_auth_metric("login")
+            def post(self, request):
+                return SimpleNamespace(status_code=200)
+
+        request = self.factory.post("/auth/login/")
+        response = _View().post(request)
+
+        self.assertEqual(response.status_code, 200)
+        mocked_logger.exception.assert_called_once_with("Failed to record auth metrics.")

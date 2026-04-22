@@ -22,6 +22,7 @@ from authentication.change_password.exceptions import (
 )
 from authentication.change_password.serializers import ChangePasswordSerializer
 from authentication.jwt_authentication import JWTAuthentication
+from monitoring.interfaces.http.decorators import track_auth_metric
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class ChangePasswordView(APIView):
     def get_change_password_use_case(self):
         return build_change_password_use_case()
 
+    @track_auth_metric("auth.change_password")
     def post(self, request):
         serializer = ChangePasswordSerializer(data=request.data)
         if not serializer.is_valid():

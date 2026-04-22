@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
@@ -9,6 +10,8 @@ from rest_framework.permissions import IsAuthenticated
 from authentication.jwt_authentication import JWTAuthentication
 from monitoring.container import get_monitoring_service
 from monitoring.interfaces.http.permissions import IsMonitoringAccount
+
+logger = logging.getLogger(__name__)
 
 OUTCOME_SUCCESS = "success"
 OUTCOME_CLIENT_ERROR = "client_error"
@@ -54,11 +57,14 @@ def _record_auth_event(
     outcome: str,
     endpoint: str,
 ) -> None:
-    monitoring_service.record_event(
-        event_name=event_name,
-        outcome=outcome,
-        endpoint=endpoint,
-    )
+    try:
+        monitoring_service.record_event(
+            event_name=event_name,
+            outcome=outcome,
+            endpoint=endpoint,
+        )
+    except Exception:
+        logger.exception("Failed to record auth metrics.")
 
 
 def track_auth_metric(event_name: str):
