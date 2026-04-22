@@ -3,7 +3,17 @@ from datetime import datetime
 from threading import Lock
 from typing import Callable
 
-from monitoring.domain.entities import MetricsSnapshot, RequestMetricEvent, RouteMetricSnapshot
+from monitoring.domain.entities import (
+    AuthMetricEvent,
+    EventMetricSnapshot,
+    MetricsSnapshot,
+    RequestMetricEvent,
+    RouteMetricSnapshot,
+)
+
+UNKNOWN_ROUTE = "unknown"
+UNKNOWN_METHOD = "UNKNOWN"
+UNKNOWN_VALUE = "unknown"
 
 
 @dataclass
@@ -22,17 +32,19 @@ class _RouteAccumulator:
             self.total_errors += 1
 
     def to_snapshot(self, route: str, method: str) -> RouteMetricSnapshot:
-        avg_latency = 0.0
-        if self.total_requests > 0:
-            avg_latency = self.total_latency_ms / self.total_requests
         return RouteMetricSnapshot(
             route=route,
             method=method,
             total_requests=self.total_requests,
             total_errors=self.total_errors,
-            avg_latency_ms=avg_latency,
+            avg_latency_ms=self._average_latency_ms(),
             max_latency_ms=self.max_latency_ms,
         )
+
+    def _average_latency_ms(self) -> float:
+        if self.total_requests <= 0:
+            return 0.0
+        return self.total_latency_ms / self.total_requests
 
 
 class InMemoryMetricsRepository:
@@ -40,11 +52,10 @@ class InMemoryMetricsRepository:
         self._now = now or datetime.utcnow
         self._lock = Lock()
         self._routes: dict[tuple[str, str], _RouteAccumulator] = {}
+        self._events: dict[tuple[str, str], int] = {}
 
     def record_request(self, event: RequestMetricEvent) -> None:
-        route = (event.route or "").strip() or "unknown"
-        method = (event.method or "").strip().upper() or "UNKNOWN"
-        key = (route, method)
+        key = self._route_key_from_event(event)
         with self._lock:
             accumulator = self._routes.get(key)
             if accumulator is None:
@@ -52,17 +63,18 @@ class InMemoryMetricsRepository:
                 self._routes[key] = accumulator
             accumulator.register(event)
 
+    def record_event(self, event: AuthMetricEvent) -> None:
+        key = self._event_key_from_event(event)
+        with self._lock:
+            self._events[key] = self._events.get(key, 0) + 1
+
     def get_snapshot(self) -> MetricsSnapshot:
         with self._lock:
             items = list(self._routes.items())
+            event_items = list(self._events.items())
 
-        route_snapshots = [
-            acc.to_snapshot(route=route, method=method)
-            for (route, method), acc in items
-        ]
-        route_snapshots.sort(
-            key=lambda item: (-item.total_requests, item.route, item.method)
-        )
+        route_snapshots = self._build_route_snapshots(items)
+        event_snapshots = self._build_event_snapshots(event_items)
 
         total_requests = sum(item.total_requests for item in route_snapshots)
         total_errors = sum(item.total_errors for item in route_snapshots)
@@ -71,9 +83,87 @@ class InMemoryMetricsRepository:
             total_requests=total_requests,
             total_errors=total_errors,
             routes=tuple(route_snapshots),
+            events=tuple(event_snapshots),
         )
 
     def reset(self) -> None:
         with self._lock:
             self._routes.clear()
+            self._events.clear()
 
+    @staticmethod
+    def _normalize_text(
+        value: str | None,
+        *,
+        default: str,
+        transform: Callable[[str], str] | None = None,
+    ) -> str:
+        normalized = (value or "").strip()
+        if not normalized:
+            return default
+        if transform is None:
+            return normalized
+        return transform(normalized)
+
+    @classmethod
+    def _route_key_from_event(cls, event: RequestMetricEvent) -> tuple[str, str]:
+        return cls._normalize_pair(
+            first=event.route,
+            second=event.method,
+            first_default=UNKNOWN_ROUTE,
+            second_default=UNKNOWN_METHOD,
+            second_transform=str.upper,
+        )
+
+    @classmethod
+    def _event_key_from_event(cls, event: AuthMetricEvent) -> tuple[str, str]:
+        return cls._normalize_pair(
+            first=event.event_name,
+            second=event.outcome,
+            first_default=UNKNOWN_VALUE,
+            second_default=UNKNOWN_VALUE,
+            first_transform=str.lower,
+            second_transform=str.lower,
+        )
+
+    @classmethod
+    def _normalize_pair(
+        cls,
+        *,
+        first: str | None,
+        second: str | None,
+        first_default: str,
+        second_default: str,
+        first_transform: Callable[[str], str] | None = None,
+        second_transform: Callable[[str], str] | None = None,
+    ) -> tuple[str, str]:
+        return (
+            cls._normalize_text(first, default=first_default, transform=first_transform),
+            cls._normalize_text(second, default=second_default, transform=second_transform),
+        )
+
+    @staticmethod
+    def _build_route_snapshots(
+        items: list[tuple[tuple[str, str], _RouteAccumulator]]
+    ) -> list[RouteMetricSnapshot]:
+        route_snapshots = [
+            accumulator.to_snapshot(route=route, method=method)
+            for (route, method), accumulator in items
+        ]
+        route_snapshots.sort(
+            key=lambda item: (-item.total_requests, item.route, item.method)
+        )
+        return route_snapshots
+
+    @staticmethod
+    def _build_event_snapshots(
+        event_items: list[tuple[tuple[str, str], int]]
+    ) -> list[EventMetricSnapshot]:
+        event_snapshots = [
+            EventMetricSnapshot(event_name=event_name, outcome=outcome, count=count)
+            for (event_name, outcome), count in event_items
+        ]
+        event_snapshots.sort(
+            key=lambda item: (-item.count, item.event_name, item.outcome)
+        )
+        return event_snapshots
