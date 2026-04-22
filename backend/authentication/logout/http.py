@@ -10,6 +10,7 @@ from authentication.jwt_authentication import JWTAuthentication
 from authentication.logout.adapters import build_logout_user_use_case
 from authentication.logout.entities import LogoutCommand
 from authentication.models import User
+from monitoring.interfaces.http.decorators import track_auth_metric
 
 
 class LogoutView(APIView):
@@ -20,6 +21,7 @@ class LogoutView(APIView):
         # This base factory is used outside the legacy wrapper in authentication.views.
         return build_logout_user_use_case()  # pragma: no cover
 
+    @track_auth_metric("auth.logout")
     def post(self, request):
         refresh_token = request.data.get("refresh_token")
         if not isinstance(refresh_token, str) or not refresh_token.strip():

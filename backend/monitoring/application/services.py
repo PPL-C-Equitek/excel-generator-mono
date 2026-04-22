@@ -4,6 +4,13 @@ from typing import Callable, Iterable
 from monitoring.domain.contracts import HealthCheck, MetricsRepository
 from monitoring.domain.entities import AuthMetricEvent, CheckResult, RequestMetricEvent
 
+STATUS_OK = "ok"
+STATUS_DEGRADED = "degraded"
+STATUS_DOWN = "down"
+
+HTTP_STATUS_OK = 200
+HTTP_STATUS_UNAVAILABLE = 503
+
 
 class ReadinessService:
     def __init__(self, checks: Iterable[HealthCheck]):
@@ -12,7 +19,7 @@ class ReadinessService:
     def run(self) -> tuple[int, dict[str, object]]:
         results = [check.run() for check in self._checks]
         status_value = self._resolve_status(results)
-        http_status = 200 if status_value == "ok" else 503
+        http_status = self._to_http_status(status_value)
         return http_status, {
             "status": status_value,
             "checks": [result.to_dict() for result in results],
@@ -20,15 +27,23 @@ class ReadinessService:
 
     @staticmethod
     def _resolve_status(results: list[CheckResult]) -> str:
-        has_critical_error = any((not result.ok) and result.is_critical for result in results)
-        if has_critical_error:
-            return "down"
+        has_non_critical_error = False
+        for result in results:
+            if result.ok:
+                continue
+            if result.is_critical:
+                return STATUS_DOWN
+            has_non_critical_error = True
 
-        has_non_critical_error = any(not result.ok for result in results)
         if has_non_critical_error:
-            return "degraded"
+            return STATUS_DEGRADED
+        return STATUS_OK
 
-        return "ok"
+    @staticmethod
+    def _to_http_status(status_value: str) -> int:
+        if status_value == STATUS_OK:
+            return HTTP_STATUS_OK
+        return HTTP_STATUS_UNAVAILABLE
 
 
 class MonitoringService:
@@ -45,13 +60,13 @@ class MonitoringService:
 
     def live(self) -> dict[str, object]:
         return {
-            "status": "ok",
-            "timestamp": self._now().isoformat(),
+            "status": STATUS_OK,
+            "timestamp": self._iso_now(),
         }
 
     def readiness(self) -> tuple[int, dict[str, object]]:
         http_status, payload = self._readiness_service.run()
-        payload["timestamp"] = self._now().isoformat()
+        payload["timestamp"] = self._iso_now()
         return http_status, payload
 
     def record_request(
@@ -89,9 +104,12 @@ class MonitoringService:
     def stats(self) -> dict[str, object]:
         snapshot = self._metrics_repository.get_snapshot()
         return {
-            "status": "ok",
+            "status": STATUS_OK,
             **snapshot.to_dict(),
         }
+
+    def _iso_now(self) -> str:
+        return self._now().isoformat()
 
     def _build_request_event(
         self,
