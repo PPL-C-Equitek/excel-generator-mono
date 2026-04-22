@@ -61,6 +61,7 @@ from file_processing.services.export_service import (
 
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
+NOT_FOUND_DETAIL = "Not found."
 
 
 def _sanitize_download_filename(candidate):
@@ -739,7 +740,7 @@ def session_list(request):
 def session_detail(request, session_id):
     session = get_session_for_user(request.user, session_id)
     if session is None:
-        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
 
     return Response(SessionDetailSerializer(session).data, status=status.HTTP_200_OK)
 
@@ -749,7 +750,7 @@ def session_detail(request, session_id):
 def session_update(request, session_id):
     session = get_session_for_user(request.user, session_id)
     if session is None:
-        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
 
     serializer = SessionTitleUpdateSerializer(data=request.data)
     if not serializer.is_valid():
@@ -767,7 +768,7 @@ def session_update(request, session_id):
 def session_delete(request, session_id):
     session = get_session_for_user(request.user, session_id)
     if session is None:
-        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
 
     delete_session(session)
     return Response(status=status.HTTP_204_NO_CONTENT)
