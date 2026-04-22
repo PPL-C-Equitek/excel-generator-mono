@@ -106,6 +106,9 @@ export default function HistoryPage() {
     }
 
     const deleteDialogHistory = historyToDelete
+    const noSelectionMessage = isLoading
+        ? 'Loading history...'
+        : (loadError || 'Choose a history item from the left panel to see details and actions.')
 
     return (
         <div className="flex min-h-screen bg-gray-50">
@@ -120,15 +123,7 @@ export default function HistoryPage() {
                                 </div>
                             ) : null}
 
-                            {!selectedHistoryItem ? (
-                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-5 text-sm text-slate-600">
-                                    {isLoading
-                                        ? 'Loading history...'
-                                        : loadError
-                                            ? loadError
-                                            : 'Choose a history item from the left panel to see details and actions.'}
-                                </div>
-                            ) : (
+                            {selectedHistoryItem ? (
                                 (() => {
                                     const item = selectedHistoryItem
                                     const isEditing = editingHistoryId === item.id
@@ -261,6 +256,10 @@ export default function HistoryPage() {
                                         </div>
                                     )
                                 })()
+                            ) : (
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-5 text-sm text-slate-600">
+                                    {noSelectionMessage}
+                                </div>
                             )}
                         </div>
                     </section>

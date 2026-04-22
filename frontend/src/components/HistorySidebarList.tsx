@@ -45,6 +45,130 @@ interface HistorySidebarListProps {
     readonly selectedHistoryId?: string | null
 }
 
+interface HistoryGroup {
+    readonly label: string
+    readonly items: HistoryItem[]
+}
+
+interface HistorySidebarItemRowProps {
+    readonly item: HistoryItem
+    readonly selectedHistoryId: string | null
+    readonly isMenuOpen: boolean
+    readonly onToggleMenu: (itemId: string) => void
+    readonly onRename: (item: HistoryItem) => void
+    readonly onDelete: (item: HistoryItem) => void
+}
+
+interface HistorySidebarGroupSectionProps {
+    readonly group: HistoryGroup
+    readonly selectedHistoryId: string | null
+    readonly openMenuHistoryId: string | null
+    readonly onToggleMenu: (itemId: string) => void
+    readonly onRename: (item: HistoryItem) => void
+    readonly onDelete: (item: HistoryItem) => void
+}
+
+function HistorySidebarItemRow({
+    item,
+    selectedHistoryId,
+    isMenuOpen,
+    onToggleMenu,
+    onRename,
+    onDelete,
+}: HistorySidebarItemRowProps) {
+    const historyName = getDisplayName(item.custom_name, item.original_name)
+    const isSelected = selectedHistoryId === item.id
+
+    return (
+        <div
+            key={item.id}
+            className={`group relative rounded-xl transition ${
+                isSelected
+                    ? 'border border-white bg-white text-red-700 shadow-md'
+                    : 'border border-transparent bg-transparent text-white hover:border-white/35 hover:bg-white/16'
+            }`}
+        >
+            <div className="flex items-start gap-1 px-2 py-1.5">
+                <Link
+                    href={`/history?historyId=${item.id}`}
+                    className="min-w-0 flex-1 rounded-md px-2 py-1 text-left transition focus:outline-none"
+                    title={historyName}
+                >
+                    <p className="truncate text-sm font-semibold">{historyName}</p>
+                </Link>
+
+                <button
+                    type="button"
+                    aria-label={`Actions for ${historyName}`}
+                    className={`mt-0.5 rounded-md px-1.5 py-1 text-sm font-bold leading-none transition focus:outline-none focus:ring-2 focus:ring-white/40 ${
+                        isSelected
+                            ? 'text-red-700 hover:bg-red-100'
+                            : 'text-white/70 hover:bg-white/20 hover:text-white group-hover:text-white/90'
+                    }`}
+                    onClick={() => {
+                        onToggleMenu(item.id)
+                    }}
+                >
+                    ...
+                </button>
+            </div>
+
+            {isMenuOpen ? (
+                <div className="absolute right-2 top-10 z-20 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                    <button
+                        type="button"
+                        className="block w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                        onClick={() => {
+                            onRename(item)
+                        }}
+                    >
+                        Rename
+                    </button>
+                    <button
+                        type="button"
+                        className="mt-1 block w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-red-700 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
+                        onClick={() => {
+                            onDelete(item)
+                        }}
+                    >
+                        Delete
+                    </button>
+                </div>
+            ) : null}
+        </div>
+    )
+}
+
+function HistorySidebarGroupSection({
+    group,
+    selectedHistoryId,
+    openMenuHistoryId,
+    onToggleMenu,
+    onRename,
+    onDelete,
+}: HistorySidebarGroupSectionProps) {
+    return (
+        <section key={group.label} className="mb-2">
+            <h2 className="mb-1 px-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-red-100">
+                {group.label}
+            </h2>
+            <div className="space-y-1">
+                {group.items.map((item) => (
+                    <HistorySidebarItemRow
+                        key={item.id}
+                        item={item}
+                        selectedHistoryId={selectedHistoryId}
+                        isMenuOpen={openMenuHistoryId === item.id}
+                        onToggleMenu={onToggleMenu}
+                        onRename={onRename}
+                        onDelete={onDelete}
+                    />
+                ))}
+            </div>
+        </section>
+    )
+}
+
 export default function HistorySidebarList({
     selectedHistoryId = null,
 }: HistorySidebarListProps) {
@@ -80,7 +204,7 @@ export default function HistorySidebarList({
         )
     }, [items, searchQuery])
 
-    const groupedItems = useMemo(() => {
+    const groupedItems = useMemo<HistoryGroup[]>(() => {
         const groups = new Map<string, HistoryItem[]>()
 
         filteredItems.forEach((item) => {
@@ -108,6 +232,14 @@ export default function HistorySidebarList({
     const hasItems = items.length > 0
     const isRenaming = renameTarget !== null && renamingHistoryId === renameTarget.id
     const isDeleting = deleteTarget !== null && deletingHistoryId === deleteTarget.id
+    const shouldShowLoadError = !isLoading && Boolean(loadError)
+    const shouldShowEmptyState = !isLoading && !loadError && !hasItems
+    const shouldShowNoMatches = !isLoading && !loadError && hasItems && !filteredItems.length
+    const shouldShowGroups = !isLoading && !loadError
+
+    const toggleMenu = (itemId: string) => {
+        setOpenMenuHistoryId((current) => (current === itemId ? null : itemId))
+    }
 
     const openRenameDialog = (item: HistoryItem) => {
         setRenameTarget(item)
@@ -172,7 +304,7 @@ export default function HistorySidebarList({
             <div className="mt-3 min-h-0 flex-1 overflow-y-auto pb-2">
                 {isLoading ? <p className="px-4 text-sm text-white/75">Loading history...</p> : null}
 
-                {!isLoading && loadError ? (
+                {shouldShowLoadError ? (
                     <div className="mx-1 rounded-xl border border-red-200/50 bg-red-50/90 p-3 text-xs text-red-700">
                         <p>{loadError}</p>
                         <button
@@ -187,94 +319,25 @@ export default function HistorySidebarList({
                     </div>
                 ) : null}
 
-                {!isLoading && !loadError && !hasItems ? (
+                {shouldShowEmptyState ? (
                     <p className="px-4 text-sm text-white/75">No history yet.</p>
                 ) : null}
 
-                {!isLoading && !loadError && hasItems && !filteredItems.length ? (
+                {shouldShowNoMatches ? (
                     <p className="px-4 text-sm text-white/75">No matches.</p>
                 ) : null}
 
-                {!isLoading && !loadError
+                {shouldShowGroups
                     ? groupedItems.map((group) => (
-                        <section key={group.label} className="mb-2">
-                            <h2 className="mb-1 px-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-red-100">
-                                {group.label}
-                            </h2>
-                            <div className="space-y-1">
-                                {group.items.map((item) => {
-                                    const historyName = getDisplayName(
-                                        item.custom_name,
-                                        item.original_name
-                                    )
-                                    const isSelected = selectedHistoryId === item.id
-                                    const isMenuOpen = openMenuHistoryId === item.id
-
-                                    return (
-                                        <div
-                                            key={item.id}
-                                            className={`group relative rounded-xl transition ${
-                                                isSelected
-                                                    ? 'border border-white bg-white text-red-700 shadow-md'
-                                                    : 'border border-transparent bg-transparent text-white hover:border-white/35 hover:bg-white/16'
-                                            }`}
-                                        >
-                                            <div className="flex items-start gap-1 px-2 py-1.5">
-                                                <Link
-                                                    href={`/history?historyId=${item.id}`}
-                                                    className="min-w-0 flex-1 rounded-md px-2 py-1 text-left transition focus:outline-none"
-                                                    title={historyName}
-                                                >
-                                                    <p className="truncate text-sm font-semibold">
-                                                        {historyName}
-                                                    </p>
-                                                </Link>
-
-                                                <button
-                                                    type="button"
-                                                    aria-label={`Actions for ${historyName}`}
-                                                    className={`mt-0.5 rounded-md px-1.5 py-1 text-sm font-bold leading-none transition focus:outline-none focus:ring-2 focus:ring-white/40 ${
-                                                        isSelected
-                                                            ? 'text-red-700 hover:bg-red-100'
-                                                            : 'text-white/70 hover:bg-white/20 hover:text-white group-hover:text-white/90'
-                                                    }`}
-                                                    onClick={() => {
-                                                        setOpenMenuHistoryId((current) =>
-                                                            current === item.id ? null : item.id
-                                                        )
-                                                    }}
-                                                >
-                                                    ...
-                                                </button>
-                                            </div>
-
-                                            {isMenuOpen ? (
-                                                <div className="absolute right-2 top-10 z-20 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
-                                                    <button
-                                                        type="button"
-                                                        className="block w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                                                        onClick={() => {
-                                                            openRenameDialog(item)
-                                                        }}
-                                                    >
-                                                        Rename
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        className="mt-1 block w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-red-700 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
-                                                        onClick={() => {
-                                                            openDeleteDialog(item)
-                                                        }}
-                                                    >
-                                                        Delete
-                                                    </button>
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        </section>
+                        <HistorySidebarGroupSection
+                            key={group.label}
+                            group={group}
+                            selectedHistoryId={selectedHistoryId}
+                            openMenuHistoryId={openMenuHistoryId}
+                            onToggleMenu={toggleMenu}
+                            onRename={openRenameDialog}
+                            onDelete={openDeleteDialog}
+                        />
                     ))
                     : null}
             </div>
