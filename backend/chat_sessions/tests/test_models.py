@@ -135,3 +135,14 @@ class ChatSessionModelTest(TestCase):
 
         self.assertEqual(sessions[0].id, newer.id)
         self.assertEqual(sessions[1].id, older.id)
+
+    def test_session_model_defines_composite_index_for_owner_and_recency(self):
+        composite_index_fields = {
+            tuple(index.fields)
+            for index in Session._meta.indexes
+        }
+
+        self.assertIn(
+            ("owner", "-last_message_at", "-updated_at", "-created_at"),
+            composite_index_fields,
+        )

@@ -21,6 +21,12 @@ class Session(models.Model):
 
     class Meta:
         ordering = ("-last_message_at", "-updated_at", "-created_at", "-id")
+        indexes = [
+            models.Index(
+                fields=("owner", "-last_message_at", "-updated_at", "-created_at"),
+                name="session_owner_recency_idx",
+            ),
+        ]
 
 
 class ChatMessage(models.Model):
@@ -61,4 +67,3 @@ class GeneratedOutput(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
-

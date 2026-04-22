@@ -2572,7 +2572,110 @@ class SessionEndpointTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(response.data["results"][0]["title"], "April report")
-        mock_list_sessions.assert_called_once_with(self.user)
+        self.assertEqual(response.data["limit"], 10)
+        self.assertEqual(response.data["offset"], 0)
+        mock_list_sessions.assert_called_once_with(self.user, limit=10, offset=0)
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_applies_default_pagination_contract(self, mock_list_sessions):
+        stub_session = SimpleNamespace(
+            id="123e4567-e89b-12d3-a456-426614174000",
+            title="April report",
+            created_at="2026-04-21T10:00:00Z",
+            updated_at="2026-04-21T10:05:00Z",
+            last_message_at=None,
+            last_output_at=None,
+        )
+        mock_list_sessions.return_value = [stub_session]
+        request = self.factory.get("/sessions/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["limit"], 10)
+        self.assertEqual(response.data["offset"], 0)
+        mock_list_sessions.assert_called_once_with(self.user, limit=10, offset=0)
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_allows_explicit_limit_and_offset(self, mock_list_sessions):
+        mock_list_sessions.return_value = []
+        request = self.factory.get("/sessions/?limit=5&offset=10")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["limit"], 5)
+        self.assertEqual(response.data["offset"], 10)
+        mock_list_sessions.assert_called_once_with(self.user, limit=5, offset=10)
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_rejects_non_numeric_limit(self, mock_list_sessions):
+        request = self.factory.get("/sessions/?limit=abc")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "limit must be an integer."})
+        mock_list_sessions.assert_not_called()
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_rejects_negative_offset(self, mock_list_sessions):
+        request = self.factory.get("/sessions/?offset=-1")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"detail": "offset must be greater than or equal to 0."},
+        )
+        mock_list_sessions.assert_not_called()
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_rejects_non_numeric_offset(self, mock_list_sessions):
+        request = self.factory.get("/sessions/?offset=abc")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "offset must be an integer."})
+        mock_list_sessions.assert_not_called()
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_returns_whitelisted_message_for_service_validation_error(self, mock_list_sessions):
+        mock_list_sessions.side_effect = ValueError("limit must be less than or equal to 50.")
+        request = self.factory.get("/sessions/?limit=51")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"detail": "limit must be less than or equal to 50."},
+        )
+        mock_list_sessions.assert_called_once_with(self.user, limit=51, offset=0)
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_hides_non_whitelisted_service_validation_error(self, mock_list_sessions):
+        mock_list_sessions.side_effect = ValueError("database exploded")
+        request = self.factory.get("/sessions/?limit=10")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"detail": "Invalid session list pagination."},
+        )
+        mock_list_sessions.assert_called_once_with(self.user, limit=10, offset=0)
 
     @patch("api.views.get_session_for_user")
     def test_session_detail_returns_not_found_when_missing(self, mock_get_session):

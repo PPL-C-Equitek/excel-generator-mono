@@ -62,6 +62,56 @@ from file_processing.services.export_service import (
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
 NOT_FOUND_DETAIL = "Not found."
+SESSION_LIST_DEFAULT_LIMIT = 10
+INVALID_SESSION_LIST_PAGINATION_DETAIL = "Invalid session list pagination."
+SESSION_LIST_PAGINATION_ERROR_DETAILS = {
+    "limit must be an integer.",
+    "offset must be an integer.",
+    "offset must be greater than or equal to 0.",
+    "limit must be greater than 0.",
+    "limit must be less than or equal to 50.",
+}
+
+
+class SessionListPaginationError(Exception):
+    def __init__(self, detail):
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _parse_session_list_pagination(request):
+    limit_param = request.query_params.get("limit")
+    offset_param = request.query_params.get("offset")
+
+    if limit_param is None:
+        limit = SESSION_LIST_DEFAULT_LIMIT
+    else:
+        try:
+            limit = int(limit_param)
+        except (TypeError, ValueError):
+            raise SessionListPaginationError("limit must be an integer.")
+
+    if offset_param is None:
+        offset = 0
+    else:
+        try:
+            offset = int(offset_param)
+        except (TypeError, ValueError):
+            raise SessionListPaginationError("offset must be an integer.")
+
+    if offset < 0:
+        raise SessionListPaginationError("offset must be greater than or equal to 0.")
+
+    return limit, offset
+
+
+def _build_session_list_pagination_error_response(detail):
+    safe_detail = (
+        detail
+        if detail in SESSION_LIST_PAGINATION_ERROR_DETAILS
+        else INVALID_SESSION_LIST_PAGINATION_DETAIL
+    )
+    return Response({"detail": safe_detail}, status=status.HTTP_400_BAD_REQUEST)
 
 
 def _sanitize_download_filename(candidate):
@@ -724,11 +774,21 @@ def download_csv(request, file_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_list(request):
-    sessions = list(list_sessions_for_user(request.user))
+    try:
+        limit, offset = _parse_session_list_pagination(request)
+        sessions = list(list_sessions_for_user(request.user, limit=limit, offset=offset))
+    except SessionListPaginationError as exc:
+        return _build_session_list_pagination_error_response(exc.detail)
+    except ValueError as exc:
+        detail = exc.args[0] if exc.args else None
+        return _build_session_list_pagination_error_response(detail)
+
     serializer = SessionListItemSerializer(sessions, many=True)
     return Response(
         {
             "count": len(sessions),
+            "limit": limit,
+            "offset": offset,
             "results": serializer.data,
         },
         status=status.HTTP_200_OK,
