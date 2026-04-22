@@ -2636,6 +2636,21 @@ class SessionEndpointTests(TestCase):
         )
         mock_list_sessions.assert_not_called()
 
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_returns_whitelisted_message_for_service_validation_error(self, mock_list_sessions):
+        mock_list_sessions.side_effect = ValueError("limit must be less than or equal to 50.")
+        request = self.factory.get("/sessions/?limit=51")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"detail": "limit must be less than or equal to 50."},
+        )
+        mock_list_sessions.assert_called_once_with(self.user, limit=51, offset=0)
+
     @patch("api.views.get_session_for_user")
     def test_session_detail_returns_not_found_when_missing(self, mock_get_session):
         mock_get_session.return_value = None
