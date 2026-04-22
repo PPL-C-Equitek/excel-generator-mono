@@ -240,6 +240,7 @@ def llm_reasoning(request):
 
 
 @api_view(["GET"])
+@require_http_methods(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def thinking_log_list(request):
     try:
@@ -281,6 +282,7 @@ def thinking_log_list(request):
 
 
 @api_view(["GET"])
+@require_http_methods(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def thinking_log_detail(request, history_id):
     record = ArtifactHistory.objects.filter(owner=request.user, id=history_id).first()
