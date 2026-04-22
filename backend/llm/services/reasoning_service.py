@@ -15,6 +15,7 @@ DEFAULT_REASONING_STEPS_MAX_ITEMS = 20
 
 FALLBACK_FINAL_ANSWER = "Unable to parse final answer from model output."
 FALLBACK_REASONING_STEP = "Unable to parse structured reasoning steps from model output."
+FALLBACK_THINKING_LOG = "Unable to parse thinking log from model output."
 
 FINAL_ANSWER_LABELS = {"final answer", "answer", "conclusion"}
 THINKING_LOG_LABELS = {
@@ -418,7 +419,7 @@ def _fallback_empty_reasoning_response(
     return {
         "final_answer": _truncate_text(FALLBACK_FINAL_ANSWER, max_final_answer_chars),
         "reasoning_steps": [_truncate_text(FALLBACK_REASONING_STEP, max_step_chars)],
-        "thinking_log": _truncate_text(FALLBACK_FINAL_ANSWER, max_thinking_log_chars),
+        "thinking_log": _truncate_text(FALLBACK_THINKING_LOG, max_thinking_log_chars),
     }
 
 
@@ -465,20 +466,11 @@ def _extract_reasoning_fields_from_lines(
 
 def _resolve_reasoning_steps(
     lines: list[str],
-    safe_text: str,
     max_steps: int,
     max_step_chars: int,
 ) -> list[str]:
     reasoning_steps = _collect_steps_from_lines(
         lines,
-        max_steps=max_steps,
-        max_step_chars=max_step_chars,
-    )
-    if reasoning_steps:
-        return reasoning_steps
-
-    reasoning_steps = _fallback_narrative_steps(
-        safe_text,
         max_steps=max_steps,
         max_step_chars=max_step_chars,
     )
@@ -518,16 +510,15 @@ def parse_reasoning_response(raw_output: Any) -> dict[str, Any]:
     )
     reasoning_steps = _resolve_reasoning_steps(
         lines,
-        safe_text,
         max_steps=max_steps,
         max_step_chars=max_step_chars,
     )
 
     if not final_answer:
-        final_answer = _truncate_text(reasoning_steps[-1], max_final_answer_chars)
+        final_answer = _truncate_text(FALLBACK_FINAL_ANSWER, max_final_answer_chars)
 
     if not thinking_log:
-        thinking_log = _truncate_text(safe_text, max_thinking_log_chars)
+        thinking_log = _truncate_text(FALLBACK_THINKING_LOG, max_thinking_log_chars)
 
     return {
         "final_answer": final_answer,

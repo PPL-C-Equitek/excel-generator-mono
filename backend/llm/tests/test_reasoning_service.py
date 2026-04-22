@@ -4,6 +4,9 @@ from django.test import SimpleTestCase, override_settings
 from unittest.mock import Mock, patch
 
 from llm.services.reasoning_service import (
+    FALLBACK_FINAL_ANSWER,
+    FALLBACK_REASONING_STEP,
+    FALLBACK_THINKING_LOG,
     LlmReasoningService,
     _collect_steps_from_lines,
     _extract_braced_json_candidate,
@@ -72,9 +75,9 @@ class LlmReasoningServiceTest(SimpleTestCase):
 
         result = service.generate("Summarize this invoice")
 
-        self.assertEqual(result["reasoning_steps"], ["not valid json"])
-        self.assertEqual(result["final_answer"], "not valid json")
-        self.assertEqual(result["thinking_log"], "not valid json")
+        self.assertEqual(result["reasoning_steps"], [FALLBACK_REASONING_STEP])
+        self.assertEqual(result["final_answer"], FALLBACK_FINAL_ANSWER)
+        self.assertEqual(result["thinking_log"], FALLBACK_THINKING_LOG)
 
     # Negative
     def test_reasoning_service_falls_back_for_non_object_json_output(self):
@@ -84,9 +87,9 @@ class LlmReasoningServiceTest(SimpleTestCase):
 
         result = service.generate("Summarize this invoice")
 
-        self.assertEqual(result["reasoning_steps"], ['["invalid"]'])
-        self.assertEqual(result["final_answer"], '["invalid"]')
-        self.assertEqual(result["thinking_log"], '["invalid"]')
+        self.assertEqual(result["reasoning_steps"], [FALLBACK_REASONING_STEP])
+        self.assertEqual(result["final_answer"], FALLBACK_FINAL_ANSWER)
+        self.assertEqual(result["thinking_log"], FALLBACK_THINKING_LOG)
 
     # Positive
     def test_reasoning_service_parses_step_label_format(self):
@@ -149,9 +152,9 @@ class LlmReasoningServiceTest(SimpleTestCase):
 
         result = service.generate("Summarize this invoice")
 
-        self.assertEqual(result["final_answer"], "No extra adjustment line appears.")
-        self.assertGreaterEqual(len(result["reasoning_steps"]), 1)
-        self.assertTrue(result["thinking_log"])
+        self.assertEqual(result["final_answer"], FALLBACK_FINAL_ANSWER)
+        self.assertEqual(result["reasoning_steps"], [FALLBACK_REASONING_STEP])
+        self.assertEqual(result["thinking_log"], FALLBACK_THINKING_LOG)
 
     # Edge
     def test_reasoning_service_parses_json_inside_code_fence(self):
@@ -479,7 +482,9 @@ class ReasoningParserCoverageTest(SimpleTestCase):
     def test_parse_reasoning_response_narrative_limits_steps_and_skips_empty_sentences(self):
         result = parse_reasoning_response("First sentence.   Second sentence?")
 
-        self.assertEqual(result["reasoning_steps"], ["First sentence."])
+        self.assertEqual(result["final_answer"], FALLBACK_FINAL_ANSWER)
+        self.assertEqual(result["reasoning_steps"], [FALLBACK_REASONING_STEP])
+        self.assertEqual(result["thinking_log"], FALLBACK_THINKING_LOG)
 
     @patch("llm.services.reasoning_service._get_positive_int_setting")
     def test_parse_reasoning_response_handles_empty_step_inside_section_when_step_truncates_empty(
@@ -523,6 +528,21 @@ class ReasoningParserCoverageTest(SimpleTestCase):
         steps = _fallback_narrative_steps("Raw fallback text", max_steps=5, max_step_chars=100)
 
         self.assertEqual(steps, ["Raw fallback text"])
+
+    @patch("llm.services.reasoning_service.re.split", return_value=["", ""])
+    def test_fallback_narrative_steps_returns_empty_for_blank_raw_text(self, _mock_split):
+        steps = _fallback_narrative_steps("   ", max_steps=5, max_step_chars=100)
+
+        self.assertEqual(steps, [])
+
+    def test_fallback_narrative_steps_stops_when_max_steps_reached(self):
+        steps = _fallback_narrative_steps(
+            "First sentence. Second sentence.",
+            max_steps=1,
+            max_step_chars=100,
+        )
+
+        self.assertEqual(steps, ["First sentence."])
 
     @patch("llm.services.reasoning_service._fallback_narrative_steps", return_value=[])
     @patch("llm.services.reasoning_service._collect_steps_from_lines", return_value=[])
