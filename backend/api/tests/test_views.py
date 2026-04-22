@@ -2572,7 +2572,9 @@ class SessionEndpointTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(response.data["results"][0]["title"], "April report")
-        mock_list_sessions.assert_called_once_with(self.user)
+        self.assertEqual(response.data["limit"], 10)
+        self.assertEqual(response.data["offset"], 0)
+        mock_list_sessions.assert_called_once_with(self.user, limit=10, offset=0)
 
     @patch("api.views.list_sessions_for_user")
     def test_session_list_applies_default_pagination_contract(self, mock_list_sessions):
