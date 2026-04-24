@@ -1,0 +1,249 @@
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type {
+    MonitoringAccessDecision,
+    MonitoringLivePayload,
+    MonitoringReadyPayload,
+    MonitoringStatsPayload,
+} from '../../src/services/monitoring'
+import {
+    useMonitoringDashboardModel,
+    type MonitoringDashboardService,
+} from '../../src/app/monitoring/useMonitoringDashboardModel'
+
+function createMonitoringService(
+    overrides: Partial<MonitoringDashboardService> = {}
+): MonitoringDashboardService {
+    const defaultLive: MonitoringLivePayload = {
+        status: 'ok',
+        timestamp: '2026-04-24T10:00:00Z',
+    }
+    const defaultAccess: MonitoringAccessDecision = {
+        allowed: true,
+        reason: 'ok',
+    }
+    const defaultReady: MonitoringReadyPayload = {
+        status: 'ok',
+        timestamp: '2026-04-24T10:00:01Z',
+        checks: [{ name: 'database', status: 'ok', latency_ms: 3, is_critical: true }],
+    }
+    const defaultStats: MonitoringStatsPayload = {
+        status: 'ok',
+        generated_at: '2026-04-24T10:00:02Z',
+        totals: { requests: 4, errors: 1, error_rate: 0.25 },
+        routes: [
+            {
+                route: 'history/',
+                method: 'GET',
+                total_requests: 4,
+                total_errors: 1,
+                error_rate: 0.25,
+                avg_latency_ms: 75,
+                max_latency_ms: 120,
+            },
+        ],
+        events: {
+            'auth.login': {
+                success: 5,
+                client_error: 1,
+            },
+        },
+        timeseries: {
+            window_seconds: 20,
+            bucket_seconds: 10,
+            points: [
+                {
+                    timestamp: '2026-04-24T10:00:00Z',
+                    requests: 2,
+                    errors: 1,
+                    error_rate: 0.5,
+                    avg_latency_ms: 100,
+                },
+                {
+                    timestamp: '2026-04-24T10:00:10Z',
+                    requests: 2,
+                    errors: 0,
+                    error_rate: 0,
+                    avg_latency_ms: 200,
+                },
+            ],
+        },
+    }
+
+    return {
+        getMonitoringLive: vi.fn().mockResolvedValue(defaultLive),
+        getMonitoringAccess: vi.fn().mockResolvedValue(defaultAccess),
+        getMonitoringReady: vi.fn().mockResolvedValue(defaultReady),
+        getMonitoringStats: vi.fn().mockResolvedValue(defaultStats),
+        ...overrides,
+    }
+}
+
+describe('useMonitoringDashboardModel', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+    })
+
+    afterEach(() => {
+        vi.useRealTimers()
+    })
+
+    it('skips ready and stats calls when access is denied', async () => {
+        const service = createMonitoringService({
+            getMonitoringAccess: vi.fn().mockResolvedValue({
+                allowed: false,
+                reason: 'no_account',
+            }),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.accessDecision).toEqual({
+            allowed: false,
+            reason: 'no_account',
+        })
+        expect(result.current.readyPayload).toBeNull()
+        expect(result.current.statsPayload).toBeNull()
+        expect(service.getMonitoringReady).not.toHaveBeenCalled()
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+    })
+
+    it('polls monitoring endpoints on the configured interval', async () => {
+        const service = createMonitoringService()
+
+        renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 20,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringLive).toHaveBeenCalledTimes(1)
+        })
+
+        await waitFor(() => {
+            expect(service.getMonitoringLive.mock.calls.length).toBeGreaterThanOrEqual(2)
+            expect(service.getMonitoringAccess.mock.calls.length).toBeGreaterThanOrEqual(2)
+        })
+    })
+
+    it('computes derived metrics from realtime timeseries and readiness data', async () => {
+        const service = createMonitoringService({
+            getMonitoringReady: vi.fn().mockResolvedValue({
+                status: 'degraded',
+                timestamp: '2026-04-24T10:00:01Z',
+                checks: [
+                    { name: 'database', status: 'ok', latency_ms: 3, is_critical: true },
+                    { name: 'openai', status: 'error', latency_ms: 7, is_critical: false },
+                ],
+            }),
+            getMonitoringStats: vi.fn().mockResolvedValue({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 100, errors: 20, error_rate: 0.2 },
+                routes: [],
+                events: {
+                    event_b: { success: 3 },
+                    event_a: { success: 5 },
+                },
+                timeseries: {
+                    window_seconds: 20,
+                    bucket_seconds: 10,
+                    points: [
+                        {
+                            timestamp: '2026-04-24T10:00:00Z',
+                            requests: 2,
+                            errors: 1,
+                            error_rate: 0.5,
+                            avg_latency_ms: 100,
+                        },
+                        {
+                            timestamp: '2026-04-24T10:00:10Z',
+                            requests: 2,
+                            errors: 0,
+                            error_rate: 0,
+                            avg_latency_ms: 200,
+                        },
+                    ],
+                },
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.hasRealtimeSeries).toBe(true)
+        expect(result.current.realtimeTotals).toEqual({
+            requests: 4,
+            errors: 1,
+            errorRate: 0.25,
+        })
+        expect(result.current.errorRateMeter.percentText).toBe('25.00%')
+        expect(result.current.readinessMeter.percentText).toBe('50%')
+        expect(result.current.latencySeries.map((item) => item.value)).toEqual([100, 200])
+        expect(result.current.eventRows.map((item) => item.eventName)).toEqual([
+            'event_a',
+            'event_b',
+        ])
+    })
+
+    it('tracks retry backoff state and clears it after successful retry', async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-04-24T10:00:00Z'))
+
+        const service = createMonitoringService({
+            getMonitoringLive: vi
+                .fn()
+                .mockRejectedValueOnce(new Error('temporary network issue'))
+                .mockResolvedValue({ status: 'ok', timestamp: '2026-04-24T10:00:03Z' }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await act(async () => {
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(result.current.isLoading).toBe(false)
+        expect(result.current.errorMessage).toBe('temporary network issue')
+        expect(result.current.consecutiveFailures).toBe(1)
+        expect(result.current.retryInSeconds).toBeGreaterThan(0)
+
+        await act(async () => {
+            vi.advanceTimersByTime(2000)
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(result.current.errorMessage).toBeNull()
+        expect(result.current.consecutiveFailures).toBe(0)
+        expect(result.current.retryInSeconds).toBe(0)
+        expect(service.getMonitoringLive).toHaveBeenCalledTimes(2)
+    })
+})

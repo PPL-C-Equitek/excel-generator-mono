@@ -1,10 +1,11 @@
+import { useId } from 'react'
 import type {
     MonitoringAccessDecision,
     MonitoringLivePayload,
     MonitoringReadyPayload,
     MonitoringStatsPayload,
 } from '@/services/monitoring'
-import { formatPercent, formatTimestamp, resolveAccessMessage, statusBadgeClass } from '../monitoringUi'
+import { formatPercent, formatTimestamp, resolveAccessMessage } from '../monitoringUi'
 import type {
     ErrorRateMeter,
     EventRow,
@@ -13,11 +14,14 @@ import type {
     ReadinessMeter,
     RealtimeTotals,
 } from '../monitoringViewModelTypes'
+import { GaugeMeter, MetricCard, StatusBadge } from './primitives/MonitoringPrimitives'
 
 type MonitoringHeroSectionProps = {
     lastSync: string
     isLoading: boolean
     isRefreshing: boolean
+    isDataStale: boolean
+    retryInSeconds: number
     onRefresh: () => void
 }
 
@@ -25,6 +29,8 @@ export function MonitoringHeroSection({
     lastSync,
     isLoading,
     isRefreshing,
+    isDataStale,
+    retryInSeconds,
     onRefresh,
 }: MonitoringHeroSectionProps) {
     return (
@@ -45,6 +51,20 @@ export function MonitoringHeroSection({
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                     <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-200">
                         Last sync: <span className="font-semibold text-white">{lastSync ? formatTimestamp(lastSync) : '--'}</span>
+                        <div className="mt-2 flex items-center gap-2">
+                            {isDataStale ? (
+                                <span className="inline-flex rounded-full border border-red-300/40 bg-red-700/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-red-200">
+                                    Stale Data
+                                </span>
+                            ) : (
+                                <span className="inline-flex rounded-full border border-blue-300/40 bg-blue-600/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-blue-100">
+                                    Live
+                                </span>
+                            )}
+                            {retryInSeconds > 0 ? (
+                                <span className="text-xs text-gray-300">Retry in {retryInSeconds}s</span>
+                            ) : null}
+                        </div>
                     </div>
                     <button
                         type="button"
@@ -89,46 +109,40 @@ export function MonitoringTrafficSummarySection({
             </div>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <article className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <p className="text-xs uppercase tracking-[0.12em] text-gray-500">Live Status</p>
-                    <p className={`mt-3 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${statusBadgeClass(livePayload.status)}`}>
-                        {livePayload.status}
-                    </p>
-                    <p className="mt-3 text-sm text-gray-600">{formatTimestamp(livePayload.timestamp)}</p>
-                </article>
+                <MetricCard
+                    title="Live Status"
+                    value={<StatusBadge status={livePayload.status} label={livePayload.status} />}
+                    valueClassName="text-base"
+                    subtitle={formatTimestamp(livePayload.timestamp)}
+                />
 
-                <article className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <p className="text-xs uppercase tracking-[0.12em] text-gray-500">Access</p>
-                    <p className={`mt-3 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${statusBadgeClass(accessDecision.allowed ? 'success' : 'error')}`}>
-                        {accessDecision.allowed ? 'allowed' : 'denied'}
-                    </p>
-                    <p className="mt-3 text-sm text-gray-600">{resolveAccessMessage(accessDecision.reason)}</p>
-                </article>
+                <MetricCard
+                    title="Access"
+                    value={<StatusBadge status={accessDecision.allowed ? 'success' : 'error'} label={accessDecision.allowed ? 'allowed' : 'denied'} />}
+                    valueClassName="text-base"
+                    subtitle={resolveAccessMessage(accessDecision.reason)}
+                />
 
-                <article className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <p className="text-xs uppercase tracking-[0.12em] text-gray-500">Total Requests</p>
-                    <p className="mt-2 text-3xl font-bold text-gray-900">
-                        {statsPayload ? (realtimeTotals?.requests ?? statsPayload.totals.requests) : '--'}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                        {hasRealtimeSeries && realtimeWindowSeconds > 0
+                <MetricCard
+                    title="Total Requests"
+                    value={statsPayload ? (realtimeTotals?.requests ?? statsPayload.totals.requests) : '--'}
+                    subtitle={
+                        hasRealtimeSeries && realtimeWindowSeconds > 0
                             ? `Last ${realtimeWindowSeconds}s window`
-                            : 'Backend traffic volume'}
-                    </p>
-                </article>
+                            : 'Backend traffic volume'
+                    }
+                />
 
-                <article className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <p className="text-xs uppercase tracking-[0.12em] text-gray-500">Errors</p>
-                    <p className="mt-2 text-3xl font-bold text-red-700">
-                        {statsPayload ? (realtimeTotals?.errors ?? statsPayload.totals.errors) : '--'}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                        Error rate:{' '}
-                        {statsPayload
-                            ? formatPercent(realtimeTotals?.errorRate ?? statsPayload.totals.error_rate)
-                            : '--'}
-                    </p>
-                </article>
+                <MetricCard
+                    title="Errors"
+                    value={statsPayload ? (realtimeTotals?.errors ?? statsPayload.totals.errors) : '--'}
+                    valueClassName="text-red-700"
+                    subtitle={
+                        statsPayload
+                            ? `Error rate: ${formatPercent(realtimeTotals?.errorRate ?? statsPayload.totals.error_rate)}`
+                            : '--'
+                    }
+                />
             </div>
         </section>
     )
@@ -166,6 +180,12 @@ export function MonitoringLatencyAndMetersSection({
     errorRateMeter,
     readinessMeter,
 }: MonitoringLatencyAndMetersSectionProps) {
+    const lineChartTitleId = useId()
+    const lineChartDescId = useId()
+    const lineChartDescription = hasRealtimeSeries && realtimeWindowSeconds > 0
+        ? `Latency trend over ${realtimeWindowSeconds} seconds, grouped every ${realtimeBucketSeconds} seconds.`
+        : 'Latency trend for the top monitored routes from the latest snapshot.'
+
     return (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
             <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-8">
@@ -185,8 +205,11 @@ export function MonitoringLatencyAndMetersSection({
                                 viewBox="0 0 520 220"
                                 className="h-52 w-full min-w-[520px]"
                                 role="img"
-                                aria-label="Latency trend line chart"
+                                aria-labelledby={`${lineChartTitleId} ${lineChartDescId}`}
+                                tabIndex={0}
                             >
+                                <title id={lineChartTitleId}>Latency trend line chart</title>
+                                <desc id={lineChartDescId}>{lineChartDescription}</desc>
                                 <line x1="26" y1="190" x2="494" y2="190" stroke="#d1d5db" strokeWidth="1" />
                                 <line x1="26" y1="16" x2="26" y2="190" stroke="#d1d5db" strokeWidth="1" />
                                 {latencyChart.areaPath ? (
@@ -277,65 +300,25 @@ export function MonitoringLatencyAndMetersSection({
                 <h3 className="text-base font-semibold text-gray-900">Meter Panels</h3>
 
                 <div className="mt-4 grid grid-cols-1 gap-4">
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-                        <p className="text-xs uppercase tracking-[0.12em] text-gray-500">Error Rate Meter</p>
-                        <div className="mt-2 flex items-center gap-3">
-                            <svg viewBox="0 0 200 120" className="h-24 w-28" role="img" aria-label="Error rate meter">
-                                <path
-                                    d="M20 100 A80 80 0 0 1 180 100"
-                                    fill="none"
-                                    stroke="#e5e7eb"
-                                    strokeWidth="12"
-                                    strokeLinecap="round"
-                                />
-                                <path
-                                    d="M20 100 A80 80 0 0 1 180 100"
-                                    fill="none"
-                                    stroke="#b91c1c"
-                                    strokeWidth="12"
-                                    strokeLinecap="round"
-                                    strokeDasharray={`${errorRateMeter.progressLength} 251.2`}
-                                />
-                            </svg>
-                            <div>
-                                <p className={`text-2xl font-bold ${errorRateMeter.colorClass}`}>{errorRateMeter.percentText}</p>
-                                <p className="text-xs text-gray-500">
-                                    {hasRealtimeSeries && realtimeWindowSeconds > 0
-                                        ? `Window ${realtimeWindowSeconds}s`
-                                        : 'Target < 5%'}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
+                    <GaugeMeter
+                        ariaLabel="Error rate meter"
+                        label="Error Rate Meter"
+                        valueText={errorRateMeter.percentText}
+                        caption={hasRealtimeSeries && realtimeWindowSeconds > 0 ? `Window ${realtimeWindowSeconds}s` : 'Target < 5%'}
+                        progressLength={errorRateMeter.progressLength}
+                        strokeColor="#b91c1c"
+                        valueClassName={errorRateMeter.colorClass}
+                    />
 
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-                        <p className="text-xs uppercase tracking-[0.12em] text-gray-500">Readiness Meter</p>
-                        <div className="mt-2 flex items-center gap-3">
-                            <svg viewBox="0 0 200 120" className="h-24 w-28" role="img" aria-label="Readiness meter">
-                                <path
-                                    d="M20 100 A80 80 0 0 1 180 100"
-                                    fill="none"
-                                    stroke="#e5e7eb"
-                                    strokeWidth="12"
-                                    strokeLinecap="round"
-                                />
-                                <path
-                                    d="M20 100 A80 80 0 0 1 180 100"
-                                    fill="none"
-                                    stroke="#2563eb"
-                                    strokeWidth="12"
-                                    strokeLinecap="round"
-                                    strokeDasharray={`${readinessMeter.progressLength} 251.2`}
-                                />
-                            </svg>
-                            <div>
-                                <p className={`text-2xl font-bold ${readinessMeter.colorClass}`}>{readinessMeter.percentText}</p>
-                                <p className="text-xs text-gray-500">
-                                    Healthy checks: {readinessMeter.healthyChecks}/{readinessMeter.totalChecks}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
+                    <GaugeMeter
+                        ariaLabel="Readiness meter"
+                        label="Readiness Meter"
+                        valueText={readinessMeter.percentText}
+                        caption={`Healthy checks: ${readinessMeter.healthyChecks}/${readinessMeter.totalChecks}`}
+                        progressLength={readinessMeter.progressLength}
+                        strokeColor="#2563eb"
+                        valueClassName={readinessMeter.colorClass}
+                    />
                 </div>
             </article>
         </section>
@@ -398,9 +381,7 @@ export function MonitoringRoutesAndReadinessSection({
                 <h3 className="text-base font-semibold text-gray-900">Readiness Checks</h3>
                 {readyPayload ? (
                     <div className="mt-4 space-y-3">
-                        <p className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ${statusBadgeClass(readyPayload.status)}`}>
-                            {readyPayload.status}
-                        </p>
+                        <StatusBadge status={readyPayload.status} label={readyPayload.status} />
                         <p className="text-sm text-gray-500">
                             Timestamp: {formatTimestamp(readyPayload.timestamp)}
                         </p>
@@ -412,9 +393,11 @@ export function MonitoringRoutesAndReadinessSection({
                                 >
                                     <div className="flex items-center justify-between text-sm">
                                         <span className="font-semibold text-gray-900">{check.name}</span>
-                                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadgeClass(check.status)}`}>
-                                            {check.status}
-                                        </span>
+                                        <StatusBadge
+                                            status={check.status}
+                                            label={check.status}
+                                            className="px-2 py-0.5 text-xs"
+                                        />
                                     </div>
                                     <p className="mt-1 text-xs text-gray-500">
                                         latency {check.latency_ms} ms
@@ -481,3 +464,80 @@ export function MonitoringAuthEventsSection({ eventRows, maxEventCount }: Monito
         </article>
     )
 }
+
+function SkeletonCard() {
+    return (
+        <article className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div className="h-3 w-20 animate-pulse rounded bg-gray-200" />
+            <div className="mt-4 h-8 w-24 animate-pulse rounded bg-gray-200" />
+            <div className="mt-3 h-3 w-32 animate-pulse rounded bg-gray-200" />
+        </article>
+    )
+}
+
+export function MonitoringTrafficSummarySkeleton() {
+    return (
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md">
+            <div className="mb-4 flex items-center justify-between">
+                <div className="h-5 w-40 animate-pulse rounded bg-gray-200" />
+                <div className="h-3 w-36 animate-pulse rounded bg-gray-200" />
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <SkeletonCard />
+                <SkeletonCard />
+                <SkeletonCard />
+                <SkeletonCard />
+            </div>
+        </section>
+    )
+}
+
+export function MonitoringPanelsSkeleton() {
+    return (
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-8">
+                <div className="h-5 w-40 animate-pulse rounded bg-gray-200" />
+                <div className="mt-4 h-52 w-full animate-pulse rounded-xl bg-gray-100" />
+            </article>
+            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-4">
+                <div className="h-5 w-28 animate-pulse rounded bg-gray-200" />
+                <div className="mt-4 h-28 w-full animate-pulse rounded-xl bg-gray-100" />
+                <div className="mt-4 h-28 w-full animate-pulse rounded-xl bg-gray-100" />
+            </article>
+        </section>
+    )
+}
+
+export function MonitoringRoutesAndReadinessSkeleton() {
+    return (
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-8">
+                <div className="h-5 w-28 animate-pulse rounded bg-gray-200" />
+                <div className="mt-4 space-y-3">
+                    <div className="h-16 w-full animate-pulse rounded-xl bg-gray-100" />
+                    <div className="h-16 w-full animate-pulse rounded-xl bg-gray-100" />
+                    <div className="h-16 w-full animate-pulse rounded-xl bg-gray-100" />
+                </div>
+            </article>
+            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-4">
+                <div className="h-5 w-32 animate-pulse rounded bg-gray-200" />
+                <div className="mt-4 h-36 w-full animate-pulse rounded-xl bg-gray-100" />
+            </article>
+        </section>
+    )
+}
+
+export function MonitoringAuthEventsSkeleton() {
+    return (
+        <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md">
+            <div className="h-5 w-24 animate-pulse rounded bg-gray-200" />
+            <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                <div className="h-16 w-full animate-pulse rounded-xl bg-gray-100" />
+                <div className="h-16 w-full animate-pulse rounded-xl bg-gray-100" />
+                <div className="h-16 w-full animate-pulse rounded-xl bg-gray-100" />
+                <div className="h-16 w-full animate-pulse rounded-xl bg-gray-100" />
+            </div>
+        </article>
+    )
+}
+

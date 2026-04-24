@@ -16,6 +16,10 @@ import type {
 } from './monitoringViewModelTypes'
 
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 5000
+const STALE_THRESHOLD_MULTIPLIER = 3
+const MIN_STALE_THRESHOLD_MS = 15000
+const RETRY_BASE_DELAY_MS = 2000
+const RETRY_MAX_DELAY_MS = 30000
 
 export type MonitoringDashboardService = {
     getMonitoringLive: () => Promise<MonitoringLivePayload>
@@ -32,6 +36,10 @@ export type MonitoringDashboardViewModel = {
     isLoading: boolean
     isRefreshing: boolean
     errorMessage: string | null
+    consecutiveFailures: number
+    retryInSeconds: number
+    nextRetryAtMs: number | null
+    isDataStale: boolean
     lastSync: string
     hasRealtimeSeries: boolean
     realtimeWindowSeconds: number
@@ -52,11 +60,20 @@ type UseMonitoringDashboardModelParams = {
     autoRefreshIntervalMs?: number
 }
 
+function calculateRetryDelayMs(consecutiveFailures: number): number {
+    return Math.min(
+        RETRY_MAX_DELAY_MS,
+        RETRY_BASE_DELAY_MS * (2 ** Math.max(0, consecutiveFailures - 1))
+    )
+}
+
 export function useMonitoringDashboardModel({
     monitoringService,
     autoRefreshIntervalMs = DEFAULT_AUTO_REFRESH_INTERVAL_MS,
 }: UseMonitoringDashboardModelParams): MonitoringDashboardViewModel {
     const isDashboardRequestInFlightRef = useRef(false)
+    const consecutiveFailuresRef = useRef(0)
+
     const [livePayload, setLivePayload] = useState<MonitoringLivePayload | null>(null)
     const [accessDecision, setAccessDecision] = useState<MonitoringAccessDecision | null>(null)
     const [readyPayload, setReadyPayload] = useState<MonitoringReadyPayload | null>(null)
@@ -64,6 +81,26 @@ export function useMonitoringDashboardModel({
     const [isLoading, setIsLoading] = useState(true)
     const [isRefreshing, setIsRefreshing] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
+    const [lastSuccessfulAtMs, setLastSuccessfulAtMs] = useState<number | null>(null)
+    const [consecutiveFailures, setConsecutiveFailures] = useState(0)
+    const [nextRetryAtMs, setNextRetryAtMs] = useState<number | null>(null)
+    const [clockNowMs, setClockNowMs] = useState(() => Date.now())
+
+    const markSuccessfulLoad = useCallback((completedAtMs: number) => {
+        consecutiveFailuresRef.current = 0
+        setConsecutiveFailures(0)
+        setNextRetryAtMs(null)
+        setLastSuccessfulAtMs(completedAtMs)
+        setClockNowMs(completedAtMs)
+    }, [])
+
+    const scheduleRetry = useCallback((failedAtMs: number) => {
+        consecutiveFailuresRef.current += 1
+        const nextFailures = consecutiveFailuresRef.current
+        setConsecutiveFailures(nextFailures)
+        setNextRetryAtMs(failedAtMs + calculateRetryDelayMs(nextFailures))
+        setClockNowMs(failedAtMs)
+    }, [])
 
     const loadDashboard = useCallback(
         async (isBackgroundRefresh: boolean) => {
@@ -91,6 +128,7 @@ export function useMonitoringDashboardModel({
                 if (!accessResponse.allowed) {
                     setReadyPayload(null)
                     setStatsPayload(null)
+                    markSuccessfulLoad(Date.now())
                     return
                 }
 
@@ -100,28 +138,62 @@ export function useMonitoringDashboardModel({
                 ])
                 setReadyPayload(readyResponse)
                 setStatsPayload(statsResponse)
+                markSuccessfulLoad(Date.now())
             } catch (error) {
+                const failedAtMs = Date.now()
                 setReadyPayload(null)
                 setStatsPayload(null)
                 setErrorMessage(error instanceof Error ? error.message : 'Failed to load monitoring data.')
+                scheduleRetry(failedAtMs)
             } finally {
                 setIsLoading(false)
                 setIsRefreshing(false)
                 isDashboardRequestInFlightRef.current = false
             }
         },
-        [monitoringService]
+        [markSuccessfulLoad, monitoringService, scheduleRetry]
     )
 
     useEffect(() => {
         void loadDashboard(false)
+    }, [loadDashboard])
+
+    useEffect(() => {
         const intervalId = window.setInterval(() => {
+            const nowMs = Date.now()
+            if (nextRetryAtMs !== null && nowMs < nextRetryAtMs) {
+                return
+            }
             void loadDashboard(true)
         }, autoRefreshIntervalMs)
         return () => {
             window.clearInterval(intervalId)
         }
-    }, [autoRefreshIntervalMs, loadDashboard])
+    }, [autoRefreshIntervalMs, loadDashboard, nextRetryAtMs])
+
+    useEffect(() => {
+        if (nextRetryAtMs === null) {
+            return
+        }
+
+        const delayMs = Math.max(0, nextRetryAtMs - Date.now())
+        const retryTimeoutId = window.setTimeout(() => {
+            void loadDashboard(true)
+        }, delayMs)
+
+        return () => {
+            window.clearTimeout(retryTimeoutId)
+        }
+    }, [loadDashboard, nextRetryAtMs])
+
+    useEffect(() => {
+        const clockId = window.setInterval(() => {
+            setClockNowMs(Date.now())
+        }, 1000)
+        return () => {
+            window.clearInterval(clockId)
+        }
+    }, [])
 
     const eventRows = useMemo<EventRow[]>(() => {
         if (!statsPayload) {
@@ -284,6 +356,15 @@ export function useMonitoringDashboardModel({
         }
     }, [readyPayload])
 
+    const staleThresholdMs = Math.max(
+        MIN_STALE_THRESHOLD_MS,
+        autoRefreshIntervalMs * STALE_THRESHOLD_MULTIPLIER
+    )
+    const isDataStale = lastSuccessfulAtMs !== null && clockNowMs - lastSuccessfulAtMs > staleThresholdMs
+    const retryInSeconds = nextRetryAtMs === null
+        ? 0
+        : Math.max(0, Math.ceil((nextRetryAtMs - clockNowMs) / 1000))
+
     const lastSync = livePayload?.timestamp ?? statsPayload?.generated_at ?? ''
 
     const refreshDashboard = useCallback(() => {
@@ -298,6 +379,10 @@ export function useMonitoringDashboardModel({
         isLoading,
         isRefreshing,
         errorMessage,
+        consecutiveFailures,
+        retryInSeconds,
+        nextRetryAtMs,
+        isDataStale,
         lastSync,
         hasRealtimeSeries,
         realtimeWindowSeconds,
@@ -313,4 +398,3 @@ export function useMonitoringDashboardModel({
         refreshDashboard,
     }
 }
-
