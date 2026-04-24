@@ -20,9 +20,7 @@ from llm.views import (
     extract_original_name,
     get_authenticated_user_id,
 )
-
-MAX_MESSAGE_LENGTH = 4096
-
+from llm.serializers import MAX_MESSAGE_LENGTH
 
 class LlmGenerateEndpointTest(SimpleTestCase):
     def test_build_llm_generation_service_returns_default_dependencies(self):
@@ -689,6 +687,26 @@ class SendMessagePositiveTest(SimpleTestCase):
         mock_generate_text.assert_called_once_with("Halo")
 
 
+    @patch("llm.views.SendMessageResponseSerializer")
+    @patch("llm.views.generate_text")
+    def test_send_message_returns_502_when_response_serializer_invalid(
+        self, mock_generate_text, mock_response_serializer_class
+    ):
+        mock_generate_text.return_value = "reply text"
+        mock_response_serializer = mock_response_serializer_class.return_value
+        mock_response_serializer.is_valid.return_value = False
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Halo"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
+        mock_response_serializer_class.assert_called_once_with(data={"reply": "reply text"})
+
+
 class SendMessageNegativeTest(SimpleTestCase):
 
     def setUp(self):
@@ -704,17 +722,18 @@ class SendMessageNegativeTest(SimpleTestCase):
         mock_generate_text.assert_not_called()
 
     @patch("llm.views.generate_text")
-    def test_send_message_rejects_missing_session_id(self, mock_generate_text):
+    def test_send_message_accepts_missing_session_id(self, mock_generate_text):
+        mock_generate_text.return_value = "Halo! Ada yang bisa saya bantu?"
+
         response = self.client.post(
             "/llm/send-message/",
             {"message": "Halo"},
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["detail"], "Invalid request payload.")
-        self.assertIn("session_id", response.data["errors"])
-        mock_generate_text.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["reply"], "Halo! Ada yang bisa saya bantu?")
+        mock_generate_text.assert_called_once_with("Halo")
 
     @patch("llm.views.generate_text")
     def test_send_message_rejects_missing_message(self, mock_generate_text):

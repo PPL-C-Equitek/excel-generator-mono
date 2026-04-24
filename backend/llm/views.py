@@ -11,6 +11,7 @@ from .serializers import (
     LlmGenerateRequestSerializer,
     LlmGenerateResponseSerializer,
     SendMessageRequestSerializer,
+    SendMessageResponseSerializer,
     LlmReasoningRequestSerializer,
     LlmReasoningResponseSerializer,
 )
@@ -30,6 +31,8 @@ from .services.openai_client import (
 )
 
 logger = logging.getLogger(__name__)
+
+_JSON_CONTENT_TYPE = "application/json"
 
 INVALID_REQUEST_DETAIL = "Invalid request payload."
 UNSUPPORTED_MEDIA_TYPE_DETAIL = "Content-Type must be application/json."
@@ -96,7 +99,7 @@ def extract_original_name(input_json, output_json) -> str:
 @require_http_methods(["POST"])
 def llm_generate(request):
     content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != "application/json":
+    if content_type != _JSON_CONTENT_TYPE:
         return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
 
     request_serializer = LlmGenerateRequestSerializer(data=request.data)
@@ -156,7 +159,7 @@ def llm_generate(request):
 @require_http_methods(["POST"])
 def send_message(request):
     content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != "application/json":
+    if content_type != _JSON_CONTENT_TYPE:
         return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
 
     serializer = SendMessageRequestSerializer(data=request.data)
@@ -181,7 +184,10 @@ def send_message(request):
         logger.exception("Unexpected error while handling send_message request.")
         return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
-    return Response({"reply": reply})
+    response_serializer = SendMessageResponseSerializer(data={"reply": reply})
+    if not response_serializer.is_valid():
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    return Response(response_serializer.data)
 
 
 @require_http_methods(["POST"])
@@ -189,7 +195,7 @@ def send_message(request):
 @permission_classes([IsAuthenticated])
 def llm_reasoning(request):
     content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != "application/json":
+    if content_type != _JSON_CONTENT_TYPE:
         return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
 
     request_serializer = LlmReasoningRequestSerializer(data=request.data)

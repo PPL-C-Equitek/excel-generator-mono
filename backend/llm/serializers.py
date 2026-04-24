@@ -26,7 +26,7 @@ class LlmGenerateResponseSerializer(serializers.Serializer):
 
 
 class SendMessageRequestSerializer(serializers.Serializer):
-    session_id = serializers.CharField()
+    session_id = serializers.CharField(required=False, allow_blank=True)
     message = serializers.CharField(
         max_length=MAX_MESSAGE_LENGTH,
         allow_blank=False,
