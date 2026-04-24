@@ -79,6 +79,20 @@ function createMonitoringService(
     }
 }
 
+function createDeferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((nextResolve, nextReject) => {
+        resolve = nextResolve
+        reject = nextReject
+    })
+    return {
+        promise,
+        resolve,
+        reject,
+    }
+}
+
 describe('useMonitoringDashboardModel', () => {
     beforeEach(() => {
         vi.clearAllMocks()
@@ -245,5 +259,80 @@ describe('useMonitoringDashboardModel', () => {
         expect(result.current.consecutiveFailures).toBe(0)
         expect(result.current.retryInSeconds).toBe(0)
         expect(service.getMonitoringLive).toHaveBeenCalledTimes(2)
+    })
+
+    it('ignores manual refresh calls while a request is already in-flight', async () => {
+        const deferredLive = createDeferred<MonitoringLivePayload>()
+        const service = createMonitoringService({
+            getMonitoringLive: vi.fn().mockReturnValue(deferredLive.promise),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await act(async () => {
+            await Promise.resolve()
+        })
+
+        act(() => {
+            result.current.refreshDashboard()
+            result.current.refreshDashboard()
+        })
+
+        expect(service.getMonitoringLive).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+            deferredLive.resolve({
+                status: 'ok',
+                timestamp: '2026-04-24T10:00:00Z',
+            })
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+    })
+
+    it('skips polling interval refresh while retry backoff window is still active', async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-04-24T10:00:00Z'))
+
+        const service = createMonitoringService({
+            getMonitoringLive: vi
+                .fn()
+                .mockRejectedValueOnce(new Error('temporary network issue'))
+                .mockResolvedValue({ status: 'ok', timestamp: '2026-04-24T10:00:03Z' }),
+        })
+
+        renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 1000,
+            })
+        )
+
+        await act(async () => {
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(service.getMonitoringLive).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+            vi.advanceTimersByTime(1000)
+            await Promise.resolve()
+        })
+
+        expect(service.getMonitoringLive).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+            vi.advanceTimersByTime(1000)
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(service.getMonitoringLive.mock.calls.length).toBeGreaterThanOrEqual(2)
     })
 })
