@@ -103,7 +103,173 @@ class _RealtimeBucketAccumulator:
         )
 
 
-class InMemoryMetricsRepository:
+@dataclass(frozen=True)
+class _RealtimeSeriesConfig:
+    window_seconds: int
+    bucket_seconds: int
+    max_records: int
+
+
+def _build_realtime_series_config(
+    *,
+    realtime_window_seconds: int,
+    realtime_bucket_seconds: int,
+    max_realtime_records: int,
+) -> _RealtimeSeriesConfig:
+    window_seconds = max(1, int(realtime_window_seconds))
+    bucket_seconds = max(1, int(realtime_bucket_seconds))
+    if bucket_seconds > window_seconds:
+        bucket_seconds = window_seconds
+    max_records = max(1, int(max_realtime_records))
+    return _RealtimeSeriesConfig(
+        window_seconds=window_seconds,
+        bucket_seconds=bucket_seconds,
+        max_records=max_records,
+    )
+
+
+class _MetricKeyNormalizerMixin:
+    @staticmethod
+    def _normalize_text(
+        value: str | None,
+        *,
+        default: str,
+        transform: Callable[[str], str] | None = None,
+    ) -> str:
+        normalized = (value or "").strip()
+        if not normalized:
+            return default
+        if transform is None:
+            return normalized
+        return transform(normalized)
+
+    @classmethod
+    def _normalize_pair(
+        cls,
+        *,
+        first: str | None,
+        second: str | None,
+        first_default: str,
+        second_default: str,
+        first_transform: Callable[[str], str] | None = None,
+        second_transform: Callable[[str], str] | None = None,
+    ) -> tuple[str, str]:
+        return (
+            cls._normalize_text(first, default=first_default, transform=first_transform),
+            cls._normalize_text(second, default=second_default, transform=second_transform),
+        )
+
+    @classmethod
+    def _route_key_from_event(cls, event: RequestMetricEvent) -> tuple[str, str]:
+        return cls._normalize_pair(
+            first=event.route,
+            second=event.method,
+            first_default=UNKNOWN_ROUTE,
+            second_default=UNKNOWN_METHOD,
+            second_transform=str.upper,
+        )
+
+    @classmethod
+    def _event_key_from_event(cls, event: AuthMetricEvent) -> tuple[str, str]:
+        return cls._normalize_pair(
+            first=event.event_name,
+            second=event.outcome,
+            first_default=UNKNOWN_VALUE,
+            second_default=UNKNOWN_VALUE,
+            first_transform=str.lower,
+            second_transform=str.lower,
+        )
+
+
+class _SnapshotFactory:
+    @staticmethod
+    def build_route_snapshots(
+        items: list[tuple[tuple[str, str], _RouteAccumulator]]
+    ) -> list[RouteMetricSnapshot]:
+        route_snapshots = [
+            accumulator.to_snapshot(route=route, method=method)
+            for (route, method), accumulator in items
+        ]
+        route_snapshots.sort(
+            key=lambda item: (-item.total_requests, item.route, item.method)
+        )
+        return route_snapshots
+
+    @staticmethod
+    def build_event_snapshots(
+        event_items: list[tuple[tuple[str, str], int]]
+    ) -> list[EventMetricSnapshot]:
+        event_snapshots = [
+            EventMetricSnapshot(event_name=event_name, outcome=outcome, count=count)
+            for (event_name, outcome), count in event_items
+        ]
+        event_snapshots.sort(
+            key=lambda item: (-item.count, item.event_name, item.outcome)
+        )
+        return event_snapshots
+
+
+class _RealtimeSeriesBuilder:
+    def __init__(self, *, window_seconds: int, bucket_seconds: int):
+        self._window_seconds = window_seconds
+        self._bucket_seconds = bucket_seconds
+
+    @property
+    def window_seconds(self) -> int:
+        return self._window_seconds
+
+    @property
+    def bucket_seconds(self) -> int:
+        return self._bucket_seconds
+
+    def build_points(
+        self,
+        *,
+        records: Iterable[_RealtimeRequestRecord],
+        now_epoch: float,
+    ) -> list[RealtimeMetricPoint]:
+        bucket_count = max(
+            1,
+            int(math.ceil(self._window_seconds / self._bucket_seconds)),
+        )
+        effective_window_seconds = bucket_count * self._bucket_seconds
+        window_start_epoch = now_epoch - effective_window_seconds
+        buckets = [_RealtimeBucketAccumulator() for _ in range(bucket_count)]
+
+        for record in records:
+            record_epoch = self.to_epoch_seconds(record.created_at)
+            if record_epoch < window_start_epoch:
+                continue
+
+            index = int((record_epoch - window_start_epoch) // self._bucket_seconds)
+            if index >= bucket_count:
+                index = bucket_count - 1
+            buckets[index].register(record)
+
+        points: list[RealtimeMetricPoint] = []
+        for index, bucket in enumerate(buckets):
+            bucket_end_epoch = window_start_epoch + (index + 1) * self._bucket_seconds
+            points.append(
+                bucket.to_snapshot(
+                    bucket_timestamp=self.utc_datetime_from_epoch(bucket_end_epoch)
+                )
+            )
+        return points
+
+    @staticmethod
+    def to_epoch_seconds(value: datetime) -> float:
+        if value.tzinfo is None:
+            return float(value.replace(tzinfo=timezone.utc).timestamp())
+        return float(value.astimezone(timezone.utc).timestamp())
+
+    @staticmethod
+    def utc_datetime_from_epoch(epoch_seconds: float) -> datetime:
+        return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).replace(
+            tzinfo=None
+        )
+
+
+class InMemoryMetricsRepository(_MetricKeyNormalizerMixin):
     def __init__(
         self,
         *,
@@ -116,16 +282,23 @@ class InMemoryMetricsRepository:
         self._lock = Lock()
         self._routes: dict[tuple[str, str], _RouteAccumulator] = {}
         self._events: dict[tuple[str, str], int] = {}
-        self._realtime_window_seconds = max(1, int(realtime_window_seconds))
-        self._realtime_bucket_seconds = max(1, int(realtime_bucket_seconds))
-        if self._realtime_bucket_seconds > self._realtime_window_seconds:
-            self._realtime_bucket_seconds = self._realtime_window_seconds
-        self._max_realtime_records = max(1, int(max_realtime_records))
+        realtime_config = _build_realtime_series_config(
+            realtime_window_seconds=realtime_window_seconds,
+            realtime_bucket_seconds=realtime_bucket_seconds,
+            max_realtime_records=max_realtime_records,
+        )
+        self._realtime_window_seconds = realtime_config.window_seconds
+        self._realtime_bucket_seconds = realtime_config.bucket_seconds
+        self._max_realtime_records = realtime_config.max_records
+        self._realtime_series_builder = _RealtimeSeriesBuilder(
+            window_seconds=self._realtime_window_seconds,
+            bucket_seconds=self._realtime_bucket_seconds,
+        )
         self._recent_requests: deque[_RealtimeRequestRecord] = deque()
 
     def record_request(self, event: RequestMetricEvent) -> None:
         key = self._route_key_from_event(event)
-        now_epoch = self._to_epoch_seconds(self._now())
+        now_epoch = self._realtime_series_builder.to_epoch_seconds(self._now())
         with self._lock:
             accumulator = self._routes.get(key)
             if accumulator is None:
@@ -142,16 +315,16 @@ class InMemoryMetricsRepository:
 
     def get_snapshot(self) -> MetricsSnapshot:
         now_value = self._now()
-        now_epoch = self._to_epoch_seconds(now_value)
+        now_epoch = self._realtime_series_builder.to_epoch_seconds(now_value)
         with self._lock:
             items = list(self._routes.items())
             event_items = list(self._events.items())
             self._prune_realtime_records(now_epoch=now_epoch)
             realtime_records = list(self._recent_requests)
 
-        route_snapshots = self._build_route_snapshots(items)
-        event_snapshots = self._build_event_snapshots(event_items)
-        realtime_points = self._build_realtime_points(
+        route_snapshots = _SnapshotFactory.build_route_snapshots(items)
+        event_snapshots = _SnapshotFactory.build_event_snapshots(event_items)
+        realtime_points = self._realtime_series_builder.build_points(
             records=realtime_records,
             now_epoch=now_epoch,
         )
@@ -175,83 +348,6 @@ class InMemoryMetricsRepository:
             self._events.clear()
             self._recent_requests.clear()
 
-    @staticmethod
-    def _normalize_text(
-        value: str | None,
-        *,
-        default: str,
-        transform: Callable[[str], str] | None = None,
-    ) -> str:
-        normalized = (value or "").strip()
-        if not normalized:
-            return default
-        if transform is None:
-            return normalized
-        return transform(normalized)
-
-    @classmethod
-    def _route_key_from_event(cls, event: RequestMetricEvent) -> tuple[str, str]:
-        return cls._normalize_pair(
-            first=event.route,
-            second=event.method,
-            first_default=UNKNOWN_ROUTE,
-            second_default=UNKNOWN_METHOD,
-            second_transform=str.upper,
-        )
-
-    @classmethod
-    def _event_key_from_event(cls, event: AuthMetricEvent) -> tuple[str, str]:
-        return cls._normalize_pair(
-            first=event.event_name,
-            second=event.outcome,
-            first_default=UNKNOWN_VALUE,
-            second_default=UNKNOWN_VALUE,
-            first_transform=str.lower,
-            second_transform=str.lower,
-        )
-
-    @classmethod
-    def _normalize_pair(
-        cls,
-        *,
-        first: str | None,
-        second: str | None,
-        first_default: str,
-        second_default: str,
-        first_transform: Callable[[str], str] | None = None,
-        second_transform: Callable[[str], str] | None = None,
-    ) -> tuple[str, str]:
-        return (
-            cls._normalize_text(first, default=first_default, transform=first_transform),
-            cls._normalize_text(second, default=second_default, transform=second_transform),
-        )
-
-    @staticmethod
-    def _build_route_snapshots(
-        items: list[tuple[tuple[str, str], _RouteAccumulator]]
-    ) -> list[RouteMetricSnapshot]:
-        route_snapshots = [
-            accumulator.to_snapshot(route=route, method=method)
-            for (route, method), accumulator in items
-        ]
-        route_snapshots.sort(
-            key=lambda item: (-item.total_requests, item.route, item.method)
-        )
-        return route_snapshots
-
-    @staticmethod
-    def _build_event_snapshots(
-        event_items: list[tuple[tuple[str, str], int]]
-    ) -> list[EventMetricSnapshot]:
-        event_snapshots = [
-            EventMetricSnapshot(event_name=event_name, outcome=outcome, count=count)
-            for (event_name, outcome), count in event_items
-        ]
-        event_snapshots.sort(
-            key=lambda item: (-item.count, item.event_name, item.outcome)
-        )
-        return event_snapshots
-
     def _append_realtime_record(self, event: RequestMetricEvent) -> None:
         self._recent_requests.append(
             _RealtimeRequestRecord(
@@ -267,61 +363,12 @@ class InMemoryMetricsRepository:
         min_epoch = now_epoch - self._realtime_window_seconds
         while self._recent_requests:
             oldest = self._recent_requests[0]
-            if self._to_epoch_seconds(oldest.created_at) >= min_epoch:
+            if self._realtime_series_builder.to_epoch_seconds(oldest.created_at) >= min_epoch:
                 break
             self._recent_requests.popleft()
 
-    def _build_realtime_points(
-        self,
-        *,
-        records: list[_RealtimeRequestRecord],
-        now_epoch: float,
-    ) -> list[RealtimeMetricPoint]:
-        bucket_count = max(
-            1,
-            int(math.ceil(self._realtime_window_seconds / self._realtime_bucket_seconds)),
-        )
-        effective_window_seconds = bucket_count * self._realtime_bucket_seconds
-        window_start_epoch = now_epoch - effective_window_seconds
-        buckets = [_RealtimeBucketAccumulator() for _ in range(bucket_count)]
 
-        for record in records:
-            record_epoch = self._to_epoch_seconds(record.created_at)
-            if record_epoch < window_start_epoch:
-                continue
-
-            index = int((record_epoch - window_start_epoch) // self._realtime_bucket_seconds)
-            if index >= bucket_count:
-                index = bucket_count - 1
-            buckets[index].register(record)
-
-        points: list[RealtimeMetricPoint] = []
-        for index, bucket in enumerate(buckets):
-            bucket_end_epoch = (
-                window_start_epoch
-                + (index + 1) * self._realtime_bucket_seconds
-            )
-            points.append(
-                bucket.to_snapshot(
-                    bucket_timestamp=self._utc_datetime_from_epoch(bucket_end_epoch)
-                )
-            )
-        return points
-
-    @staticmethod
-    def _to_epoch_seconds(value: datetime) -> float:
-        if value.tzinfo is None:
-            return float(value.replace(tzinfo=timezone.utc).timestamp())
-        return float(value.astimezone(timezone.utc).timestamp())
-
-    @staticmethod
-    def _utc_datetime_from_epoch(epoch_seconds: float) -> datetime:
-        return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).replace(
-            tzinfo=None
-        )
-
-
-class RedisMetricsRepository:
+class RedisMetricsRepository(_MetricKeyNormalizerMixin):
     def __init__(
         self,
         *,
@@ -336,11 +383,18 @@ class RedisMetricsRepository:
         redis_client=None,
     ):
         self._now = now or datetime.utcnow
-        self._realtime_window_seconds = max(1, int(realtime_window_seconds))
-        self._realtime_bucket_seconds = max(1, int(realtime_bucket_seconds))
-        if self._realtime_bucket_seconds > self._realtime_window_seconds:
-            self._realtime_bucket_seconds = self._realtime_window_seconds
-        self._max_realtime_records = max(1, int(max_realtime_records))
+        realtime_config = _build_realtime_series_config(
+            realtime_window_seconds=realtime_window_seconds,
+            realtime_bucket_seconds=realtime_bucket_seconds,
+            max_realtime_records=max_realtime_records,
+        )
+        self._realtime_window_seconds = realtime_config.window_seconds
+        self._realtime_bucket_seconds = realtime_config.bucket_seconds
+        self._max_realtime_records = realtime_config.max_records
+        self._realtime_series_builder = _RealtimeSeriesBuilder(
+            window_seconds=self._realtime_window_seconds,
+            bucket_seconds=self._realtime_bucket_seconds,
+        )
         self._key_prefix = (key_prefix or REDIS_DEFAULT_KEY_PREFIX).strip() or REDIS_DEFAULT_KEY_PREFIX
 
         if redis_client is None:
@@ -381,8 +435,8 @@ class RedisMetricsRepository:
         route_hash_key = self._route_hash_key(route=route, method=method)
         duration_ms = max(0.0, float(event.duration_ms))
         is_error = 1 if event.status_code >= 500 else 0
-        now_epoch = self._to_epoch_seconds(self._now())
-        created_epoch = self._to_epoch_seconds(event.created_at)
+        now_epoch = self._realtime_series_builder.to_epoch_seconds(self._now())
+        created_epoch = self._realtime_series_builder.to_epoch_seconds(event.created_at)
 
         pipeline = self._redis.pipeline()
         pipeline.sadd(self._routes_index_key, route_hash_key)
@@ -413,7 +467,7 @@ class RedisMetricsRepository:
 
     def get_snapshot(self) -> MetricsSnapshot:
         now_value = self._now()
-        now_epoch = self._to_epoch_seconds(now_value)
+        now_epoch = self._realtime_series_builder.to_epoch_seconds(now_value)
         min_epoch = now_epoch - self._realtime_window_seconds
 
         pipeline = self._redis.pipeline()
@@ -427,9 +481,9 @@ class RedisMetricsRepository:
         event_items = self._build_event_items(raw_events)
         realtime_records = self._build_realtime_records(raw_realtime)
 
-        route_snapshots = InMemoryMetricsRepository._build_route_snapshots(route_items)
-        event_snapshots = InMemoryMetricsRepository._build_event_snapshots(event_items)
-        realtime_points = self._build_realtime_points(
+        route_snapshots = _SnapshotFactory.build_route_snapshots(route_items)
+        event_snapshots = _SnapshotFactory.build_event_snapshots(event_items)
+        realtime_points = self._realtime_series_builder.build_points(
             records=realtime_records,
             now_epoch=now_epoch,
         )
@@ -519,7 +573,7 @@ class RedisMetricsRepository:
             is_error, duration_ms = self._decode_realtime_member(member)
             records.append(
                 _RealtimeRequestRecord(
-                    created_at=self._utc_datetime_from_epoch(float(score)),
+                    created_at=self._realtime_series_builder.utc_datetime_from_epoch(float(score)),
                     is_error=is_error,
                     duration_ms=duration_ms,
                 )
@@ -539,57 +593,6 @@ class RedisMetricsRepository:
             return float(value)
         except (TypeError, ValueError):
             return default
-
-    @staticmethod
-    def _normalize_text(
-        value: str | None,
-        *,
-        default: str,
-        transform: Callable[[str], str] | None = None,
-    ) -> str:
-        normalized = (value or "").strip()
-        if not normalized:
-            return default
-        if transform is None:
-            return normalized
-        return transform(normalized)
-
-    @classmethod
-    def _normalize_pair(
-        cls,
-        *,
-        first: str | None,
-        second: str | None,
-        first_default: str,
-        second_default: str,
-        first_transform: Callable[[str], str] | None = None,
-        second_transform: Callable[[str], str] | None = None,
-    ) -> tuple[str, str]:
-        return (
-            cls._normalize_text(first, default=first_default, transform=first_transform),
-            cls._normalize_text(second, default=second_default, transform=second_transform),
-        )
-
-    @classmethod
-    def _route_key_from_event(cls, event: RequestMetricEvent) -> tuple[str, str]:
-        return cls._normalize_pair(
-            first=event.route,
-            second=event.method,
-            first_default=UNKNOWN_ROUTE,
-            second_default=UNKNOWN_METHOD,
-            second_transform=str.upper,
-        )
-
-    @classmethod
-    def _event_key_from_event(cls, event: AuthMetricEvent) -> tuple[str, str]:
-        return cls._normalize_pair(
-            first=event.event_name,
-            second=event.outcome,
-            first_default=UNKNOWN_VALUE,
-            second_default=UNKNOWN_VALUE,
-            first_transform=str.lower,
-            second_transform=str.lower,
-        )
 
     @staticmethod
     def _event_hash_field(*, event_name: str, outcome: str) -> str:
@@ -619,52 +622,3 @@ class RedisMetricsRepository:
         if len(parts) != 3:
             return False, 0.0
         return parts[1] == "1", RedisMetricsRepository._to_float(parts[2])
-
-    def _build_realtime_points(
-        self,
-        *,
-        records: list[_RealtimeRequestRecord],
-        now_epoch: float,
-    ) -> list[RealtimeMetricPoint]:
-        bucket_count = max(
-            1,
-            int(math.ceil(self._realtime_window_seconds / self._realtime_bucket_seconds)),
-        )
-        effective_window_seconds = bucket_count * self._realtime_bucket_seconds
-        window_start_epoch = now_epoch - effective_window_seconds
-        buckets = [_RealtimeBucketAccumulator() for _ in range(bucket_count)]
-
-        for record in records:
-            record_epoch = self._to_epoch_seconds(record.created_at)
-            if record_epoch < window_start_epoch:
-                continue
-
-            index = int((record_epoch - window_start_epoch) // self._realtime_bucket_seconds)
-            if index >= bucket_count:
-                index = bucket_count - 1
-            buckets[index].register(record)
-
-        points: list[RealtimeMetricPoint] = []
-        for index, bucket in enumerate(buckets):
-            bucket_end_epoch = (
-                window_start_epoch
-                + (index + 1) * self._realtime_bucket_seconds
-            )
-            points.append(
-                bucket.to_snapshot(
-                    bucket_timestamp=self._utc_datetime_from_epoch(bucket_end_epoch)
-                )
-            )
-        return points
-
-    @staticmethod
-    def _to_epoch_seconds(value: datetime) -> float:
-        if value.tzinfo is None:
-            return float(value.replace(tzinfo=timezone.utc).timestamp())
-        return float(value.astimezone(timezone.utc).timestamp())
-
-    @staticmethod
-    def _utc_datetime_from_epoch(epoch_seconds: float) -> datetime:
-        return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).replace(
-            tzinfo=None
-        )
