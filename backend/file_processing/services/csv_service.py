@@ -83,12 +83,17 @@ def parse_csv(file_or_path: str | IO[bytes] | IO[str] | Any, delimiter: str = ",
 def process_uploaded_csv(file_or_path):
     try:
         raw = None
-        try:
-            file_or_path.seek(0)
-            raw = file_or_path.read()
-            file_or_path.seek(0)
-        except (AttributeError, OSError):
-            pass
+        if isinstance(file_or_path, str):
+            safe_path = validate_path(file_or_path)
+            with open(safe_path, "rb") as fh:
+                raw = fh.read()
+        else:
+            try:
+                file_or_path.seek(0)
+                raw = file_or_path.read()
+                file_or_path.seek(0)
+            except (AttributeError, OSError):
+                pass
 
         if raw is not None and not raw.strip():
             return False, "CSV file is empty or does not contain valid data.", None

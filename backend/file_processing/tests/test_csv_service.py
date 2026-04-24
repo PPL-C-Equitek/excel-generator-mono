@@ -839,6 +839,18 @@ class ProcessUploadCsvIntegrationTests(TestCase):
 
 class CsvServiceCoverageTests(TestCase):
 
+    def test_process_uploaded_csv_empty_file_by_path_returns_success_false(self):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as f:
+            temp_path = f.name
+
+        try:
+            success, error, data = process_uploaded_csv(temp_path)
+            self.assertFalse(success)
+            self.assertIsNotNone(error)
+            self.assertIsNone(data)
+        finally:
+            os.remove(temp_path)
+
     def test_parse_csv_with_string_path(self):
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".csv", encoding="utf-8") as f:
             f.write("id,nama\n1,Alpha\n2,Beta\n")
@@ -945,15 +957,17 @@ class ProcessUploadedCsvNonSeekableTests(TestCase):
         self.assertIsNone(error)
         self.assertEqual(data, [])
 
-    def test_non_seekable_empty_stream_returns_success_false(self):
-        """Stream tanpa seek + benar-benar kosong: tetap harus (False, error, None)."""
+    def test_non_seekable_empty_stream_is_treated_as_header_only(self):
+        """Stream tanpa seek yang benar-benar kosong tidak bisa dibedakan dari
+        header-only karena raw-nya tidak bisa dibaca — parse_csv return [] untuk
+        keduanya. Perilaku yang terkunci adalah (True, None, [])."""
         class EmptyNoSeek:
             def __iter__(self):
                 return iter([])
 
         success, error, data = process_uploaded_csv(EmptyNoSeek())
-        # stream tidak bisa dibaca raw-nya, parse_csv return [] →
-        # tidak bisa dibedakan dari header-only, tapi setidaknya tidak crash
-        self.assertIsNotNone(success)
-        self.assertIsNone(data) if not success else self.assertEqual(data, [])
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(data, [])
 
