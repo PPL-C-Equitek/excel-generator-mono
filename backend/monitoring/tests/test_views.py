@@ -172,6 +172,57 @@ class MonitoringViewsTest(APITestCase):
         response = self.client.post("/monitoring/stats/")
         self.assertEqual(response.status_code, 405)
 
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
+    def test_stream_endpoint_returns_401_for_unauthenticated_user(
+        self,
+        mocked_get_service,
+    ):
+        response = self.client.get("/monitoring/stream/")
+
+        self.assertEqual(response.status_code, 401)
+        mocked_get_service.assert_not_called()
+
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
+    def test_stream_endpoint_returns_sse_payload_for_authorized_monitoring_account(
+        self,
+        mocked_get_service,
+    ):
+        user = User.objects.create_user(
+            email="stream-monitoring@example.com",
+            name="Stream Monitoring",
+            status="verified",
+        )
+        MonitoringAccount.objects.create(user=user, is_active=True)
+        self.client.force_authenticate(user=user)
+
+        service = Mock()
+        service.stats.return_value = {
+            "status": "ok",
+            "generated_at": "2026-04-20T10:00:00",
+            "totals": {"requests": 2, "errors": 0, "error_rate": 0.0},
+            "routes": [],
+            "events": {},
+            "timeseries": {"window_seconds": 300, "bucket_seconds": 10, "points": []},
+        }
+        mocked_get_service.return_value = service
+
+        response = self.client.get("/monitoring/stream/?max_events=1")
+        first_chunk = next(iter(response.streaming_content))
+        if isinstance(first_chunk, bytes):
+            first_chunk = first_chunk.decode("utf-8")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-cache")
+        self.assertEqual(response["X-Accel-Buffering"], "no")
+        self.assertIn("text/event-stream", response["Content-Type"])
+        self.assertIn("event: stats", first_chunk)
+        self.assertIn('"status":"ok"', first_chunk)
+        service.stats.assert_called_once()
+
+    def test_stream_endpoint_rejects_post_method(self):
+        response = self.client.post("/monitoring/stream/")
+        self.assertEqual(response.status_code, 405)
+
     def test_access_endpoint_returns_unauthenticated_decision(self):
         response = self.client.get("/monitoring/access/")
 

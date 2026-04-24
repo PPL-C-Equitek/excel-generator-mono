@@ -1,9 +1,15 @@
 from datetime import datetime
+from unittest.mock import Mock
 
 from django.test import SimpleTestCase
 
 from monitoring.entities import AuthMetricEvent, RequestMetricEvent
-from monitoring.repositories import InMemoryMetricsRepository, RedisMetricsRepository, _RouteAccumulator
+from monitoring.repositories import (
+    InMemoryMetricsRepository,
+    RedisMetricsRepository,
+    ResilientMetricsRepository,
+    _RouteAccumulator,
+)
 
 
 class RouteAccumulatorTest(SimpleTestCase):
@@ -14,6 +20,8 @@ class RouteAccumulatorTest(SimpleTestCase):
         self.assertEqual(snapshot.total_requests, 0)
         self.assertEqual(snapshot.avg_latency_ms, 0.0)
         self.assertEqual(snapshot.max_latency_ms, 0.0)
+        self.assertEqual(snapshot.p95_latency_ms, 0.0)
+        self.assertEqual(snapshot.p99_latency_ms, 0.0)
 
 
 class InMemoryMetricsRepositoryTest(SimpleTestCase):
@@ -91,6 +99,8 @@ class InMemoryMetricsRepositoryTest(SimpleTestCase):
         self.assertEqual(route.total_errors, 1)
         self.assertEqual(route.avg_latency_ms, 200.0)
         self.assertEqual(route.max_latency_ms, 300.0)
+        self.assertEqual(route.p95_latency_ms, 300.0)
+        self.assertEqual(route.p99_latency_ms, 300.0)
         self.assertEqual(
             sum(point.requests for point in snapshot.timeseries),
             2,
@@ -160,6 +170,21 @@ class InMemoryMetricsRepositoryTest(SimpleTestCase):
             [("login", "success", 2), ("register", "success", 1)],
         )
 
+    def test_route_percentile_uses_bounded_recent_samples(self):
+        repo = InMemoryMetricsRepository(
+            now=lambda: datetime(2026, 4, 20, 12, 0, 0),
+            max_route_latency_samples=3,
+        )
+        repo.record_request(self._event(duration_ms=10.0))
+        repo.record_request(self._event(duration_ms=20.0))
+        repo.record_request(self._event(duration_ms=30.0))
+        repo.record_request(self._event(duration_ms=100.0))
+
+        route = repo.get_snapshot().routes[0]
+        self.assertEqual(route.max_latency_ms, 100.0)
+        self.assertEqual(route.p95_latency_ms, 100.0)
+        self.assertEqual(route.p99_latency_ms, 100.0)
+
     def test_timeseries_excludes_requests_older_than_window(self):
         self.repo.record_request(
             self._event(
@@ -220,12 +245,26 @@ class _FakeRedisPipeline:
     def zrangebyscore(self, *args, **kwargs):
         return self._queue("zrangebyscore", *args, **kwargs)
 
+    def lpush(self, *args, **kwargs):
+        return self._queue("lpush", *args, **kwargs)
+
+    def ltrim(self, *args, **kwargs):
+        return self._queue("ltrim", *args, **kwargs)
+
+    def lrange(self, *args, **kwargs):
+        return self._queue("lrange", *args, **kwargs)
+
+    def expire(self, *args, **kwargs):
+        return self._queue("expire", *args, **kwargs)
+
 
 class _FakeRedisClient:
     def __init__(self):
         self._sets = {}
         self._hashes = {}
         self._zsets = {}
+        self._lists = {}
+        self._expirations = {}
 
     def ping(self):
         return True
@@ -348,6 +387,47 @@ class _FakeRedisClient:
         del zset[start : stop + 1]
         return removed_count
 
+    def lpush(self, key, *values):
+        items = self._lists.setdefault(key, [])
+        for value in values:
+            items.insert(0, str(value))
+        return len(items)
+
+    def ltrim(self, key, start, stop):
+        items = self._lists.get(key, [])
+        if not items:
+            return True
+        if start < 0:
+            start = max(len(items) + start, 0)
+        if stop < 0:
+            stop = len(items) + stop
+        stop = min(stop, len(items) - 1)
+        if start > stop:
+            self._lists[key] = []
+            return True
+        self._lists[key] = items[start : stop + 1]
+        return True
+
+    def lrange(self, key, start, stop):
+        items = self._lists.get(key, [])
+        if not items:
+            return []
+        if start < 0:
+            start = max(len(items) + start, 0)
+        if stop < 0:
+            stop = len(items) + stop
+        stop = min(stop, len(items) - 1)
+        if start > stop:
+            return []
+        return list(items[start : stop + 1])
+
+    def llen(self, key):
+        return len(self._lists.get(key, []))
+
+    def expire(self, key, ttl_seconds):
+        self._expirations[key] = int(ttl_seconds)
+        return 1
+
     def delete(self, *keys):
         removed = 0
         for key in keys:
@@ -360,18 +440,27 @@ class _FakeRedisClient:
             if key in self._zsets:
                 del self._zsets[key]
                 removed += 1
+            if key in self._lists:
+                del self._lists[key]
+                removed += 1
+            if key in self._expirations:
+                del self._expirations[key]
         return removed
 
 
 class RedisMetricsRepositoryTest(SimpleTestCase):
     def setUp(self):
+        self.redis_client = _FakeRedisClient()
         self.repo = RedisMetricsRepository(
-            redis_client=_FakeRedisClient(),
+            redis_client=self.redis_client,
             now=lambda: datetime(2026, 4, 20, 12, 0, 0),
             key_prefix="monitoring_test",
+            key_namespace_version="v2",
+            key_ttl_seconds=3600,
             realtime_window_seconds=60,
             realtime_bucket_seconds=10,
             max_realtime_records=100,
+            max_route_latency_samples=4,
         )
 
     def _event(
@@ -418,11 +507,14 @@ class RedisMetricsRepositoryTest(SimpleTestCase):
         self.assertEqual(snapshot.routes[0].method, "POST")
         self.assertEqual(snapshot.routes[0].avg_latency_ms, 175.0)
         self.assertEqual(snapshot.routes[0].max_latency_ms, 250.0)
+        self.assertEqual(snapshot.routes[0].p95_latency_ms, 250.0)
+        self.assertEqual(snapshot.routes[0].p99_latency_ms, 250.0)
         self.assertEqual(snapshot.to_dict()["events"]["login"]["success"], 2)
         self.assertEqual(
             sum(point.requests for point in snapshot.timeseries),
             2,
         )
+        self.assertTrue(any(key.startswith("monitoring_test:v2:") for key in self.redis_client._expirations))
 
     def test_normalization_and_reset(self):
         self.repo.record_request(self._event(route=" ", method=" ", duration_ms=-1.0))
@@ -438,3 +530,57 @@ class RedisMetricsRepositoryTest(SimpleTestCase):
         self.assertEqual(after_reset.total_requests, 0)
         self.assertEqual(after_reset.routes, ())
         self.assertEqual(after_reset.events, ())
+
+
+class ResilientMetricsRepositoryTest(SimpleTestCase):
+    def test_falls_back_when_primary_record_request_fails(self):
+        primary = Mock()
+        fallback = Mock()
+        primary.record_request.side_effect = RuntimeError("redis down")
+
+        repository = ResilientMetricsRepository(
+            primary_repository=primary,
+            fallback_repository=fallback,
+        )
+        event = RequestMetricEvent(
+            route="/upload",
+            method="POST",
+            status_code=200,
+            duration_ms=10.0,
+            created_at=datetime(2026, 4, 20, 10, 0, 0),
+        )
+
+        repository.record_request(event)
+        repository.record_event(
+            AuthMetricEvent(
+                event_name="login",
+                outcome="success",
+                endpoint="/auth/login/",
+                created_at=datetime(2026, 4, 20, 10, 0, 0),
+            )
+        )
+
+        self.assertTrue(repository.degraded_to_fallback)
+        primary.record_request.assert_called_once_with(event)
+        fallback.record_request.assert_called_once_with(event)
+        fallback.record_event.assert_called_once()
+        primary.record_event.assert_not_called()
+
+    def test_get_snapshot_uses_fallback_when_primary_fails(self):
+        primary = Mock()
+        fallback = Mock()
+        snapshot = Mock()
+        primary.get_snapshot.side_effect = RuntimeError("redis down")
+        fallback.get_snapshot.return_value = snapshot
+
+        repository = ResilientMetricsRepository(
+            primary_repository=primary,
+            fallback_repository=fallback,
+        )
+
+        result = repository.get_snapshot()
+
+        self.assertIs(result, snapshot)
+        self.assertTrue(repository.degraded_to_fallback)
+        primary.get_snapshot.assert_called_once_with()
+        fallback.get_snapshot.assert_called_once_with()

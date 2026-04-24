@@ -39,28 +39,55 @@ class MonitoringContainerTest(SimpleTestCase):
         MONITORING_METRICS_BACKEND="redis",
         MONITORING_REDIS_URL="redis://localhost:6379/0",
         MONITORING_REDIS_KEY_PREFIX="monitoring_test",
+        MONITORING_REDIS_KEY_NAMESPACE_VERSION="v2",
+        MONITORING_REDIS_KEY_TTL_SECONDS=7200,
         MONITORING_REDIS_SOCKET_TIMEOUT_SECONDS=2.0,
         MONITORING_REDIS_CONNECT_TIMEOUT_SECONDS=2.0,
         MONITORING_REALTIME_WINDOW_SECONDS=120,
         MONITORING_REALTIME_BUCKET_SECONDS=15,
         MONITORING_MAX_REALTIME_RECORDS=321,
+        MONITORING_MAX_ROUTE_LATENCY_SAMPLES=123,
     )
+    @patch("monitoring.container.ResilientMetricsRepository")
+    @patch("monitoring.container.InMemoryMetricsRepository")
     @patch("monitoring.container.RedisMetricsRepository")
-    def test_build_monitoring_service_uses_redis_repository_when_enabled(self, redis_repository_cls):
+    def test_build_monitoring_service_uses_redis_repository_when_enabled(
+        self,
+        redis_repository_cls,
+        in_memory_repository_cls,
+        resilient_repository_cls,
+    ):
         redis_repository = object()
+        fallback_repository = object()
+        resilient_repository = object()
         redis_repository_cls.return_value = redis_repository
+        in_memory_repository_cls.return_value = fallback_repository
+        resilient_repository_cls.return_value = resilient_repository
 
         service = container.build_monitoring_service()
 
-        self.assertIs(service._metrics_repository, redis_repository)
+        self.assertIs(service._metrics_repository, resilient_repository)
         redis_repository_cls.assert_called_once_with(
             redis_url="redis://localhost:6379/0",
             key_prefix="monitoring_test",
+            key_namespace_version="v2",
+            key_ttl_seconds=7200,
             socket_timeout_seconds=2.0,
             connect_timeout_seconds=2.0,
             realtime_window_seconds=120,
             realtime_bucket_seconds=15,
             max_realtime_records=321,
+            max_route_latency_samples=123,
+        )
+        in_memory_repository_cls.assert_called_once_with(
+            realtime_window_seconds=120,
+            realtime_bucket_seconds=15,
+            max_realtime_records=321,
+            max_route_latency_samples=123,
+        )
+        resilient_repository_cls.assert_called_once_with(
+            primary_repository=redis_repository,
+            fallback_repository=fallback_repository,
         )
 
     @override_settings(
@@ -82,3 +109,10 @@ class MonitoringContainerTest(SimpleTestCase):
         self.assertIs(service._metrics_repository, in_memory_repository)
         redis_repository_cls.assert_called_once()
         in_memory_repository_cls.assert_called_once()
+
+    @override_settings(MONITORING_METRICS_BACKEND="redis")
+    def test_build_monitoring_service_adds_redis_check_when_backend_is_redis(self):
+        service = container.build_monitoring_service()
+
+        checks = service._readiness_service._checks
+        self.assertEqual([check.name for check in checks], ["database", "storage", "openai_config", "redis"])
