@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from django.test import SimpleTestCase
 
-from monitoring.entities import CheckResult, MetricsSnapshot, RouteMetricSnapshot
+from monitoring.entities import EventMetricSnapshot, CheckResult, MetricsSnapshot, RouteMetricSnapshot
 from monitoring.services import MonitoringService, ReadinessService
 
 
@@ -93,6 +93,7 @@ class ReadinessServiceTest(SimpleTestCase):
 class _RepositoryDouble:
     def __init__(self):
         self.recorded = []
+        self.recorded_events = []
         self.snapshot = MetricsSnapshot(
             generated_at=datetime(2026, 4, 20, 10, 0, 0),
             total_requests=3,
@@ -107,10 +108,20 @@ class _RepositoryDouble:
                     max_latency_ms=150.0,
                 ),
             ),
+            events=(
+                EventMetricSnapshot(
+                    event_name="login",
+                    outcome="success",
+                    count=2,
+                ),
+            ),
         )
 
     def record_request(self, event):
         self.recorded.append(event)
+
+    def record_event(self, event):
+        self.recorded_events.append(event)
 
     def get_snapshot(self):
         return self.snapshot
@@ -166,6 +177,20 @@ class MonitoringServiceTest(SimpleTestCase):
         self.assertEqual(event.duration_ms, 12.5)
         self.assertEqual(event.created_at, datetime(2026, 4, 20, 10, 5, 0))
 
+    def test_record_event_sends_auth_metric_event_to_repository(self):
+        self.service.record_event(
+            event_name="login",
+            outcome="success",
+            endpoint="/auth/login/",
+        )
+
+        self.assertEqual(len(self.repo.recorded_events), 1)
+        event = self.repo.recorded_events[0]
+        self.assertEqual(event.event_name, "login")
+        self.assertEqual(event.outcome, "success")
+        self.assertEqual(event.endpoint, "/auth/login/")
+        self.assertEqual(event.created_at, datetime(2026, 4, 20, 10, 5, 0))
+
     def test_stats_maps_snapshot_payload(self):
         payload = self.service.stats()
 
@@ -174,4 +199,4 @@ class MonitoringServiceTest(SimpleTestCase):
         self.assertEqual(payload["totals"]["requests"], 3)
         self.assertEqual(payload["totals"]["errors"], 1)
         self.assertEqual(payload["routes"][0]["route"], "/upload")
-
+        self.assertEqual(payload["events"]["login"]["success"], 2)

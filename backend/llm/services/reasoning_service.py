@@ -15,6 +15,7 @@ DEFAULT_REASONING_STEPS_MAX_ITEMS = 20
 
 FALLBACK_FINAL_ANSWER = "Unable to parse final answer from model output."
 FALLBACK_REASONING_STEP = "Unable to parse structured reasoning steps from model output."
+FALLBACK_THINKING_LOG = "Unable to parse thinking log from model output."
 
 FINAL_ANSWER_LABELS = {"final answer", "answer", "conclusion"}
 THINKING_LOG_LABELS = {
@@ -26,6 +27,9 @@ THINKING_LOG_LABELS = {
 }
 STEP_SECTION_HEADERS = {"reasoning step", "reasoning steps", "step", "steps", "analysis"}
 STEP_PREFIX_TOKEN = "step"
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+ReasoningLimits = tuple[int, int, int, int, int]
 
 
 class TextGenerationProvider(Protocol):
@@ -350,7 +354,7 @@ def _collect_steps_from_lines(lines: list[str], max_steps: int, max_step_chars: 
 
 
 def _fallback_narrative_steps(text: str, max_steps: int, max_step_chars: int) -> list[str]:
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    sentences = SENTENCE_SPLIT_RE.split(text.strip())
     steps: list[str] = []
     for sentence in sentences:
         normalized_sentence = sentence.strip()
@@ -367,7 +371,7 @@ def _fallback_narrative_steps(text: str, max_steps: int, max_step_chars: int) ->
     return steps
 
 
-def _resolve_reasoning_limits() -> tuple[int, int, int, int, int]:
+def _resolve_reasoning_limits() -> ReasoningLimits:
     max_output_chars = _get_positive_int_setting(
         "LLM_REASONING_OUTPUT_TEXT_MAX_CHARS",
         DEFAULT_REASONING_OUTPUT_TEXT_MAX_CHARS,
@@ -413,14 +417,18 @@ def _fallback_empty_reasoning_response(
     return {
         "final_answer": _truncate_text(FALLBACK_FINAL_ANSWER, max_final_answer_chars),
         "reasoning_steps": [_truncate_text(FALLBACK_REASONING_STEP, max_step_chars)],
-        "thinking_log": _truncate_text(FALLBACK_FINAL_ANSWER, max_thinking_log_chars),
+        "thinking_log": _truncate_text(FALLBACK_THINKING_LOG, max_thinking_log_chars),
     }
 
 
-def _parse_structured_reasoning_object(safe_text: str) -> dict[str, Any] | None:
-    direct_json = _try_parse_json_candidate(safe_text)
-    if isinstance(direct_json, dict):
-        return direct_json
+def _parse_structured_reasoning_object(
+    safe_text: str,
+    skip_direct_json_parse: bool = False,
+) -> dict[str, Any] | None:
+    if not skip_direct_json_parse:
+        direct_json = _try_parse_json_candidate(safe_text)
+        if isinstance(direct_json, dict):
+            return direct_json
 
     for candidate in _extract_json_from_fenced_blocks(safe_text):
         parsed_candidate = _try_parse_json_candidate(candidate)
@@ -460,7 +468,6 @@ def _extract_reasoning_fields_from_lines(
 
 def _resolve_reasoning_steps(
     lines: list[str],
-    safe_text: str,
     max_steps: int,
     max_step_chars: int,
 ) -> list[str]:
@@ -472,25 +479,21 @@ def _resolve_reasoning_steps(
     if reasoning_steps:
         return reasoning_steps
 
-    reasoning_steps = _fallback_narrative_steps(
-        safe_text,
-        max_steps=max_steps,
-        max_step_chars=max_step_chars,
-    )
-    if reasoning_steps:
-        return reasoning_steps
-
     return [_truncate_text(FALLBACK_REASONING_STEP, max_step_chars)]
 
 
-def parse_reasoning_response(raw_output: Any) -> dict[str, Any]:
+def parse_reasoning_response(
+    raw_output: Any,
+    reasoning_limits: ReasoningLimits | None = None,
+) -> dict[str, Any]:
+    limits = reasoning_limits or _resolve_reasoning_limits()
     (
         max_output_chars,
         max_steps,
         max_step_chars,
         max_final_answer_chars,
         max_thinking_log_chars,
-    ) = _resolve_reasoning_limits()
+    ) = limits
 
     safe_text = _normalize_raw_reasoning_output(raw_output, max_output_chars)
 
@@ -501,7 +504,20 @@ def parse_reasoning_response(raw_output: Any) -> dict[str, Any]:
             max_thinking_log_chars=max_thinking_log_chars,
         )
 
-    parsed_structured = _parse_structured_reasoning_object(safe_text)
+    attempted_direct_json_fast_path = (
+        len(safe_text) >= 2
+        and safe_text[0] == "{"
+        and safe_text[-1] == "}"
+    )
+    if attempted_direct_json_fast_path:
+        parsed_fast_path = _try_parse_json_candidate(safe_text)
+        if isinstance(parsed_fast_path, dict):
+            return parsed_fast_path
+
+    parsed_structured = _parse_structured_reasoning_object(
+        safe_text,
+        skip_direct_json_parse=attempted_direct_json_fast_path,
+    )
     if parsed_structured is not None:
         return parsed_structured
 
@@ -513,16 +529,15 @@ def parse_reasoning_response(raw_output: Any) -> dict[str, Any]:
     )
     reasoning_steps = _resolve_reasoning_steps(
         lines,
-        safe_text,
         max_steps=max_steps,
         max_step_chars=max_step_chars,
     )
 
     if not final_answer:
-        final_answer = _truncate_text(reasoning_steps[-1], max_final_answer_chars)
+        final_answer = _truncate_text(FALLBACK_FINAL_ANSWER, max_final_answer_chars)
 
     if not thinking_log:
-        thinking_log = _truncate_text(safe_text, max_thinking_log_chars)
+        thinking_log = _truncate_text(FALLBACK_THINKING_LOG, max_thinking_log_chars)
 
     return {
         "final_answer": final_answer,
@@ -548,6 +563,7 @@ class LlmReasoningService:
 
     def generate(self, prompt: str) -> dict[str, Any]:
         normalized_prompt = _normalize_prompt(prompt)
+        reasoning_limits = _resolve_reasoning_limits()
         effective_system_prompt = compose_system_prompt(
             self.base_system_prompt_provider(),
             self.reasoning_system_prompt_provider(),
@@ -557,30 +573,31 @@ class LlmReasoningService:
             generate_text_kwargs["system_prompt"] = effective_system_prompt
 
         output_text = self.text_provider.generate_text(**generate_text_kwargs)
-        parsed_output = parse_reasoning_response(output_text)
-        return validate_reasoning_response(parsed_output)
+        parsed_output = parse_reasoning_response(
+            output_text,
+            reasoning_limits=reasoning_limits,
+        )
+        return validate_reasoning_response(
+            parsed_output,
+            reasoning_limits=reasoning_limits,
+        )
 
 
-def validate_reasoning_response(payload: Any) -> dict[str, Any]:
+def validate_reasoning_response(
+    payload: Any,
+    reasoning_limits: ReasoningLimits | None = None,
+) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise OpenAIServiceError("OpenAI reasoning response JSON must be an object.")
 
-    max_final_answer_chars = _get_positive_int_setting(
-        "LLM_REASONING_FINAL_ANSWER_MAX_CHARS",
-        DEFAULT_REASONING_FINAL_ANSWER_MAX_CHARS,
-    )
-    max_thinking_log_chars = _get_positive_int_setting(
-        "LLM_REASONING_THINKING_LOG_MAX_CHARS",
-        DEFAULT_REASONING_THINKING_LOG_MAX_CHARS,
-    )
-    max_steps = _get_positive_int_setting(
-        "LLM_REASONING_STEPS_MAX_ITEMS",
-        DEFAULT_REASONING_STEPS_MAX_ITEMS,
-    )
-    max_step_chars = _get_positive_int_setting(
-        "LLM_REASONING_STEP_MAX_CHARS",
-        DEFAULT_REASONING_STEP_MAX_CHARS,
-    )
+    limits = reasoning_limits or _resolve_reasoning_limits()
+    (
+        _max_output_chars,
+        max_steps,
+        max_step_chars,
+        max_final_answer_chars,
+        max_thinking_log_chars,
+    ) = limits
 
     final_answer = _normalize_reasoning_text(
         payload.get("final_answer"),

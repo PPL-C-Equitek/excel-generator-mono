@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "file_processing",
     "authentication",
     "artifact_history",
+    "chat_sessions",
     "monitoring",
 ]
 

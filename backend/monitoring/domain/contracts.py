@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from .entities import CheckResult, MetricsSnapshot, RequestMetricEvent
+from .entities import AuthMetricEvent, CheckResult, MetricsSnapshot, RequestMetricEvent
 
 
 class HealthCheck(Protocol):
@@ -15,6 +15,8 @@ class MetricsRepository(Protocol):
     def record_request(self, event: RequestMetricEvent) -> None:
         ...
 
-    def get_snapshot(self) -> MetricsSnapshot:
+    def record_event(self, event: AuthMetricEvent) -> None:
         ...
 
+    def get_snapshot(self) -> MetricsSnapshot:
+        ...

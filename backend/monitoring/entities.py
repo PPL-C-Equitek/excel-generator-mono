@@ -1,3 +1,17 @@
-from monitoring.domain.entities import CheckResult, MetricsSnapshot, RequestMetricEvent, RouteMetricSnapshot
+from monitoring.domain.entities import (
+    AuthMetricEvent,
+    CheckResult,
+    EventMetricSnapshot,
+    MetricsSnapshot,
+    RequestMetricEvent,
+    RouteMetricSnapshot,
+)
 
-__all__ = ["CheckResult", "RequestMetricEvent", "RouteMetricSnapshot", "MetricsSnapshot"]
+__all__ = [
+    "CheckResult",
+    "RequestMetricEvent",
+    "AuthMetricEvent",
+    "RouteMetricSnapshot",
+    "EventMetricSnapshot",
+    "MetricsSnapshot",
+]

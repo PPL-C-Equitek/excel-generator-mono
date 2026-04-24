@@ -34,6 +34,7 @@ from authentication.services import (
     RefreshTokenExpiredError,
     InvalidRefreshTokenError,
 )
+from monitoring.interfaces.http.decorators import track_auth_metric
 
 logger = logging.getLogger(__name__)
 SERVER_ERROR_MESSAGE = "An internal server error occurred. Please try again later."
@@ -99,6 +100,7 @@ class VerifyEmailView(APIView):
 
         return user
 
+    @track_auth_metric("auth.verify_email")
     def post(self, request):
         serializer = VerifyEmailSerializer(data=request.data)
         if not serializer.is_valid():
@@ -126,6 +128,7 @@ class VerifyEmailView(APIView):
 
 
 class ValidateVerificationTokenView(APIView):
+    @track_auth_metric("auth.verify_email_validate")
     def post(self, request):
         serializer = TokenValidationSerializer(data=request.data)
         if not serializer.is_valid():
@@ -147,6 +150,7 @@ class ValidateVerificationTokenView(APIView):
 class ResendVerificationView(APIView):
     throttle_classes = [ResendVerificationThrottle]
 
+    @track_auth_metric("auth.resend_verification")
     def post(self, request):
         email = request.data.get("email")
         if not email:
@@ -180,6 +184,7 @@ class ResendVerificationView(APIView):
 class RefreshTokenView(APIView):
     permission_classes = [AllowAny]
 
+    @track_auth_metric("auth.refresh")
     def post(self, request):
         serializer = RefreshTokenSerializer(data=request.data)
         if not serializer.is_valid():
@@ -229,6 +234,7 @@ class GoogleOAuthCallbackView(APIView):
     permission_classes = [AllowAny]
     throttle_classes = [GoogleOAuthRateThrottle]
 
+    @track_auth_metric("auth.google_oauth")
     def post(self, request):
         token = request.data.get("token")
 
