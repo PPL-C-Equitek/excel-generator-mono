@@ -1,6 +1,7 @@
 from django.urls import path
 
 from authentication.change_password.http import ChangePasswordView
+from authentication.login.http import LoginView
 from authentication.register.http import RegisterView
 from authentication.password_reset.http import (
     ForgotPasswordView,
@@ -17,7 +18,7 @@ urlpatterns = [
     path("forgot-password/", ForgotPasswordView.as_view(), name="forgot-password"),
     path("resend-password-reset/", ResendPasswordResetView.as_view(), name="resend-password-reset"),
     path("reset-password/", ResetPasswordView.as_view(), name="reset-password"),
-    path("login/", views.LoginView.as_view(), name="login"),
+    path("login/", LoginView.as_view(), name="login"),
     path("refresh/", views.RefreshTokenView.as_view(), name="refresh"),
     path("google-oauth/", views.google_oauth_callback, name="google-oauth"),
     path("logout/", views.LogoutView.as_view(), name="logout"),

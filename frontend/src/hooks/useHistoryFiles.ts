@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
     deleteHistoryFile,
     downloadHistoryFile,
@@ -75,37 +75,36 @@ export function useHistoryFiles(
     const [mutationError, setMutationError] = useState<string | null>(null)
     const [activeDownloads, setActiveDownloads] = useState<Record<string, boolean>>({})
 
-    const loadHistory = async (
-        nextLimit = limit,
-        nextOffset = offset,
-        options?: { showLoader?: boolean }
-    ) => {
-        const showLoader = options?.showLoader ?? true
-        if (showLoader) {
-            setIsLoading(true)
-        }
-        setLoadError(null)
-
-        try {
-            const response = await service.getHistoryFiles(nextLimit, nextOffset)
-            setItems(response.results)
-            setCount(response.count)
-            setLimit(response.limit)
-            setOffset(response.offset)
-        } catch (error: unknown) {
-            setItems([])
-            setCount(0)
-            setLoadError(getErrorMessage(error, 'Failed to load history.'))
-        } finally {
+    const loadHistory = useCallback(
+        async (nextLimit: number, nextOffset: number, options?: { showLoader?: boolean }) => {
+            const showLoader = options?.showLoader ?? true
             if (showLoader) {
-                setIsLoading(false)
+                setIsLoading(true)
             }
-        }
-    }
+            setLoadError(null)
+
+            try {
+                const response = await service.getHistoryFiles(nextLimit, nextOffset)
+                setItems(response.results)
+                setCount(response.count)
+                setLimit(response.limit)
+                setOffset(response.offset)
+            } catch (error: unknown) {
+                setItems([])
+                setCount(0)
+                setLoadError(getErrorMessage(error, 'Failed to load history.'))
+            } finally {
+                if (showLoader) {
+                    setIsLoading(false)
+                }
+            }
+        },
+        [service]
+    )
 
     useEffect(() => {
         void loadHistory(DEFAULT_LIMIT, 0)
-    }, [])
+    }, [loadHistory])
 
     const reloadHistory = async () => {
         await loadHistory(limit, offset)

@@ -9,8 +9,18 @@ import {
     requestPasswordReset,
     resendPasswordReset,
 } from "@/lib/api";
+import { FILE_TOO_LARGE_MESSAGE } from "@/constants/upload";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+function parseMockRequestBody(mockFetch: ReturnType<typeof vi.fn>, callIndex = 0) {
+    const requestInit = mockFetch.mock.calls[callIndex]?.[1] as RequestInit | undefined
+    if (!requestInit || typeof requestInit.body !== "string") {
+        throw new Error("Expected a JSON request body")
+    }
+
+    return JSON.parse(requestInit.body)
+}
 
 describe("fetchAPI", () => {
     afterEach(() => {
@@ -65,6 +75,88 @@ describe("fetchAPI", () => {
         const calledUrl = mockedFetch.mock.calls[0][0] as string;
         expect(calledUrl).toBe("http://localhost:9999/health/");
         expect(result).toEqual({ status: "trimmed" });
+    });
+
+    it("clears auth tokens and redirects to /login when a protected request returns 401", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        window.localStorage.setItem("access_token", "access-token");
+        window.localStorage.setItem("refresh_token", "refresh-token");
+
+        const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
+        const assignSpy = vi.fn();
+        Object.defineProperty(window, "location", {
+            configurable: true,
+            value: {
+                ...window.location,
+                assign: assignSpy,
+            },
+        });
+
+        await expect(
+            fetchAPI("history/", {
+                headers: {
+                    Authorization: "Bearer access-token",
+                },
+            })
+        ).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(removeItemSpy).toHaveBeenCalledWith("access_token");
+        expect(removeItemSpy).toHaveBeenCalledWith("refresh_token");
+        expect(assignSpy).toHaveBeenCalledWith("/login");
+    });
+
+    it("still throws the 401 error gracefully when window is unavailable", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+        vi.stubGlobal("window", undefined);
+
+        await expect(fetchAPI("history/")).rejects.toMatchObject({
+            status: 401,
+            message: "Unauthorized",
+        });
+    });
+
+    it("clears auth tokens without redirecting again when already on /login", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        window.localStorage.setItem("access_token", "access-token");
+        window.localStorage.setItem("refresh_token", "refresh-token");
+
+        const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
+        const assignSpy = vi.fn();
+        Object.defineProperty(window, "location", {
+            configurable: true,
+            value: {
+                ...window.location,
+                pathname: "/login",
+                assign: assignSpy,
+            },
+        });
+
+        await expect(fetchAPI("history/")).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(removeItemSpy).toHaveBeenCalledWith("access_token");
+        expect(removeItemSpy).toHaveBeenCalledWith("refresh_token");
+        expect(assignSpy).not.toHaveBeenCalled();
     });
 });
 
@@ -127,7 +219,7 @@ describe("uploadFile", () => {
 
         const file = new File(["file-content"], "big.pdf", { type: "application/pdf" });
 
-        await expect(uploadFile(file)).rejects.toThrow("File size too big.");
+        await expect(uploadFile(file)).rejects.toThrow(FILE_TOO_LARGE_MESSAGE);
     });
 
     it("maps max PDF page count error to user-friendly FE message", async () => {
@@ -405,7 +497,7 @@ describe('login', () => {
 
             await login('user1@gmail.com', 'user1123')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body).toEqual({ email: 'user1@gmail.com', password: 'user1123' })
         })
 
@@ -462,7 +554,7 @@ describe('login', () => {
 
             await login('  USER1@GMAIL.COM  ', 'user1123')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body.email).toBe('  USER1@GMAIL.COM  ')
         })
 
@@ -528,7 +620,7 @@ describe('loginWithGoogle', () => {
 
             await loginWithGoogle('mock-google-token')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body).toEqual({ token: 'mock-google-token' })
         })
 

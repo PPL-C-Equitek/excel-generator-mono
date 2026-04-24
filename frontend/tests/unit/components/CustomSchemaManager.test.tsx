@@ -7,6 +7,7 @@ import CustomSchemaManager, {
     getNextColumnsAfterRemoval,
     validateCustomSchemaDraft,
 } from '../../../src/components/CustomSchemaManager'
+import { isCustomSchemaLimitExceededErrorMessage } from '../../../src/lib/customSchemaDraft'
 import type {
     CreateCustomSchemaInput,
     CustomSchemaRecord,
@@ -55,12 +56,14 @@ function createHookState(
         isSaving: false,
         deletingSchemaId: null,
         schemas: [],
+        saveError: null,
         error: null,
         message: null,
         reloadSchemas: vi.fn().mockResolvedValue(undefined),
         createSchema: vi.fn().mockResolvedValue(true),
         updateSchema: vi.fn().mockResolvedValue(true),
         deleteSchema: vi.fn().mockResolvedValue(true),
+        clearSaveError: vi.fn(),
         ...overrides,
     }
 }
@@ -216,6 +219,96 @@ describe('CustomSchemaManager', () => {
         expect(screen.getByText('Order Mapping')).toBeInTheDocument()
     })
 
+    it('trims whitespace on description fields when leaving them', async () => {
+        const user = userEvent.setup()
+
+        render(
+            <CustomSchemaManager
+                service={createService()}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await user.click(screen.getByTestId('add-schema-btn'))
+
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        const schemaDescription = within(dialog).getByLabelText(/^description$/i)
+        const columnDescription = within(dialog).getByLabelText(/column description/i)
+
+        fireEvent.change(schemaDescription, { target: { value: '   ' } })
+        fireEvent.blur(schemaDescription)
+
+        fireEvent.change(columnDescription, { target: { value: '   ' } })
+        fireEvent.blur(columnDescription)
+
+        expect(schemaDescription).toHaveValue('')
+        expect(columnDescription).toHaveValue('')
+    })
+
+    it('trims whitespace from column names before submitting the schema', async () => {
+        const user = userEvent.setup()
+        const createdSchema = createSchemaRecord({
+            id: '00000000-0000-0000-0000-000000000008',
+            name: 'Order Mapping',
+            definition: {
+                columns: [
+                    {
+                        name: 'order_id',
+                        description: 'Order identifier',
+                    },
+                ],
+            },
+        })
+        const service = createService({
+            create: vi.fn().mockResolvedValue(createdSchema),
+        })
+        const accessTokenResolver = vi.fn().mockReturnValue('access-token')
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={accessTokenResolver}
+            />
+        )
+
+        await waitFor(() => {
+            expect(service.list).toHaveBeenCalledWith('access-token')
+        })
+
+        await user.click(screen.getByTestId('add-schema-btn'))
+
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        fireEvent.change(within(dialog).getByLabelText(/schema name/i), {
+            target: { value: '  Order Mapping  ' },
+        })
+        fireEvent.change(within(dialog).getByLabelText(/^description$/i), {
+            target: { value: 'Maps order rows' },
+        })
+        fireEvent.change(within(dialog).getByLabelText(/column name/i), {
+            target: { value: '  order_id  ' },
+        })
+        fireEvent.change(within(dialog).getByLabelText(/column description/i), {
+            target: { value: 'Order identifier' },
+        })
+        await user.click(within(dialog).getByTestId('schema-save-btn'))
+
+        await waitFor(() => {
+            expect(service.create).toHaveBeenCalledWith(
+                {
+                    name: 'Order Mapping',
+                    description: 'Maps order rows',
+                    is_active: false,
+                    definition: {
+                        columns: [
+                            { name: 'order_id', description: 'Order identifier' },
+                        ],
+                    },
+                },
+                'access-token'
+            )
+        })
+    })
+
     it('deletes an existing schema from the rendered list', async () => {
         const user = userEvent.setup()
         const service = createService({
@@ -330,7 +423,7 @@ describe('CustomSchemaManager', () => {
         ).toBeInTheDocument()
     })
 
-    it('shows the per-user limit and disables adding after five schemas', async () => {
+    it('disables adding after five schemas', async () => {
         const service = createService({
             list: vi.fn().mockResolvedValue([
                 createSchemaRecord({ id: '00000000-0000-0000-0000-000000000001', name: 'Schema 1' }),
@@ -351,7 +444,7 @@ describe('CustomSchemaManager', () => {
         await screen.findByText('Schema 5')
 
         expect(screen.getByTestId('schema-count')).toHaveTextContent('5/5 saved')
-        expect(screen.getByText(/you have reached the 5-schema limit/i)).toBeInTheDocument()
+        expect(screen.queryByTestId('schema-error')).not.toBeInTheDocument()
         expect(screen.getByTestId('add-schema-btn')).toBeDisabled()
     })
 
@@ -554,8 +647,89 @@ describe('CustomSchemaManager', () => {
         )
         await user.click(within(dialog).getByTestId('schema-save-btn'))
 
-        expect(await screen.findByText('Save failed.')).toBeInTheDocument()
+        expect(await within(dialog).findByText('Save failed.')).toBeInTheDocument()
         expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
+    })
+
+    it('shows duplicate schema name errors inside the modal instead of the page message', async () => {
+        const user = userEvent.setup()
+        const service = createService({
+            create: vi.fn().mockRejectedValue(
+                new Error('You already have a custom schema with this name.')
+            ),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await user.click(screen.getByTestId('add-schema-btn'))
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        await user.type(within(dialog).getByLabelText(/schema name/i), 'Invoice Mapping')
+        await user.type(within(dialog).getByLabelText(/column name/i), 'invoice_number')
+        await user.type(
+            within(dialog).getByLabelText(/column description/i),
+            'Invoice identifier'
+        )
+        await user.click(within(dialog).getByTestId('schema-save-btn'))
+
+        expect(
+            await within(dialog).findByText('You already have a custom schema with this name.')
+        ).toBeInTheDocument()
+        expect(screen.queryByTestId('schema-message')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('schema-error')).not.toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
+    })
+
+    it('shows max schema limit errors inside the modal instead of the page message', async () => {
+        const user = userEvent.setup()
+        const service = createService({
+            create: vi.fn().mockRejectedValue(
+                new Error('A user can only have up to 5 custom schemas.')
+            ),
+        })
+
+        render(
+            <CustomSchemaManager
+                service={service}
+                accessTokenResolver={() => 'access-token'}
+            />
+        )
+
+        await user.click(screen.getByTestId('add-schema-btn'))
+        const dialog = screen.getByRole('dialog', { name: /add schema/i })
+        await user.type(within(dialog).getByLabelText(/schema name/i), 'Invoice Mapping')
+        await user.type(within(dialog).getByLabelText(/column name/i), 'invoice_number')
+        await user.type(
+            within(dialog).getByLabelText(/column description/i),
+            'Invoice identifier'
+        )
+        await user.click(within(dialog).getByTestId('schema-save-btn'))
+
+        expect(
+            await within(dialog).findByText('A user can only have up to 5 custom schemas.')
+        ).toBeInTheDocument()
+        expect(screen.queryByTestId('schema-message')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('schema-error')).not.toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: /add schema/i })).toBeInTheDocument()
+    })
+
+    it('does not show max schema limit errors in the page error banner', () => {
+        vi.spyOn(customSchemaHook, 'useCustomSchemas').mockReturnValue(
+            createHookState({
+                error: 'A user can only have up to 5 custom schemas.',
+            })
+        )
+
+        render(<CustomSchemaManager />)
+
+        expect(screen.queryByTestId('schema-error')).not.toBeInTheDocument()
+        expect(
+            screen.queryByText('A user can only have up to 5 custom schemas.')
+        ).not.toBeInTheDocument()
     })
 
     it('keeps the modal open when the save callback reports failure', async () => {
@@ -916,5 +1090,25 @@ describe('buildCustomSchemaInput', () => {
                 ],
             },
         })
+    })
+})
+
+describe('isCustomSchemaLimitExceededErrorMessage', () => {
+    it('returns false for an empty message', () => {
+        expect(isCustomSchemaLimitExceededErrorMessage('')).toBe(false)
+    })
+
+    it('detects the dynamic custom schema limit message', () => {
+        expect(
+            isCustomSchemaLimitExceededErrorMessage('A user can only have up to 5 custom schemas.')
+        ).toBe(true)
+    })
+
+    it('returns false for a non-limit message', () => {
+        expect(
+            isCustomSchemaLimitExceededErrorMessage(
+                'A user can only have up to five custom schemas.'
+            )
+        ).toBe(false)
     })
 })
