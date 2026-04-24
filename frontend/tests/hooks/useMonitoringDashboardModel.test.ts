@@ -261,6 +261,26 @@ describe('useMonitoringDashboardModel', () => {
         expect(service.getMonitoringLive).toHaveBeenCalledTimes(2)
     })
 
+    it('uses fallback error message when a non-Error rejection is thrown', async () => {
+        const service = createMonitoringService({
+            getMonitoringLive: vi.fn().mockRejectedValueOnce('non-error failure'),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.errorMessage).toBe('Failed to load monitoring data.')
+        expect(result.current.consecutiveFailures).toBe(1)
+    })
+
     it('ignores manual refresh calls while a request is already in-flight', async () => {
         const deferredLive = createDeferred<MonitoringLivePayload>()
         const service = createMonitoringService({
@@ -334,5 +354,117 @@ describe('useMonitoringDashboardModel', () => {
         })
 
         expect(service.getMonitoringLive.mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('sorts tied event counts by event name and guards zero-request realtime totals', async () => {
+        const service = createMonitoringService({
+            getMonitoringStats: vi.fn().mockResolvedValue({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 0, errors: 2, error_rate: 1 },
+                routes: [
+                    {
+                        route: '/history/',
+                        method: 'GET',
+                        total_requests: 0,
+                        total_errors: 0,
+                        error_rate: 0,
+                        avg_latency_ms: 10,
+                        max_latency_ms: 15,
+                    },
+                ],
+                events: {
+                    event_b: { success: 1 },
+                    event_a: { success: 1 },
+                },
+                timeseries: {
+                    window_seconds: 30,
+                    bucket_seconds: 10,
+                    points: [
+                        {
+                            timestamp: '2026-04-24T10:00:00Z',
+                            requests: 0,
+                            errors: 1,
+                            error_rate: 0,
+                            avg_latency_ms: 10,
+                        },
+                        {
+                            timestamp: '2026-04-24T10:00:10Z',
+                            requests: 0,
+                            errors: 1,
+                            error_rate: 0,
+                            avg_latency_ms: 12,
+                        },
+                    ],
+                },
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.realtimeTotals).toEqual({
+            requests: 0,
+            errors: 2,
+            errorRate: 0,
+        })
+        expect(result.current.eventRows.map((row) => row.eventName)).toEqual(['event_a', 'event_b'])
+        expect(result.current.latencyChart.linePoints).not.toBe('')
+    })
+
+    it('keeps latency chart generation stable when sparse series has no last point value', async () => {
+        const sparsePoints: Array<{
+            timestamp: string
+            requests: number
+            errors: number
+            error_rate: number
+            avg_latency_ms: number
+        }> = [
+            {
+                timestamp: '2026-04-24T10:00:00Z',
+                requests: 1,
+                errors: 0,
+                error_rate: 0,
+                avg_latency_ms: 20,
+            },
+        ]
+        sparsePoints.length = 2
+
+        const service = createMonitoringService({
+            getMonitoringStats: vi.fn().mockResolvedValue({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 1, errors: 0, error_rate: 0 },
+                routes: [],
+                events: {},
+                timeseries: {
+                    window_seconds: 20,
+                    bucket_seconds: 10,
+                    points: sparsePoints as unknown as MonitoringStatsPayload['timeseries']['points'],
+                },
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.latencyChart.linePoints).toContain(',')
+        expect(result.current.latencyChart.areaPath).toContain('Z')
     })
 })

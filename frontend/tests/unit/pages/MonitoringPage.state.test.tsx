@@ -144,6 +144,17 @@ describe('MonitoringPage state announcements and branch rendering', () => {
         expect(screen.getByTestId('access-required')).toBeInTheDocument()
     })
 
+    it('renders monitoring detail sections when access is granted and stats are available', () => {
+        mockUseMonitoringDashboardModel.mockReturnValue(buildViewModel())
+
+        render(<MonitoringPage />)
+
+        expect(screen.getByTestId('summary-section')).toBeInTheDocument()
+        expect(screen.getByTestId('latency-section')).toBeInTheDocument()
+        expect(screen.getByTestId('routes-section')).toBeInTheDocument()
+        expect(screen.getByTestId('events-section')).toBeInTheDocument()
+    })
+
     it('announces the last sync when data is fresh and skips details when stats is missing', () => {
         mockUseMonitoringDashboardModel.mockReturnValue(
             buildViewModel({

@@ -17,11 +17,14 @@ describe('monitoringUi helpers', () => {
     it('formats percentages and falls back for non-finite values', () => {
         expect(formatPercent(0.125)).toBe('12.50%')
         expect(formatPercent(Number.NaN)).toBe('0.00%')
+        expect(formatPercent(Number.POSITIVE_INFINITY)).toBe('0.00%')
     })
 
     it('maps status badges to expected classes', () => {
         expect(statusBadgeClass('ok')).toContain('text-blue-700')
         expect(statusBadgeClass('degraded')).toContain('text-red-700')
+        expect(statusBadgeClass('down')).toContain('border-red-400')
+        expect(statusBadgeClass('exception')).toContain('border-red-400')
         expect(statusBadgeClass('error')).toContain('border-red-400')
         expect(statusBadgeClass('custom')).toContain('text-gray-700')
     })
@@ -37,4 +40,3 @@ describe('monitoringUi helpers', () => {
         expect(clamp(3, 0, 5)).toBe(3)
     })
 })
-
