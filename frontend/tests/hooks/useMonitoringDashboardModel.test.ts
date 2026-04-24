@@ -467,4 +467,107 @@ describe('useMonitoringDashboardModel', () => {
         expect(result.current.latencyChart.linePoints).toContain(',')
         expect(result.current.latencyChart.areaPath).toContain('Z')
     })
+
+    it('uses authenticated snapshot service when available to avoid extra per-endpoint orchestration', async () => {
+        const getMonitoringLive = vi.fn().mockResolvedValue({
+            status: 'ok',
+            timestamp: '2026-04-24T10:00:00Z',
+        })
+        const getMonitoringAuthenticatedSnapshot = vi.fn().mockResolvedValue({
+            accessDecision: { allowed: true, reason: 'ok' },
+            readyPayload: {
+                status: 'ok',
+                timestamp: '2026-04-24T10:00:01Z',
+                checks: [{ name: 'database', status: 'ok', latency_ms: 3, is_critical: true }],
+            },
+            statsPayload: {
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 1, errors: 0, error_rate: 0 },
+                routes: [],
+                events: {},
+            },
+        })
+
+        const service: MonitoringDashboardService = {
+            getMonitoringLive,
+            getMonitoringAccess: vi.fn(),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+            getMonitoringAuthenticatedSnapshot,
+        }
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(getMonitoringLive).toHaveBeenCalledTimes(1)
+        expect(getMonitoringAuthenticatedSnapshot).toHaveBeenCalledTimes(1)
+        expect(service.getMonitoringAccess).not.toHaveBeenCalled()
+        expect(service.getMonitoringReady).not.toHaveBeenCalled()
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+    })
+
+    it('pauses interval polling when tab is hidden and refreshes when visible again', async () => {
+        vi.useFakeTimers()
+
+        const originalVisibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+        let currentVisibilityState: DocumentVisibilityState = 'visible'
+        Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            get: () => currentVisibilityState,
+        })
+
+        const service = createMonitoringService()
+
+        try {
+            renderHook(() =>
+                useMonitoringDashboardModel({
+                    monitoringService: service,
+                    autoRefreshIntervalMs: 1000,
+                })
+            )
+
+            await act(async () => {
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+
+            expect(service.getMonitoringLive).toHaveBeenCalledTimes(1)
+
+            await act(async () => {
+                currentVisibilityState = 'hidden'
+                document.dispatchEvent(new Event('visibilitychange'))
+            })
+
+            await act(async () => {
+                vi.advanceTimersByTime(3000)
+                await Promise.resolve()
+            })
+
+            expect(service.getMonitoringLive).toHaveBeenCalledTimes(1)
+
+            await act(async () => {
+                currentVisibilityState = 'visible'
+                document.dispatchEvent(new Event('visibilitychange'))
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+
+            expect(service.getMonitoringLive.mock.calls.length).toBeGreaterThanOrEqual(2)
+        } finally {
+            if (originalVisibilityDescriptor) {
+                Object.defineProperty(document, 'visibilityState', originalVisibilityDescriptor)
+            } else {
+                Reflect.deleteProperty(document, 'visibilityState')
+            }
+        }
+    })
 })

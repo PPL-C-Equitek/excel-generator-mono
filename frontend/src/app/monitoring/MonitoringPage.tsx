@@ -4,6 +4,7 @@ import { type ReactNode, useMemo } from 'react'
 import Sidebar from '@/components/Sidebar'
 import {
     getMonitoringAccess,
+    getMonitoringAuthenticatedSnapshot,
     getMonitoringLive,
     getMonitoringReady,
     getMonitoringStats,
@@ -34,6 +35,7 @@ const defaultMonitoringService: MonitoringDashboardService = {
     getMonitoringAccess,
     getMonitoringReady,
     getMonitoringStats,
+    getMonitoringAuthenticatedSnapshot,
 }
 
 export default function MonitoringPage({ monitoringService = defaultMonitoringService }: MonitoringPageProps) {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
     MonitoringAccessDecision,
+    MonitoringAuthenticatedSnapshot,
     MonitoringLivePayload,
     MonitoringReadyPayload,
     MonitoringStatsPayload,
@@ -20,12 +21,14 @@ const STALE_THRESHOLD_MULTIPLIER = 3
 const MIN_STALE_THRESHOLD_MS = 15000
 const RETRY_BASE_DELAY_MS = 2000
 const RETRY_MAX_DELAY_MS = 30000
+const RETRY_TICK_INTERVAL_MS = 1000
 
 export type MonitoringDashboardService = {
     getMonitoringLive: () => Promise<MonitoringLivePayload>
     getMonitoringAccess: () => Promise<MonitoringAccessDecision>
     getMonitoringReady: () => Promise<MonitoringReadyPayload>
     getMonitoringStats: () => Promise<MonitoringStatsPayload>
+    getMonitoringAuthenticatedSnapshot?: () => Promise<MonitoringAuthenticatedSnapshot>
 }
 
 export type MonitoringDashboardViewModel = {
@@ -67,6 +70,13 @@ function calculateRetryDelayMs(consecutiveFailures: number): number {
     )
 }
 
+function getIsPageVisible(): boolean {
+    if (typeof document === 'undefined') {
+        return true
+    }
+    return document.visibilityState === 'visible'
+}
+
 export function useMonitoringDashboardModel({
     monitoringService,
     autoRefreshIntervalMs = DEFAULT_AUTO_REFRESH_INTERVAL_MS,
@@ -84,14 +94,17 @@ export function useMonitoringDashboardModel({
     const [lastSuccessfulAtMs, setLastSuccessfulAtMs] = useState<number | null>(null)
     const [consecutiveFailures, setConsecutiveFailures] = useState(0)
     const [nextRetryAtMs, setNextRetryAtMs] = useState<number | null>(null)
-    const [clockNowMs, setClockNowMs] = useState(() => Date.now())
+    const [retryClockNowMs, setRetryClockNowMs] = useState(() => Date.now())
+    const [isDataStale, setIsDataStale] = useState(false)
+    const [isPageVisible, setIsPageVisible] = useState(getIsPageVisible)
 
     const markSuccessfulLoad = useCallback((completedAtMs: number) => {
         consecutiveFailuresRef.current = 0
         setConsecutiveFailures(0)
         setNextRetryAtMs(null)
         setLastSuccessfulAtMs(completedAtMs)
-        setClockNowMs(completedAtMs)
+        setRetryClockNowMs(completedAtMs)
+        setIsDataStale(false)
     }, [])
 
     const scheduleRetry = useCallback((failedAtMs: number) => {
@@ -99,7 +112,7 @@ export function useMonitoringDashboardModel({
         const nextFailures = consecutiveFailuresRef.current
         setConsecutiveFailures(nextFailures)
         setNextRetryAtMs(failedAtMs + calculateRetryDelayMs(nextFailures))
-        setClockNowMs(failedAtMs)
+        setRetryClockNowMs(failedAtMs)
     }, [])
 
     const loadDashboard = useCallback(
@@ -117,6 +130,19 @@ export function useMonitoringDashboardModel({
             }
 
             try {
+                if (monitoringService.getMonitoringAuthenticatedSnapshot) {
+                    const [liveResponse, snapshot] = await Promise.all([
+                        monitoringService.getMonitoringLive(),
+                        monitoringService.getMonitoringAuthenticatedSnapshot(),
+                    ])
+                    setLivePayload(liveResponse)
+                    setAccessDecision(snapshot.accessDecision)
+                    setReadyPayload(snapshot.readyPayload)
+                    setStatsPayload(snapshot.statsPayload)
+                    markSuccessfulLoad(Date.now())
+                    return
+                }
+
                 const [liveResponse, accessResponse] = await Promise.all([
                     monitoringService.getMonitoringLive(),
                     monitoringService.getMonitoringAccess(),
@@ -159,6 +185,30 @@ export function useMonitoringDashboardModel({
     }, [loadDashboard])
 
     useEffect(() => {
+        if (typeof document === 'undefined') {
+            return
+        }
+
+        const handleVisibilityChange = () => {
+            const nextVisible = getIsPageVisible()
+            setIsPageVisible(nextVisible)
+
+            if (nextVisible) {
+                void loadDashboard(true)
+            }
+        }
+
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
+        }
+    }, [loadDashboard])
+
+    useEffect(() => {
+        if (!isPageVisible) {
+            return
+        }
+
         const intervalId = globalThis.setInterval(() => {
             const nowMs = Date.now()
             if (nextRetryAtMs !== null && nowMs < nextRetryAtMs) {
@@ -169,10 +219,10 @@ export function useMonitoringDashboardModel({
         return () => {
             globalThis.clearInterval(intervalId)
         }
-    }, [autoRefreshIntervalMs, loadDashboard, nextRetryAtMs])
+    }, [autoRefreshIntervalMs, isPageVisible, loadDashboard, nextRetryAtMs])
 
     useEffect(() => {
-        if (nextRetryAtMs === null) {
+        if (nextRetryAtMs === null || !isPageVisible) {
             return
         }
 
@@ -184,16 +234,24 @@ export function useMonitoringDashboardModel({
         return () => {
             globalThis.clearTimeout(retryTimeoutId)
         }
-    }, [loadDashboard, nextRetryAtMs])
+    }, [isPageVisible, loadDashboard, nextRetryAtMs])
 
     useEffect(() => {
-        const clockId = globalThis.setInterval(() => {
-            setClockNowMs(Date.now())
-        }, 1000)
+        if (nextRetryAtMs === null) {
+            return
+        }
+
+        const tick = () => {
+            setRetryClockNowMs(Date.now())
+        }
+
+        tick()
+        const clockId = globalThis.setInterval(tick, RETRY_TICK_INTERVAL_MS)
+
         return () => {
             globalThis.clearInterval(clockId)
         }
-    }, [])
+    }, [nextRetryAtMs])
 
     const eventRows = useMemo<EventRow[]>(() => {
         if (!statsPayload) {
@@ -356,14 +414,37 @@ export function useMonitoringDashboardModel({
         }
     }, [readyPayload])
 
-    const staleThresholdMs = Math.max(
-        MIN_STALE_THRESHOLD_MS,
-        autoRefreshIntervalMs * STALE_THRESHOLD_MULTIPLIER
-    )
-    const isDataStale = lastSuccessfulAtMs !== null && clockNowMs - lastSuccessfulAtMs > staleThresholdMs
+    useEffect(() => {
+        if (lastSuccessfulAtMs === null) {
+            setIsDataStale(false)
+            return
+        }
+
+        const staleThresholdMs = Math.max(
+            MIN_STALE_THRESHOLD_MS,
+            autoRefreshIntervalMs * STALE_THRESHOLD_MULTIPLIER
+        )
+        const markStaleAtMs = lastSuccessfulAtMs + staleThresholdMs
+        const nowMs = Date.now()
+
+        if (nowMs >= markStaleAtMs) {
+            setIsDataStale(true)
+            return
+        }
+
+        setIsDataStale(false)
+        const staleTimeoutId = globalThis.setTimeout(() => {
+            setIsDataStale(true)
+        }, markStaleAtMs - nowMs)
+
+        return () => {
+            globalThis.clearTimeout(staleTimeoutId)
+        }
+    }, [autoRefreshIntervalMs, lastSuccessfulAtMs])
+
     const retryInSeconds = nextRetryAtMs === null
         ? 0
-        : Math.max(0, Math.ceil((nextRetryAtMs - clockNowMs) / 1000))
+        : Math.max(0, Math.ceil((nextRetryAtMs - retryClockNowMs) / 1000))
 
     const lastSync = livePayload?.timestamp ?? statsPayload?.generated_at ?? ''
 
