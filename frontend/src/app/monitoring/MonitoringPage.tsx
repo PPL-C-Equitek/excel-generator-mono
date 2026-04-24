@@ -91,7 +91,9 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
             )
         }
     } else {
-        monitoringDetailsSection = <MonitoringAccessRequiredSection reason={accessDecision?.reason} />
+        monitoringDetailsSection = (
+            <MonitoringAccessRequiredSection reason={accessDecision?.reason ?? 'unauthenticated'} />
+        )
     }
 
     const statusAnnouncement = useMemo(() => {
