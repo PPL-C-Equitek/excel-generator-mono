@@ -159,7 +159,7 @@ export function useMonitoringDashboardModel({
     }, [loadDashboard])
 
     useEffect(() => {
-        const intervalId = window.setInterval(() => {
+        const intervalId = globalThis.setInterval(() => {
             const nowMs = Date.now()
             if (nextRetryAtMs !== null && nowMs < nextRetryAtMs) {
                 return
@@ -167,7 +167,7 @@ export function useMonitoringDashboardModel({
             void loadDashboard(true)
         }, autoRefreshIntervalMs)
         return () => {
-            window.clearInterval(intervalId)
+            globalThis.clearInterval(intervalId)
         }
     }, [autoRefreshIntervalMs, loadDashboard, nextRetryAtMs])
 
@@ -177,21 +177,21 @@ export function useMonitoringDashboardModel({
         }
 
         const delayMs = Math.max(0, nextRetryAtMs - Date.now())
-        const retryTimeoutId = window.setTimeout(() => {
+        const retryTimeoutId = globalThis.setTimeout(() => {
             void loadDashboard(true)
         }, delayMs)
 
         return () => {
-            window.clearTimeout(retryTimeoutId)
+            globalThis.clearTimeout(retryTimeoutId)
         }
     }, [loadDashboard, nextRetryAtMs])
 
     useEffect(() => {
-        const clockId = window.setInterval(() => {
+        const clockId = globalThis.setInterval(() => {
             setClockNowMs(Date.now())
         }, 1000)
         return () => {
-            window.clearInterval(clockId)
+            globalThis.clearInterval(clockId)
         }
     }, [])
 
@@ -305,7 +305,7 @@ export function useMonitoringDashboardModel({
 
         const linePoints = points.map((point) => `${point.x},${point.y}`).join(' ')
         const first = points[0]
-        const last = points[points.length - 1]
+        const last = points.at(-1) ?? points[0]
         const areaPath = `M ${first.x} ${height - bottomPadding} L ${points
             .map((point) => `${point.x} ${point.y}`)
             .join(' L ')} L ${last.x} ${height - bottomPadding} Z`

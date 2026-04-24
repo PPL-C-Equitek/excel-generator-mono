@@ -62,6 +62,7 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
         readinessMeter,
         refreshDashboard,
     } = useMonitoringDashboardModel({ monitoringService })
+    const hasMonitoringAccess = Boolean(accessDecision?.allowed)
 
     const statusAnnouncement = useMemo(() => {
         if (isLoading) {
@@ -147,32 +148,32 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
                                 realtimeWindowSeconds={realtimeWindowSeconds}
                             />
 
-                            {!accessDecision.allowed ? (
+                            {hasMonitoringAccess ? (
+                                statsPayload ? (
+                                    <section className="space-y-4">
+                                        <MonitoringLatencyAndMetersSection
+                                            latencySeries={latencySeries}
+                                            latencyChart={latencyChart}
+                                            hasRealtimeSeries={hasRealtimeSeries}
+                                            realtimeWindowSeconds={realtimeWindowSeconds}
+                                            realtimeBucketSeconds={realtimeBucketSeconds}
+                                            errorRateMeter={errorRateMeter}
+                                            readinessMeter={readinessMeter}
+                                        />
+                                        <MonitoringRoutesAndReadinessSection
+                                            statsPayload={statsPayload}
+                                            maxRouteRequests={maxRouteRequests}
+                                            readyPayload={readyPayload}
+                                        />
+                                        <MonitoringAuthEventsSection
+                                            eventRows={eventRows}
+                                            maxEventCount={maxEventCount}
+                                        />
+                                    </section>
+                                ) : null
+                            ) : (
                                 <MonitoringAccessRequiredSection reason={accessDecision.reason} />
-                            ) : null}
-
-                            {accessDecision.allowed && statsPayload ? (
-                                <section className="space-y-4">
-                                    <MonitoringLatencyAndMetersSection
-                                        latencySeries={latencySeries}
-                                        latencyChart={latencyChart}
-                                        hasRealtimeSeries={hasRealtimeSeries}
-                                        realtimeWindowSeconds={realtimeWindowSeconds}
-                                        realtimeBucketSeconds={realtimeBucketSeconds}
-                                        errorRateMeter={errorRateMeter}
-                                        readinessMeter={readinessMeter}
-                                    />
-                                    <MonitoringRoutesAndReadinessSection
-                                        statsPayload={statsPayload}
-                                        maxRouteRequests={maxRouteRequests}
-                                        readyPayload={readyPayload}
-                                    />
-                                    <MonitoringAuthEventsSection
-                                        eventRows={eventRows}
-                                        maxEventCount={maxEventCount}
-                                    />
-                                </section>
-                            ) : null}
+                            )}
                         </>
                     ) : null}
                 </div>

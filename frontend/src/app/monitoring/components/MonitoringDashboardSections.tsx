@@ -16,14 +16,14 @@ import type {
 } from '../monitoringViewModelTypes'
 import { GaugeMeter, MetricCard, StatusBadge } from './primitives/MonitoringPrimitives'
 
-type MonitoringHeroSectionProps = {
+type MonitoringHeroSectionProps = Readonly<{
     lastSync: string
     isLoading: boolean
     isRefreshing: boolean
     isDataStale: boolean
     retryInSeconds: number
     onRefresh: () => void
-}
+}>
 
 export function MonitoringHeroSection({
     lastSync,
@@ -80,14 +80,14 @@ export function MonitoringHeroSection({
     )
 }
 
-type MonitoringTrafficSummarySectionProps = {
+type MonitoringTrafficSummarySectionProps = Readonly<{
     livePayload: MonitoringLivePayload
     accessDecision: MonitoringAccessDecision
     statsPayload: MonitoringStatsPayload | null
     realtimeTotals: RealtimeTotals
     hasRealtimeSeries: boolean
     realtimeWindowSeconds: number
-}
+}>
 
 export function MonitoringTrafficSummarySection({
     livePayload,
@@ -148,9 +148,9 @@ export function MonitoringTrafficSummarySection({
     )
 }
 
-type MonitoringAccessRequiredSectionProps = {
+type MonitoringAccessRequiredSectionProps = Readonly<{
     reason: string
-}
+}>
 
 export function MonitoringAccessRequiredSection({ reason }: MonitoringAccessRequiredSectionProps) {
     return (
@@ -161,7 +161,7 @@ export function MonitoringAccessRequiredSection({ reason }: MonitoringAccessRequ
     )
 }
 
-type MonitoringLatencyAndMetersSectionProps = {
+type MonitoringLatencyAndMetersSectionProps = Readonly<{
     latencySeries: LatencySeriesPoint[]
     latencyChart: LatencyChartModel
     hasRealtimeSeries: boolean
@@ -169,7 +169,7 @@ type MonitoringLatencyAndMetersSectionProps = {
     realtimeBucketSeconds: number
     errorRateMeter: ErrorRateMeter
     readinessMeter: ReadinessMeter
-}
+}>
 
 export function MonitoringLatencyAndMetersSection({
     latencySeries,
@@ -185,6 +185,7 @@ export function MonitoringLatencyAndMetersSection({
     const lineChartDescription = hasRealtimeSeries && realtimeWindowSeconds > 0
         ? `Latency trend over ${realtimeWindowSeconds} seconds, grouped every ${realtimeBucketSeconds} seconds.`
         : 'Latency trend for the top monitored routes from the latest snapshot.'
+    const latestLatencyPoint = latencySeries.at(-1)
 
     return (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
@@ -204,7 +205,6 @@ export function MonitoringLatencyAndMetersSection({
                             <svg
                                 viewBox="0 0 520 220"
                                 className="h-52 w-full min-w-[520px]"
-                                role="img"
                                 aria-labelledby={`${lineChartTitleId} ${lineChartDescId}`}
                                 tabIndex={0}
                             >
@@ -273,13 +273,13 @@ export function MonitoringLatencyAndMetersSection({
                         </p>
                         {hasRealtimeSeries ? (
                             <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                                Latest bucket {latencySeries[latencySeries.length - 1]?.label}: avg latency{' '}
+                                Latest bucket {latestLatencyPoint?.label}: avg latency{' '}
                                 <span className="font-semibold text-gray-900">
-                                    {latencySeries[latencySeries.length - 1]?.value.toFixed(2)} ms
+                                    {latestLatencyPoint?.value.toFixed(2)} ms
                                 </span>{' '}
                                 across{' '}
                                 <span className="font-semibold text-gray-900">
-                                    {latencySeries[latencySeries.length - 1]?.requests ?? 0}
+                                    {latestLatencyPoint?.requests ?? 0}
                                 </span>{' '}
                                 requests.
                             </div>
@@ -325,11 +325,11 @@ export function MonitoringLatencyAndMetersSection({
     )
 }
 
-type MonitoringRoutesAndReadinessSectionProps = {
+type MonitoringRoutesAndReadinessSectionProps = Readonly<{
     statsPayload: MonitoringStatsPayload
     maxRouteRequests: number
     readyPayload: MonitoringReadyPayload | null
-}
+}>
 
 export function MonitoringRoutesAndReadinessSection({
     statsPayload,
@@ -417,10 +417,10 @@ export function MonitoringRoutesAndReadinessSection({
     )
 }
 
-type MonitoringAuthEventsSectionProps = {
+type MonitoringAuthEventsSectionProps = Readonly<{
     eventRows: EventRow[]
     maxEventCount: number
-}
+}>
 
 export function MonitoringAuthEventsSection({ eventRows, maxEventCount }: MonitoringAuthEventsSectionProps) {
     return (
@@ -540,4 +540,3 @@ export function MonitoringAuthEventsSkeleton() {
         </article>
     )
 }
-

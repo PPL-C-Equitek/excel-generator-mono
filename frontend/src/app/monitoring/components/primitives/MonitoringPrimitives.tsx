@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
 import { statusBadgeClass } from '../../monitoringUi'
 
-type StatusBadgeProps = {
+type StatusBadgeProps = Readonly<{
     status: string
     label?: string
     className?: string
-}
+}>
 
 export function StatusBadge({ status, label, className = '' }: StatusBadgeProps) {
     return (
@@ -15,13 +15,13 @@ export function StatusBadge({ status, label, className = '' }: StatusBadgeProps)
     )
 }
 
-type MetricCardProps = {
+type MetricCardProps = Readonly<{
     title: string
     value: ReactNode
     subtitle?: ReactNode
     children?: ReactNode
     valueClassName?: string
-}
+}>
 
 export function MetricCard({
     title,
@@ -40,7 +40,7 @@ export function MetricCard({
     )
 }
 
-type GaugeMeterProps = {
+type GaugeMeterProps = Readonly<{
     ariaLabel: string
     label: string
     valueText: string
@@ -48,7 +48,7 @@ type GaugeMeterProps = {
     progressLength: number
     strokeColor: string
     valueClassName: string
-}
+}>
 
 export function GaugeMeter({
     ariaLabel,
@@ -66,7 +66,6 @@ export function GaugeMeter({
                 <svg
                     viewBox="0 0 200 120"
                     className="h-24 w-28"
-                    role="img"
                     aria-label={ariaLabel}
                     tabIndex={0}
                 >
@@ -94,4 +93,3 @@ export function GaugeMeter({
         </div>
     )
 }
-
