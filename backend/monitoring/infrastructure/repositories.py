@@ -728,8 +728,8 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin):
         raw_events: dict[str, str],
     ) -> list[tuple[tuple[str, str], int]]:
         items: list[tuple[tuple[str, str], int]] = []
-        for field, count_raw in raw_events.items():
-            event_name, outcome = self._parse_event_hash_field(field)
+        for event_field, count_raw in raw_events.items():
+            event_name, outcome = self._parse_event_hash_field(event_field)
             count = self._to_int(count_raw)
             items.append(((event_name, outcome), count))
         return items
