@@ -1,5 +1,5 @@
 from .health_checks import BaseHealthCheck, DatabaseHealthCheck, OpenAIConfigHealthCheck, StorageHealthCheck
-from .repositories import InMemoryMetricsRepository
+from .repositories import InMemoryMetricsRepository, RedisMetricsRepository
 
 __all__ = [
     "BaseHealthCheck",
@@ -7,5 +7,5 @@ __all__ = [
     "OpenAIConfigHealthCheck",
     "StorageHealthCheck",
     "InMemoryMetricsRepository",
+    "RedisMetricsRepository",
 ]
-
