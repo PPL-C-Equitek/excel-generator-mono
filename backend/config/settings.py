@@ -36,6 +36,10 @@ RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
+# Login rate-limit configuration
+LOGIN_FAILURE_LIMIT = int(os.environ.get("LOGIN_FAILURE_LIMIT", "5"))
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("LOGIN_RATE_LIMIT_WINDOW_SECONDS", str(15 * 60)))
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -53,6 +57,8 @@ INSTALLED_APPS = [
     "file_processing",
     "authentication",
     "artifact_history",
+    "chat_sessions",
+    "monitoring",
 ]
 
 MIDDLEWARE = [
@@ -68,6 +74,7 @@ MIDDLEWARE = [
 
 raw_cors = os.environ.get("DJANGO_CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 CORS_ALLOWED_ORIGINS = [o.strip() for o in raw_cors.split(",") if o.strip()]
+CORS_EXPOSE_HEADERS = ["Content-Disposition"]
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
@@ -147,14 +154,12 @@ MEDIA_ROOT = os.environ.get("MEDIA_ROOT", os.path.join(BASE_DIR, "media"))
 MEDIA_URL = "/media/"
 
 
-UPLOAD_TEMP_DIR = os.path.join(MEDIA_ROOT, 'uploads', 'tmp')
+UPLOAD_TEMP_DIR = os.path.join(MEDIA_ROOT, "uploads", "tmp")
 CSV_EXPORT_DIR = os.environ.get(
-    'CSV_EXPORT_DIR',
-    os.path.join(MEDIA_ROOT, 'exports', 'csv')
+    "CSV_EXPORT_DIR", os.path.join(MEDIA_ROOT, "exports", "csv")
 )
 EXCEL_EXPORT_DIR = os.environ.get(
-    'EXCEL_EXPORT_DIR',
-    os.path.join(MEDIA_ROOT, 'exports', 'excel')
+    "EXCEL_EXPORT_DIR", os.path.join(MEDIA_ROOT, "exports", "excel")
 )
 
 # Default primary key field type

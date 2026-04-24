@@ -1,18 +1,21 @@
 import logging
 import jwt
+import uuid
 from datetime import timedelta
+from types import SimpleNamespace
 from urllib.parse import quote
 
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, TypedDict
 from django.conf import settings
 from django.core.cache import cache
-from django.core.signing import TimestampSigner
+from django.core.signing import BadSignature, TimestampSigner
 from django.utils import timezone
 
 from authentication.models import User
 from authentication.logout.adapters import DjangoTokenBlacklistRepository
 from authentication.logout.contracts import TokenBlacklistPort
+from authentication.serializers import TokenObtainPairSerializer
 
 logger = logging.getLogger(__name__)
 PASSWORD_RESET_TOKEN_PREFIX = "password-reset"
@@ -119,9 +122,27 @@ def _require_resend_from_email() -> str:
     return from_email
 
 
-def generate_verification_token(email):
+EMAIL_VERIFICATION_TOKEN_PREFIX = "email-verify"
+
+
+def generate_verification_token(email, nonce):
     signer = TimestampSigner()
-    return signer.sign(email)
+    return signer.sign(f"{EMAIL_VERIFICATION_TOKEN_PREFIX}:{email}:{nonce}")
+
+
+def decode_verification_token(token, max_age):
+    signer = TimestampSigner()
+    value = signer.unsign(token, max_age=max_age)
+    prefix = f"{EMAIL_VERIFICATION_TOKEN_PREFIX}:"
+    if not isinstance(value, str) or not value.startswith(prefix):
+        raise BadSignature("Invalid token purpose.")
+
+    payload = value[len(prefix):]
+    email, separator, nonce = payload.rpartition(":")
+    if not separator or not email or not nonce:
+        raise BadSignature("Invalid token payload.")
+
+    return email, nonce
 
 
 def generate_password_reset_token(email):
@@ -138,31 +159,33 @@ def decode_password_reset_token(token, max_age):
     return value[len(prefix):]
 
 
-def generate_tokens(user_id, email) -> TokenPayload:
+def generate_tokens(user_id, email, session_version: int = 1) -> TokenPayload:
     secret_key = getattr(settings, "JWT_SECRET_KEY", None)
     if not secret_key:
         raise ValueError("JWT_SECRET_KEY is not configured")
 
     now = timezone.now()
+    now_ts = int(now.timestamp())
 
-    access_payload = {
-        "user_id": str(user_id),
-        "email": email,
-        "type": "access",
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(hours=1)).timestamp()),
-        "iss": "excel-generator",
-    }
+    token_user = SimpleNamespace(
+        id=str(user_id),
+        email=email,
+        session_version=session_version,
+    )
+
+    access_payload = TokenObtainPairSerializer.build_access_payload(
+        user=token_user,
+        now_timestamp=now_ts,
+        exp_timestamp=int((now + timedelta(hours=1)).timestamp()),
+    )
 
     access_token = jwt.encode(access_payload, secret_key, algorithm="HS256")
 
-    refresh_payload = {
-        "user_id": str(user_id),
-        "email": email,
-        "type": "refresh",
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(days=7)).timestamp()),
-    }
+    refresh_payload = TokenObtainPairSerializer.build_refresh_payload(
+        user=token_user,
+        now_timestamp=now_ts,
+        exp_timestamp=int((now + timedelta(days=7)).timestamp()),
+    )
 
     refresh_token = jwt.encode(refresh_payload, secret_key, algorithm="HS256")
 
@@ -252,7 +275,7 @@ class LoginService:
             self.failure_tracker.record_failure(normalized_email)
             raise InvalidCredentialsError()
 
-        token_data = self.token_generator(user.id, user.email)
+        token_data = self.token_generator(user.id, user.email, user.session_version)
         self.failure_tracker.reset_failures(normalized_email)
 
         tokens = TokenPair(
@@ -295,15 +318,19 @@ class RefreshTokenService:
             raise BlacklistedRefreshTokenError("Refresh token is blacklisted.")
 
         # Ensure the refresh token still belongs to an existing verified user.
-        user_exists_and_verified = User.objects.filter(
+        user = User.objects.filter(
             id=user_id,
             email=email,
             status="verified",
-        ).exists()
-        if not user_exists_and_verified:
+        ).first()
+        if user is None:
             raise InvalidRefreshTokenError("User is not valid for refresh.")
 
-        return self.token_generator(user_id, email)
+        token_session_version = payload.get("session_version")
+        if token_session_version != user.session_version:
+            raise InvalidRefreshTokenError("Refresh token session is no longer valid.")
+
+        return self.token_generator(user_id, email, user.session_version)
 
     def _decode_refresh_token(self, refresh_token: str):
         secret_key = getattr(settings, "JWT_SECRET_KEY", "")
@@ -319,7 +346,12 @@ class RefreshTokenService:
 
 
 def send_verification_email(email):
-    token = generate_verification_token(email)
+    user = User.objects.get(email=email)
+    previous_nonce = user.email_verification_nonce
+    user.email_verification_nonce = uuid.uuid4()
+    user.save(update_fields=["email_verification_nonce"])
+
+    token = generate_verification_token(user.email, str(user.email_verification_nonce))
     frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
     verification_url = f"{frontend_url}/auth/verify-email?token={quote(token, safe='')}"
 
@@ -331,15 +363,17 @@ def send_verification_email(email):
             resend.api_key = resend_api_key
             resend.Emails.send({
                 "from": from_email,
-                "to": email,
+                "to": user.email,
                 "subject": "Verify Your Email",
                 "html": f'<p>Click the link below to verify: <a href="{verification_url}">{verification_url}</a></p>',
             })
         else:
             logger.info("Verification link (RESEND_API_KEY not set): %s", verification_url)
-    except Exception:
-        logger.exception("Failed to send verification email to %s", email)
-        raise
+    except Exception as exc:
+        user.email_verification_nonce = previous_nonce
+        user.save(update_fields=["email_verification_nonce"])
+        logger.exception("Failed to send verification email to %s", user.email)
+        raise exc
 
 
 def send_password_reset_email(email):

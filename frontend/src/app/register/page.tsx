@@ -5,10 +5,15 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import type { AxiosError } from 'axios';
+import { toast } from 'sonner';
 import AuthEmailSuccessCard from '@/components/AuthEmailSuccessCard';
 import Navbar from '@/components/Navbar';
 import { LANDING_NAV_LINKS } from '@/constants/landing';
-import { useResendCooldown } from '@/hooks/useResendCooldown';
+import {
+  getRemainingResendCooldownForEmail,
+  setResendCooldownForEmail,
+  useResendCooldown,
+} from '@/hooks/useResendCooldown';
 import { resendEmailActionFlow, shouldSkipEmailResend } from '@/lib/authEmailAction';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -27,6 +32,7 @@ type RegisterFormErrors = {
 type FormSubmitEvent = Parameters<NonNullable<React.ComponentProps<'form'>['onSubmit']>>[0];
 
 type RegisterErrorResponse = {
+  code?: string;
   message?: string;
   errors?: {
     name?: string[];
@@ -34,6 +40,14 @@ type RegisterErrorResponse = {
     non_field_errors?: string[];
   };
 };
+
+function FieldErrorMessage({ children }: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-800 shadow-sm">
+      {children}
+    </p>
+  );
+}
 
 function getResendButtonText(isResending: boolean, resendCooldown: number): string {
   if (isResending) return 'Mengirim...';
@@ -134,7 +148,10 @@ export default function RegisterPage() {
   const [isResending, setIsResending] = useState(false);
   const [resendStatusMessage, setResendStatusMessage] = useState('');
   const [resendErrorMessage, setResendErrorMessage] = useState('');
-  const { cooldown: resendCooldown, setCooldown: setResendCooldown } = useResendCooldown();
+  const { cooldown: resendCooldown, setCooldown: setResendCooldown } = useResendCooldown(
+    0,
+    formData.email
+  );
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -163,21 +180,43 @@ export default function RegisterPage() {
 
     try {
       const trimmedEmail = formData.email.trim();
+      const activeCooldown = getRemainingResendCooldownForEmail(trimmedEmail);
+
+      if (activeCooldown > 0) {
+        toast.success(
+          'Email ini belum diverifikasi. Silakan cek inbox Anda atau tunggu hingga cooldown selesai.'
+        );
+        router.push(
+          `/auth/verify-email/pending?email=${encodeURIComponent(trimmedEmail)}`
+        );
+        return;
+      }
+
       const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL || ''}/auth/register/`, {
         name: formData.name,
         email: trimmedEmail,
       });
 
       setSuccessMessage(response.data?.message || 'Registrasi berhasil. Cek email Anda.');
-      if (response.status === 201) {
-        router.push('/login');
-      }
     } catch (error: unknown) {
       const axiosError = error as AxiosError<RegisterErrorResponse>;
       const responseData = axiosError.response?.data;
       const message = responseData?.message;
+      const code = responseData?.code;
       const status = axiosError.response?.status;
       const backendErrors = responseData?.errors;
+
+      if (status === 409 && code === 'UNVERIFIED_EMAIL') {
+        const emailForRedirect = formData.email.trim();
+        setResendCooldownForEmail(emailForRedirect, 60);
+        toast.success(
+          message || 'Email belum diverifikasi. Kami telah mengirim ulang link verifikasi.'
+        );
+        router.push(
+          `/auth/verify-email/pending?email=${encodeURIComponent(emailForRedirect)}&resent=1`
+        );
+        return;
+      }
 
       if (status === 409) {
         setErrors((prev) => ({
@@ -259,7 +298,9 @@ export default function RegisterPage() {
           ) : (
             <form className="mt-8 space-y-6" onSubmit={handleSubmit} noValidate>
               {errors.form && (
-                <div className="rounded-md bg-red-100 p-3 text-sm text-red-600">{errors.form}</div>
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800 shadow-sm">
+                  {errors.form}
+                </div>
               )}
 
               <div className="space-y-6 force-light">
@@ -274,14 +315,15 @@ export default function RegisterPage() {
                     value={formData.name}
                     onChange={handleChange}
                     placeholder="Enter your full name"
-                    className={`relative block w-full appearance-none rounded-xl border px-4 py-3 text-sm outline-none ${errors.name ? 'border-red-300' : 'border-transparent'
+                    className={`relative block w-full appearance-none rounded-xl border px-4 py-3 text-sm outline-none ${
+                      errors.name ? 'border-rose-400 bg-rose-50/70' : 'border-transparent'
                       }`}
                     style={{
                       backgroundColor: 'var(--surface-2)',
                       color: 'var(--foreground)',
                     }}
                   />
-                  {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
+                  {errors.name && <FieldErrorMessage>{errors.name}</FieldErrorMessage>}
                 </div>
 
                 <div className="force-light">
@@ -295,14 +337,15 @@ export default function RegisterPage() {
                     value={formData.email}
                     onChange={handleChange}
                     placeholder="Enter your email"
-                    className={`relative block w-full appearance-none rounded-xl border px-4 py-3 text-sm outline-none ${errors.email ? 'border-red-300' : 'border-transparent'
+                    className={`relative block w-full appearance-none rounded-xl border px-4 py-3 text-sm outline-none ${
+                      errors.email ? 'border-rose-400 bg-rose-50/70' : 'border-transparent'
                       }`}
                     style={{
                       backgroundColor: 'var(--surface-2)',
                       color: 'var(--foreground)',
                     }}
                   />
-                  {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
+                  {errors.email && <FieldErrorMessage>{errors.email}</FieldErrorMessage>}
                 </div>
               </div>
 

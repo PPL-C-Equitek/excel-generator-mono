@@ -1,22 +1,23 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
-import type { ComponentProps, ReactNode } from 'react';
-import Link from 'next/link';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import { LANDING_NAV_LINKS } from '@/constants/landing';
-
-type ActionStatus = 'form' | 'loading' | 'success' | 'error';
-type TokenFormErrors = {
-  password: string;
-  passwordConfirm: string;
-};
-
-type FormSubmitEvent = Parameters<NonNullable<ComponentProps<'form'>['onSubmit']>>[0];
+import { useTokenPasswordAction } from '@/hooks/useTokenPasswordAction';
+import {
+  AuthActionLayout,
+  AuthActionLink,
+  AuthActionTitle,
+  AuthActionFormError,
+  AuthSuccessIcon,
+  AuthErrorIcon,
+  AuthStatusSpinner,
+} from '@/components/auth/AuthActionShell';
 
 export interface TokenPasswordActionConfig {
   endpointPath: string;
+  validateEndpointPath?: string;
   suspenseTitle: string;
   suspenseMessage: string;
   missingTokenMessage: string;
@@ -38,220 +39,39 @@ export interface TokenPasswordActionConfig {
   errorSecondaryLabel: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function readFirstError(errors: Record<string, unknown>, field: 'password' | 'password_confirm'): string {
-  const value = errors[field];
-  if (!Array.isArray(value)) {
-    return '';
-  }
-
-  const firstError = value[0];
-  return typeof firstError === 'string' ? firstError : '';
-}
-
-function ActionShell({ children }: Readonly<{ children: ReactNode }>) {
-  return (
-    <div className="force-light min-h-screen bg-gray-50 flex flex-col">
-      <Navbar links={LANDING_NAV_LINKS} />
-      <main className="flex flex-1 items-center justify-center px-4 py-12">
-        <div
-          className="mx-auto w-full max-w-lg space-y-8 rounded-2xl p-10"
-          style={{ backgroundColor: 'var(--brand-primary)' }}
-        >
-          {children}
-        </div>
-      </main>
-    </div>
-  );
-}
-
-function ActionTitle({ children }: Readonly<{ children: ReactNode }>) {
-  return <h1 className="text-2xl font-bold text-white">{children}</h1>;
-}
-
-function ActionLink({
-  href,
-  children,
-  secondary = false,
-}: Readonly<{ href: string; children: ReactNode; secondary?: boolean }>) {
-  return (
-    <Link
-      href={href}
-      className={
-        secondary
-          ? 'inline-flex w-full items-center justify-center rounded-xl border border-white/30 bg-transparent px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2'
-          : 'inline-flex w-full items-center justify-center rounded-xl bg-white px-6 py-3 text-sm font-semibold transition-all duration-200 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2'
-      }
-      style={secondary ? undefined : { color: 'var(--brand-primary)' }}
-    >
-      {children}
-    </Link>
-  );
-}
-
-function StatusSpinner() {
-  return (
-    <div className="rounded-full bg-slate-100 p-3">
-      <div className="h-14 w-14 animate-spin rounded-full border-4 border-slate-200 border-t-red-600" />
-    </div>
-  );
-}
-
-function SuccessIcon() {
-  return (
-    <div className="rounded-full border border-white/20 bg-white/10 p-4 text-white shadow-lg shadow-red-950/20">
-      <svg className="h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m6 2.25A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z" />
-      </svg>
-    </div>
-  );
-}
-
-function ErrorIcon() {
-  return (
-    <div className="rounded-full bg-red-100 p-3 text-red-600">
-      <svg className="h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
-        <path strokeLinecap="round" strokeLinejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-      </svg>
-    </div>
-  );
-}
-
-function validatePasswordForm(password: string, passwordConfirm: string): TokenFormErrors {
-  const nextErrors: TokenFormErrors = {
-    password: '',
-    passwordConfirm: '',
-  };
-
-  if (!password) {
-    nextErrors.password = 'Password is required.';
-  }
-
-  if (!passwordConfirm) {
-    nextErrors.passwordConfirm = 'Password confirmation is required.';
-  } else if (password !== passwordConfirm) {
-    nextErrors.passwordConfirm = 'Passwords do not match.';
-  }
-
-  return nextErrors;
-}
-
-function hasFormErrors(errors: TokenFormErrors): boolean {
-  return Boolean(errors.password || errors.passwordConfirm);
-}
-
-function readMessageFromResponse(data: unknown, fallback: string): string {
-  return isRecord(data) && typeof data.message === 'string'
-    ? data.message
-    : fallback;
-}
-
-function readFieldErrors(data: unknown): TokenFormErrors | null {
-  const errorMap = isRecord(data) ? data.errors : null;
-  if (!isRecord(errorMap)) {
-    return null;
-  }
-
-  const nextErrors = {
-    password: readFirstError(errorMap, 'password'),
-    passwordConfirm: readFirstError(errorMap, 'password_confirm'),
-  };
-
-  return hasFormErrors(nextErrors) ? nextErrors : null;
-}
-
-async function submitTokenPasswordAction(
-  endpointPath: string,
-  token: string | null,
-  password: string,
-  passwordConfirm: string
-): Promise<Response> {
-  return fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}${endpointPath}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      token,
-      password,
-      password_confirm: passwordConfirm,
-    }),
-  });
-}
-
 function TokenPasswordActionContent({
   config,
 }: Readonly<{ config: TokenPasswordActionConfig }>) {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
 
-  const [status, setStatus] = useState<ActionStatus>('form');
-  const [message, setMessage] = useState('');
-  const [password, setPassword] = useState('');
-  const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [errors, setErrors] = useState<TokenFormErrors>({
-    password: '',
-    passwordConfirm: '',
+  const {
+    status,
+    message,
+    password,
+    passwordConfirm,
+    errors,
+    setPassword,
+    setPasswordConfirm,
+    handleSubmit,
+  } = useTokenPasswordAction({
+    token,
+    endpointPath: config.endpointPath,
+    validateEndpointPath: config.validateEndpointPath,
+    suspenseMessage: config.suspenseMessage,
+    missingTokenMessage: config.missingTokenMessage,
+    invalidTokenMessage: config.invalidTokenMessage,
+    unknownErrorMessage: config.unknownErrorMessage,
+    loadingMessage: config.loadingMessage,
+    successFallbackMessage: config.successFallbackMessage,
   });
 
-  useEffect(() => {
-    if (!token) {
-      setStatus('error');
-      setMessage(config.missingTokenMessage);
-    }
-  }, [config.missingTokenMessage, token]);
-
-  const handleSubmit = async (event: FormSubmitEvent) => {
-    event.preventDefault();
-
-    const nextErrors = validatePasswordForm(password, passwordConfirm);
-    setErrors(nextErrors);
-    if (hasFormErrors(nextErrors)) {
-      return;
-    }
-
-    setStatus('loading');
-    setMessage(config.loadingMessage);
-
-    try {
-      const response = await submitTokenPasswordAction(
-        config.endpointPath,
-        token,
-        password,
-        passwordConfirm
-      );
-      const data = await response.json().catch(() => null);
-      const fieldErrors = response.status === 400 ? readFieldErrors(data) : null;
-
-      if (fieldErrors) {
-        setErrors(fieldErrors);
-        setStatus('form');
-        return;
-      }
-
-      if (!response.ok) {
-        throw new Error(readMessageFromResponse(data, config.invalidTokenMessage));
-      }
-
-      setStatus('success');
-      setMessage(readMessageFromResponse(data, config.successFallbackMessage));
-    } catch (error: unknown) {
-      setStatus('error');
-      setMessage(
-        error instanceof Error ? error.message : config.unknownErrorMessage
-      );
-    }
-  };
-
   return (
-    <ActionShell>
+    <AuthActionLayout Navbar={<Navbar links={LANDING_NAV_LINKS} />}>
       {status === 'form' && (
         <form className="space-y-6" onSubmit={handleSubmit} noValidate>
           <div className="space-y-2 text-center">
-            <ActionTitle>{config.formTitle}</ActionTitle>
+            <AuthActionTitle>{config.formTitle}</AuthActionTitle>
             <p className="text-sm leading-relaxed text-white/75">
               {config.formDescription}
             </p>
@@ -269,11 +89,11 @@ function TokenPasswordActionContent({
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500 ${
-                  errors.password ? 'border-red-300' : 'border-slate-300'
+                  errors.password ? 'border-rose-400 bg-rose-50/70' : 'border-slate-300'
                 }`}
                 style={{ backgroundColor: '#ffffff' }}
               />
-              {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
+              {errors.password && <AuthActionFormError>{errors.password}</AuthActionFormError>}
             </div>
 
             <div>
@@ -287,12 +107,12 @@ function TokenPasswordActionContent({
                 value={passwordConfirm}
                 onChange={(event) => setPasswordConfirm(event.target.value)}
                 className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500 ${
-                  errors.passwordConfirm ? 'border-red-300' : 'border-slate-300'
+                  errors.passwordConfirm ? 'border-rose-400 bg-rose-50/70' : 'border-slate-300'
                 }`}
                 style={{ backgroundColor: '#ffffff' }}
               />
               {errors.passwordConfirm && (
-                <p className="mt-1 text-sm text-red-600">{errors.passwordConfirm}</p>
+                <AuthActionFormError>{errors.passwordConfirm}</AuthActionFormError>
               )}
             </div>
           </div>
@@ -309,9 +129,9 @@ function TokenPasswordActionContent({
 
       {status === 'loading' && (
         <div className="flex flex-col items-center gap-6 text-center">
-          <StatusSpinner />
+          <AuthStatusSpinner />
           <div className="space-y-2">
-            <ActionTitle>{config.loadingTitle}</ActionTitle>
+            <AuthActionTitle>{config.loadingTitle}</AuthActionTitle>
             <p className="text-sm leading-relaxed text-white/75">{message}</p>
           </div>
         </div>
@@ -319,39 +139,39 @@ function TokenPasswordActionContent({
 
       {status === 'success' && (
         <div className="flex flex-col items-center gap-6 text-center">
-          <SuccessIcon />
+          <AuthSuccessIcon />
           <div className="space-y-3">
-            <ActionTitle>{config.successTitle}</ActionTitle>
+            <AuthActionTitle>{config.successTitle}</AuthActionTitle>
             <p className="mx-auto max-w-sm text-sm leading-relaxed text-white/80">
               {message}
             </p>
           </div>
-          <ActionLink href={config.successPrimaryHref}>
+          <AuthActionLink href={config.successPrimaryHref}>
             {config.successPrimaryLabel}
-          </ActionLink>
+          </AuthActionLink>
         </div>
       )}
 
       {status === 'error' && (
         <div className="flex flex-col items-center gap-6 text-center">
-          <ErrorIcon />
+          <AuthErrorIcon />
           <div className="space-y-2">
-            <ActionTitle>{config.errorTitle}</ActionTitle>
+            <AuthActionTitle>{config.errorTitle}</AuthActionTitle>
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-700">
               {message}
             </div>
           </div>
           <div className="flex w-full flex-col gap-3 sm:flex-row">
-            <ActionLink href={config.errorPrimaryHref}>
+            <AuthActionLink href={config.errorPrimaryHref}>
               {config.errorPrimaryLabel}
-            </ActionLink>
-            <ActionLink href={config.errorSecondaryHref} secondary>
+            </AuthActionLink>
+            <AuthActionLink href={config.errorSecondaryHref} secondary>
               {config.errorSecondaryLabel}
-            </ActionLink>
+            </AuthActionLink>
           </div>
         </div>
       )}
-    </ActionShell>
+    </AuthActionLayout>
   );
 }
 
@@ -359,17 +179,17 @@ function TokenPasswordActionLoadingFallback({
   config,
 }: Readonly<{ config: TokenPasswordActionConfig }>) {
   return (
-    <ActionShell>
+    <AuthActionLayout Navbar={<Navbar links={LANDING_NAV_LINKS} />}>
       <div className="flex flex-col items-center gap-6 text-center">
-        <StatusSpinner />
+        <AuthStatusSpinner />
         <div className="space-y-2">
-          <ActionTitle>{config.suspenseTitle}</ActionTitle>
+          <AuthActionTitle>{config.suspenseTitle}</AuthActionTitle>
           <p className="text-sm leading-relaxed text-white/75">
             {config.suspenseMessage}
           </p>
         </div>
       </div>
-    </ActionShell>
+    </AuthActionLayout>
   );
 }
 

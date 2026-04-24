@@ -21,7 +21,10 @@ class JWTAuthentication(authentication.BaseAuthentication):
 
         token = parts[1]
         payload = self._decode_token(token)
+        user, validated_payload = self.authenticate_credentials(payload)
+        return (user, validated_payload)
 
+    def authenticate_credentials(self, payload):
         token_type = payload.get("type")
         if token_type != "access":
             raise exceptions.AuthenticationFailed("Invalid token type.")
@@ -31,11 +34,14 @@ class JWTAuthentication(authentication.BaseAuthentication):
             raise exceptions.AuthenticationFailed("Invalid token payload.")
 
         try:
-            user = User.objects.get(id=user_id)
+            user = User.objects.select_related("monitoring_account").get(id=user_id)
         except User.DoesNotExist as exc:
             raise exceptions.AuthenticationFailed("User not found.") from exc
 
-        return (user, payload)
+        if payload.get("session_version") != user.session_version:
+            raise exceptions.AuthenticationFailed("Session has expired.")
+
+        return user, payload
 
     def _decode_token(self, token):
         secret_key = getattr(settings, "JWT_SECRET_KEY", "")

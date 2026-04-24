@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from django.db import IntegrityError
 from rest_framework import status
 from rest_framework.test import APISimpleTestCase, APIRequestFactory
 
-from authentication.register.adapters import DefaultRegistrationStrategyFactory
+from authentication.register.adapters import (
+    DefaultRegistrationStrategyFactory,
+    DjangoRegistrationWriterRepository,
+)
 from authentication.register.entities import RegisterCommand, RegistrationResult, RegistrationUser
-from authentication.register.exceptions import RegistrationConflictError, RegistrationServiceError
+from authentication.register.exceptions import (
+    RegistrationConflictError,
+    RegistrationServiceError,
+    UnverifiedRegistrationError,
+)
 from authentication.register.http import RegisterView
 from authentication.register.strategies import (
     ExistingUnverifiedUserRegistrationStrategy,
@@ -48,10 +55,12 @@ class DefaultRegisterUserUseCaseTest(APISimpleTestCase):
         lookup = MagicMock()
         lookup.find_by_email.return_value = None
         strategy = SpyRegistrationStrategy()
+        writer = MagicMock()
         strategy_factory = MagicMock()
         strategy_factory.create.return_value = strategy
         use_case = DefaultRegisterUserUseCase(
             lookup_port=lookup,
+            registration_writer=writer,
             strategy_factory=strategy_factory,
         )
 
@@ -64,31 +73,79 @@ class DefaultRegisterUserUseCaseTest(APISimpleTestCase):
         self.assertEqual(strategy.received_command, RegisterCommand(name="John", email="john@example.com"))
         self.assertIsNone(strategy.received_user)
 
-    def test_raises_registration_conflict_error_when_existing_user_is_found(self) -> None:
+    def test_raises_unverified_registration_error_and_executes_unverified_strategy_for_unverified_user(self) -> None:
         existing_user = RegistrationUser(email="john@example.com", status="unverified")
         lookup = MagicMock()
         lookup.find_by_email.return_value = existing_user
+        strategy = MagicMock()
+        writer = MagicMock()
         strategy_factory = MagicMock()
+        strategy_factory.create.return_value = strategy
         use_case = DefaultRegisterUserUseCase(
             lookup_port=lookup,
+            registration_writer=writer,
             strategy_factory=strategy_factory,
         )
 
-        with self.assertRaises(RegistrationConflictError):
-            use_case.execute(RegisterCommand(name="John", email="john@example.com"))
+        with patch("authentication.register.use_cases.transaction.atomic") as mock_atomic:
+            mock_atomic.return_value.__enter__.return_value = None
+            mock_atomic.return_value.__exit__.return_value = None
+
+            with self.assertRaises(UnverifiedRegistrationError):
+                use_case.execute(RegisterCommand(name="John", email="john@example.com"))
 
         lookup.find_by_email.assert_called_once_with("john@example.com")
-        strategy_factory.create.assert_not_called()
+        strategy_factory.create.assert_called_once_with(existing_user)
+        strategy.execute.assert_called_once_with(
+            RegisterCommand(name="John", email="john@example.com"),
+            existing_user,
+        )
+        writer.update_unverified_user_password.assert_not_called()
+
+    def test_updates_password_before_resending_for_unverified_user_when_password_is_provided(self) -> None:
+        existing_user = RegistrationUser(email="john@example.com", status="unverified")
+        lookup = MagicMock()
+        lookup.find_by_email.return_value = existing_user
+        writer = MagicMock()
+        strategy = MagicMock()
+        strategy_factory = MagicMock()
+        strategy_factory.create.return_value = strategy
+        use_case = DefaultRegisterUserUseCase(
+            lookup_port=lookup,
+            registration_writer=writer,
+            strategy_factory=strategy_factory,
+        )
+
+        with patch("authentication.register.use_cases.transaction.atomic") as mock_atomic:
+            mock_atomic.return_value.__enter__.return_value = None
+            mock_atomic.return_value.__exit__.return_value = None
+
+            with self.assertRaises(UnverifiedRegistrationError):
+                use_case.execute(
+                    RegisterCommand(name="John", email="john@example.com"),
+                    password="Strong#123",
+                )
+
+        writer.update_unverified_user_password.assert_called_once_with(
+            email="john@example.com",
+            password="Strong#123",
+        )
+        strategy.execute.assert_called_once_with(
+            RegisterCommand(name="John", email="john@example.com"),
+            existing_user,
+        )
 
     def test_raises_registration_conflict_error_when_duplicate_race_raises_integrity_error(self) -> None:
         lookup = MagicMock()
         lookup.find_by_email.return_value = None
         strategy = MagicMock()
         strategy.execute.side_effect = IntegrityError("duplicate")
+        writer = MagicMock()
         strategy_factory = MagicMock()
         strategy_factory.create.return_value = strategy
         use_case = DefaultRegisterUserUseCase(
             lookup_port=lookup,
+            registration_writer=writer,
             strategy_factory=strategy_factory,
         )
 
@@ -98,9 +155,11 @@ class DefaultRegisterUserUseCaseTest(APISimpleTestCase):
     def test_wraps_unexpected_errors_in_application_specific_exception(self) -> None:
         lookup = MagicMock()
         lookup.find_by_email.side_effect = RuntimeError("db down")
+        writer = MagicMock()
         strategy_factory = MagicMock()
         use_case = DefaultRegisterUserUseCase(
             lookup_port=lookup,
+            registration_writer=writer,
             strategy_factory=strategy_factory,
         )
 
@@ -224,7 +283,34 @@ class RegisterViewDependencyInjectionTest(APISimpleTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         use_case.execute.assert_called_once_with(
-            RegisterCommand(name="John", email="john@example.com")
+            RegisterCommand(name="John", email="john@example.com"),
+            password=None,
+        )
+
+    def test_view_passes_valid_password_from_serializer(self) -> None:
+        use_case = MagicMock()
+        use_case.execute.return_value = RegistrationResult(message=REGISTER_SUCCESS_MESSAGE)
+
+        class TestableRegisterView(RegisterView):
+            def get_register_use_case(self):  # type: ignore[override]
+                return use_case
+
+        request = self.factory.post(
+            "/auth/register/",
+            {
+                "name": "John",
+                "email": "john@example.com",
+                "password": "Strong#123",
+            },
+            format="json",
+        )
+
+        response = TestableRegisterView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        use_case.execute.assert_called_once_with(
+            RegisterCommand(name="John", email="john@example.com"),
+            password="Strong#123",
         )
 
     def test_view_returns_500_when_use_case_raises_application_error(self) -> None:
@@ -282,3 +368,59 @@ class RegisterViewDependencyInjectionTest(APISimpleTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         use_case.execute.assert_not_called()
+
+    def test_view_short_circuits_when_password_type_is_invalid(self) -> None:
+        use_case = MagicMock()
+
+        class TestableRegisterView(RegisterView):
+            def get_register_use_case(self):  # type: ignore[override]
+                return use_case
+
+        request = self.factory.post(
+            "/auth/register/",
+            {"name": "John", "email": "john@example.com", "password": {"bad": "type"}},
+            format="json",
+        )
+
+        response = TestableRegisterView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["errors"]["password"][0], "Not a valid string.")
+        use_case.execute.assert_not_called()
+
+
+class DjangoRegistrationWriterRepositoryTest(APISimpleTestCase):
+    @patch("authentication.register.adapters.User")
+    def test_update_unverified_user_password_is_noop_when_user_missing(self, mock_user_model):
+        mock_user_model.objects.filter.return_value.select_for_update.return_value.first.return_value = None
+
+        repository = DjangoRegistrationWriterRepository()
+        repository.update_unverified_user_password(
+            email="missing@example.com",
+            password="Strong#123",
+        )
+
+        mock_user_model.objects.filter.assert_called_once_with(
+            email="missing@example.com",
+            status="unverified",
+        )
+        mock_user_model.objects.filter.return_value.select_for_update.assert_called_once_with()
+
+    @patch("authentication.register.adapters.User")
+    def test_update_unverified_user_password_only_targets_unverified_users(self, mock_user_model):
+        mock_user = MagicMock()
+        mock_user_model.objects.filter.return_value.select_for_update.return_value.first.return_value = mock_user
+
+        repository = DjangoRegistrationWriterRepository()
+        repository.update_unverified_user_password(
+            email="pending@example.com",
+            password="Strong#123",
+        )
+
+        mock_user_model.objects.filter.assert_called_once_with(
+            email="pending@example.com",
+            status="unverified",
+        )
+        mock_user_model.objects.filter.return_value.select_for_update.assert_called_once_with()
+        mock_user.set_password.assert_called_once_with("Strong#123")
+        mock_user.save.assert_called_once_with(update_fields=["password"])

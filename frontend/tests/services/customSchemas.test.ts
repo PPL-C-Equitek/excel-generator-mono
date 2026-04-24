@@ -284,4 +284,19 @@ describe('customSchemaService', () => {
             'Request failed. Please try again.'
         )
     })
+
+    it('falls back to the default error when nested values contain no readable strings', async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 500,
+            json: async () => ({ errors: [123], detail: null }),
+        })
+        vi.stubGlobal('fetch', mockedFetch)
+
+        const { customSchemaService } = await importFreshService()
+
+        await expect(customSchemaService.list('access-token')).rejects.toThrow(
+            'Request failed. Please try again.'
+        )
+    })
 })

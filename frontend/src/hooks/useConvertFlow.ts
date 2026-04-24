@@ -14,6 +14,7 @@ import { isJsonObject } from '@/utils/schemaValidator'
 import { sanitizeCSVCell } from '@/utils/csvSanitizer'
 import type { ILLMService } from '@/lib/ILLMService'
 import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
+import { FILE_TOO_LARGE_MESSAGE, MAX_UPLOAD_SIZE_BYTES } from '@/constants/upload'
 
 const defaultService: ILLMService = {
     generate: generateJson,
@@ -181,6 +182,13 @@ export function useConvertFlow(
         const signal = abortPreviousRequest()
 
         resetConversionState()
+
+        if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+            setError(FILE_TOO_LARGE_MESSAGE)
+            setIsConverting(false)
+            return
+        }
+
         setIsConverting(true)
 
         const uploadResult = await processUpload(file, signal)
@@ -244,26 +252,45 @@ export function useConvertFlow(
             return
         }
 
+        const requestId = conversionRequestIdRef.current
+        const excelOutput = generatedOutput
+        const excelFilename = getExcelDownloadFilename(outputFile.filename)
+
         setExcelError(null)
         setExcelSuccessMessage(null)
         setIsExcelDownloading(true)
 
         try {
             const excelResult = await llmService.exportToExcel(
-                generatedOutput,
+                excelOutput,
                 getActiveSignal()
             )
+
+            if (requestId !== conversionRequestIdRef.current) {
+                return
+            }
+
             await llmService.downloadExcelFile(
                 excelResult.file_id,
-                getExcelDownloadFilename(outputFile.filename)
+                excelFilename
             )
+
+            if (requestId !== conversionRequestIdRef.current) {
+                return
+            }
+
             setExcelError(null)
             setExcelSuccessMessage('Successfully downloaded')
         } catch (err: unknown) {
+            if (requestId !== conversionRequestIdRef.current) {
+                return
+            }
             setExcelSuccessMessage(null)
             setExcelError(err instanceof Error ? err.message : 'Failed to export')
         } finally {
-            setIsExcelDownloading(false)
+            if (requestId === conversionRequestIdRef.current) {
+                setIsExcelDownloading(false)
+            }
         }
     }
 

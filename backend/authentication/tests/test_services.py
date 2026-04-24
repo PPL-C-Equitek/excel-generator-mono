@@ -1,11 +1,12 @@
 import sys
 import jwt
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 from django.utils import timezone
 
-from django.core.signing import TimestampSigner
-from django.test import SimpleTestCase, override_settings
+from django.core.signing import BadSignature, TimestampSigner
+from django.test import SimpleTestCase, TestCase, override_settings
 from authentication.models import User
 from authentication.services import (
     DjangoUserLookupGateway,
@@ -14,6 +15,8 @@ from authentication.services import (
     RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
     RefreshTokenService,
     _get_resend_from_email,
+    _require_resend_from_email,
+    decode_verification_token,
     generate_tokens,
     generate_verification_token,
     send_password_changed_email,
@@ -22,19 +25,41 @@ from authentication.services import (
 
 class GenerateVerificationTokenTest(SimpleTestCase):
     def test_generates_signed_token_containing_email(self):
-        token = generate_verification_token("test@example.com")
+        token = generate_verification_token(
+            "test@example.com",
+            "nonce-123",
+        )
 
-        signer = TimestampSigner()
-        email = signer.unsign(token, max_age=60)
+        email, nonce = decode_verification_token(token, max_age=60)
         self.assertEqual(email, "test@example.com")
+        self.assertEqual(nonce, "nonce-123")
 
     def test_different_emails_produce_different_tokens(self):
-        token_a = generate_verification_token("a@example.com")
-        token_b = generate_verification_token("b@example.com")
+        token_a = generate_verification_token("a@example.com", "nonce-a")
+        token_b = generate_verification_token("b@example.com", "nonce-b")
         self.assertNotEqual(token_a, token_b)
 
+    def test_decode_rejects_token_with_invalid_purpose(self):
+        token = TimestampSigner().sign("password-reset:user@example.com:nonce-123")
 
-class SendVerificationEmailTest(SimpleTestCase):
+        with self.assertRaises(BadSignature):
+            decode_verification_token(token, max_age=60)
+
+    def test_decode_rejects_token_with_invalid_payload(self):
+        token = TimestampSigner().sign("email-verify:user@example.com")
+
+        with self.assertRaises(BadSignature):
+            decode_verification_token(token, max_age=60)
+
+
+class SendVerificationEmailTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="user@example.com",
+            password="Password123!",
+            name="Test User",
+        )
+
     @override_settings(RESEND_API_KEY="", FRONTEND_URL="http://localhost:3000")
     def test_logs_verification_link_when_no_api_key(self):
         with self.assertLogs("authentication.services", level="INFO") as log:
@@ -63,14 +88,18 @@ class SendVerificationEmailTest(SimpleTestCase):
         self.assertEqual(call_kwargs["subject"], "Verify Your Email")
         self.assertIn("verify-email?token=", call_kwargs["html"])
 
-    @override_settings(RESEND_API_KEY="re_test_key", FRONTEND_URL="https://app.example.com")
+    @override_settings(
+        RESEND_API_KEY="re_test_key",
+        FRONTEND_URL="https://app.example.com",
+        RESEND_FROM_EMAIL="test@example.com",
+    )
     def test_logs_and_reraises_exception_when_resend_fails(self):
-        with self.assertLogs("authentication.services", level="ERROR") as log:
-            with self.assertRaisesRegex(
-                ValueError,
-                RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
-            ):
-                send_verification_email("user@example.com")
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = RuntimeError("send failed")
+        with patch.dict(sys.modules, {"resend": mock_resend}):
+            with self.assertLogs("authentication.services", level="ERROR") as log:
+                with self.assertRaisesRegex(RuntimeError, "send failed"):
+                    send_verification_email("user@example.com")
 
         self.assertTrue(any("Failed to send" in msg for msg in log.output))
 
@@ -82,11 +111,32 @@ class SendVerificationEmailTest(SimpleTestCase):
         log_text = "\n".join(log.output)
         self.assertIn("https://myapp.com/auth/verify-email?token=", log_text)
 
+    @override_settings(RESEND_API_KEY="", FRONTEND_URL="http://localhost:3000")
+    def test_rotates_email_verification_nonce_before_logging_link(self):
+        previous_nonce = self.user.email_verification_nonce
+
+        send_verification_email("user@example.com")
+
+        self.user.refresh_from_db()
+        self.assertNotEqual(self.user.email_verification_nonce, previous_nonce)
+
 
 class ResendFromEmailHelperTest(SimpleTestCase):
     @override_settings(RESEND_FROM_EMAIL=123)
     def test_returns_empty_string_when_setting_is_not_a_string(self):
         self.assertEqual(_get_resend_from_email(), "")
+
+    @override_settings(RESEND_FROM_EMAIL="  noreply@app.example.com  ")
+    def test_require_returns_trimmed_resend_from_email(self):
+        self.assertEqual(_require_resend_from_email(), "noreply@app.example.com")
+
+    @override_settings(RESEND_FROM_EMAIL="")
+    def test_require_raises_when_resend_from_email_missing(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
+        ):
+            _require_resend_from_email()
 
 class GenerateTokensTest(SimpleTestCase):
     SECRET_KEY = "test-secret-key"
@@ -208,6 +258,26 @@ class RefreshTokenServiceTest(SimpleTestCase):
             with self.assertRaises(InvalidRefreshTokenError, msg="Invalid token payload."):
                 RefreshTokenService().refresh(token)
 
+    @patch("authentication.services.User")
+    def test_raises_when_refresh_token_session_version_does_not_match_user(self, mock_user_model):
+        token = self._make_refresh_token(
+            {
+                "user_id": str(uuid.uuid4()),
+                "email": "user@example.com",
+                "session_version": 1,
+            }
+        )
+        mock_user_model.objects.filter.return_value.first.return_value = SimpleNamespace(
+            session_version=2
+        )
+
+        with self.settings(JWT_SECRET_KEY=self.SECRET_KEY):
+            with self.assertRaises(
+                InvalidRefreshTokenError,
+                msg="Refresh token session is no longer valid.",
+            ):
+                RefreshTokenService().refresh(token)
+
 
 class SendPasswordChangedEmailTest(SimpleTestCase):
     @override_settings(RESEND_API_KEY="")
@@ -235,13 +305,16 @@ class SendPasswordChangedEmailTest(SimpleTestCase):
         self.assertEqual(call_kwargs["to"], "user@example.com")
         self.assertEqual(call_kwargs["subject"], "Your Password Was Changed")
 
-    @override_settings(RESEND_API_KEY="re_test_key")
+    @override_settings(
+        RESEND_API_KEY="re_test_key",
+        RESEND_FROM_EMAIL="test@example.com",
+    )
     def test_logs_and_reraises_when_password_changed_email_send_fails(self):
-        with self.assertLogs("authentication.services", level="ERROR") as log:
-            with self.assertRaisesRegex(
-                ValueError,
-                RESEND_FROM_EMAIL_NOT_CONFIGURED_MESSAGE,
-            ):
-                send_password_changed_email("user@example.com")
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = RuntimeError("send failed")
+        with patch.dict(sys.modules, {"resend": mock_resend}):
+            with self.assertLogs("authentication.services", level="ERROR") as log:
+                with self.assertRaisesRegex(RuntimeError, "send failed"):
+                    send_password_changed_email("user@example.com")
 
         self.assertTrue(any("Failed to send password changed email" in msg for msg in log.output))

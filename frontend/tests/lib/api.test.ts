@@ -9,8 +9,18 @@ import {
     requestPasswordReset,
     resendPasswordReset,
 } from "@/lib/api";
+import { FILE_TOO_LARGE_MESSAGE } from "@/constants/upload";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+function parseMockRequestBody(mockFetch: ReturnType<typeof vi.fn>, callIndex = 0) {
+    const requestInit = mockFetch.mock.calls[callIndex]?.[1] as RequestInit | undefined
+    if (!requestInit || typeof requestInit.body !== "string") {
+        throw new Error("Expected a JSON request body")
+    }
+
+    return JSON.parse(requestInit.body)
+}
 
 describe("fetchAPI", () => {
     afterEach(() => {
@@ -65,6 +75,88 @@ describe("fetchAPI", () => {
         const calledUrl = mockedFetch.mock.calls[0][0] as string;
         expect(calledUrl).toBe("http://localhost:9999/health/");
         expect(result).toEqual({ status: "trimmed" });
+    });
+
+    it("clears auth tokens and redirects to /login when a protected request returns 401", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        window.localStorage.setItem("access_token", "access-token");
+        window.localStorage.setItem("refresh_token", "refresh-token");
+
+        const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
+        const assignSpy = vi.fn();
+        Object.defineProperty(window, "location", {
+            configurable: true,
+            value: {
+                ...window.location,
+                assign: assignSpy,
+            },
+        });
+
+        await expect(
+            fetchAPI("history/", {
+                headers: {
+                    Authorization: "Bearer access-token",
+                },
+            })
+        ).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(removeItemSpy).toHaveBeenCalledWith("access_token");
+        expect(removeItemSpy).toHaveBeenCalledWith("refresh_token");
+        expect(assignSpy).toHaveBeenCalledWith("/login");
+    });
+
+    it("still throws the 401 error gracefully when window is unavailable", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+        vi.stubGlobal("window", undefined);
+
+        await expect(fetchAPI("history/")).rejects.toMatchObject({
+            status: 401,
+            message: "Unauthorized",
+        });
+    });
+
+    it("clears auth tokens without redirecting again when already on /login", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        window.localStorage.setItem("access_token", "access-token");
+        window.localStorage.setItem("refresh_token", "refresh-token");
+
+        const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
+        const assignSpy = vi.fn();
+        Object.defineProperty(window, "location", {
+            configurable: true,
+            value: {
+                ...window.location,
+                pathname: "/login",
+                assign: assignSpy,
+            },
+        });
+
+        await expect(fetchAPI("history/")).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(removeItemSpy).toHaveBeenCalledWith("access_token");
+        expect(removeItemSpy).toHaveBeenCalledWith("refresh_token");
+        expect(assignSpy).not.toHaveBeenCalled();
     });
 });
 
@@ -127,7 +219,7 @@ describe("uploadFile", () => {
 
         const file = new File(["file-content"], "big.pdf", { type: "application/pdf" });
 
-        await expect(uploadFile(file)).rejects.toThrow("File size too big.");
+        await expect(uploadFile(file)).rejects.toThrow(FILE_TOO_LARGE_MESSAGE);
     });
 
     it("maps max PDF page count error to user-friendly FE message", async () => {
@@ -197,6 +289,23 @@ describe("uploadFile", () => {
         );
     });
 
+    it("maps password-protected Word error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Word file is password-protected." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "protected.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow(
+            "Word file is password-protected. Please remove the password and try again."
+        );
+    });
+
     it("maps corrupted PDF error to dedicated FE message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
@@ -208,6 +317,38 @@ describe("uploadFile", () => {
         const file = new File(["file-content"], "corrupt.pdf", { type: "application/pdf" });
 
         await expect(uploadFile(file)).rejects.toThrow("PDF file is corrupted or invalid.");
+    });
+
+    it("maps corrupted Word error to dedicated FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Word file is corrupt or has an invalid structure." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "corrupt.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Word file is corrupt or has an invalid structure.");
+    });
+
+    it("maps max Word page count error to user-friendly FE message", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({
+                message: "Word exceeds the maximum allowed page count of 100.",
+            }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "long.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Word has too many pages (maximum 100).");
     });
 
     it("maps generic corrupted Excel error to dedicated FE message", async () => {
@@ -298,9 +439,9 @@ describe("uploadFile", () => {
         await expect(uploadFile(file)).rejects.toThrow("Upload failed");
     });
 
-    it("falls back to localhost:8000 when NEXT_PUBLIC_API_URL is not a valid URL", async () => {
+    it("preserves the configured API path when uploading files", async () => {
         vi.resetModules();
-        vi.stubEnv("NEXT_PUBLIC_API_URL", "not-a-valid-url");
+        vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:9999/api/v1/");
 
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: true,
@@ -314,7 +455,7 @@ describe("uploadFile", () => {
         await freshUploadFile(file);
 
         const calledUrl = mockedFetch.mock.calls[0][0] as string;
-        expect(calledUrl).toBe("http://localhost:8000/upload/");
+        expect(calledUrl).toBe("http://localhost:9999/api/v1/upload/");
     });
 });
 
@@ -356,7 +497,7 @@ describe('login', () => {
 
             await login('user1@gmail.com', 'user1123')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body).toEqual({ email: 'user1@gmail.com', password: 'user1123' })
         })
 
@@ -413,7 +554,7 @@ describe('login', () => {
 
             await login('  USER1@GMAIL.COM  ', 'user1123')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body.email).toBe('  USER1@GMAIL.COM  ')
         })
 
@@ -479,7 +620,7 @@ describe('loginWithGoogle', () => {
 
             await loginWithGoogle('mock-google-token')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body).toEqual({ token: 'mock-google-token' })
         })
 

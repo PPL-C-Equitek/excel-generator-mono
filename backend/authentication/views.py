@@ -1,8 +1,8 @@
 import logging
+import uuid
 from datetime import timedelta
-from django.core.cache import cache
 
-from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
+from django.core.signing import SignatureExpired, BadSignature
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
@@ -21,23 +21,20 @@ from authentication.logout.adapters import (
 from authentication.logout.http import LogoutView as CleanLogoutView
 from authentication.models import User
 from authentication.serializers import (
-    LoginSerializer,
     RefreshTokenSerializer,
+    TokenValidationSerializer,
     VerifyEmailSerializer,
 )
 from authentication.services import (
+    decode_verification_token,
     send_verification_email,
     generate_tokens,
-    LoginFailureTracker as BaseLoginFailureTracker,
-    LoginService,
     RefreshTokenService,
-    LoginRateLimitedError,
-    InvalidCredentialsError,
-    EmailNotVerifiedError,
     BlacklistedRefreshTokenError,
     RefreshTokenExpiredError,
     InvalidRefreshTokenError,
 )
+from monitoring.interfaces.http.decorators import track_auth_metric
 
 logger = logging.getLogger(__name__)
 SERVER_ERROR_MESSAGE = "An internal server error occurred. Please try again later."
@@ -63,20 +60,13 @@ class ResendVerificationThrottle(SimpleRateThrottle):
 
 
 class VerifyEmailView(APIView):
-    def post(self, request):
-        serializer = VerifyEmailSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                {"errors": serializer.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        token = serializer.validated_data["token"]
-        password = serializer.validated_data["password"]
-
-        signer = TimestampSigner()
+    @staticmethod
+    def validate_token(token: str) -> User | Response:
         try:
-            email = signer.unsign(token, max_age=timedelta(hours=24))
+            email, token_nonce = decode_verification_token(
+                token,
+                max_age=timedelta(hours=24),
+            )
         except SignatureExpired:
             return Response(
                 {"message": "Token expired. Please request a new verification email."},
@@ -96,9 +86,40 @@ class VerifyEmailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        if user.status == "verified":
+            return Response(
+                {"message": "Email is already verified"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if str(user.email_verification_nonce) != token_nonce:
+            return Response(
+                {"message": "Invalid token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return user
+
+    @track_auth_metric("auth.verify_email")
+    def post(self, request):
+        serializer = VerifyEmailSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        token = serializer.validated_data["token"]
+        password = serializer.validated_data["password"]
+
+        user = self.validate_token(token)
+        if isinstance(user, Response):
+            return user
+
         user.set_password(password)
         user.status = "verified"
-        user.save(update_fields=["password", "status"])
+        user.email_verification_nonce = uuid.uuid4()
+        user.save(update_fields=["password", "status", "email_verification_nonce"])
 
         return Response(
             {"message": "Email verified successfully"},
@@ -106,9 +127,30 @@ class VerifyEmailView(APIView):
         )
 
 
+class ValidateVerificationTokenView(APIView):
+    @track_auth_metric("auth.verify_email_validate")
+    def post(self, request):
+        serializer = TokenValidationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = VerifyEmailView.validate_token(serializer.validated_data["token"])
+        if isinstance(user, Response):
+            return user
+
+        return Response(
+            {"message": "Verification token is valid"},
+            status=status.HTTP_200_OK,
+        )
+
+
 class ResendVerificationView(APIView):
     throttle_classes = [ResendVerificationThrottle]
 
+    @track_auth_metric("auth.resend_verification")
     def post(self, request):
         email = request.data.get("email")
         if not email:
@@ -139,75 +181,10 @@ class ResendVerificationView(APIView):
         )
 
 
-class LoginFailureTracker(BaseLoginFailureTracker):
-    @classmethod
-    def get_cache_backend(cls):
-        return cache
-
-
-class DjangoUserLookupGateway:
-    def get_by_email(self, email: str) -> User:
-        return User.objects.get(email=email)
-
-class LoginView(APIView):
-    """Login endpoint with JWT token generation and rate limiting"""
-
-    def post(self, request):
-        serializer = LoginSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                {"errors": serializer.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        email = serializer.validated_data["email"]
-        password = serializer.validated_data["password"]
-
-        login_service = LoginService(
-            user_gateway=DjangoUserLookupGateway(),
-            failure_tracker=LoginFailureTracker,
-            token_generator=generate_tokens,
-        )
-
-        try:
-            result = login_service.authenticate(email=email, password=password)
-            return Response(
-                {
-                    "access_token": result.tokens.access_token,
-                    "refresh_token": result.tokens.refresh_token,
-                    "user": {
-                        "id": result.user.id,
-                        "email": result.user.email,
-                        "name": result.user.name,
-                    },
-                },
-                status=status.HTTP_200_OK,
-            )
-        except LoginRateLimitedError:
-            return Response(
-                {"message": "Terlalu banyak percobaan gagal. Coba lagi dalam beberapa menit."},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
-        except InvalidCredentialsError:
-            return Response(
-                {"message": "Email atau password salah"},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-        except EmailNotVerifiedError:
-            return Response(
-                {"message": "Email Anda belum diverifikasi. Cek email untuk link verifikasi."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        except Exception:
-            logger.exception("Unexpected error during login for email: %s", email)
-            return Response(
-                {"message": SERVER_ERROR_MESSAGE},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-
 class RefreshTokenView(APIView):
     permission_classes = [AllowAny]
 
+    @track_auth_metric("auth.refresh")
     def post(self, request):
         serializer = RefreshTokenSerializer(data=request.data)
         if not serializer.is_valid():
@@ -257,6 +234,7 @@ class GoogleOAuthCallbackView(APIView):
     permission_classes = [AllowAny]
     throttle_classes = [GoogleOAuthRateThrottle]
 
+    @track_auth_metric("auth.google_oauth")
     def post(self, request):
         token = request.data.get("token")
 

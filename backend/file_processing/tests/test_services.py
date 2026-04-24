@@ -3,12 +3,15 @@ import tempfile
 import builtins
 import zipfile
 import unittest
+import base64
 
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch, MagicMock, PropertyMock
 from PyPDF2.errors import PdfReadError
 from openpyxl import Workbook
+from docx import Document
+from docx.shared import Inches
 
 from file_processing.services.ocr_service import OCRService
 from io import BytesIO
@@ -124,7 +127,6 @@ class TestOCRService(TestCase):
         text = OCRService._ocr_single_image("mock_image")
 
         self.assertEqual(text, "OCR text")
-
 
     @patch("file_processing.services.ocr_service.OCRService._ocr_single_image")
     def test_process_image_success(self, mock_ocr_single):
@@ -2179,6 +2181,11 @@ class TestWordValidationServiceCoverage(TestCase):
 
 
 class TestWordValidationService(unittest.TestCase):
+    _ONE_PIXEL_PNG_BASE64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/"
+        "x8AAwMCAO2vN6kAAAAASUVORK5CYII="
+    )
+
     def _build_valid_docx(self, pages=1):
         content = BytesIO()
         with zipfile.ZipFile(content, "w") as archive:
@@ -2189,6 +2196,26 @@ class TestWordValidationService(unittest.TestCase):
                 f"<Properties><Pages>{pages}</Pages></Properties>",
             )
         return content.getvalue()
+
+    def _build_image_heavy_docx(self, image_count=101):
+        image_bytes = base64.b64decode(self._ONE_PIXEL_PNG_BASE64)
+        doc = Document()
+
+        for _ in range(image_count):
+            doc.add_picture(BytesIO(image_bytes), width=Inches(6.3), height=Inches(8.8))
+
+        out = BytesIO()
+        doc.save(out)
+        return out.getvalue()
+
+    def _build_blank_pages_docx(self, page_count=101):
+        doc = Document()
+        for _ in range(max(0, page_count - 1)):
+            doc.add_page_break()
+
+        out = BytesIO()
+        doc.save(out)
+        return out.getvalue()
 
     def test_validate_word_docx_happy_path(self):
         f = SimpleUploadedFile(
@@ -2258,4 +2285,441 @@ class TestWordValidationService(unittest.TestCase):
 
         self.assertEqual(
             word_validation_service.extract_docx_page_count(ArchiveNoPages()), 0
+        )
+
+    def test_extract_docx_page_count_uses_positive_app_pages(self):
+        class ArchiveAppPagesOnly:
+            def read(self, name):
+                if name == "docProps/app.xml":
+                    return b"<Properties><Pages>7</Pages></Properties>"
+                raise KeyError(name)
+
+        self.assertEqual(
+            word_validation_service.extract_docx_page_count(ArchiveAppPagesOnly()), 7
+        )
+
+    def test_extract_docx_page_count_breaks_after_first_positive_pages(self):
+        class ArchiveAppPagesBreak:
+            def read(self, name):
+                if name == "docProps/app.xml":
+                    # If break is not hit, second Pages=0 can overwrite app_pages.
+                    return b"<Properties><Pages>9</Pages><Pages>0</Pages></Properties>"
+                raise KeyError(name)
+
+        self.assertEqual(
+            word_validation_service.extract_docx_page_count(ArchiveAppPagesBreak()), 9
+        )
+
+    def test_extract_docx_page_count_keeps_zero_when_pages_is_zero(self):
+        class ArchiveZeroPages:
+            def read(self, name):
+                if name == "docProps/app.xml":
+                    return b"<Properties><Pages>0</Pages></Properties>"
+                raise KeyError(name)
+
+        self.assertEqual(
+            word_validation_service.extract_docx_page_count(ArchiveZeroPages()), 0
+        )
+
+    def test_extract_docx_page_count_uses_document_fallback_when_app_xml_missing(self):
+        class ArchiveNoAppPages:
+            def read(self, name):
+                if name == "docProps/app.xml":
+                    return b"<Properties><Template>Normal</Template></Properties>"
+                if name == "word/document.xml":
+                    namespace = (
+                        "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    )
+                    page_breaks = "".join(
+                        "<w:lastRenderedPageBreak/>"
+                        for _ in range(word_validation_service.MAX_WORD_PAGES)
+                    )
+                    return (
+                        f'<w:document xmlns:w="{namespace}"><w:body><w:p><w:r>'
+                        f"{page_breaks}</w:r></w:p></w:body></w:document>"
+                    ).encode("utf-8")
+                raise KeyError(name)
+
+        page_count = word_validation_service.extract_docx_page_count(
+            ArchiveNoAppPages()
+        )
+        self.assertGreater(page_count, word_validation_service.MAX_WORD_PAGES)
+
+    def test_extract_docx_page_count_prefers_higher_document_estimate(self):
+        class ArchiveStaleAppPages:
+            def read(self, name):
+                if name == "docProps/app.xml":
+                    return b"<Properties><Pages>2</Pages></Properties>"
+                if name == "word/document.xml":
+                    namespace = (
+                        "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    )
+                    page_break_before_nodes = "".join(
+                        "<w:p><w:pPr><w:pageBreakBefore/></w:pPr></w:p>"
+                        for _ in range(word_validation_service.MAX_WORD_PAGES)
+                    )
+                    return (
+                        f'<w:document xmlns:w="{namespace}"><w:body>'
+                        f"{page_break_before_nodes}</w:body></w:document>"
+                    ).encode("utf-8")
+                raise KeyError(name)
+
+        page_count = word_validation_service.extract_docx_page_count(
+            ArchiveStaleAppPages()
+        )
+        self.assertGreater(page_count, word_validation_service.MAX_WORD_PAGES)
+
+    def test_validate_word_docx_rejects_image_heavy_document_without_text(self):
+        f = SimpleUploadedFile(
+            "image-heavy.docx",
+            self._build_image_heavy_docx(image_count=101),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = word_validation_service.validate_word(f, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(
+            error,
+            f"Word exceeds the maximum allowed page count of {word_validation_service.MAX_WORD_PAGES}.",
+        )
+
+    def test_validate_word_docx_rejects_blank_pages_document(self):
+        f = SimpleUploadedFile(
+            "blank-pages.docx",
+            self._build_blank_pages_docx(page_count=101),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = word_validation_service.validate_word(f, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(
+            error,
+            f"Word exceeds the maximum allowed page count of {word_validation_service.MAX_WORD_PAGES}.",
+        )
+
+    def test_estimate_pages_from_images_medium_images_not_undercounted(self):
+        estimate = word_validation_service._estimate_pages_from_images(
+            image_count=221,
+            total_image_area=1990.4,
+            usable_page_area=58.5,
+        )
+        self.assertGreater(estimate, word_validation_service.MAX_WORD_PAGES)
+
+    def test_estimate_docx_usable_page_area_handles_invalid_section_values(self):
+        class _BadSection:
+            page_width = "7772400"
+            page_height = "10058400"
+
+            @property
+            def left_margin(self):
+                raise ValueError("invalid twips")
+
+            right_margin = "1440.0000000000002"
+            top_margin = "1440"
+            bottom_margin = "1440"
+
+        class _BadDocument:
+            sections = [_BadSection()]
+
+        area = word_validation_service._estimate_docx_usable_page_area(_BadDocument())
+        self.assertGreater(area, 0)
+
+    def test_estimate_docx_usable_page_area_falls_back_to_defaults_when_sections_fail(
+        self,
+    ):
+        class _BadDocument:
+            @property
+            def sections(self):
+                raise RuntimeError("no sections")
+
+        area = word_validation_service._estimate_docx_usable_page_area(_BadDocument())
+        expected = (
+            word_validation_service.DOCX_DEFAULT_PAGE_WIDTH_INCH
+            - 2 * word_validation_service.DOCX_DEFAULT_MARGIN_INCH
+        ) * (
+            word_validation_service.DOCX_DEFAULT_PAGE_HEIGHT_INCH
+            - 2 * word_validation_service.DOCX_DEFAULT_MARGIN_INCH
+        )
+        self.assertAlmostEqual(area, expected)
+
+    def test_estimate_docx_pages_with_python_docx_handles_body_access_exception(self):
+        class _Node:
+            def __init__(self, tag, attrib=None):
+                self.tag = tag
+                self.attrib = attrib or {}
+
+        class _ParagraphXml:
+            def iter(self):
+                return [
+                    _Node("{w}br", {"{w}type": "page"}),
+                    _Node("{w}lastRenderedPageBreak"),
+                ]
+
+        class _Paragraph:
+            text = "hello world"
+            _p = _ParagraphXml()
+
+        class _Cell:
+            text = "table words"
+
+        class _Row:
+            cells = [_Cell()]
+
+        class _Table:
+            rows = [_Row()]
+
+        class _Document:
+            paragraphs = [_Paragraph()]
+            tables = [_Table()]
+
+            @property
+            def sections(self):
+                raise ValueError("section decode error")
+
+            @property
+            def element(self):
+                raise ValueError("no body")
+
+        with patch(
+            "file_processing.services.word_validation_service.Document",
+            return_value=_Document(),
+        ):
+            estimate = word_validation_service._estimate_docx_pages_with_python_docx(
+                b"fake"
+            )
+
+        self.assertGreaterEqual(estimate, 1)
+
+    def test_estimate_docx_pages_with_python_docx_counts_body_drawings_and_sections(
+        self,
+    ):
+        class _Node:
+            def __init__(self, tag, attrib=None):
+                self.tag = tag
+                self.attrib = attrib or {}
+
+        class _Body:
+            def iter(self):
+                return [
+                    _Node("{w}drawing"),
+                    _Node("{wp}extent", {"cx": "914400", "cy": "1828800"}),
+                ]
+
+        class _Element:
+            body = _Body()
+
+        class _ParagraphXml:
+            def iter(self):
+                return []
+
+        class _Paragraph:
+            text = ""
+            _p = _ParagraphXml()
+
+        class _Section:
+            page_width = 7772400
+            page_height = 10058400
+            left_margin = 914400
+            right_margin = 914400
+            top_margin = 914400
+            bottom_margin = 914400
+
+        class _Document:
+            paragraphs = [_Paragraph()]
+            tables = []
+            sections = [_Section(), _Section()]
+            element = _Element()
+
+        with patch(
+            "file_processing.services.word_validation_service.Document",
+            return_value=_Document(),
+        ):
+            estimate = word_validation_service._estimate_docx_pages_with_python_docx(
+                b"fake"
+            )
+
+        self.assertGreaterEqual(estimate, 2)
+
+    def test_estimate_pages_from_images_small_and_tiny_branches(self):
+        small_estimate = word_validation_service._estimate_pages_from_images(
+            image_count=9,
+            total_image_area=18.0,
+            usable_page_area=60.0,
+        )
+        tiny_estimate = word_validation_service._estimate_pages_from_images(
+            image_count=12,
+            total_image_area=6.0,
+            usable_page_area=60.0,
+        )
+        no_area_estimate = word_validation_service._estimate_pages_from_images(
+            image_count=12,
+            total_image_area=0.0,
+            usable_page_area=60.0,
+        )
+
+        self.assertEqual(small_estimate, 3)
+        self.assertEqual(tiny_estimate, 2)
+        self.assertEqual(no_area_estimate, 2)
+
+    def test_extract_extent_inches_handles_invalid_numeric_values(self):
+        class _Node:
+            attrib = {"cx": "invalid-cx", "cy": "invalid-cy"}
+
+        cx, cy = word_validation_service._extract_extent_inches(_Node())
+        self.assertEqual(cx, 0.0)
+        self.assertEqual(cy, 0.0)
+
+    def test_emu_to_inches_handles_invalid_and_non_positive_values(self):
+        self.assertEqual(word_validation_service._emu_to_inches("abc", 7.5), 7.5)
+        self.assertEqual(word_validation_service._emu_to_inches(0, 3.2), 3.2)
+        self.assertEqual(word_validation_service._emu_to_inches(-10, 4.1), 4.1)
+
+    def test_count_text_characters_returns_zero_for_empty_text(self):
+        self.assertEqual(word_validation_service._count_text_characters(None), 0)
+        self.assertEqual(word_validation_service._count_text_characters(""), 0)
+
+    def test_is_page_break_node_detects_type_attribute(self):
+        class _Node:
+            attrib = {"{w}type": "page"}
+
+        self.assertTrue(word_validation_service._is_page_break_node(_Node()))
+
+    def test_is_page_break_node_ignores_non_page_type_and_missing_type(self):
+        class _NonPageNode:
+            attrib = {"{w}type": "textWrapping"}
+
+        class _NoTypeNode:
+            attrib = {"other": "value"}
+
+        self.assertFalse(word_validation_service._is_page_break_node(_NonPageNode()))
+        self.assertFalse(word_validation_service._is_page_break_node(_NoTypeNode()))
+
+    def test_estimate_pages_from_blocks_returns_zero_for_non_positive(self):
+        self.assertEqual(word_validation_service._estimate_pages_from_blocks(0), 0)
+        self.assertEqual(word_validation_service._estimate_pages_from_blocks(-3), 0)
+
+    def test_extract_extent_inches_reads_cy_attribute(self):
+        class _Node:
+            attrib = {"cy": "1828800"}
+
+        cx, cy = word_validation_service._extract_extent_inches(_Node())
+        self.assertEqual(cx, 0.0)
+        self.assertGreater(cy, 0.0)
+
+    def test_extract_extent_inches_handles_cy_success_and_failure_paths(self):
+        class _NodeCySuccess:
+            attrib = {"other": "x", "cy": "1828800"}
+
+        class _NodeCyFailure:
+            attrib = {"other": "x", "cy": "not-a-number"}
+
+        cx_ok, cy_ok = word_validation_service._extract_extent_inches(_NodeCySuccess())
+        cx_bad, cy_bad = word_validation_service._extract_extent_inches(
+            _NodeCyFailure()
+        )
+
+        self.assertEqual(cx_ok, 0.0)
+        self.assertGreater(cy_ok, 0.0)
+        self.assertEqual(cx_bad, 0.0)
+        self.assertEqual(cy_bad, 0.0)
+
+    def test_extract_extent_inches_reads_both_cx_and_cy_attributes(self):
+        class _Node:
+            attrib = {"cx": "914400", "cy": "1828800"}
+
+        cx, cy = word_validation_service._extract_extent_inches(_Node())
+        self.assertGreater(cx, 0.0)
+        self.assertGreater(cy, 0.0)
+
+    def test_collect_body_image_metrics_does_not_add_area_when_extent_incomplete(self):
+        class _Node:
+            def __init__(self, tag, attrib=None):
+                self.tag = tag
+                self.attrib = attrib or {}
+
+        class _Body:
+            def iter(self):
+                return [
+                    _Node("{w}drawing"),
+                    _Node("{wp}extent", {"cx": "914400"}),
+                ]
+
+        class _Element:
+            body = _Body()
+
+        class _Document:
+            element = _Element()
+
+        image_count, total_area = word_validation_service._collect_body_image_metrics(
+            _Document()
+        )
+        self.assertEqual(image_count, 1)
+        self.assertEqual(total_area, 0.0)
+
+    def test_estimate_docx_pages_from_document_xml_counts_text_sections_and_page_break(
+        self,
+    ):
+        namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        document_xml = (
+            f'<w:document xmlns:w="{namespace}">'
+            "<w:body>"
+            "<w:p><w:r><w:br w:type='page'/></w:r></w:p>"
+            "<w:p><w:r><w:t>abc</w:t></w:r></w:p>"
+            "<w:sectPr></w:sectPr>"
+            "<w:sectPr></w:sectPr>"
+            "</w:body>"
+            "</w:document>"
+        ).encode("utf-8")
+
+        estimate = word_validation_service._estimate_docx_pages_from_document_xml(
+            document_xml
+        )
+
+        self.assertEqual(estimate, 2)
+
+    def test_collect_docx_xml_marker_counts_br_non_page_not_counted(self):
+        namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        document_xml = (
+            f'<w:document xmlns:w="{namespace}">'
+            "<w:body>"
+            "<w:p><w:r><w:br w:type='textWrapping'/></w:r></w:p>"
+            "<w:p><w:r><w:br w:type='page'/></w:r></w:p>"
+            "</w:body>"
+            "</w:document>"
+        ).encode("utf-8")
+
+        root = word_validation_service._parse_docx_document_root(document_xml)
+        marker_counts, text_char_count = (
+            word_validation_service._collect_docx_xml_marker_counts(root)
+        )
+
+        self.assertEqual(marker_counts["manual_page_breaks"], 1)
+        self.assertEqual(text_char_count, 0)
+
+    @patch(
+        "file_processing.services.word_validation_service._estimate_docx_pages_with_python_docx",
+        return_value=word_validation_service.MAX_WORD_PAGES + 10,
+    )
+    def test_validate_word_docx_rejects_over_limit_from_python_docx_fallback(
+        self, _mock_python_docx_estimate
+    ):
+        content = BytesIO()
+        with zipfile.ZipFile(content, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types></Types>")
+            archive.writestr("word/document.xml", "<w:document></w:document>")
+
+        f = SimpleUploadedFile(
+            "large.docx",
+            content.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        is_valid, error = word_validation_service.validate_word(f, ".docx")
+
+        self.assertFalse(is_valid)
+        self.assertEqual(
+            error,
+            f"Word exceeds the maximum allowed page count of {word_validation_service.MAX_WORD_PAGES}.",
         )
