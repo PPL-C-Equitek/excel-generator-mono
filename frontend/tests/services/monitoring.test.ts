@@ -21,7 +21,7 @@ describe('monitoring service', () => {
         const result = await getMonitoringLive()
 
         expect(fetchAPI).toHaveBeenCalledWith('monitoring/live/', { method: 'GET' })
-        expect(result).toEqual({ status: 'ok' })
+        expect(result).toEqual({ status: 'ok', timestamp: '' })
     })
 
     it('calls access endpoint with bearer token', async () => {
@@ -76,6 +76,73 @@ describe('monitoring service', () => {
             method: 'GET',
             headers: {
                 Authorization: 'Bearer token-456',
+            },
+        })
+    })
+
+    it('normalizes malformed stats payload from API', async () => {
+        const { fetchAPI } = await import('@/lib/api')
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStats } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-789')
+        vi.mocked(fetchAPI).mockResolvedValue({
+            status: 123,
+            totals: {
+                requests: 'abc',
+                errors: 2,
+            },
+            routes: [{ route: null, method: 'GET' }],
+            events: {
+                login: {
+                    success: 'x',
+                },
+            },
+            timeseries: {
+                window_seconds: 60,
+                bucket_seconds: '10',
+                points: [{ timestamp: 1, requests: 3 }],
+            },
+        })
+
+        const payload = await getMonitoringStats()
+
+        expect(payload).toEqual({
+            status: 'unknown',
+            generated_at: '',
+            totals: {
+                requests: 0,
+                errors: 2,
+                error_rate: 0,
+            },
+            routes: [
+                {
+                    route: 'unknown',
+                    method: 'GET',
+                    total_requests: 0,
+                    total_errors: 0,
+                    error_rate: 0,
+                    avg_latency_ms: 0,
+                    max_latency_ms: 0,
+                },
+            ],
+            events: {
+                login: {
+                    success: 0,
+                },
+            },
+            timeseries: {
+                window_seconds: 60,
+                bucket_seconds: 0,
+                points: [
+                    {
+                        timestamp: '',
+                        requests: 3,
+                        errors: 0,
+                        error_rate: 0,
+                        avg_latency_ms: 0,
+                    },
+                ],
             },
         })
     })

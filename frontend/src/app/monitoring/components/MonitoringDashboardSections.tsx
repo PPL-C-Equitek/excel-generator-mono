@@ -5,45 +5,14 @@ import type {
     MonitoringStatsPayload,
 } from '@/services/monitoring'
 import { formatPercent, formatTimestamp, resolveAccessMessage, statusBadgeClass } from '../monitoringUi'
-
-export type RealtimeTotals = {
-    requests: number
-    errors: number
-    errorRate: number
-} | null
-
-export type LatencySeriesPoint = {
-    id: number
-    label: string
-    value: number
-    requests: number
-}
-
-export type LatencyChartModel = {
-    linePoints: string
-    areaPath: string
-    maxLatency: number
-}
-
-export type ErrorRateMeter = {
-    percentText: string
-    progressLength: number
-    colorClass: string
-}
-
-export type ReadinessMeter = {
-    percentText: string
-    progressLength: number
-    colorClass: string
-    healthyChecks: number
-    totalChecks: number
-}
-
-export type EventRow = {
-    eventName: string
-    outcome: string
-    count: number
-}
+import type {
+    ErrorRateMeter,
+    EventRow,
+    LatencyChartModel,
+    LatencySeriesPoint,
+    ReadinessMeter,
+    RealtimeTotals,
+} from '../monitoringViewModelTypes'
 
 type MonitoringHeroSectionProps = {
     lastSync: string
@@ -512,4 +481,3 @@ export function MonitoringAuthEventsSection({ eventRows, maxEventCount }: Monito
         </article>
     )
 }
-
