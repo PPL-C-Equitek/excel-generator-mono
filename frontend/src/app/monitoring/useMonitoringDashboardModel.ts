@@ -70,7 +70,7 @@ function calculateRetryDelayMs(consecutiveFailures: number): number {
     )
 }
 
-function getIsPageVisible(): boolean {
+export function getIsPageVisible(): boolean {
     if (typeof document === 'undefined') {
         return true
     }
@@ -188,6 +188,7 @@ export function useMonitoringDashboardModel({
         if (typeof document === 'undefined') {
             return
         }
+        const visibilityDocument = document
 
         const handleVisibilityChange = () => {
             const nextVisible = getIsPageVisible()
@@ -198,9 +199,9 @@ export function useMonitoringDashboardModel({
             }
         }
 
-        document.addEventListener('visibilitychange', handleVisibilityChange)
+        visibilityDocument.addEventListener('visibilitychange', handleVisibilityChange)
         return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange)
+            visibilityDocument.removeEventListener('visibilitychange', handleVisibilityChange)
         }
     }, [loadDashboard])
 

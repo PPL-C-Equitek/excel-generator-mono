@@ -7,6 +7,7 @@ import type {
     MonitoringStatsPayload,
 } from '../../src/services/monitoring'
 import {
+    getIsPageVisible,
     useMonitoringDashboardModel,
     type MonitoringDashboardService,
 } from '../../src/app/monitoring/useMonitoringDashboardModel'
@@ -515,6 +516,17 @@ describe('useMonitoringDashboardModel', () => {
         expect(service.getMonitoringStats).not.toHaveBeenCalled()
     })
 
+    it('defaults visibility to true when document is unavailable', () => {
+        const originalDocument = globalThis.document
+
+        try {
+            vi.stubGlobal('document', undefined)
+            expect(getIsPageVisible()).toBe(true)
+        } finally {
+            vi.stubGlobal('document', originalDocument)
+        }
+    })
+
     it('pauses interval polling when tab is hidden and refreshes when visible again', async () => {
         vi.useFakeTimers()
 
@@ -562,6 +574,137 @@ describe('useMonitoringDashboardModel', () => {
             })
 
             expect(service.getMonitoringLive.mock.calls.length).toBeGreaterThanOrEqual(2)
+        } finally {
+            if (originalVisibilityDescriptor) {
+                Object.defineProperty(document, 'visibilityState', originalVisibilityDescriptor)
+            } else {
+                Reflect.deleteProperty(document, 'visibilityState')
+            }
+        }
+    })
+
+    it('skips attaching visibility listener when document becomes unavailable', async () => {
+        const initialService = createMonitoringService()
+        const rerenderService = createMonitoringService()
+
+        const { rerender } = renderHook(
+            ({ monitoringService }) =>
+                useMonitoringDashboardModel({
+                    monitoringService,
+                    autoRefreshIntervalMs: 60000,
+                }),
+            {
+                initialProps: {
+                    monitoringService: initialService,
+                },
+            }
+        )
+
+        await waitFor(() => {
+            expect(initialService.getMonitoringLive).toHaveBeenCalledTimes(1)
+        })
+
+        const originalDocument = globalThis.document
+        try {
+            vi.stubGlobal('document', undefined)
+
+            rerender({
+                monitoringService: rerenderService,
+            })
+
+            await act(async () => {
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+
+            expect(rerenderService.getMonitoringLive).toHaveBeenCalledTimes(1)
+        } finally {
+            vi.stubGlobal('document', originalDocument)
+        }
+    })
+
+    it('marks data stale immediately when effect reruns after threshold has already passed', async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-04-24T10:00:00Z'))
+
+        const originalVisibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+        Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            get: () => 'hidden',
+        })
+
+        try {
+            const service = createMonitoringService()
+            const { result, rerender } = renderHook(
+                ({ intervalMs }) =>
+                    useMonitoringDashboardModel({
+                        monitoringService: service,
+                        autoRefreshIntervalMs: intervalMs,
+                    }),
+                {
+                    initialProps: {
+                        intervalMs: 1000,
+                    },
+                }
+            )
+
+            await act(async () => {
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+            expect(result.current.isLoading).toBe(false)
+            expect(result.current.isDataStale).toBe(false)
+
+            act(() => {
+                vi.setSystemTime(new Date('2026-04-24T10:00:20Z'))
+            })
+
+            rerender({
+                intervalMs: 2000,
+            })
+
+            expect(result.current.isDataStale).toBe(true)
+        } finally {
+            if (originalVisibilityDescriptor) {
+                Object.defineProperty(document, 'visibilityState', originalVisibilityDescriptor)
+            } else {
+                Reflect.deleteProperty(document, 'visibilityState')
+            }
+        }
+    })
+
+    it('marks data stale when stale timeout fires', async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-04-24T10:00:00Z'))
+
+        const originalVisibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+        Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            get: () => 'hidden',
+        })
+
+        try {
+            const service = createMonitoringService()
+            const { result } = renderHook(() =>
+                useMonitoringDashboardModel({
+                    monitoringService: service,
+                    autoRefreshIntervalMs: 1000,
+                })
+            )
+
+            await act(async () => {
+                await Promise.resolve()
+                await Promise.resolve()
+            })
+            expect(result.current.isLoading).toBe(false)
+            expect(result.current.isDataStale).toBe(false)
+
+            await act(async () => {
+                vi.advanceTimersByTime(15001)
+                await Promise.resolve()
+            })
+
+            expect(result.current.isDataStale).toBe(true)
         } finally {
             if (originalVisibilityDescriptor) {
                 Object.defineProperty(document, 'visibilityState', originalVisibilityDescriptor)
