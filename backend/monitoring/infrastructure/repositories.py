@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from hashlib import sha1
+from hashlib import sha256
 from threading import Lock
 from typing import Callable
 from uuid import uuid4
@@ -554,7 +554,7 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin):
         return f"{route_hash_key}:latency_samples"
 
     def _route_hash_key(self, *, route: str, method: str) -> str:
-        digest = sha1(
+        digest = sha256(
             f"{route}{REDIS_KEY_SEPARATOR}{method}".encode("utf-8")
         ).hexdigest()
         return f"{self._key_prefix}:route:{digest}"

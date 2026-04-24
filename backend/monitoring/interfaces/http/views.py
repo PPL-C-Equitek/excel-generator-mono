@@ -68,6 +68,7 @@ def stats(request):
     return Response(payload, status=status.HTTP_200_OK)
 
 
+@require_GET
 @monitoring_protected_get
 def stream(request):
     service = get_monitoring_service()
