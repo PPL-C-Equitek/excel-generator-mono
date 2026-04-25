@@ -1172,6 +1172,75 @@ class RedisMetricsRepositoryTest(SimpleTestCase):
         self.assertEqual(after_reset.events, ())
 
 
+class RedisMetricsRepositorySnapshotCacheTest(SimpleTestCase):
+    def test_get_snapshot_uses_cache_within_ttl_window(self):
+        now = datetime(2026, 4, 20, 12, 0, 0)
+        repository = RedisMetricsRepository(
+            redis_client=Mock(),
+            now=lambda: now,
+            max_route_latency_samples=4,
+            snapshot_cache_ttl_seconds=10.0,
+        )
+
+        pipeline = Mock()
+        pipeline.execute.return_value = [set(), {}, None, []]
+        repository._redis.pipeline.return_value = pipeline
+
+        repository.get_snapshot()
+        repository.get_snapshot()
+
+        self.assertEqual(repository._redis.pipeline.call_count, 1)
+
+    def test_get_snapshot_refreshes_after_ttl_window(self):
+        now_values = [
+            datetime(2026, 4, 20, 12, 0, 0),
+            datetime(2026, 4, 20, 12, 0, 11),
+        ]
+
+        def now() -> datetime:
+            return now_values.pop(0)
+
+        repository = RedisMetricsRepository(
+            redis_client=Mock(),
+            now=now,
+            max_route_latency_samples=4,
+            snapshot_cache_ttl_seconds=5.0,
+        )
+
+        pipeline = Mock()
+        pipeline.execute.return_value = [set(), {}, None, []]
+        repository._redis.pipeline.return_value = pipeline
+
+        repository.get_snapshot()
+        repository.get_snapshot()
+
+        self.assertEqual(repository._redis.pipeline.call_count, 2)
+
+    def test_record_request_invalidates_snapshot_cache(self):
+        now = datetime(2026, 4, 20, 12, 0, 0)
+        repository = RedisMetricsRepository(
+            redis_client=_FakeRedisClient(),
+            now=lambda: now,
+            max_route_latency_samples=4,
+            snapshot_cache_ttl_seconds=120.0,
+        )
+
+        baseline_snapshot = repository.get_snapshot()
+        self.assertEqual(baseline_snapshot.total_requests, 0)
+
+        repository.record_request(
+            RequestMetricEvent(
+                route="/upload",
+                method="POST",
+                status_code=200,
+                duration_ms=100.0,
+                created_at=now,
+            )
+        )
+
+        updated_snapshot = repository.get_snapshot()
+        self.assertEqual(updated_snapshot.total_requests, 1)
+
 class ResilientMetricsRepositoryTest(SimpleTestCase):
     def test_falls_back_when_primary_record_request_fails(self):
         primary = Mock()
