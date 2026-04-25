@@ -124,6 +124,7 @@ class _RouteAccumulator:
 
 @dataclass(frozen=True)
 class RedisConnectionSettings:
+    redis_url: str = REDIS_DEFAULT_URL
     socket_timeout_seconds: float = 1.0
     connect_timeout_seconds: float = 1.0
 
@@ -609,7 +610,6 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
     def __init__(
         self,
         *,
-        redis_url: str = REDIS_DEFAULT_URL,
         key_namespace_settings: RedisNamespaceSettings | None = None,
         now: Callable[[], datetime] | None = None,
         realtime_window_seconds: int = REALTIME_DEFAULT_WINDOW_SECONDS,
@@ -653,7 +653,7 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
                     "Redis dependency is missing. Install with `pip install redis`."
                 )
             redis_client = redis.Redis.from_url(
-                redis_url,
+                resolved_connection_settings.redis_url,
                 decode_responses=True,
                 socket_timeout=resolved_connection_settings.socket_timeout_seconds,
                 socket_connect_timeout=resolved_connection_settings.connect_timeout_seconds,

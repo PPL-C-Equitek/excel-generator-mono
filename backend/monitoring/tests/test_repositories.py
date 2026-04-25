@@ -10,6 +10,7 @@ from monitoring.infrastructure.repositories import (
     _RealtimeRequestRecord,
     _RouteAccumulator,
     RedisNamespaceSettings,
+    RedisConnectionSettings,
     _SnapshotFactory,
     _REDIS_ROUTE_SNAPSHOT_FIELDS,
     REDIS_KEY_SEPARATOR,
@@ -1095,7 +1096,9 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
     def test_repository_init_raises_when_redis_is_missing(self):
         with self.assertRaises(RuntimeError):
             RedisMetricsRepository(
-                redis_url="redis://localhost:6379/0",
+                connection_settings=RedisConnectionSettings(
+                    redis_url="redis://localhost:6379/0",
+                ),
                 redis_client=None,
                 now=lambda: datetime(2026, 4, 20, 12, 0, 0),
                 max_route_latency_samples=4,

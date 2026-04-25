@@ -71,7 +71,6 @@ class MonitoringContainerTest(SimpleTestCase):
         )
 
         redis_repository_cls.assert_called_once_with(
-            redis_url="redis://127.0.0.1:6379/0",
             key_namespace_settings=RedisNamespaceSettings(
                 key_prefix="monitoring",
                 key_namespace_version="v1",
@@ -84,6 +83,7 @@ class MonitoringContainerTest(SimpleTestCase):
             max_route_latency_samples=64,
             max_routes_per_snapshot=None,
             connection_settings=RedisConnectionSettings(
+                redis_url="redis://127.0.0.1:6379/0",
                 socket_timeout_seconds=1.5,
                 connect_timeout_seconds=2.5,
             ),
@@ -174,13 +174,13 @@ class MonitoringContainerTest(SimpleTestCase):
 
         self.assertIs(service._metrics_repository, resilient_repository)
         redis_repository_cls.assert_called_once_with(
-            redis_url="redis://localhost:6379/0",
             key_namespace_settings=RedisNamespaceSettings(
                 key_prefix="monitoring_test",
                 key_namespace_version="v2",
             ),
             key_ttl_seconds=7200,
             connection_settings=RedisConnectionSettings(
+                redis_url="redis://localhost:6379/0",
                 socket_timeout_seconds=2.0,
                 connect_timeout_seconds=2.0,
             ),
@@ -326,13 +326,13 @@ class MonitoringContainerTest(SimpleTestCase):
         self.assertEqual([check.name for check in checks], ["database", "storage", "openai_config", "redis"])
         self.assertIs(service._metrics_repository, resilient_repository)
         redis_repository_cls.assert_called_once_with(
-            redis_url="redis://127.0.0.1:6379/0",
             key_namespace_settings=RedisNamespaceSettings(
                 key_prefix="monitoring",
                 key_namespace_version="v1",
             ),
             key_ttl_seconds=86400,
             connection_settings=RedisConnectionSettings(
+                redis_url="redis://127.0.0.1:6379/0",
                 socket_timeout_seconds=1.0,
                 connect_timeout_seconds=1.0,
             ),

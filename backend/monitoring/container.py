@@ -100,13 +100,13 @@ def _build_redis_repository(*, repository_kwargs: dict[str, int]) -> RedisMetric
             getattr(settings, "MONITORING_STATS_CACHE_TTL_SECONDS", MONITORING_DEFAULT_STATS_CACHE_TTL_SECONDS),
     )
     return RedisMetricsRepository(
-        redis_url=redis_url,
         key_namespace_settings=RedisNamespaceSettings(
             key_prefix=redis_key_prefix,
             key_namespace_version=redis_key_namespace_version,
         ),
         key_ttl_seconds=redis_key_ttl_seconds,
         connection_settings=RedisConnectionSettings(
+            redis_url=redis_url,
             socket_timeout_seconds=redis_socket_timeout_seconds,
             connect_timeout_seconds=redis_connect_timeout_seconds,
         ),
