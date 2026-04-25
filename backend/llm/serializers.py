@@ -79,7 +79,7 @@ _THINKING_LOG_BLOCKED_MARKERS = (
 )
 
 
-def _safe_thinking_log_summary(output_json) -> str:
+def _extract_normalized_thinking_log(output_json) -> str:
     if not isinstance(output_json, dict):
         return ""
 
@@ -87,7 +87,38 @@ def _safe_thinking_log_summary(output_json) -> str:
     if not isinstance(raw_thinking_log, str):
         return ""
 
-    normalized = raw_thinking_log.strip()
+    return raw_thinking_log.strip()
+
+
+def _is_safe_thinking_log_line(line: str) -> bool:
+    lowered_line = line.lower()
+    return not any(marker in lowered_line for marker in _THINKING_LOG_BLOCKED_MARKERS)
+
+
+def _append_safe_line_with_limit(
+    safe_lines: list[str],
+    current_length: int,
+    line: str,
+) -> tuple[int, bool]:
+    separator_length = 1 if safe_lines else 0
+    remaining_chars = THINKING_LOG_MAX_CHARS - current_length - separator_length
+    if remaining_chars <= 0:
+        return current_length, False
+
+    if len(line) > remaining_chars:
+        safe_lines.append(line[:remaining_chars])
+        return current_length, False
+
+    if separator_length:
+        current_length += 1
+
+    safe_lines.append(line)
+    current_length += len(line)
+    return current_length, True
+
+
+def _safe_thinking_log_summary(output_json) -> str:
+    normalized = _extract_normalized_thinking_log(output_json)
     if not normalized:
         return ""
 
@@ -97,23 +128,17 @@ def _safe_thinking_log_summary(output_json) -> str:
         trimmed_line = line.strip()
         if not trimmed_line:
             continue
-        lowered_line = trimmed_line.lower()
-        if any(marker in lowered_line for marker in _THINKING_LOG_BLOCKED_MARKERS):
+
+        if not _is_safe_thinking_log_line(trimmed_line):
             continue
-        separator_length = 1 if safe_lines else 0
-        remaining_chars = THINKING_LOG_MAX_CHARS - current_length - separator_length
-        if remaining_chars <= 0:
+
+        current_length, should_continue = _append_safe_line_with_limit(
+            safe_lines=safe_lines,
+            current_length=current_length,
+            line=trimmed_line,
+        )
+        if not should_continue:
             break
-
-        if len(trimmed_line) > remaining_chars:
-            safe_lines.append(trimmed_line[:remaining_chars])
-            break
-
-        if separator_length:
-            current_length += 1
-
-        safe_lines.append(trimmed_line)
-        current_length += len(trimmed_line)
 
     if not safe_lines:
         return ""
