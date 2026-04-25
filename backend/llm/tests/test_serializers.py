@@ -113,6 +113,38 @@ class ThinkingLogSerializerTest(SimpleTestCase):
 
         self.assertEqual(summary, "")
 
+    def test_safe_thinking_log_summary_stops_after_max_chars(self):
+        summary = _safe_thinking_log_summary(
+            {
+                "thinking_log": (
+                    "A" * 1990
+                    + "\n"
+                    + "B" * 2000
+                    + "\n"
+                    + "This line should not be processed."
+                )
+            }
+        )
+
+        self.assertEqual(len(summary), 2000)
+        self.assertTrue(summary.startswith("A" * 1990))
+        self.assertIn("\n", summary)
+        self.assertNotIn("This line should not be processed.", summary)
+
+    def test_safe_thinking_log_summary_stops_when_limit_is_exactly_reached(self):
+        summary = _safe_thinking_log_summary(
+            {
+                "thinking_log": (
+                    "A" * 2000
+                    + "\n"
+                    + "This line should not be processed either."
+                )
+            }
+        )
+
+        self.assertEqual(len(summary), 2000)
+        self.assertEqual(summary, "A" * 2000)
+
     def test_thinking_log_item_serializer_handles_non_dict_output_json(self):
         instance = SimpleNamespace(
             id=uuid4(),

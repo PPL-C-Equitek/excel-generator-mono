@@ -1,3 +1,5 @@
+from io import StringIO
+
 from rest_framework import serializers
 
 MAX_MESSAGE_LENGTH = 4096
@@ -90,19 +92,33 @@ def _safe_thinking_log_summary(output_json) -> str:
         return ""
 
     safe_lines = []
-    for line in normalized.splitlines():
+    current_length = 0
+    for line in StringIO(normalized):
         trimmed_line = line.strip()
         if not trimmed_line:
             continue
         lowered_line = trimmed_line.lower()
         if any(marker in lowered_line for marker in _THINKING_LOG_BLOCKED_MARKERS):
             continue
+        separator_length = 1 if safe_lines else 0
+        remaining_chars = THINKING_LOG_MAX_CHARS - current_length - separator_length
+        if remaining_chars <= 0:
+            break
+
+        if len(trimmed_line) > remaining_chars:
+            safe_lines.append(trimmed_line[:remaining_chars])
+            break
+
+        if separator_length:
+            current_length += 1
+
         safe_lines.append(trimmed_line)
+        current_length += len(trimmed_line)
 
     if not safe_lines:
         return ""
 
-    return "\n".join(safe_lines)[:THINKING_LOG_MAX_CHARS]
+    return "\n".join(safe_lines)
 
 
 class ThinkingLogItemSerializer(serializers.Serializer):
