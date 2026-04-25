@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from django.test import SimpleTestCase, override_settings
 
@@ -26,6 +27,7 @@ class MonitoringContainerTest(SimpleTestCase):
                 "realtime_bucket_seconds": 8,
                 "max_realtime_records": 200,
                 "max_route_latency_samples": 512,
+                "max_routes_per_snapshot": None,
             },
         )
 
@@ -92,6 +94,7 @@ class MonitoringContainerTest(SimpleTestCase):
         MONITORING_REALTIME_BUCKET_SECONDS=15,
         MONITORING_MAX_REALTIME_RECORDS=321,
         MONITORING_MAX_ROUTE_LATENCY_SAMPLES=123,
+        MONITORING_MAX_ROUTES_PER_SNAPSHOT=150,
     )
     @patch("monitoring.container.ResilientMetricsRepository")
     @patch("monitoring.container.InMemoryMetricsRepository")
@@ -123,6 +126,7 @@ class MonitoringContainerTest(SimpleTestCase):
             realtime_bucket_seconds=15,
             max_realtime_records=321,
             max_route_latency_samples=123,
+            max_routes_per_snapshot=150,
         )
         in_memory_repository_cls.assert_called_once_with(
             realtime_window_seconds=120,
@@ -133,6 +137,84 @@ class MonitoringContainerTest(SimpleTestCase):
         resilient_repository_cls.assert_called_once_with(
             primary_repository=redis_repository,
             fallback_repository=fallback_repository,
+        )
+
+    @override_settings(
+        MONITORING_DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/test",
+        MONITORING_DISCORD_WEBHOOK_USERNAME="OpsBot",
+        MONITORING_DISCORD_WEBHOOK_TIMEOUT_SECONDS=2.5,
+        MONITORING_READINESS_ALERT_COOLDOWN_SECONDS=123,
+    )
+    @patch("monitoring.container.MonitoringService")
+    @patch("monitoring.container.InMemoryMetricsRepository")
+    @patch("monitoring.container.ReadinessService")
+    @patch("monitoring.container.DiscordWebhookNotifier")
+    def test_build_monitoring_service_includes_discord_notifier(
+        self,
+        notifier_cls,
+        readiness_service_cls,
+        in_memory_repository_cls,
+        monitoring_service_cls,
+    ):
+        readiness_service = object()
+        repository = object()
+        notifier = object()
+        service = SimpleNamespace()
+        readiness_service_cls.return_value = readiness_service
+        in_memory_repository_cls.return_value = repository
+        notifier_cls.return_value = notifier
+        monitoring_service_cls.return_value = service
+
+        container.reset_monitoring_service_for_tests()
+        result = container.build_monitoring_service()
+
+        self.assertIs(result, service)
+        notifier_cls.assert_called_once_with(
+            webhook_url="https://discord.com/api/webhooks/test",
+            username="OpsBot",
+            timeout_seconds=2.5,
+        )
+        monitoring_service_cls.assert_called_once_with(
+            readiness_service=readiness_service,
+            metrics_repository=repository,
+            alert_notifier=notifier,
+            readiness_alert_cooldown_seconds=123,
+            stats_cache_ttl_seconds=2.0,
+        )
+
+    @override_settings(
+        MONITORING_STATS_CACHE_TTL_SECONDS=4.5,
+    )
+    @patch("monitoring.container.MonitoringService")
+    @patch("monitoring.container.InMemoryMetricsRepository")
+    @patch("monitoring.container.ReadinessService")
+    @patch("monitoring.container.DiscordWebhookNotifier")
+    def test_build_monitoring_service_respects_stats_cache_ttl_setting(
+        self,
+        notifier_cls,
+        readiness_service_cls,
+        in_memory_repository_cls,
+        monitoring_service_cls,
+    ):
+        readiness_service = object()
+        repository = object()
+        notifier = object()
+        service = SimpleNamespace()
+        readiness_service_cls.return_value = readiness_service
+        in_memory_repository_cls.return_value = repository
+        notifier_cls.return_value = notifier
+        monitoring_service_cls.return_value = service
+
+        container.reset_monitoring_service_for_tests()
+        result = container.build_monitoring_service()
+
+        self.assertIs(result, service)
+        monitoring_service_cls.assert_called_once_with(
+            readiness_service=readiness_service,
+            metrics_repository=repository,
+            alert_notifier=notifier,
+            readiness_alert_cooldown_seconds=300,
+            stats_cache_ttl_seconds=4.5,
         )
 
     @override_settings(

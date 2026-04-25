@@ -80,6 +80,45 @@ describe('monitoring service', () => {
         })
     })
 
+    it('reuses caller-provided token for all protected endpoints without fetching again', async () => {
+        const { fetchAPI } = await import('@/lib/api')
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const {
+            getMonitoringAccess,
+            getMonitoringReady,
+            getMonitoringStats,
+        } = await import('@/services/monitoring')
+
+        vi.mocked(fetchAPI).mockResolvedValue({})
+
+        const accessPromise = getMonitoringAccess('shared-token')
+        const readyPromise = getMonitoringReady('shared-token')
+        const statsPromise = getMonitoringStats('shared-token')
+
+        await Promise.all([accessPromise, readyPromise, statsPromise])
+
+        expect(vi.mocked(getValidAccessToken)).not.toHaveBeenCalled()
+        expect(fetchAPI).toHaveBeenCalledWith('monitoring/access/', {
+            method: 'GET',
+            headers: {
+                Authorization: 'Bearer shared-token',
+            },
+        })
+        expect(fetchAPI).toHaveBeenCalledWith('monitoring/ready/', {
+            method: 'GET',
+            headers: {
+                Authorization: 'Bearer shared-token',
+            },
+        })
+        expect(fetchAPI).toHaveBeenCalledWith('monitoring/stats/', {
+            method: 'GET',
+            headers: {
+                Authorization: 'Bearer shared-token',
+            },
+        })
+        expect(fetchAPI).toHaveBeenCalledTimes(3)
+    })
+
     it('normalizes malformed stats payload from API', async () => {
         const { fetchAPI } = await import('@/lib/api')
         const { getValidAccessToken } = await import('@/lib/auth')
@@ -147,65 +186,68 @@ describe('monitoring service', () => {
         })
     })
 
-    it('reuses a single token across access/ready/stats in one snapshot cycle', async () => {
+    it('reuses a single token for one snapshot request', async () => {
         const { fetchAPI } = await import('@/lib/api')
         const { getValidAccessToken } = await import('@/lib/auth')
         const { getMonitoringAuthenticatedSnapshot } = await import('@/services/monitoring')
 
         vi.mocked(getValidAccessToken).mockResolvedValue('shared-token')
         vi.mocked(fetchAPI)
-            .mockResolvedValueOnce({ allowed: true, reason: 'ok' })
             .mockResolvedValueOnce({
-                status: 'ok',
-                timestamp: '2026-04-24T10:00:00Z',
-                checks: [{ name: 'database', status: 'ok', latency_ms: 1, is_critical: true }],
-            })
-            .mockResolvedValueOnce({
-                status: 'ok',
-                generated_at: '2026-04-24T10:00:00Z',
-                totals: { requests: 1, errors: 0, error_rate: 0 },
-                routes: [],
-                events: {},
+                access: { allowed: true, reason: 'ok' },
+                ready: {
+                    status: 'ok',
+                    timestamp: '2026-04-24T10:00:00Z',
+                    checks: [
+                        { name: 'database', status: 'ok', latency_ms: 1, is_critical: true },
+                    ],
+                },
+                stats: {
+                    status: 'ok',
+                    generated_at: '2026-04-24T10:00:00Z',
+                    totals: { requests: 1, errors: 0, error_rate: 0 },
+                    routes: [],
+                    events: {},
+                },
             })
 
         const result = await getMonitoringAuthenticatedSnapshot()
 
         expect(getValidAccessToken).toHaveBeenCalledTimes(1)
-        expect(fetchAPI).toHaveBeenNthCalledWith(1, 'monitoring/access/', {
+        expect(fetchAPI).toHaveBeenNthCalledWith(1, 'monitoring/snapshot/', {
             method: 'GET',
             headers: {
                 Authorization: 'Bearer shared-token',
             },
         })
-        expect(fetchAPI).toHaveBeenNthCalledWith(2, 'monitoring/ready/', {
-            method: 'GET',
-            headers: {
-                Authorization: 'Bearer shared-token',
-            },
-        })
-        expect(fetchAPI).toHaveBeenNthCalledWith(3, 'monitoring/stats/', {
-            method: 'GET',
-            headers: {
-                Authorization: 'Bearer shared-token',
-            },
-        })
+        expect(fetchAPI).toHaveBeenCalledTimes(1)
         expect(result.accessDecision).toEqual({ allowed: true, reason: 'ok' })
         expect(result.readyPayload?.status).toBe('ok')
         expect(result.statsPayload?.status).toBe('ok')
     })
 
-    it('stops snapshot flow after access denied', async () => {
+    it('stops snapshot flow after access denied snapshot payload', async () => {
         const { fetchAPI } = await import('@/lib/api')
         const { getValidAccessToken } = await import('@/lib/auth')
         const { getMonitoringAuthenticatedSnapshot } = await import('@/services/monitoring')
 
         vi.mocked(getValidAccessToken).mockResolvedValue('shared-token')
-        vi.mocked(fetchAPI).mockResolvedValueOnce({ allowed: false, reason: 'no_account' })
+        vi.mocked(fetchAPI).mockResolvedValueOnce({
+            access: { allowed: false, reason: 'no_account' },
+            ready: null,
+            stats: null,
+        })
 
         const result = await getMonitoringAuthenticatedSnapshot()
 
         expect(getValidAccessToken).toHaveBeenCalledTimes(1)
         expect(fetchAPI).toHaveBeenCalledTimes(1)
+        expect(fetchAPI).toHaveBeenNthCalledWith(1, 'monitoring/snapshot/', {
+            method: 'GET',
+            headers: {
+                Authorization: 'Bearer shared-token',
+            },
+        })
         expect(result).toEqual({
             accessDecision: { allowed: false, reason: 'no_account' },
             readyPayload: null,

@@ -223,6 +223,70 @@ class MonitoringViewsTest(APITestCase):
         self.assertEqual(response.data["status"], "ok")
         service.stats.assert_called_once()
 
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
+    def test_snapshot_endpoint_returns_access_only_when_monitoring_not_allowed(
+        self,
+        mocked_get_service,
+    ):
+        response = self.client.get("/monitoring/snapshot/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                "access": {"allowed": False, "reason": "unauthenticated"},
+                "ready": None,
+                "stats": None,
+            },
+        )
+        mocked_get_service.assert_not_called()
+
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
+    def test_snapshot_endpoint_returns_snapshot_for_authorized_monitoring_account(
+        self,
+        mocked_get_service,
+    ):
+        user = User.objects.create_user(
+            email="snapshot-monitoring@example.com",
+            name="Snapshot Monitoring",
+            status="verified",
+        )
+        MonitoringAccount.objects.create(user=user, is_active=True)
+        self.client.force_authenticate(user=user)
+
+        service = Mock()
+        service.readiness.return_value = (
+            200,
+            {
+                "status": "ok",
+                "timestamp": "2026-04-20T10:00:00",
+                "checks": [],
+            },
+        )
+        service.stats.return_value = {
+            "status": "ok",
+            "generated_at": "2026-04-20T10:00:00",
+            "totals": {"requests": 2, "errors": 0, "error_rate": 0.0},
+            "routes": [],
+            "events": {},
+        }
+        mocked_get_service.return_value = service
+
+        response = self.client.get("/monitoring/snapshot/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["access"],
+            {
+                "allowed": True,
+                "reason": "ok",
+            },
+        )
+        self.assertEqual(response.data["ready"]["status"], "ok")
+        self.assertEqual(response.data["stats"]["status"], "ok")
+        service.readiness.assert_called_once()
+        service.stats.assert_called_once()
+
     def test_live_endpoint_rejects_post_method(self):
         response = self.client.post("/monitoring/live/")
         self.assertEqual(response.status_code, 405)
@@ -233,6 +297,10 @@ class MonitoringViewsTest(APITestCase):
 
     def test_stats_endpoint_rejects_post_method(self):
         response = self.client.post("/monitoring/stats/")
+        self.assertEqual(response.status_code, 405)
+
+    def test_snapshot_endpoint_rejects_post_method(self):
+        response = self.client.post("/monitoring/snapshot/")
         self.assertEqual(response.status_code, 405)
 
     @patch("monitoring.interfaces.http.views.get_monitoring_service")

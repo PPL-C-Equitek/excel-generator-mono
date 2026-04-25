@@ -527,6 +527,31 @@ describe('useMonitoringDashboardModel', () => {
         }
     })
 
+    it('derives visibility from document visibilityState', () => {
+        const originalVisibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+        Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            get: () => 'hidden',
+        })
+
+        try {
+            expect(getIsPageVisible()).toBe(false)
+
+            Object.defineProperty(document, 'visibilityState', {
+                configurable: true,
+                get: () => 'visible',
+            })
+
+            expect(getIsPageVisible()).toBe(true)
+        } finally {
+            if (originalVisibilityDescriptor) {
+                Object.defineProperty(document, 'visibilityState', originalVisibilityDescriptor)
+            } else {
+                Reflect.deleteProperty(document, 'visibilityState')
+            }
+        }
+    })
+
     it('pauses interval polling when tab is hidden and refreshes when visible again', async () => {
         vi.useFakeTimers()
 

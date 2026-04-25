@@ -178,6 +178,44 @@ describe('MonitoringDashboardSections', () => {
         expect(screen.getByText('Latency trend line chart')).toBeInTheDocument()
     })
 
+    it('shows even-index and trailing labels only for longer latency series', () => {
+        const longLatencySeries: LatencySeriesPoint[] = [
+            { id: 1, label: '10:00:00', value: 30, requests: 1 },
+            { id: 2, label: '10:00:10', value: 40, requests: 2 },
+            { id: 3, label: '10:00:20', value: 35, requests: 3 },
+            { id: 4, label: '10:00:30', value: 50, requests: 4 },
+            { id: 5, label: '10:00:40', value: 45, requests: 5 },
+            { id: 6, label: '10:00:50', value: 60, requests: 6 },
+            { id: 7, label: '10:01:00', value: 55, requests: 7 },
+        ]
+
+        render(
+            <MonitoringLatencyAndMetersSection
+                latencySeries={longLatencySeries}
+                latencyChart={{
+                    linePoints: '',
+                    areaPath: '',
+                    maxLatency: 60,
+                }}
+                hasRealtimeSeries={true}
+                realtimeWindowSeconds={60}
+                realtimeBucketSeconds={10}
+                errorRateMeter={{ percentText: '10.00%', progressLength: 25.12, valueClassName: 'text-blue-600' }}
+                readinessMeter={{
+                    percentText: '100%',
+                    progressLength: 251.2,
+                    valueClassName: 'text-blue-600',
+                    healthyChecks: 1,
+                    totalChecks: 1,
+                }}
+            />
+        )
+
+        expect(screen.getByText('10:00:00')).toBeInTheDocument()
+        expect(screen.queryByText('10:00:10')).toBeNull()
+        expect(screen.getByText('10:01:00')).toBeInTheDocument()
+    })
+
     it('renders latency snapshot fallback labels when realtime is unavailable', () => {
         render(
             <MonitoringLatencyAndMetersSection
