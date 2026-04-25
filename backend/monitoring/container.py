@@ -90,6 +90,13 @@ def _build_redis_repository(*, repository_kwargs: dict[str, int]) -> RedisMetric
     redis_connect_timeout_seconds = float(
         getattr(settings, "MONITORING_REDIS_CONNECT_TIMEOUT_SECONDS", 1.0)
     )
+    redis_snapshot_cache_ttl_seconds = float(
+        getattr(settings, "MONITORING_REDIS_SNAPSHOT_CACHE_TTL_SECONDS", 0.0)
+    )
+    if redis_snapshot_cache_ttl_seconds <= 0:
+        redis_snapshot_cache_ttl_seconds = float(
+            getattr(settings, "MONITORING_STATS_CACHE_TTL_SECONDS", MONITORING_DEFAULT_STATS_CACHE_TTL_SECONDS),
+        )
     return RedisMetricsRepository(
         redis_url=redis_url,
         key_prefix=redis_key_prefix,
@@ -97,6 +104,7 @@ def _build_redis_repository(*, repository_kwargs: dict[str, int]) -> RedisMetric
         key_ttl_seconds=redis_key_ttl_seconds,
         socket_timeout_seconds=redis_socket_timeout_seconds,
         connect_timeout_seconds=redis_connect_timeout_seconds,
+        snapshot_cache_ttl_seconds=redis_snapshot_cache_ttl_seconds,
         **repository_kwargs,
     )
 

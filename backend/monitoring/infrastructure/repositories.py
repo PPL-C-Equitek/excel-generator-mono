@@ -610,8 +610,13 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         connect_timeout_seconds: float = 1.0,
         max_routes_per_snapshot: int | None = None,
         redis_client=None,
+        snapshot_cache_ttl_seconds: float | None = None,
     ):
         self._now = now or datetime.utcnow
+        parsed_snapshot_cache_ttl_seconds = (
+            0.0 if snapshot_cache_ttl_seconds is None else float(snapshot_cache_ttl_seconds)
+        )
+        self._snapshot_cache_ttl_seconds = max(0.0, parsed_snapshot_cache_ttl_seconds)
         self._apply_realtime_state(
             realtime_window_seconds=realtime_window_seconds,
             realtime_bucket_seconds=realtime_bucket_seconds,
@@ -647,6 +652,8 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         self._max_routes_per_snapshot = (
             parsed_max_routes if (parsed_max_routes and parsed_max_routes > 0) else None
         )
+        self._snapshot_cache_expires_at_ms: float | None = None
+        self._snapshot_cache: MetricsSnapshot | None = None
 
     @property
     def _routes_index_key(self) -> str:
@@ -674,6 +681,7 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         return f"{self._key_prefix}:route:{digest}"
 
     def record_request(self, event: RequestMetricEvent) -> None:
+        self._invalidate_snapshot_cache()
         route, method = self._route_key_from_event(event)
         route_hash_key = self._route_hash_key(route=route, method=method)
         route_latency_samples_key = self._route_latency_samples_key(route_hash_key)
@@ -723,6 +731,7 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         pipeline.execute()
 
     def record_event(self, event: AuthMetricEvent) -> None:
+        self._invalidate_snapshot_cache()
         event_name, outcome = self._event_key_from_event(event)
         field = self._event_hash_field(event_name=event_name, outcome=outcome)
         pipeline = self._redis.pipeline()
@@ -733,6 +742,13 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
     def get_snapshot(self) -> MetricsSnapshot:
         now_value = self._now()
         now_epoch = self._realtime_series_builder.to_epoch_seconds(now_value)
+        if (
+            self._snapshot_cache is not None
+            and self._snapshot_cache_expires_at_ms is not None
+            and now_epoch <= self._snapshot_cache_expires_at_ms
+        ):
+            return self._snapshot_cache
+
         min_epoch = now_epoch - self._realtime_window_seconds
 
         pipeline = self._redis.pipeline()
@@ -758,14 +774,24 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         route_items = self._build_route_items(route_hash_keys)
         event_items = self._build_event_items(raw_events)
         realtime_records = self._build_realtime_records(raw_realtime)
-        return self._build_snapshot_response(
+        snapshot = self._build_snapshot_response(
             now_value=now_value,
             route_items=route_items,
             event_items=event_items,
             realtime_records=realtime_records,
         )
+        if self._snapshot_cache_ttl_seconds > 0:
+            self._snapshot_cache = snapshot
+            self._snapshot_cache_expires_at_ms = (
+                now_epoch + self._snapshot_cache_ttl_seconds
+            )
+        else:
+            self._snapshot_cache = None
+            self._snapshot_cache_expires_at_ms = None
+        return snapshot
 
     def reset(self) -> None:
+        self._invalidate_snapshot_cache()
         route_hash_keys = self._redis.smembers(self._routes_index_key)
         keys_to_delete = [
             self._routes_index_key,
@@ -798,6 +824,10 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             return 0
         """
         pipeline.eval(script, 1, route_hash_key, REDIS_FIELD_MAX_LATENCY_MS, duration_ms)
+
+    def _invalidate_snapshot_cache(self) -> None:
+        self._snapshot_cache = None
+        self._snapshot_cache_expires_at_ms = None
 
     def _trim_realtime_records(self) -> None:
         current_size = self._to_int(self._redis.zcard(self._realtime_key))
