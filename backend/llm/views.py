@@ -47,6 +47,7 @@ INVALID_PROMPT_DETAIL = "Invalid prompt payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
 THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
+MAX_THINKING_LOG_PAGE_SIZE = 100
 
 
 def get_authenticated_user_id(user) -> object | None:
@@ -122,6 +123,13 @@ def _parse_thinking_log_positive_int(value, default, minimum=1):
 
     parsed = int(value)
     if parsed < minimum:
+        raise ValueError
+    return parsed
+
+
+def _parse_thinking_log_page_size(value, default=10):
+    parsed = _parse_thinking_log_positive_int(value, default=default)
+    if parsed > MAX_THINKING_LOG_PAGE_SIZE:
         raise ValueError
     return parsed
 
@@ -290,7 +298,7 @@ def llm_reasoning(request):
 def thinking_log_list(request):
     try:
         page = _parse_thinking_log_positive_int(request.query_params.get("page"), default=1)
-        page_size = _parse_thinking_log_positive_int(
+        page_size = _parse_thinking_log_page_size(
             request.query_params.get("page_size"),
             default=10,
         )

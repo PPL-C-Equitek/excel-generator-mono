@@ -878,6 +878,18 @@ class ThinkingLogEndpointTest(TestCase):
             response.data["errors"],
             {"pagination": ["Invalid thinking log pagination request."]},
         )
+
+    def test_thinking_log_list_rejects_page_size_above_maximum(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/llm/thinking-logs/?page_size=101")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(
+            response.data["errors"],
+            {"pagination": ["Invalid thinking log pagination request."]},
+        )
 class SendMessagePositiveTest(SimpleTestCase):
 
     def setUp(self):
