@@ -6,6 +6,7 @@ import {
     MonitoringAccessRequiredSection,
     MonitoringAuthEventsSection,
     MonitoringHeroSection,
+    MonitoringReadinessAlertSection,
     MonitoringLatencyAndMetersSection,
     MonitoringRoutesAndReadinessSection,
     MonitoringTrafficSummarySection,
@@ -108,6 +109,43 @@ describe('MonitoringDashboardSections', () => {
 
         expect(screen.getByText('Monitoring Access Required')).toBeInTheDocument()
         expect(screen.getByText('Monitoring account access is required for this page.')).toBeInTheDocument()
+    })
+
+    it('renders readiness alert for degraded status with critical checks', () => {
+        render(
+            <MonitoringReadinessAlertSection
+                readyPayload={{
+                    status: 'degraded',
+                    timestamp: '2026-04-24T10:00:05Z',
+                    checks: [
+                        {
+                            name: 'database',
+                            status: 'ok',
+                            latency_ms: 3,
+                            is_critical: true,
+                        },
+                        {
+                            name: 'queue',
+                            status: 'error',
+                            latency_ms: 55,
+                            is_critical: true,
+                            message: 'queue backlog too high',
+                        },
+                        {
+                            name: 'filesystem',
+                            status: 'warning',
+                            latency_ms: 12,
+                            is_critical: true,
+                        },
+                    ],
+                }}
+            />
+        )
+
+        expect(screen.getByText('Readiness Degraded')).toBeInTheDocument()
+        expect(screen.getByText(/queue/i)).toBeInTheDocument()
+        expect(screen.getByText(/filesystem/i)).toBeInTheDocument()
+        expect(screen.getByText(/queue backlog too high/i)).toBeInTheDocument()
     })
 
     it('renders latency section empty state', () => {
