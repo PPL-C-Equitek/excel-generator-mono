@@ -196,7 +196,8 @@ function getValidatedPositiveInteger(value?: number): number | undefined {
 }
 
 function getFiniteValue(value?: number): number {
-    return Number.isFinite(value) ? value : Number.NaN
+    const normalizedValue = value ?? Number.NaN
+    return Number.isFinite(normalizedValue) ? normalizedValue : Number.NaN
 }
 
 async function fetchMonitoringStreamResponse({

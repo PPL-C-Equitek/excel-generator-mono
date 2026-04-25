@@ -130,6 +130,10 @@ export function useMonitoringDashboardModel({
     }, [])
 
     const loadWithAuthenticatedSnapshot = useCallback(async () => {
+        if (!monitoringService.getMonitoringAuthenticatedSnapshot) {
+            return
+        }
+
         const [liveResponse, snapshot] = await Promise.all([
             monitoringService.getMonitoringLive(),
             monitoringService.getMonitoringAuthenticatedSnapshot(),
@@ -168,6 +172,10 @@ export function useMonitoringDashboardModel({
     }, [markSuccessfulLoad, monitoringService, stopMonitoringStatsStream])
 
     const startMonitoringStatsStream = useCallback(async (monitoringAuthToken: string) => {
+        if (!monitoringService.getMonitoringStatsStream) {
+            return
+        }
+
         const streamPayloads = await monitoringService.getMonitoringStatsStream({
             accessToken: monitoringAuthToken,
             intervalSeconds: autoRefreshIntervalMs / 1000,
