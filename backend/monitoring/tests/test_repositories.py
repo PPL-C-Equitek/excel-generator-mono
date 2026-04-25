@@ -676,6 +676,33 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         )
         pipeline.eval.assert_called_once()
 
+    def test_record_request_skips_realtime_capacity_trim_when_limit_zero(self):
+        redis_client = Mock()
+        redis_client.pipeline.return_value = pipeline = Mock()
+        pipeline.execute.return_value = []
+        repository = RedisMetricsRepository(
+            redis_client=redis_client,
+            now=lambda: datetime(2026, 4, 20, 12, 0, 0),
+            key_ttl_seconds=120,
+            realtime_window_seconds=60,
+            realtime_bucket_seconds=10,
+            max_realtime_records=100,
+            max_route_latency_samples=4,
+        )
+        repository._max_realtime_records = 0
+
+        repository.record_request(
+            RequestMetricEvent(
+                route="/upload",
+                method="POST",
+                status_code=200,
+                duration_ms=110.0,
+                created_at=datetime(2026, 4, 20, 11, 59, 0),
+            )
+        )
+
+        pipeline.zremrangebyrank.assert_not_called()
+
     def test_limit_route_hash_keys_respects_snapshot_limit(self):
         repository = RedisMetricsRepository(
             redis_client=Mock(),
@@ -690,6 +717,13 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         route_hash_keys = repository._limit_route_hash_keys(["route-c", "route-a", "route-b"])
 
         self.assertEqual(route_hash_keys, ["route-a", "route-b"])
+
+    def test_to_float_returns_default_on_non_numeric(self):
+        self.assertEqual(self.repo._to_float("not-number"), 0.0)
+        self.assertEqual(self.repo._to_float({}, default=5.5), 5.5)
+
+    def test_to_float_returns_default_on_none_value(self):
+        self.assertEqual(self.repo._to_float(None), 0.0)
 
     def test_build_realtime_records_keeps_invalid_members(self):
         records = self.repo._build_realtime_records([("broken", 1713607200.0)])
