@@ -335,7 +335,115 @@ class _RealtimeSeriesBuilder:
         )
 
 
-class InMemoryMetricsRepository(_MetricKeyNormalizerMixin):
+def _build_realtime_repository_state(
+    *,
+    realtime_window_seconds: int,
+    realtime_bucket_seconds: int,
+    max_realtime_records: int,
+    max_route_latency_samples: int,
+) -> tuple[
+    int,
+    int,
+    int,
+    int,
+    _RealtimeSeriesBuilder,
+]:
+    realtime_config = _build_realtime_series_config(
+        realtime_window_seconds=realtime_window_seconds,
+        realtime_bucket_seconds=realtime_bucket_seconds,
+        max_realtime_records=max_realtime_records,
+    )
+    realtime_window_seconds = realtime_config.window_seconds
+    realtime_bucket_seconds = realtime_config.bucket_seconds
+    max_realtime_records = realtime_config.max_records
+    max_route_latency_samples = _normalize_max_latency_samples(
+        max_route_latency_samples
+    )
+    realtime_series_builder = _RealtimeSeriesBuilder(
+        window_seconds=realtime_window_seconds,
+        bucket_seconds=realtime_bucket_seconds,
+    )
+    return (
+        realtime_window_seconds,
+        realtime_bucket_seconds,
+        max_realtime_records,
+        max_route_latency_samples,
+        realtime_series_builder,
+    )
+
+
+class _RepositoryRealtimeMixin:
+    def _apply_realtime_state(
+        self,
+        *,
+        realtime_window_seconds: int,
+        realtime_bucket_seconds: int,
+        max_realtime_records: int,
+        max_route_latency_samples: int,
+    ) -> None:
+        (
+            self._realtime_window_seconds,
+            self._realtime_bucket_seconds,
+            self._max_realtime_records,
+            self._max_route_latency_samples,
+            self._realtime_series_builder,
+        ) = _build_realtime_repository_state(
+            realtime_window_seconds=realtime_window_seconds,
+            realtime_bucket_seconds=realtime_bucket_seconds,
+            max_realtime_records=max_realtime_records,
+            max_route_latency_samples=max_route_latency_samples,
+        )
+
+    def _build_snapshot_response(
+        self,
+        *,
+        now_value: datetime,
+        route_items: list[tuple[tuple[str, str], _RouteAccumulator]],
+        event_items: list[tuple[tuple[str, str], int]],
+        realtime_records: list[_RealtimeRequestRecord],
+    ) -> MetricsSnapshot:
+        return _build_snapshot_response(
+            now_value=now_value,
+            route_items=route_items,
+            event_items=event_items,
+            realtime_records=realtime_records,
+            realtime_series_builder=self._realtime_series_builder,
+            realtime_window_seconds=self._realtime_window_seconds,
+            realtime_bucket_seconds=self._realtime_bucket_seconds,
+        )
+
+
+def _build_snapshot_response(
+    *,
+    now_value: datetime,
+    route_items: list[tuple[tuple[str, str], _RouteAccumulator]],
+    event_items: list[tuple[tuple[str, str], int]],
+    realtime_records: list[_RealtimeRequestRecord],
+    realtime_series_builder: _RealtimeSeriesBuilder,
+    realtime_window_seconds: int,
+    realtime_bucket_seconds: int,
+) -> MetricsSnapshot:
+    route_snapshots = _SnapshotFactory.build_route_snapshots(route_items)
+    event_snapshots = _SnapshotFactory.build_event_snapshots(event_items)
+    realtime_points = realtime_series_builder.build_points(
+        records=realtime_records,
+        now_epoch=realtime_series_builder.to_epoch_seconds(now_value),
+    )
+    total_requests = sum(item.total_requests for item in route_snapshots)
+    total_errors = sum(item.total_errors for item in route_snapshots)
+    return MetricsSnapshot(
+        generated_at=now_value,
+        total_requests=total_requests,
+        total_errors=total_errors,
+        routes=tuple(route_snapshots),
+        events=tuple(event_snapshots),
+        timeseries=tuple(realtime_points),
+        timeseries_window_seconds=realtime_window_seconds,
+        timeseries_bucket_seconds=realtime_bucket_seconds,
+    )
+
+
+class InMemoryMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin):
     def __init__(
         self,
         *,
@@ -349,20 +457,11 @@ class InMemoryMetricsRepository(_MetricKeyNormalizerMixin):
         self._lock = Lock()
         self._routes: dict[tuple[str, str], _RouteAccumulator] = {}
         self._events: dict[tuple[str, str], int] = {}
-        realtime_config = _build_realtime_series_config(
+        self._apply_realtime_state(
             realtime_window_seconds=realtime_window_seconds,
             realtime_bucket_seconds=realtime_bucket_seconds,
             max_realtime_records=max_realtime_records,
-        )
-        self._realtime_window_seconds = realtime_config.window_seconds
-        self._realtime_bucket_seconds = realtime_config.bucket_seconds
-        self._max_realtime_records = realtime_config.max_records
-        self._max_route_latency_samples = _normalize_max_latency_samples(
-            max_route_latency_samples
-        )
-        self._realtime_series_builder = _RealtimeSeriesBuilder(
-            window_seconds=self._realtime_window_seconds,
-            bucket_seconds=self._realtime_bucket_seconds,
+            max_route_latency_samples=max_route_latency_samples,
         )
         self._recent_requests: deque[_RealtimeRequestRecord] = deque()
 
@@ -394,24 +493,11 @@ class InMemoryMetricsRepository(_MetricKeyNormalizerMixin):
             self._prune_realtime_records(now_epoch=now_epoch)
             realtime_records = list(self._recent_requests)
 
-        route_snapshots = _SnapshotFactory.build_route_snapshots(items)
-        event_snapshots = _SnapshotFactory.build_event_snapshots(event_items)
-        realtime_points = self._realtime_series_builder.build_points(
-            records=realtime_records,
-            now_epoch=now_epoch,
-        )
-
-        total_requests = sum(item.total_requests for item in route_snapshots)
-        total_errors = sum(item.total_errors for item in route_snapshots)
-        return MetricsSnapshot(
-            generated_at=now_value,
-            total_requests=total_requests,
-            total_errors=total_errors,
-            routes=tuple(route_snapshots),
-            events=tuple(event_snapshots),
-            timeseries=tuple(realtime_points),
-            timeseries_window_seconds=self._realtime_window_seconds,
-            timeseries_bucket_seconds=self._realtime_bucket_seconds,
+        return self._build_snapshot_response(
+            now_value=now_value,
+            route_items=items,
+            event_items=event_items,
+            realtime_records=realtime_records,
         )
 
     def reset(self) -> None:
@@ -499,7 +585,7 @@ class ResilientMetricsRepository:
             self._degraded_to_fallback = True
 
 
-class RedisMetricsRepository(_MetricKeyNormalizerMixin):
+class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin):
     def __init__(
         self,
         *,
@@ -517,20 +603,11 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin):
         redis_client=None,
     ):
         self._now = now or datetime.utcnow
-        realtime_config = _build_realtime_series_config(
+        self._apply_realtime_state(
             realtime_window_seconds=realtime_window_seconds,
             realtime_bucket_seconds=realtime_bucket_seconds,
             max_realtime_records=max_realtime_records,
-        )
-        self._realtime_window_seconds = realtime_config.window_seconds
-        self._realtime_bucket_seconds = realtime_config.bucket_seconds
-        self._max_realtime_records = realtime_config.max_records
-        self._max_route_latency_samples = _normalize_max_latency_samples(
-            max_route_latency_samples
-        )
-        self._realtime_series_builder = _RealtimeSeriesBuilder(
-            window_seconds=self._realtime_window_seconds,
-            bucket_seconds=self._realtime_bucket_seconds,
+            max_route_latency_samples=max_route_latency_samples,
         )
         base_prefix = (key_prefix or REDIS_DEFAULT_KEY_PREFIX).strip() or REDIS_DEFAULT_KEY_PREFIX
         namespace_version = (
@@ -638,26 +715,11 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin):
         route_items = self._build_route_items(route_hash_keys)
         event_items = self._build_event_items(raw_events)
         realtime_records = self._build_realtime_records(raw_realtime)
-
-        route_snapshots = _SnapshotFactory.build_route_snapshots(route_items)
-        event_snapshots = _SnapshotFactory.build_event_snapshots(event_items)
-        realtime_points = self._realtime_series_builder.build_points(
-            records=realtime_records,
-            now_epoch=now_epoch,
-        )
-
-        total_requests = sum(item.total_requests for item in route_snapshots)
-        total_errors = sum(item.total_errors for item in route_snapshots)
-
-        return MetricsSnapshot(
-            generated_at=now_value,
-            total_requests=total_requests,
-            total_errors=total_errors,
-            routes=tuple(route_snapshots),
-            events=tuple(event_snapshots),
-            timeseries=tuple(realtime_points),
-            timeseries_window_seconds=self._realtime_window_seconds,
-            timeseries_bucket_seconds=self._realtime_bucket_seconds,
+        return self._build_snapshot_response(
+            now_value=now_value,
+            route_items=route_items,
+            event_items=event_items,
+            realtime_records=realtime_records,
         )
 
     def reset(self) -> None:
