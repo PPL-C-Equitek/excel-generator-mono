@@ -8,6 +8,7 @@ import {
     getMonitoringLive,
     getMonitoringReady,
     getMonitoringStats,
+    getMonitoringStatsStream,
 } from '@/services/monitoring'
 import {
     MonitoringAccessRequiredSection,
@@ -35,6 +36,7 @@ const defaultMonitoringService: MonitoringDashboardService = {
     getMonitoringAccess,
     getMonitoringReady,
     getMonitoringStats,
+    getMonitoringStatsStream,
     getMonitoringAuthenticatedSnapshot,
 }
 

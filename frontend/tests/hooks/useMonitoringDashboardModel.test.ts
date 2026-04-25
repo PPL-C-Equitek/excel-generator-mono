@@ -98,6 +98,43 @@ function createDeferred<T>() {
     }
 }
 
+function makeStreamStatsPayload(): MonitoringStatsPayload {
+    return {
+        status: 'ok',
+        generated_at: '2026-04-24T10:00:05Z',
+        totals: { requests: 200, errors: 2, error_rate: 0.01 },
+        routes: [
+            {
+                route: '/monitoring/stream/',
+                method: 'GET',
+                total_requests: 100,
+                total_errors: 1,
+                error_rate: 0.01,
+                avg_latency_ms: 12,
+                max_latency_ms: 25,
+            },
+        ],
+        events: {
+            'monitoring.stream': {
+                ok: 2,
+            },
+        },
+        timeseries: {
+            window_seconds: 10,
+            bucket_seconds: 5,
+            points: [
+                {
+                    timestamp: '2026-04-24T10:00:03Z',
+                    requests: 5,
+                    errors: 0,
+                    error_rate: 0,
+                    avg_latency_ms: 12,
+                },
+            ],
+        },
+    }
+}
+
 describe('useMonitoringDashboardModel', () => {
     beforeEach(() => {
         vi.mocked(getValidAccessToken).mockResolvedValue('test-access-token')
@@ -564,6 +601,36 @@ describe('useMonitoringDashboardModel', () => {
         expect(service.getMonitoringAccess).not.toHaveBeenCalled()
         expect(service.getMonitoringReady).not.toHaveBeenCalled()
         expect(service.getMonitoringStats).not.toHaveBeenCalled()
+    })
+
+    it('subscribes to realtime stream for stats when service supports it', async () => {
+        const streamClose = vi.fn()
+        const streamPayload = makeStreamStatsPayload()
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockImplementation(async ({ onPayload }) => {
+                onPayload(streamPayload)
+                return { close: streamClose }
+            }),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { result, unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+        expect(result.current.statsPayload?.totals.requests).toBe(200)
+
+        unmount()
+        expect(streamClose).toHaveBeenCalledTimes(1)
     })
 
     it('defaults visibility to true when document is unavailable', () => {
