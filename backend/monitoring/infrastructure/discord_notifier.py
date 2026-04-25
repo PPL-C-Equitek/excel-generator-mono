@@ -4,7 +4,6 @@ import json
 import logging
 from itertools import islice
 from typing import Callable, Mapping, TypeAlias
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
@@ -55,7 +54,7 @@ class DiscordWebhookNotifier:
                 payload=message,
                 timeout_seconds=self._timeout_seconds,
             )
-        except (OSError, URLError, ValueError):
+        except (OSError, ValueError):
             logger.exception("Failed to notify discord webhook.")
         except Exception:
             logger.exception(

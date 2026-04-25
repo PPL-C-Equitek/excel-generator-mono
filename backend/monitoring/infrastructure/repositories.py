@@ -123,6 +123,18 @@ class _RouteAccumulator:
 
 
 @dataclass(frozen=True)
+class RedisConnectionSettings:
+    socket_timeout_seconds: float = 1.0
+    connect_timeout_seconds: float = 1.0
+
+
+@dataclass(frozen=True)
+class RedisNamespaceSettings:
+    key_prefix: str = REDIS_DEFAULT_KEY_PREFIX
+    key_namespace_version: str = REDIS_DEFAULT_KEY_NAMESPACE_VERSION
+
+
+@dataclass(frozen=True)
 class _RealtimeRequestRecord:
     created_at: datetime
     is_error: bool
@@ -598,20 +610,19 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         self,
         *,
         redis_url: str = REDIS_DEFAULT_URL,
-        key_prefix: str = REDIS_DEFAULT_KEY_PREFIX,
+        key_namespace_settings: RedisNamespaceSettings | None = None,
         now: Callable[[], datetime] | None = None,
         realtime_window_seconds: int = REALTIME_DEFAULT_WINDOW_SECONDS,
         realtime_bucket_seconds: int = REALTIME_DEFAULT_BUCKET_SECONDS,
         max_realtime_records: int = REALTIME_DEFAULT_MAX_RECORDS,
         max_route_latency_samples: int = ROUTE_DEFAULT_MAX_LATENCY_SAMPLES,
-        key_namespace_version: str = REDIS_DEFAULT_KEY_NAMESPACE_VERSION,
         key_ttl_seconds: int | None = REDIS_DEFAULT_KEY_TTL_SECONDS,
-        socket_timeout_seconds: float = 1.0,
-        connect_timeout_seconds: float = 1.0,
+        connection_settings: RedisConnectionSettings | None = None,
         max_routes_per_snapshot: int | None = None,
         redis_client=None,
         snapshot_cache_ttl_seconds: float | None = None,
     ):
+        resolved_connection_settings = connection_settings or RedisConnectionSettings()
         self._now = now or datetime.utcnow
         parsed_snapshot_cache_ttl_seconds = (
             0.0 if snapshot_cache_ttl_seconds is None else float(snapshot_cache_ttl_seconds)
@@ -623,9 +634,13 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             max_realtime_records=max_realtime_records,
             max_route_latency_samples=max_route_latency_samples,
         )
-        base_prefix = (key_prefix or REDIS_DEFAULT_KEY_PREFIX).strip() or REDIS_DEFAULT_KEY_PREFIX
+        namespace_settings = key_namespace_settings or RedisNamespaceSettings()
+        base_prefix = (
+            str(namespace_settings.key_prefix or REDIS_DEFAULT_KEY_PREFIX).strip()
+            or REDIS_DEFAULT_KEY_PREFIX
+        )
         namespace_version = (
-            str(key_namespace_version or REDIS_DEFAULT_KEY_NAMESPACE_VERSION).strip()
+            str(namespace_settings.key_namespace_version or REDIS_DEFAULT_KEY_NAMESPACE_VERSION).strip()
             or REDIS_DEFAULT_KEY_NAMESPACE_VERSION
         )
         self._key_prefix = f"{base_prefix}:{namespace_version}"
@@ -640,8 +655,8 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             redis_client = redis.Redis.from_url(
                 redis_url,
                 decode_responses=True,
-                socket_timeout=socket_timeout_seconds,
-                socket_connect_timeout=connect_timeout_seconds,
+                socket_timeout=resolved_connection_settings.socket_timeout_seconds,
+                socket_connect_timeout=resolved_connection_settings.connect_timeout_seconds,
             )
 
         self._redis = redis_client

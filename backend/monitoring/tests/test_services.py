@@ -350,6 +350,20 @@ class MonitoringServiceTest(SimpleTestCase):
 
         self.assertEqual(self.repo.get_snapshot_calls, 2)
 
+    def test_stats_skips_cache_when_ttl_is_zero(self):
+        repo = _RepositoryDouble()
+        service = MonitoringService(
+            readiness_service=self.readiness,
+            metrics_repository=repo,
+            now=lambda: datetime(2026, 4, 20, 10, 5, 0),
+            stats_cache_ttl_seconds=0,
+        )
+
+        service.stats()
+        service.stats()
+
+        self.assertEqual(repo.get_snapshot_calls, 2)
+
     def test_stats_cache_invalidated_after_record_request(self):
         clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
         service = MonitoringService(

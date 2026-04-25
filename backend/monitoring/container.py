@@ -15,6 +15,8 @@ from monitoring.infrastructure.repositories import (
     InMemoryMetricsRepository,
     ResilientMetricsRepository,
     RedisMetricsRepository,
+    RedisConnectionSettings,
+    RedisNamespaceSettings,
     REALTIME_DEFAULT_BUCKET_SECONDS,
     REALTIME_DEFAULT_MAX_RECORDS,
     REALTIME_DEFAULT_WINDOW_SECONDS,
@@ -96,14 +98,18 @@ def _build_redis_repository(*, repository_kwargs: dict[str, int]) -> RedisMetric
     if redis_snapshot_cache_ttl_seconds <= 0:
         redis_snapshot_cache_ttl_seconds = float(
             getattr(settings, "MONITORING_STATS_CACHE_TTL_SECONDS", MONITORING_DEFAULT_STATS_CACHE_TTL_SECONDS),
-        )
+    )
     return RedisMetricsRepository(
         redis_url=redis_url,
-        key_prefix=redis_key_prefix,
-        key_namespace_version=redis_key_namespace_version,
+        key_namespace_settings=RedisNamespaceSettings(
+            key_prefix=redis_key_prefix,
+            key_namespace_version=redis_key_namespace_version,
+        ),
         key_ttl_seconds=redis_key_ttl_seconds,
-        socket_timeout_seconds=redis_socket_timeout_seconds,
-        connect_timeout_seconds=redis_connect_timeout_seconds,
+        connection_settings=RedisConnectionSettings(
+            socket_timeout_seconds=redis_socket_timeout_seconds,
+            connect_timeout_seconds=redis_connect_timeout_seconds,
+        ),
         snapshot_cache_ttl_seconds=redis_snapshot_cache_ttl_seconds,
         **repository_kwargs,
     )

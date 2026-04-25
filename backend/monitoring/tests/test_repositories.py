@@ -9,6 +9,7 @@ from monitoring.infrastructure.repositories import (
     _RealtimeSeriesBuilder,
     _RealtimeRequestRecord,
     _RouteAccumulator,
+    RedisNamespaceSettings,
     _SnapshotFactory,
     _REDIS_ROUTE_SNAPSHOT_FIELDS,
     REDIS_KEY_SEPARATOR,
@@ -807,6 +808,57 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
 
         pipeline.zremrangebyrank.assert_not_called()
 
+    def test_limit_route_hash_keys_from_index_returns_empty_when_index_is_empty(self):
+        redis_client = Mock()
+        redis_client.smembers.return_value = []
+        repository = RedisMetricsRepository(
+            redis_client=redis_client,
+            now=lambda: datetime(2026, 4, 20, 12, 0, 0),
+            key_ttl_seconds=120,
+            realtime_window_seconds=60,
+            realtime_bucket_seconds=10,
+            max_realtime_records=10,
+            max_route_latency_samples=4,
+            max_routes_per_snapshot=2,
+        )
+
+        self.assertEqual(repository._limit_route_hash_keys_from_index(), [])
+        redis_client.pipeline.assert_not_called()
+
+    def test_limit_route_hash_keys_from_index_handles_invalid_metadata_values(self):
+        redis_client = Mock()
+        redis_client.smembers.return_value = ["route-a", "route-b"]
+        redis_client.pipeline.return_value = pipeline = Mock()
+        pipeline.execute.return_value = [
+            ["/beta", "post"],
+            "broken",
+        ]
+        repository = RedisMetricsRepository(
+            redis_client=redis_client,
+            now=lambda: datetime(2026, 4, 20, 12, 0, 0),
+            key_ttl_seconds=120,
+            realtime_window_seconds=60,
+            realtime_bucket_seconds=10,
+            max_realtime_records=10,
+            max_route_latency_samples=4,
+            max_routes_per_snapshot=2,
+        )
+
+        route_hash_keys = repository._limit_route_hash_keys_from_index()
+
+        self.assertEqual(route_hash_keys, ["route-a", "route-b"])
+        self.assertEqual(
+            pipeline.hmget.call_count,
+            2,
+        )
+        pipeline.hmget.assert_has_calls(
+            [
+                Mock.call("route-a", "route", "method"),
+                Mock.call("route-b", "route", "method"),
+            ],
+            any_order=True,
+        )
+
     def test_limit_route_hash_keys_respects_snapshot_limit(self):
         repository = RedisMetricsRepository(
             redis_client=Mock(),
@@ -1096,8 +1148,10 @@ class RedisMetricsRepositoryTest(SimpleTestCase):
         self.repo = RedisMetricsRepository(
             redis_client=self.redis_client,
             now=lambda: datetime(2026, 4, 20, 12, 0, 0),
-            key_prefix="monitoring_test",
-            key_namespace_version="v2",
+            key_namespace_settings=RedisNamespaceSettings(
+                key_prefix="monitoring_test",
+                key_namespace_version="v2",
+            ),
             key_ttl_seconds=3600,
             realtime_window_seconds=60,
             realtime_bucket_seconds=10,
@@ -1242,6 +1296,26 @@ class RedisMetricsRepositorySnapshotCacheTest(SimpleTestCase):
 
         updated_snapshot = repository.get_snapshot()
         self.assertEqual(updated_snapshot.total_requests, 1)
+
+    def test_get_snapshot_disables_cache_when_ttl_is_zero(self):
+        now = datetime(2026, 4, 20, 12, 0, 0)
+        repository = RedisMetricsRepository(
+            redis_client=Mock(),
+            now=lambda: now,
+            max_route_latency_samples=4,
+            snapshot_cache_ttl_seconds=0,
+        )
+
+        pipeline = Mock()
+        pipeline.execute.return_value = [set(), {}, None, []]
+        repository._redis.pipeline.return_value = pipeline
+
+        repository.get_snapshot()
+        repository.get_snapshot()
+
+        self.assertEqual(repository._redis.pipeline.call_count, 2)
+        self.assertIsNone(repository._snapshot_cache)
+        self.assertIsNone(repository._snapshot_cache_expires_at_ms)
 
 class ResilientMetricsRepositoryTest(SimpleTestCase):
     def test_falls_back_when_primary_record_request_fails(self):

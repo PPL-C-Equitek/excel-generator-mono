@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.test import override_settings
@@ -9,11 +10,96 @@ from monitoring.interfaces.http.views import (
     _resolve_stream_interval_seconds,
     _resolve_stream_max_events,
     _stats_stream,
+    _resolve_monitoring_rate_limit_identity,
+    _monitoring_rate_limit,
 )
 
 
 @override_settings(ROOT_URLCONF="monitoring.urls")
 class MonitoringViewsTest(APITestCase):
+    def test_resolve_monitoring_rate_limit_identity_prefers_user_id(self):
+        request = SimpleNamespace(
+            user=SimpleNamespace(
+                is_authenticated=True,
+                id=42,
+                pk=11,
+            ),
+            META={},
+        )
+
+        self.assertEqual(
+            _resolve_monitoring_rate_limit_identity(request),
+            "user:42",
+        )
+
+    def test_resolve_monitoring_rate_limit_identity_falls_back_to_pk_when_id_is_missing(self):
+        request = SimpleNamespace(
+            user=SimpleNamespace(
+                is_authenticated=True,
+                id=None,
+                pk=99,
+            ),
+            META={},
+        )
+
+        self.assertEqual(
+            _resolve_monitoring_rate_limit_identity(request),
+            "user:99",
+        )
+
+    def test_resolve_monitoring_rate_limit_identity_falls_back_to_forwarded_ip_for_anonymous_request(self):
+        request = SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=False),
+            META={
+                "REMOTE_ADDR": "10.0.0.1",
+                "HTTP_X_FORWARDED_FOR": "198.51.100.10, 203.0.113.1",
+            },
+        )
+
+        self.assertEqual(
+            _resolve_monitoring_rate_limit_identity(request),
+            "ip:198.51.100.10",
+        )
+
+    def test_resolve_monitoring_rate_limit_identity_falls_back_to_remote_addr_without_forwarded_ip(self):
+        request = SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=False),
+            META={"REMOTE_ADDR": "10.0.0.1"},
+        )
+
+        self.assertEqual(
+            _resolve_monitoring_rate_limit_identity(request),
+            "ip:10.0.0.1",
+        )
+
+    @override_settings(
+        MONITORING_RATE_LIMIT_MAX_REQUESTS="0",
+        MONITORING_RATE_LIMIT_PER="invalid",
+    )
+    @patch("monitoring.interfaces.http.views.rate_limit")
+    def test_monitoring_rate_limit_defaults_for_invalid_config(self, mocked_rate_limit):
+        _monitoring_rate_limit()
+
+        mocked_rate_limit.assert_called_once_with(
+            max_requests=120,
+            per="minute",
+            key_func=_resolve_monitoring_rate_limit_identity,
+        )
+
+    @override_settings(
+        MONITORING_RATE_LIMIT_MAX_REQUESTS="abc",
+        MONITORING_RATE_LIMIT_PER="seconds",
+    )
+    @patch("monitoring.interfaces.http.views.rate_limit")
+    def test_monitoring_rate_limit_uses_validized_per_when_max_invalid(self, mocked_rate_limit):
+        _monitoring_rate_limit()
+
+        mocked_rate_limit.assert_called_once_with(
+            max_requests=120,
+            per="seconds",
+            key_func=_resolve_monitoring_rate_limit_identity,
+        )
+
     def test_resolve_stream_interval_seconds_handles_invalid_value(self):
         self.assertEqual(_resolve_stream_interval_seconds("invalid"), 2.0)
 

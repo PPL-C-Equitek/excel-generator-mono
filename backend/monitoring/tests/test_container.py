@@ -6,6 +6,8 @@ from django.test import SimpleTestCase, override_settings
 from monitoring import container
 from monitoring.services import MonitoringService
 from monitoring.infrastructure.repositories import (
+    RedisConnectionSettings,
+    RedisNamespaceSettings,
     REALTIME_DEFAULT_BUCKET_SECONDS,
     REALTIME_DEFAULT_MAX_RECORDS,
     REALTIME_DEFAULT_WINDOW_SECONDS,
@@ -35,6 +37,56 @@ class MonitoringContainerTest(SimpleTestCase):
                 "max_route_latency_samples": 512,
                 "max_routes_per_snapshot": None,
             },
+        )
+
+    @override_settings(MONITORING_MAX_ROUTES_PER_SNAPSHOT="abc")
+    def test_build_repository_kwargs_ignores_invalid_routes_setting(self):
+        self.assertIsNone(
+            container._build_repository_kwargs()["max_routes_per_snapshot"]
+        )
+
+    @override_settings(
+        MONITORING_REDIS_SNAPSHOT_CACHE_TTL_SECONDS=0,
+        MONITORING_STATS_CACHE_TTL_SECONDS=4.5,
+        MONITORING_REDIS_SOCKET_TIMEOUT_SECONDS=1.5,
+        MONITORING_REDIS_CONNECT_TIMEOUT_SECONDS=2.5,
+        MONITORING_REALTIME_WINDOW_SECONDS=120,
+        MONITORING_REALTIME_BUCKET_SECONDS=15,
+        MONITORING_MAX_REALTIME_RECORDS=200,
+        MONITORING_MAX_ROUTE_LATENCY_SAMPLES=64,
+    )
+    @patch("monitoring.container.RedisMetricsRepository")
+    def test_build_redis_repository_falls_back_to_stats_ttl_when_snapshot_ttl_is_invalid(
+        self,
+        redis_repository_cls,
+    ):
+        container._build_redis_repository(
+            repository_kwargs={
+                "realtime_window_seconds": 120,
+                "realtime_bucket_seconds": 15,
+                "max_realtime_records": 200,
+                "max_route_latency_samples": 64,
+                "max_routes_per_snapshot": None,
+            }
+        )
+
+        redis_repository_cls.assert_called_once_with(
+            redis_url="redis://127.0.0.1:6379/0",
+            key_namespace_settings=RedisNamespaceSettings(
+                key_prefix="monitoring",
+                key_namespace_version="v1",
+            ),
+            key_ttl_seconds=86400,
+            snapshot_cache_ttl_seconds=4.5,
+            realtime_window_seconds=120,
+            realtime_bucket_seconds=15,
+            max_realtime_records=200,
+            max_route_latency_samples=64,
+            max_routes_per_snapshot=None,
+            connection_settings=RedisConnectionSettings(
+                socket_timeout_seconds=1.5,
+                connect_timeout_seconds=2.5,
+            ),
         )
 
     @override_settings(MONITORING_METRICS_BACKEND="memory")
@@ -123,11 +175,15 @@ class MonitoringContainerTest(SimpleTestCase):
         self.assertIs(service._metrics_repository, resilient_repository)
         redis_repository_cls.assert_called_once_with(
             redis_url="redis://localhost:6379/0",
-            key_prefix="monitoring_test",
-            key_namespace_version="v2",
+            key_namespace_settings=RedisNamespaceSettings(
+                key_prefix="monitoring_test",
+                key_namespace_version="v2",
+            ),
             key_ttl_seconds=7200,
-            socket_timeout_seconds=2.0,
-            connect_timeout_seconds=2.0,
+            connection_settings=RedisConnectionSettings(
+                socket_timeout_seconds=2.0,
+                connect_timeout_seconds=2.0,
+            ),
             snapshot_cache_ttl_seconds=2.0,
             realtime_window_seconds=120,
             realtime_bucket_seconds=15,
@@ -271,11 +327,15 @@ class MonitoringContainerTest(SimpleTestCase):
         self.assertIs(service._metrics_repository, resilient_repository)
         redis_repository_cls.assert_called_once_with(
             redis_url="redis://127.0.0.1:6379/0",
-            key_prefix="monitoring",
-            key_namespace_version="v1",
+            key_namespace_settings=RedisNamespaceSettings(
+                key_prefix="monitoring",
+                key_namespace_version="v1",
+            ),
             key_ttl_seconds=86400,
-            socket_timeout_seconds=1.0,
-            connect_timeout_seconds=1.0,
+            connection_settings=RedisConnectionSettings(
+                socket_timeout_seconds=1.0,
+                connect_timeout_seconds=1.0,
+            ),
             snapshot_cache_ttl_seconds=2.0,
             realtime_window_seconds=REALTIME_DEFAULT_WINDOW_SECONDS,
             realtime_bucket_seconds=REALTIME_DEFAULT_BUCKET_SECONDS,
