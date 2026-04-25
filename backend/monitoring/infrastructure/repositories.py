@@ -42,6 +42,14 @@ REDIS_FIELD_TOTAL_LATENCY_MS = "total_latency_ms"
 REDIS_FIELD_MAX_LATENCY_MS = "max_latency_ms"
 REDIS_KEY_SEPARATOR = "\x1f"
 logger = logging.getLogger(__name__)
+_REDIS_ROUTE_SNAPSHOT_FIELDS = (
+    REDIS_FIELD_ROUTE,
+    REDIS_FIELD_METHOD,
+    REDIS_FIELD_TOTAL_REQUESTS,
+    REDIS_FIELD_TOTAL_ERRORS,
+    REDIS_FIELD_TOTAL_LATENCY_MS,
+    REDIS_FIELD_MAX_LATENCY_MS,
+)
 
 
 @dataclass
@@ -600,6 +608,7 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         key_ttl_seconds: int | None = REDIS_DEFAULT_KEY_TTL_SECONDS,
         socket_timeout_seconds: float = 1.0,
         connect_timeout_seconds: float = 1.0,
+        max_routes_per_snapshot: int | None = None,
         redis_client=None,
     ):
         self._now = now or datetime.utcnow
@@ -632,6 +641,12 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
 
         self._redis = redis_client
         self._redis.ping()
+        parsed_max_routes = (
+            None if max_routes_per_snapshot is None else int(max_routes_per_snapshot)
+        )
+        self._max_routes_per_snapshot = (
+            parsed_max_routes if (parsed_max_routes and parsed_max_routes > 0) else None
+        )
 
     @property
     def _routes_index_key(self) -> str:
@@ -682,15 +697,22 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             "-inf",
             f"({now_epoch - self._realtime_window_seconds}",
         )
+        if self._max_realtime_records > 0:
+            pipeline.zremrangebyrank(
+                self._realtime_key,
+                0,
+                -self._max_realtime_records - 1,
+            )
+        self._queue_set_route_max_latency(
+            pipeline=pipeline,
+            route_hash_key=route_hash_key,
+            duration_ms=duration_ms,
+        )
         self._queue_expire(pipeline, self._routes_index_key)
         self._queue_expire(pipeline, route_hash_key)
         self._queue_expire(pipeline, route_latency_samples_key)
         self._queue_expire(pipeline, self._realtime_key)
         pipeline.execute()
-
-        self._update_route_max_latency(route_hash_key=route_hash_key, duration_ms=duration_ms)
-        self._trim_route_latency_samples(route_latency_samples_key=route_latency_samples_key)
-        self._trim_realtime_records()
 
     def record_event(self, event: AuthMetricEvent) -> None:
         event_name, outcome = self._event_key_from_event(event)
@@ -712,6 +734,7 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         pipeline.zrangebyscore(self._realtime_key, min_epoch, "+inf", withscores=True)
         route_hash_keys, raw_events, _, raw_realtime = pipeline.execute()
 
+        route_hash_keys = self._limit_route_hash_keys(route_hash_keys)
         route_items = self._build_route_items(route_hash_keys)
         event_items = self._build_event_items(raw_events)
         realtime_records = self._build_realtime_records(raw_realtime)
@@ -730,11 +753,26 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             keys_to_delete.append(self._route_latency_samples_key(route_hash_key))
         self._redis.delete(*keys_to_delete)
 
-    def _update_route_max_latency(self, *, route_hash_key: str, duration_ms: float) -> None:
-        current_raw = self._redis.hget(route_hash_key, REDIS_FIELD_MAX_LATENCY_MS)
-        current = self._to_float(current_raw)
-        if duration_ms > current:
-            self._redis.hset(route_hash_key, REDIS_FIELD_MAX_LATENCY_MS, duration_ms)
+    def _queue_set_route_max_latency(
+        self,
+        *,
+        pipeline,
+        route_hash_key: str,
+        duration_ms: float,
+    ) -> None:
+        script = """
+            local current = tonumber(redis.call('HGET', KEYS[1], ARGV[1]))
+            local candidate = tonumber(ARGV[2])
+            if not candidate then
+                return 0
+            end
+            if not current or candidate > current then
+                redis.call('HSET', KEYS[1], ARGV[1], candidate)
+                return 1
+            end
+            return 0
+        """
+        pipeline.eval(script, 1, route_hash_key, REDIS_FIELD_MAX_LATENCY_MS, duration_ms)
 
     def _trim_realtime_records(self) -> None:
         current_size = self._to_int(self._redis.zcard(self._realtime_key))
@@ -767,7 +805,7 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
 
         pipeline = self._redis.pipeline()
         for route_hash_key in route_hash_keys:
-            pipeline.hgetall(route_hash_key)
+            pipeline.hmget(route_hash_key, *_REDIS_ROUTE_SNAPSHOT_FIELDS)
             pipeline.lrange(
                 self._route_latency_samples_key(route_hash_key),
                 0,
@@ -779,11 +817,22 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         for index, route_hash_key in enumerate(route_hash_keys):
             raw_route = route_data[index * 2]
             raw_latency_samples = route_data[index * 2 + 1]
-            if not isinstance(raw_route, dict):
+            if not isinstance(raw_route, list):
                 continue
-            route = self._normalize_text(raw_route.get(REDIS_FIELD_ROUTE), default=UNKNOWN_ROUTE)
+            raw_route_values = list(raw_route)
+            (
+                route_raw,
+                method_raw,
+                total_requests_raw,
+                total_errors_raw,
+                total_latency_ms_raw,
+                max_latency_ms_raw,
+            ) = (
+                raw_route_values + [None] * (6 - len(raw_route_values))
+            )[:6]
+            route = self._normalize_text(route_raw, default=UNKNOWN_ROUTE)
             method = self._normalize_text(
-                raw_route.get(REDIS_FIELD_METHOD),
+                method_raw,
                 default=UNKNOWN_METHOD,
                 transform=str.upper,
             )
@@ -791,16 +840,26 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
                 raw_latency_samples
             )
             accumulator = _RouteAccumulator(
-                total_requests=self._to_int(raw_route.get(REDIS_FIELD_TOTAL_REQUESTS)),
-                total_errors=self._to_int(raw_route.get(REDIS_FIELD_TOTAL_ERRORS)),
-                total_latency_ms=self._to_float(raw_route.get(REDIS_FIELD_TOTAL_LATENCY_MS)),
-                max_latency_ms=self._to_float(raw_route.get(REDIS_FIELD_MAX_LATENCY_MS)),
+                total_requests=self._to_int(total_requests_raw),
+                total_errors=self._to_int(total_errors_raw),
+                total_latency_ms=self._to_float(total_latency_ms_raw),
+                max_latency_ms=self._to_float(max_latency_ms_raw),
                 max_latency_samples=self._max_route_latency_samples,
                 precomputed_p95_latency_ms=p95_latency_ms,
                 precomputed_p99_latency_ms=p99_latency_ms,
             )
             items.append(((route, method), accumulator))
         return items
+
+    def _limit_route_hash_keys(
+        self,
+        route_hash_keys: Iterable[str],
+    ) -> list[str]:
+        route_hash_keys_list = list(route_hash_keys)
+        if not route_hash_keys_list or self._max_routes_per_snapshot is None:
+            return route_hash_keys_list
+        route_hash_keys_list = sorted(route_hash_keys_list)
+        return route_hash_keys_list[: self._max_routes_per_snapshot]
 
     def _build_event_items(
         self,

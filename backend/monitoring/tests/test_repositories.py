@@ -10,6 +10,7 @@ from monitoring.infrastructure.repositories import (
     _RealtimeRequestRecord,
     _RouteAccumulator,
     _SnapshotFactory,
+    _REDIS_ROUTE_SNAPSHOT_FIELDS,
     RedisMetricsRepository,
 )
 from monitoring.repositories import (
@@ -366,6 +367,9 @@ class _FakeRedisPipeline:
     def zremrangebyscore(self, *args, **kwargs):
         return self._queue("zremrangebyscore", *args, **kwargs)
 
+    def zremrangebyrank(self, *args, **kwargs):
+        return self._queue("zremrangebyrank", *args, **kwargs)
+
     def smembers(self, *args, **kwargs):
         return self._queue("smembers", *args, **kwargs)
 
@@ -374,6 +378,12 @@ class _FakeRedisPipeline:
 
     def zrangebyscore(self, *args, **kwargs):
         return self._queue("zrangebyscore", *args, **kwargs)
+
+    def hmget(self, *args, **kwargs):
+        return self._queue("hmget", *args, **kwargs)
+
+    def eval(self, *args, **kwargs):
+        return self._queue("eval", *args, **kwargs)
 
     def lpush(self, *args, **kwargs):
         return self._queue("lpush", *args, **kwargs)
@@ -431,6 +441,10 @@ class _FakeRedisClient:
 
     def hgetall(self, key):
         return dict(self._hashes.get(key, {}))
+
+    def hmget(self, key, *fields):
+        table = self._hashes.setdefault(key, {})
+        return [table.get(field) for field in fields]
 
     def hincrby(self, key, field, amount):
         table = self._hashes.setdefault(key, {})
@@ -498,6 +512,17 @@ class _FakeRedisClient:
         if withscores:
             return [(member, score) for score, member in filtered]
         return [member for score, member in filtered]
+
+    def eval(self, script, numkeys, *keys_and_args):
+        if "redis.call('HGET'" in script:
+            key = keys_and_args[0]
+            field = keys_and_args[1]
+            candidate = float(keys_and_args[2])
+            current_raw = self._hashes.get(key, {}).get(field)
+            current = float(current_raw) if current_raw is not None else None
+            if current is None or candidate > current:
+                self._hashes.setdefault(key, {})[field] = str(candidate)
+        return None
 
     def zcard(self, key):
         return len(self._zsets.get(key, []))
@@ -605,7 +630,7 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
 
     def test_build_route_items_skips_non_dict_payload(self):
         pipeline = Mock()
-        pipeline.hgetall.return_value = pipeline
+        pipeline.hmget.return_value = pipeline
         pipeline.lrange.return_value = pipeline
         pipeline.execute.return_value = [None, []]
         self.repo._redis.pipeline = Mock(return_value=pipeline)
@@ -613,7 +638,58 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         items = self.repo._build_route_items(["route-key"])
 
         self.assertEqual(items, [])
-        pipeline.hgetall.assert_called_once_with("route-key")
+        pipeline.hmget.assert_called_once_with("route-key", *_REDIS_ROUTE_SNAPSHOT_FIELDS)
+
+    def test_record_request_does_not_run_separate_trim_commands(self):
+        redis_client = Mock()
+        redis_client.pipeline.return_value = pipeline = Mock()
+        pipeline.execute.return_value = []
+        repository = RedisMetricsRepository(
+            redis_client=redis_client,
+            now=lambda: datetime(2026, 4, 20, 12, 0, 0),
+            key_ttl_seconds=120,
+            realtime_window_seconds=60,
+            realtime_bucket_seconds=10,
+            max_realtime_records=10,
+            max_route_latency_samples=4,
+        )
+
+        repository.record_request(
+            RequestMetricEvent(
+                route="/upload",
+                method="POST",
+                status_code=200,
+                duration_ms=110.0,
+                created_at=datetime(2026, 4, 20, 11, 59, 0),
+            )
+        )
+
+        self.assertEqual(redis_client.hget.call_count, 0)
+        self.assertEqual(redis_client.llen.call_count, 0)
+        self.assertEqual(redis_client.zcard.call_count, 0)
+        self.assertEqual(redis_client.zremrangebyrank.call_count, 0)
+        self.assertEqual(redis_client.ltrim.call_count, 0)
+        pipeline.zremrangebyrank.assert_called_once_with(
+            repository._realtime_key,
+            0,
+            -repository._max_realtime_records - 1,
+        )
+        pipeline.eval.assert_called_once()
+
+    def test_limit_route_hash_keys_respects_snapshot_limit(self):
+        repository = RedisMetricsRepository(
+            redis_client=Mock(),
+            now=lambda: datetime(2026, 4, 20, 12, 0, 0),
+            key_ttl_seconds=120,
+            realtime_window_seconds=60,
+            realtime_bucket_seconds=10,
+            max_realtime_records=10,
+            max_route_latency_samples=4,
+            max_routes_per_snapshot=2,
+        )
+        route_hash_keys = repository._limit_route_hash_keys(["route-c", "route-a", "route-b"])
+
+        self.assertEqual(route_hash_keys, ["route-a", "route-b"])
 
     def test_build_realtime_records_keeps_invalid_members(self):
         records = self.repo._build_realtime_records([("broken", 1713607200.0)])
