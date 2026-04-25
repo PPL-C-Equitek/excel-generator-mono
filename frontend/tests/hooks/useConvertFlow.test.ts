@@ -1319,7 +1319,7 @@ describe('useConvertFlow', () => {
 
             expect(payload.content_data[0].rows[0]).toEqual({
                 plain_obj: '{"nested":"ok"}',
-                circular_obj: '[object Object]',
+                circular_obj: '[unserializable object]',
             })
         })
 

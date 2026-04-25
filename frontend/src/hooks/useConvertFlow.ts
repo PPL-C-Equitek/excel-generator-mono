@@ -82,6 +82,9 @@ function toScalarCell(value: unknown): ScalarCell {
     try {
         return JSON.stringify(value)
     } catch {
+        if (value !== null && typeof value === 'object') {
+            return '[unserializable object]'
+        }
         return String(value)
     }
 }
@@ -183,7 +186,7 @@ function inferHeadersAndRowsFromRowsArray(rows: unknown[]): { headers: string[];
     if (rows.length > 0 && rows.every((row) => isJsonObject(row))) {
         const collectedHeaders = Array.from(
             new Set(
-                (rows as JsonObject[]).flatMap((row) => Object.keys(row))
+                rows.flatMap((row) => Object.keys(row))
             )
         )
         const headers = normalizeHeaders(collectedHeaders)
