@@ -18,6 +18,8 @@ class Session(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     last_message_at = models.DateTimeField(null=True, blank=True)
     last_output_at = models.DateTimeField(null=True, blank=True)
+    history_summary = models.TextField(blank=True, default="")
+    history_summary_watermark = models.IntegerField(default=0)
 
     class Meta:
         ordering = ("-last_message_at", "-updated_at", "-created_at", "-id")

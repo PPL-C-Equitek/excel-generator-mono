@@ -10,6 +10,7 @@ from artifact_history.services import create_artifact_history
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
+    build_history_with_summary,
     create_session_for_user,
     get_session_for_user,
 )
@@ -189,10 +190,11 @@ def send_message(request):
 
     append_user_message(session, message)
 
-    history = [
+    full_history = [
         {"role": msg.role, "content": msg.content}
         for msg in session.messages.order_by("created_at")
     ]
+    history = build_history_with_summary(session, full_history)
 
     try:
         reply = generate_chat_response(history)
