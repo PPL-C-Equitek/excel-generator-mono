@@ -231,30 +231,48 @@ class _MetricKeyNormalizerMixin:
 
 class _SnapshotFactory:
     @staticmethod
+    def _build_sorted_snapshots(
+        *,
+        items: list[tuple[tuple[str, str], object]],
+        build_snapshot,
+        sort_key,
+    ) -> list:
+        snapshots = [
+            build_snapshot(
+                item_key=item_key,
+                item_payload=item_payload,
+            )
+            for item_key, item_payload in items
+        ]
+        snapshots.sort(key=sort_key)
+        return snapshots
+
+    @staticmethod
     def build_route_snapshots(
         items: list[tuple[tuple[str, str], _RouteAccumulator]]
     ) -> list[RouteMetricSnapshot]:
-        route_snapshots = [
-            accumulator.to_snapshot(route=route, method=method)
-            for (route, method), accumulator in items
-        ]
-        route_snapshots.sort(
-            key=lambda item: (-item.total_requests, item.route, item.method)
+        return _SnapshotFactory._build_sorted_snapshots(
+            items=items,
+            build_snapshot=lambda *, item_key, item_payload: item_payload.to_snapshot(
+                route=item_key[0],
+                method=item_key[1],
+            ),
+            sort_key=lambda item: (-item.total_requests, item.route, item.method),
         )
-        return route_snapshots
 
     @staticmethod
     def build_event_snapshots(
         event_items: list[tuple[tuple[str, str], int]]
     ) -> list[EventMetricSnapshot]:
-        event_snapshots = [
-            EventMetricSnapshot(event_name=event_name, outcome=outcome, count=count)
-            for (event_name, outcome), count in event_items
-        ]
-        event_snapshots.sort(
-            key=lambda item: (-item.count, item.event_name, item.outcome)
+        return _SnapshotFactory._build_sorted_snapshots(
+            items=event_items,
+            build_snapshot=lambda *, item_key, item_payload: EventMetricSnapshot(
+                event_name=item_key[0],
+                outcome=item_key[1],
+                count=item_payload,
+            ),
+            sort_key=lambda item: (-item.count, item.event_name, item.outcome),
         )
-        return event_snapshots
 
 
 class _RealtimeSeriesBuilder:
@@ -648,8 +666,7 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin):
         for route_hash_key in route_hash_keys:
             keys_to_delete.append(route_hash_key)
             keys_to_delete.append(self._route_latency_samples_key(route_hash_key))
-        if keys_to_delete:
-            self._redis.delete(*keys_to_delete)
+        self._redis.delete(*keys_to_delete)
 
     def _update_route_max_latency(self, *, route_hash_key: str, duration_ms: float) -> None:
         current_raw = self._redis.hget(route_hash_key, REDIS_FIELD_MAX_LATENCY_MS)

@@ -141,3 +141,10 @@ class RedisHealthCheckTest(SimpleTestCase):
             socket_connect_timeout=1.5,
         )
         client.ping.assert_called_once()
+
+    @patch("monitoring.infrastructure.health_checks.redis", new=None)
+    def test_perform_check_raises_when_redis_is_missing(self):
+        check = RedisHealthCheck(redis_url="redis://localhost:6379/0")
+
+        with self.assertRaises(RuntimeError):
+            check.perform_check()

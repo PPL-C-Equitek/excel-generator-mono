@@ -62,7 +62,12 @@ class DefaultLoginUserUseCase(LoginUserUseCase):
                 self._attempt_tracker_port.record_failure(command.email)
                 raise InvalidCredentialsError()
 
-            token_data = self._token_generator_port.generate(user.id, user.email)
+            session_version = self._resolve_session_version(user)
+            token_data = self._token_generator_port.generate(
+                user.id,
+                user.email,
+                session_version=session_version,
+            )
             self._attempt_tracker_port.reset_failures(command.email)
 
             return LoginResult(
@@ -88,3 +93,10 @@ class DefaultLoginUserUseCase(LoginUserUseCase):
             logger.warning("Login failed for %s: user not found.", email)
             self._attempt_tracker_port.record_failure(email)
             raise InvalidCredentialsError() from exc
+
+    @staticmethod
+    def _resolve_session_version(user: User) -> int:
+        session_version = getattr(user, "session_version", 1)
+        if isinstance(session_version, int):
+            return session_version
+        return 1

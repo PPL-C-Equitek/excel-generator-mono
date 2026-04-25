@@ -7,6 +7,51 @@ from monitoring.services import MonitoringService
 
 
 class MonitoringContainerTest(SimpleTestCase):
+    def test_monitoring_backend_setting_normalizes_value(self):
+        with patch("monitoring.container.settings") as settings:
+            settings.MONITORING_METRICS_BACKEND = "Redis "
+            self.assertEqual(container._monitoring_backend_setting(), "redis")
+
+    @override_settings(
+        MONITORING_REALTIME_WINDOW_SECONDS="75",
+        MONITORING_REALTIME_BUCKET_SECONDS="8",
+        MONITORING_MAX_REALTIME_RECORDS="200",
+        MONITORING_MAX_ROUTE_LATENCY_SAMPLES="512",
+    )
+    def test_build_repository_kwargs_reads_settings(self):
+        self.assertEqual(
+            container._build_repository_kwargs(),
+            {
+                "realtime_window_seconds": 75,
+                "realtime_bucket_seconds": 8,
+                "max_realtime_records": 200,
+                "max_route_latency_samples": 512,
+            },
+        )
+
+    @override_settings(MONITORING_METRICS_BACKEND="memory")
+    def test_build_readiness_checks_does_not_include_redis_check_by_default(self):
+        checks = container._build_readiness_checks()
+
+        self.assertEqual([check.name for check in checks], ["database", "storage", "openai_config"])
+
+    @override_settings(MONITORING_METRICS_BACKEND="unknown")
+    @patch("monitoring.container.InMemoryMetricsRepository")
+    @patch("monitoring.container.RedisMetricsRepository")
+    def test_build_metrics_repository_falls_back_to_in_memory_for_unsupported_backend(
+        self,
+        redis_repository_cls,
+        in_memory_repository_cls,
+    ):
+        fallback_repository = object()
+        in_memory_repository_cls.return_value = fallback_repository
+
+        result = container._build_metrics_repository()
+
+        self.assertIs(result, fallback_repository)
+        redis_repository_cls.assert_not_called()
+        in_memory_repository_cls.assert_called_once()
+
     def tearDown(self):
         container.reset_monitoring_service_for_tests()
 
