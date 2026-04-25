@@ -718,6 +718,7 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         redis_client.ping.assert_called_once()
         self.assertIs(repository._redis, redis_client)
 
+    @patch("monitoring.infrastructure.repositories.redis", new=None)
     def test_repository_init_raises_when_redis_is_missing(self):
         with self.assertRaises(RuntimeError):
             RedisMetricsRepository(
@@ -726,6 +727,28 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
                 now=lambda: datetime(2026, 4, 20, 12, 0, 0),
                 max_route_latency_samples=4,
             )
+
+    @patch("monitoring.infrastructure.repositories.redis")
+    def test_repository_init_raises_when_redis_server_is_unreachable(
+        self,
+        redis_module,
+    ):
+        redis_client = Mock()
+        redis_client.ping.side_effect = RuntimeError("connection refused")
+        redis_module.Redis.from_url.return_value = redis_client
+
+        with self.assertRaises(RuntimeError):
+            RedisMetricsRepository(
+                now=lambda: datetime(2026, 4, 20, 12, 0, 0),
+                max_route_latency_samples=4,
+            )
+
+        redis_module.Redis.from_url.assert_called_once_with(
+            "redis://127.0.0.1:6379/0",
+            decode_responses=True,
+            socket_timeout=1.0,
+            socket_connect_timeout=1.0,
+        )
 
     def test_parse_event_hash_field_returns_unknown_when_invalid(self):
         self.assertEqual(
