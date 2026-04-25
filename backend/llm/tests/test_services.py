@@ -11,7 +11,13 @@ from llm.services.generation_service import (
     LlmGenerationService,
     compose_system_prompt,
 )
-from llm.services.openai_client import OpenAIServiceError, OpenAIUpstreamError, generate_json, generate_text
+from llm.services.openai_client import (
+    OpenAIServiceError,
+    OpenAIUpstreamError,
+    generate_chat_response,
+    generate_json,
+    generate_text,
+)
 
 
 class DummyAuthenticationError(Exception):
@@ -561,6 +567,140 @@ class LlmGenerationServiceTest(SimpleTestCase):
             prompt_source.get_prompt_fragment("schema-1")
 
         mock_get.assert_not_called()
+
+
+class GenerateChatResponseServiceTest(SimpleTestCase):
+    # Positive
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_returns_reply_from_first_choice(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="Halo!"))]
+        )
+
+        result = generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(result, "Halo!")
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_calls_chat_completions_with_correct_payload(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="ok"))]
+        )
+        messages = [{"role": "user", "content": "Halo"}]
+
+        generate_chat_response(messages)
+
+        mock_client.chat.completions.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            messages=messages,
+        )
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_passes_full_history_to_api(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="Follow-up reply"))]
+        )
+        messages = [
+            {"role": "user", "content": "Pesan pertama"},
+            {"role": "assistant", "content": "Balasan pertama"},
+            {"role": "user", "content": "Pesan lanjutan"},
+        ]
+
+        result = generate_chat_response(messages)
+
+        self.assertEqual(result, "Follow-up reply")
+        mock_client.chat.completions.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            messages=messages,
+        )
+
+    # Negative
+
+    def test_generate_chat_response_raises_for_empty_messages(self):
+        with self.assertRaises(ValueError):
+            generate_chat_response([])
+
+    @override_settings(OPENAI_API_KEY="", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_raises_when_api_key_missing(self, mock_openai):
+        with self.assertRaises(OpenAIServiceError):
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        mock_openai.assert_not_called()
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_raises_when_reply_content_is_empty(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content=""))]
+        )
+
+        with self.assertRaises(OpenAIServiceError):
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.AuthenticationError", new=DummyAuthenticationError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_maps_authentication_error_to_401(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = DummyAuthenticationError("bad auth")
+
+        with self.assertRaises(OpenAIUpstreamError) as ctx:
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.RateLimitError", new=DummyRateLimitError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_maps_rate_limit_error_to_429(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = DummyRateLimitError("rate limit")
+
+        with self.assertRaises(OpenAIUpstreamError) as ctx:
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(ctx.exception.status_code, 429)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APITimeoutError", new=DummyTimeoutError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_maps_timeout_error_to_504(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = DummyTimeoutError("timeout")
+
+        with self.assertRaises(OpenAIUpstreamError) as ctx:
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(ctx.exception.status_code, 504)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIConnectionError", new=DummyAPIConnectionError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_maps_connection_error_to_502(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = DummyAPIConnectionError("conn aborted")
+
+        with self.assertRaises(OpenAIUpstreamError) as ctx:
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(ctx.exception.status_code, 502)
 
 
 

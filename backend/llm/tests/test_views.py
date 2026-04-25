@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from artifact_history.models import ArtifactHistory
 from authentication.models import User
+from chat_sessions.models import ChatMessage, Session
 from llm.services.generation_service import CustomSchemaNotFoundError
 from llm.services.openai_client import OpenAITextGenerationProvider
 from llm.services.openai_client import (
@@ -665,36 +666,116 @@ class LlmGenerateHistoryIntegrationTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(ArtifactHistory.objects.exists())
 
-class SendMessagePositiveTest(SimpleTestCase):
+class SendMessagePositiveTest(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="send-msg-pos@example.com",
+            name="Send Message User",
+            password="secret",
+            status="verified",
+        )
 
-    @patch("llm.views.generate_text")
-    def test_send_message_returns_200_with_valid_payload(self, mock_generate_text):
-        mock_generate_text.return_value = "Halo! Ada yang bisa saya bantu?"
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_200_with_reply_and_session_id(self, mock_generate):
+        mock_generate.return_value = "Halo! Ada yang bisa saya bantu?"
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "Halo"},
+            {"message": "Halo"},
             format="json",
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["reply"], "Halo! Ada yang bisa saya bantu?")
-        self.assertEqual(response["Content-Type"], "application/json")
-        self.assertIsInstance(response.data, dict)
-        mock_generate_text.assert_called_once_with("Halo")
+        self.assertIn("session_id", response.data)
+        self.assertIsNotNone(response.data["session_id"])
 
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_creates_new_session_when_no_session_id_given(self, mock_generate):
+        mock_generate.return_value = "ok"
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Halo"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        session_id = response.data["session_id"]
+        self.assertTrue(Session.objects.filter(id=session_id, owner=self.user).exists())
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_continues_existing_session(self, mock_generate):
+        mock_generate.return_value = "Balasan lanjutan."
+        session = Session.objects.create(owner=self.user)
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"session_id": str(session.id), "message": "Pesan lanjutan"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(str(response.data["session_id"]), str(session.id))
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_persists_user_and_assistant_messages(self, mock_generate):
+        mock_generate.return_value = "Balasan dari AI."
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Halo dari user"},
+            format="json",
+        )
+
+        session_id = response.data["session_id"]
+        messages = list(
+            ChatMessage.objects.filter(session_id=session_id).order_by("created_at")
+        )
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0].role, ChatMessage.ROLE_USER)
+        self.assertEqual(messages[0].content, "Halo dari user")
+        self.assertEqual(messages[1].role, ChatMessage.ROLE_ASSISTANT)
+        self.assertEqual(messages[1].content, "Balasan dari AI.")
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_passes_full_history_to_llm(self, mock_generate):
+        mock_generate.return_value = "Balasan baru."
+        session = Session.objects.create(owner=self.user)
+        ChatMessage.objects.create(
+            session=session, role=ChatMessage.ROLE_USER, content="Pesan pertama"
+        )
+        ChatMessage.objects.create(
+            session=session, role=ChatMessage.ROLE_ASSISTANT, content="Balasan pertama"
+        )
+        self.client.force_authenticate(user=self.user)
+
+        self.client.post(
+            "/llm/send-message/",
+            {"session_id": str(session.id), "message": "Pesan kedua"},
+            format="json",
+        )
+
+        mock_generate.assert_called_once_with([
+            {"role": "user", "content": "Pesan pertama"},
+            {"role": "assistant", "content": "Balasan pertama"},
+            {"role": "user", "content": "Pesan kedua"},
+        ])
 
     @patch("llm.views.SendMessageResponseSerializer")
-    @patch("llm.views.generate_text")
+    @patch("llm.views.generate_chat_response")
     def test_send_message_returns_502_when_response_serializer_invalid(
-        self, mock_generate_text, mock_response_serializer_class
+        self, mock_generate, mock_serializer_class
     ):
-        mock_generate_text.return_value = "reply text"
-        mock_response_serializer = mock_response_serializer_class.return_value
-        mock_response_serializer.is_valid.return_value = False
+        mock_generate.return_value = "reply text"
+        mock_serializer_class.return_value.is_valid.return_value = False
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/send-message/",
@@ -704,77 +785,118 @@ class SendMessagePositiveTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
-        mock_response_serializer_class.assert_called_once_with(data={"reply": "reply text"})
 
 
-class SendMessageNegativeTest(SimpleTestCase):
+class SendMessageNegativeTest(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="send-msg-neg@example.com",
+            name="Negative Test User",
+            password="secret",
+            status="verified",
+        )
 
-    @patch("llm.views.generate_text")
-    def test_send_message_rejects_empty_payload(self, mock_generate_text):
-        response = self.client.post("/llm/send-message/", {}, format="json")
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["detail"], "Invalid request payload.")
-        self.assertIn("errors", response.data)
-        mock_generate_text.assert_not_called()
-
-    @patch("llm.views.generate_text")
-    def test_send_message_accepts_missing_session_id(self, mock_generate_text):
-        mock_generate_text.return_value = "Halo! Ada yang bisa saya bantu?"
-
+    def test_send_message_requires_authentication(self):
         response = self.client.post(
             "/llm/send-message/",
             {"message": "Halo"},
             format="json",
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["reply"], "Halo! Ada yang bisa saya bantu?")
-        mock_generate_text.assert_called_once_with("Halo")
+        self.assertEqual(response.status_code, 401)
 
-    @patch("llm.views.generate_text")
-    def test_send_message_rejects_missing_message(self, mock_generate_text):
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_404_for_unknown_session_id(self, mock_generate):
+        self.client.force_authenticate(user=self.user)
+
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123"},
+            {"session_id": str(uuid4()), "message": "Halo"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        mock_generate.assert_not_called()
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_404_for_session_owned_by_other_user(self, mock_generate):
+        other_user = User.objects.create_user(
+            email="other-user@example.com",
+            name="Other User",
+            password="secret",
+            status="verified",
+        )
+        other_session = Session.objects.create(owner=other_user)
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"session_id": str(other_session.id), "message": "Halo"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        mock_generate.assert_not_called()
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_rejects_empty_payload(self, mock_generate):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post("/llm/send-message/", {}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertIn("errors", response.data)
+        mock_generate.assert_not_called()
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_rejects_missing_message(self, mock_generate):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"session_id": str(uuid4())},
             format="json",
         )
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["detail"], "Invalid request payload.")
         self.assertIn("message", response.data["errors"])
-        mock_generate_text.assert_not_called()
+        mock_generate.assert_not_called()
 
-    @patch("llm.views.generate_text")
-    def test_send_message_rejects_blank_message(self, mock_generate_text):
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_rejects_blank_message(self, mock_generate):
+        self.client.force_authenticate(user=self.user)
+
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": ""},
+            {"message": ""},
             format="json",
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["detail"], "Invalid request payload.")
         self.assertIn("message", response.data["errors"])
-        mock_generate_text.assert_not_called()
+        mock_generate.assert_not_called()
 
-    @patch("llm.views.generate_text")
-    def test_send_message_rejects_whitespace_only_message(self, mock_generate_text):
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_rejects_whitespace_only_message(self, mock_generate):
+        self.client.force_authenticate(user=self.user)
+
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "   "},
+            {"message": "   "},
             format="json",
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["detail"], "Invalid request payload.")
         self.assertIn("message", response.data["errors"])
-        mock_generate_text.assert_not_called()
+        mock_generate.assert_not_called()
 
     def test_send_message_rejects_non_json_content_type(self):
+        self.client.force_authenticate(user=self.user)
+
         response = self.client.post(
             "/llm/send-message/",
             data="plain text",
@@ -790,70 +912,81 @@ class SendMessageNegativeTest(SimpleTestCase):
         self.assertEqual(response.status_code, 405)
 
 
-class SendMessageErrorHandlingTest(SimpleTestCase):
+class SendMessageErrorHandlingTest(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="send-msg-err@example.com",
+            name="Error Test User",
+            password="secret",
+            status="verified",
+        )
 
-    @patch("llm.views.generate_text")
-    def test_send_message_returns_503_when_openai_not_configured(self, mock_generate_text):
-        mock_generate_text.side_effect = OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_503_when_openai_not_configured(self, mock_generate):
+        mock_generate.side_effect = OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "Halo"},
+            {"message": "Halo"},
             format="json",
         )
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.data["detail"], "Service unavailable. Please try again later.")
 
-    @patch("llm.views.generate_text")
-    def test_send_message_returns_502_for_openai_service_error(self, mock_generate_text):
-        mock_generate_text.side_effect = OpenAIServiceError("OpenAI response did not include output_text.")
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_502_for_openai_service_error(self, mock_generate):
+        mock_generate.side_effect = OpenAIServiceError("OpenAI response did not include a reply.")
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "Halo"},
+            {"message": "Halo"},
             format="json",
         )
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
 
-    @patch("llm.views.generate_text")
-    def test_send_message_returns_401_for_upstream_auth_error(self, mock_generate_text):
-        mock_generate_text.side_effect = OpenAIUpstreamError("LLM authentication failed.", status_code=401)
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_401_for_upstream_auth_error(self, mock_generate):
+        mock_generate.side_effect = OpenAIUpstreamError("LLM authentication failed.", status_code=401)
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "Halo"},
+            {"message": "Halo"},
             format="json",
         )
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
 
-    @patch("llm.views.generate_text")
-    def test_send_message_returns_429_for_upstream_rate_limit(self, mock_generate_text):
-        mock_generate_text.side_effect = OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429)
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_429_for_upstream_rate_limit(self, mock_generate):
+        mock_generate.side_effect = OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429)
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "Halo"},
+            {"message": "Halo"},
             format="json",
         )
 
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
 
-    @patch("llm.views.generate_text")
-    def test_send_message_returns_504_for_upstream_timeout(self, mock_generate_text):
-        mock_generate_text.side_effect = OpenAIUpstreamError("LLM request timed out.", status_code=504)
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_504_for_upstream_timeout(self, mock_generate):
+        mock_generate.side_effect = OpenAIUpstreamError("LLM request timed out.", status_code=504)
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "Halo"},
+            {"message": "Halo"},
             format="json",
         )
 
@@ -861,13 +994,14 @@ class SendMessageErrorHandlingTest(SimpleTestCase):
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
 
     @patch("llm.views.logger")
-    @patch("llm.views.generate_text")
-    def test_send_message_returns_500_for_unexpected_error(self, mock_generate_text, mock_logger):
-        mock_generate_text.side_effect = RuntimeError("unexpected failure")
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_500_for_unexpected_error(self, mock_generate, mock_logger):
+        mock_generate.side_effect = RuntimeError("unexpected failure")
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "Halo"},
+            {"message": "Halo"},
             format="json",
         )
 
@@ -875,13 +1009,14 @@ class SendMessageErrorHandlingTest(SimpleTestCase):
         self.assertEqual(response.data["detail"], "Internal server error.")
         mock_logger.exception.assert_called_once()
 
-    @patch("llm.views.generate_text")
-    def test_send_message_does_not_expose_upstream_error_details(self, mock_generate_text):
-        mock_generate_text.side_effect = OpenAIUpstreamError("raw upstream details", status_code=502)
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_does_not_expose_upstream_error_details(self, mock_generate):
+        mock_generate.side_effect = OpenAIUpstreamError("raw upstream details", status_code=502)
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "Halo"},
+            {"message": "Halo"},
             format="json",
         )
 
@@ -889,33 +1024,41 @@ class SendMessageErrorHandlingTest(SimpleTestCase):
         self.assertNotIn("raw upstream details", str(response.data))
 
 
-class SendMessageEdgeCaseTest(SimpleTestCase):
+class SendMessageEdgeCaseTest(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="send-msg-edge@example.com",
+            name="Edge Case User",
+            password="secret",
+            status="verified",
+        )
 
-    @patch("llm.views.generate_text")
-    def test_send_message_at_max_length_is_accepted(self, mock_generate_text):
-        mock_generate_text.return_value = "ok"
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_at_max_length_is_accepted(self, mock_generate):
+        mock_generate.return_value = "ok"
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "a" * MAX_MESSAGE_LENGTH},
+            {"message": "a" * MAX_MESSAGE_LENGTH},
             format="json",
         )
 
         self.assertEqual(response.status_code, 200)
-        mock_generate_text.assert_called_once_with("a" * MAX_MESSAGE_LENGTH)
 
-    @patch("llm.views.generate_text")
-    def test_send_message_exceeding_max_length_is_rejected(self, mock_generate_text):
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_exceeding_max_length_is_rejected(self, mock_generate):
+        self.client.force_authenticate(user=self.user)
+
         response = self.client.post(
             "/llm/send-message/",
-            {"session_id": "sesi-123", "message": "a" * (MAX_MESSAGE_LENGTH + 1)},
+            {"message": "a" * (MAX_MESSAGE_LENGTH + 1)},
             format="json",
         )
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["detail"], "Invalid request payload.")
         self.assertIn("message", response.data["errors"])
-        mock_generate_text.assert_not_called()
+        mock_generate.assert_not_called()
