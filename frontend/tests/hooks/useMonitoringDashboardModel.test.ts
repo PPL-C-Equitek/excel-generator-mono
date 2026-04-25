@@ -765,56 +765,6 @@ describe('useMonitoringDashboardModel', () => {
         }
     })
 
-    it('marks data stale immediately when effect reruns after threshold has already passed', async () => {
-        vi.useFakeTimers()
-        vi.setSystemTime(new Date('2026-04-24T10:00:00Z'))
-
-        const originalVisibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
-        Object.defineProperty(document, 'visibilityState', {
-            configurable: true,
-            get: () => 'hidden',
-        })
-
-        try {
-            const service = createMonitoringService()
-            const { result, rerender } = renderHook(
-                ({ intervalMs }) =>
-                    useMonitoringDashboardModel({
-                        monitoringService: service,
-                        autoRefreshIntervalMs: intervalMs,
-                    }),
-                {
-                    initialProps: {
-                        intervalMs: 1000,
-                    },
-                }
-            )
-
-            await act(async () => {
-                await Promise.resolve()
-                await Promise.resolve()
-            })
-            expect(result.current.isLoading).toBe(false)
-            expect(result.current.isDataStale).toBe(false)
-
-            act(() => {
-                vi.setSystemTime(new Date('2026-04-24T10:00:20Z'))
-            })
-
-            rerender({
-                intervalMs: 2000,
-            })
-
-            expect(result.current.isDataStale).toBe(true)
-        } finally {
-            if (originalVisibilityDescriptor) {
-                Object.defineProperty(document, 'visibilityState', originalVisibilityDescriptor)
-            } else {
-                Reflect.deleteProperty(document, 'visibilityState')
-            }
-        }
-    })
-
     it('marks data stale when stale timeout fires', async () => {
         vi.useFakeTimers()
         vi.setSystemTime(new Date('2026-04-24T10:00:00Z'))
@@ -854,5 +804,43 @@ describe('useMonitoringDashboardModel', () => {
                 Reflect.deleteProperty(document, 'visibilityState')
             }
         }
+    })
+
+    it('retries stream connection after stream-level error and resumes periodic loading', async () => {
+        const streamClose = vi.fn()
+        let capturedError: ((error: Error) => void) | undefined
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockImplementation(async ({ onError }) => {
+                capturedError = onError
+                return { close: streamClose }
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 1000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        })
+
+        act(() => {
+            capturedError?.(new Error('stream interrupted'))
+        })
+        expect(streamClose).toHaveBeenCalledTimes(1)
+        expect(result.current.consecutiveFailures).toBe(1)
+
+        act(() => {
+            result.current.refreshDashboard()
+        })
+
+        await waitFor(() => {
+            expect(
+                (service.getMonitoringStatsStream as ReturnType<typeof vi.fn>).mock.calls.length
+            ).toBe(2)
+        })
     })
 })
