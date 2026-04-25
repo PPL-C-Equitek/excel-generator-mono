@@ -128,6 +128,7 @@ class MonitoringContainerTest(SimpleTestCase):
             key_ttl_seconds=7200,
             socket_timeout_seconds=2.0,
             connect_timeout_seconds=2.0,
+            snapshot_cache_ttl_seconds=2.0,
             realtime_window_seconds=120,
             realtime_bucket_seconds=15,
             max_realtime_records=321,
@@ -190,6 +191,9 @@ class MonitoringContainerTest(SimpleTestCase):
 
     @override_settings(
         MONITORING_STATS_CACHE_TTL_SECONDS=4.5,
+        MONITORING_DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/test",
+        MONITORING_DISCORD_WEBHOOK_USERNAME="OpsBot",
+        MONITORING_DISCORD_WEBHOOK_TIMEOUT_SECONDS=2.5,
     )
     @patch("monitoring.container.MonitoringService")
     @patch("monitoring.container.InMemoryMetricsRepository")

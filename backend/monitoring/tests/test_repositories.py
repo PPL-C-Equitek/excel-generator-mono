@@ -11,6 +11,7 @@ from monitoring.infrastructure.repositories import (
     _RouteAccumulator,
     _SnapshotFactory,
     _REDIS_ROUTE_SNAPSHOT_FIELDS,
+    REDIS_KEY_SEPARATOR,
     RedisMetricsRepository,
 )
 from monitoring.repositories import (
@@ -924,11 +925,12 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         self.assertEqual(records[0].duration_ms, 0.0)
 
     def test_build_realtime_records_keeps_invalid_members_and_parses_score(self):
+        sep = REDIS_KEY_SEPARATOR
         records = self.repo._build_realtime_records(
             [
-                ("c3cf|1|12.500000", 1713607200.5),
+                (f"c3cf{sep}1{sep}12.500000", 1713607200.5),
                 ("invalid|tuple", 1713607201.5),
-                ("9a1d|0|9.250000", 1713607202.0),
+                (f"9a1d{sep}0{sep}9.250000", 1713607202.0),
             ]
         )
 
