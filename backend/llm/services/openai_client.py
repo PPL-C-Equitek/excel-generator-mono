@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from typing import Any
 
 from django.conf import settings
@@ -31,6 +32,23 @@ class OpenAIUpstreamError(OpenAIServiceError):
         self.status_code = status_code
 
 
+@contextmanager
+def handle_openai_exceptions():
+    try:
+        yield
+    except AuthenticationError as exc:
+        raise OpenAIUpstreamError("LLM authentication failed.", status_code=401) from exc
+    except RateLimitError as exc:
+        raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
+    except APITimeoutError as exc:
+        raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
+    except APIStatusError as exc:
+        status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
+        raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=status_code) from exc
+    except (APIConnectionError, APIError) as exc:
+        raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=502) from exc
+
+
 class OpenAITextGenerationProvider:
     def generate_text(self, prompt: str, system_prompt: str | None = None) -> str:
         if not isinstance(prompt, str) or not prompt.strip():
@@ -46,19 +64,8 @@ class OpenAITextGenerationProvider:
         if effective_system_prompt:
             request_payload["instructions"] = effective_system_prompt
 
-        try:
+        with handle_openai_exceptions():
             response = client.responses.create(**request_payload)
-        except AuthenticationError as exc:
-            raise OpenAIUpstreamError("LLM authentication failed.", status_code=401) from exc
-        except RateLimitError as exc:
-            raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
-        except APITimeoutError as exc:
-            raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
-        except APIStatusError as exc:
-            status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
-            raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=status_code) from exc
-        except (APIConnectionError, APIError) as exc:
-            raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=502) from exc
 
         output_text = getattr(response, "output_text", None)
         if not output_text:
@@ -101,22 +108,11 @@ def generate_chat_response(messages: list[dict]) -> str:
 
     client = _build_client()
 
-    try:
+    with handle_openai_exceptions():
         response = client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=messages,
         )
-    except AuthenticationError as exc:
-        raise OpenAIUpstreamError("LLM authentication failed.", status_code=401) from exc
-    except RateLimitError as exc:
-        raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
-    except APITimeoutError as exc:
-        raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
-    except APIStatusError as exc:
-        status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
-        raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=status_code) from exc
-    except (APIConnectionError, APIError) as exc:
-        raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=502) from exc
 
     try:
         content = response.choices[0].message.content
