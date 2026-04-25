@@ -315,4 +315,12 @@ describe('monitoring adapter', () => {
             statsPayload: null,
         })
     })
+
+    it('falls back to defaults for malformed snapshot payload', () => {
+        expect(mapMonitoringAuthenticatedSnapshotResponse('invalid')).toEqual({
+            accessDecision: { allowed: false, reason: 'unauthenticated' },
+            readyPayload: null,
+            statsPayload: null,
+        })
+    })
 })

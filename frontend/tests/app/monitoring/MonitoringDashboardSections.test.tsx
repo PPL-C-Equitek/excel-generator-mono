@@ -10,6 +10,10 @@ import {
     MonitoringLatencyAndMetersSection,
     MonitoringRoutesAndReadinessSection,
     MonitoringTrafficSummarySection,
+    MonitoringTrafficSummarySkeleton,
+    MonitoringPanelsSkeleton,
+    MonitoringRoutesAndReadinessSkeleton,
+    MonitoringAuthEventsSkeleton,
 } from '../../../src/app/monitoring/components/MonitoringDashboardSections'
 
 const baseStatsPayload: MonitoringStatsPayload = {
@@ -87,6 +91,28 @@ describe('MonitoringDashboardSections', () => {
         expect(onRefresh).toHaveBeenCalledTimes(1)
     })
 
+    it('renders hero with last-sync fallback and refresh button enabled', () => {
+        const onRefresh = vi.fn()
+
+        render(
+            <MonitoringHeroSection
+                lastSync=""
+                isLoading={false}
+                isRefreshing={false}
+                isDataStale={false}
+                retryInSeconds={0}
+                onRefresh={onRefresh}
+            />
+        )
+
+        expect(screen.getByText('Last sync:')).toBeInTheDocument()
+        expect(screen.getByText('--')).toBeInTheDocument()
+        const refreshButton = screen.getByRole('button', { name: 'Refresh Monitoring' })
+        expect(refreshButton).not.toBeDisabled()
+        fireEvent.click(refreshButton)
+        expect(onRefresh).toHaveBeenCalledTimes(1)
+    })
+
     it('renders traffic summary with realtime subtitle and realtime totals', () => {
         render(
             <MonitoringTrafficSummarySection
@@ -101,6 +127,42 @@ describe('MonitoringDashboardSections', () => {
 
         expect(screen.getByText(/^Generated:/)).toBeInTheDocument()
         expect(screen.getByText('Last 60s window')).toBeInTheDocument()
+        expect(screen.getByText('Error rate: 5.00%')).toBeInTheDocument()
+    })
+
+    it('renders traffic summary without realtime stats payload fallback', () => {
+        render(
+            <MonitoringTrafficSummarySection
+                livePayload={{ status: 'ok', timestamp: '2026-04-24T10:00:00Z' }}
+                accessDecision={{ allowed: true, reason: 'ok' }}
+                statsPayload={null}
+                realtimeTotals={null}
+                hasRealtimeSeries={false}
+                realtimeWindowSeconds={0}
+            />
+        )
+
+        expect(screen.queryByText('Generated:')).not.toBeInTheDocument()
+        expect(screen.getByText('Backend traffic volume')).toBeInTheDocument()
+        expect(screen.getAllByText('--').length).toBeGreaterThanOrEqual(3)
+    })
+
+    it('falls back to snapshot totals when realtime totals are absent', () => {
+        render(
+            <MonitoringTrafficSummarySection
+                livePayload={{ status: 'ok', timestamp: '2026-04-24T10:00:00Z' }}
+                accessDecision={{ allowed: true, reason: 'ok' }}
+                statsPayload={baseStatsPayload}
+                realtimeTotals={null as unknown as typeof baseStatsPayload.totals}
+                hasRealtimeSeries={false}
+                realtimeWindowSeconds={0}
+            />
+        )
+
+        expect(screen.getByText('Total Requests')).toBeInTheDocument()
+        expect(screen.getByText('Errors')).toBeInTheDocument()
+        expect(screen.getByText('120')).toBeInTheDocument()
+        expect(screen.getByText('6')).toBeInTheDocument()
         expect(screen.getByText('Error rate: 5.00%')).toBeInTheDocument()
     })
 
@@ -148,6 +210,49 @@ describe('MonitoringDashboardSections', () => {
         expect(screen.getByText(/queue backlog too high/i)).toBeInTheDocument()
     })
 
+    it('renders nothing for readyPayload in non-degraded, healthy state', () => {
+        render(
+            <MonitoringReadinessAlertSection
+                readyPayload={{
+                    status: 'ok',
+                    timestamp: '2026-04-24T10:00:05Z',
+                    checks: [
+                        {
+                            name: 'database',
+                            status: 'ok',
+                            latency_ms: 3,
+                            is_critical: true,
+                        },
+                    ],
+                }}
+            />
+        )
+
+        expect(screen.queryByText('Readiness Degraded')).not.toBeInTheDocument()
+    })
+
+    it('renders nothing when readiness payload is missing', () => {
+        const { container } = render(
+            <MonitoringReadinessAlertSection readyPayload={null} />
+        )
+
+        expect(container).toBeEmptyDOMElement()
+    })
+
+    it('renders overall degraded message when degraded status has no failed checks', () => {
+        render(
+            <MonitoringReadinessAlertSection
+                readyPayload={{
+                    status: 'degraded',
+                    timestamp: '2026-04-24T10:00:05Z',
+                    checks: [],
+                }}
+            />
+        )
+
+        expect(screen.getByText('Overall readiness is in degraded state.')).toBeInTheDocument()
+    })
+
     it('renders latency section empty state', () => {
         render(
             <MonitoringLatencyAndMetersSection
@@ -169,6 +274,31 @@ describe('MonitoringDashboardSections', () => {
 
         expect(screen.getByText('No latency data available yet.')).toBeInTheDocument()
         expect(screen.getByText('Target < 5%')).toBeInTheDocument()
+    })
+
+    it('renders latency chart for a single realtime bucket', () => {
+        render(
+            <MonitoringLatencyAndMetersSection
+                latencySeries={[
+                    { id: 1, label: '10:00:00', value: 40, requests: 3 },
+                ]}
+                latencyChart={{ linePoints: '26,120', areaPath: 'M 26 190 L 26 120 L 26 190 Z', maxLatency: 40 }}
+                hasRealtimeSeries={true}
+                realtimeWindowSeconds={10}
+                realtimeBucketSeconds={5}
+                errorRateMeter={{ percentText: '4.00%', progressLength: 10.05, colorClass: 'text-blue-600' }}
+                readinessMeter={{
+                    percentText: '100%',
+                    progressLength: 251.2,
+                    colorClass: 'text-blue-600',
+                    healthyChecks: 1,
+                    totalChecks: 1,
+                }}
+            />
+        )
+
+        expect(screen.getByText('Peak latency in last 10s:')).toBeInTheDocument()
+        expect(screen.getByText(/Latest bucket\s*10:00:00:\s*avg latency/)).toBeInTheDocument()
     })
 
     it('renders latency realtime chart details and latest bucket', () => {
@@ -311,9 +441,65 @@ describe('MonitoringDashboardSections', () => {
         expect(screen.getByText('latency 5 ms - healthy')).toBeInTheDocument()
     })
 
+    it('renders readiness checks when message is omitted', () => {
+        render(
+            <MonitoringRoutesAndReadinessSection
+                statsPayload={baseStatsPayload}
+                maxRouteRequests={60}
+                readyPayload={{
+                    status: 'healthy',
+                    timestamp: '2026-04-24T10:00:05Z',
+                    checks: [
+                        {
+                            name: 'database',
+                            status: 'ok',
+                            latency_ms: 4,
+                            is_critical: true,
+                        },
+                    ],
+                }}
+            />
+        )
+
+        expect(screen.getByText('latency 4 ms')).toBeInTheDocument()
+        expect(screen.queryByText(/latency 4 ms -/)).not.toBeInTheDocument()
+    })
+
     it('renders auth events empty state', () => {
         render(<MonitoringAuthEventsSection eventRows={[]} maxEventCount={1} />)
 
         expect(screen.getByText('No auth event metrics available yet.')).toBeInTheDocument()
+    })
+
+    it('renders auth events metrics list', () => {
+        render(
+            <MonitoringAuthEventsSection
+                maxEventCount={10}
+                eventRows={[
+                    { eventName: 'auth.login', outcome: 'success', count: 12 },
+                    { eventName: 'auth.refresh', outcome: 'error', count: 8 },
+                ]}
+            />
+        )
+
+        expect(screen.getByText('Auth Events')).toBeInTheDocument()
+        expect(screen.getByText('auth.login')).toBeInTheDocument()
+        expect(screen.getByText('auth.refresh')).toBeInTheDocument()
+        expect(screen.getByText('Outcome: success')).toBeInTheDocument()
+        expect(screen.getByText('Outcome: error')).toBeInTheDocument()
+    })
+
+    it('renders all dashboard skeletons', () => {
+        render(
+            <div>
+                <MonitoringTrafficSummarySkeleton />
+                <MonitoringPanelsSkeleton />
+                <MonitoringRoutesAndReadinessSkeleton />
+                <MonitoringAuthEventsSkeleton />
+            </div>
+        )
+
+        const articles = screen.getAllByRole('article')
+        expect(articles.length).toBeGreaterThanOrEqual(9)
     })
 })

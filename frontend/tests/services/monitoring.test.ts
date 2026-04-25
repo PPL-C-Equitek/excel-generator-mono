@@ -367,6 +367,286 @@ describe('monitoring service', () => {
         streamHandle.close()
     })
 
+    it('passes max_events when a valid positive value is provided', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-max-events')
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockImplementation(async (url: string) => {
+                expect(url).toContain('interval_seconds=3')
+                expect(url).toContain('max_events=5')
+                return createStreamResponse([`data: ${createMonitoringStatsStreamPayload('2026-04-24T10:00:01Z', 1)}\n\n`])
+            })
+        )
+
+        const onPayload = vi.fn()
+        const onError = vi.fn()
+        const streamHandle = await getMonitoringStatsStream({
+            onPayload,
+            onError,
+            maxEvents: 5,
+            intervalSeconds: 3,
+        })
+
+        await waitFor(() => expect(onPayload).toHaveBeenCalledTimes(1))
+        expect(onError).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'Monitoring stream closed unexpectedly.' })
+        )
+
+        streamHandle.close()
+    })
+
+    it('omits max_events when no positive value is provided', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-max-events-off')
+
+        const streamURLs: string[] = []
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockImplementation(async (url: string) => {
+                streamURLs.push(url)
+                return createStreamResponse([`data: ${createMonitoringStatsStreamPayload('2026-04-24T10:00:01Z', 1)}\n\n`])
+            })
+        )
+
+        const onPayload = vi.fn()
+        const onError = vi.fn()
+        const streamHandle = await getMonitoringStatsStream({
+            onPayload,
+            onError,
+            maxEvents: 0,
+            intervalSeconds: 0,
+        })
+
+        await waitFor(() => expect(onPayload).toHaveBeenCalledTimes(1))
+        const streamUrl = streamURLs.at(0)
+        expect(streamUrl).toBe('monitoring/stream/?interval_seconds=1')
+        expect(onError).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'Monitoring stream closed unexpectedly.' })
+        )
+
+        streamHandle.close()
+    })
+
+    it('omits max_events for negative maxEvents and defaults interval to 1', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-max-events-negative')
+
+        const streamURLs: string[] = []
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockImplementation(async (url: string) => {
+                streamURLs.push(url)
+                return createStreamResponse([`data: ${createMonitoringStatsStreamPayload('2026-04-24T10:00:01Z', 1)}\n\n`])
+            })
+        )
+
+        const onPayload = vi.fn()
+        const onError = vi.fn()
+        const streamHandle = await getMonitoringStatsStream({
+            onPayload,
+            onError,
+            maxEvents: -2,
+            intervalSeconds: -3,
+        })
+
+        await waitFor(() => expect(onPayload).toHaveBeenCalledTimes(1))
+        const streamUrl = streamURLs.at(0)
+        expect(streamUrl).toBe('monitoring/stream/?interval_seconds=1')
+        expect(streamURLs.at(0)).not.toContain('max_events=')
+        expect(onError).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'Monitoring stream closed unexpectedly.' })
+        )
+
+        streamHandle.close()
+    })
+
+    it('ignores malformed final trailing frame payload after stream closes', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-trailing-malformed')
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                createStreamResponse([`data: {bad-json`])
+            )
+        )
+
+        const onPayload = vi.fn()
+        const onError = vi.fn()
+
+        const streamHandle = await getMonitoringStatsStream({
+            onPayload,
+            onError,
+        })
+
+        await waitFor(() => {
+            expect(onError).toHaveBeenCalledWith(
+                expect.objectContaining({ message: 'Monitoring stream closed unexpectedly.' })
+            )
+        })
+
+        expect(onPayload).not.toHaveBeenCalled()
+
+        streamHandle.close()
+    })
+
+    it('throws when stream response has no readable body', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-empty-body')
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+        )
+
+        await expect(
+            getMonitoringStatsStream({
+                onPayload: vi.fn(),
+                onError: vi.fn(),
+                accessToken: 'token-empty-body',
+            })
+        ).rejects.toThrow('Monitoring stream response has no readable body.')
+    })
+
+    it('ignores non-data frames and continues parsing subsequent stream frames', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-no-data')
+        const onPayload = vi.fn()
+        const onError = vi.fn()
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                createStreamResponse([
+                    ': keep-alive\n\n',
+                    `data: ${createMonitoringStatsStreamPayload('2026-04-24T10:00:00Z', 1)}\n\n`,
+                ])
+            )
+        )
+
+        const streamHandle = await getMonitoringStatsStream({
+            onPayload,
+            onError,
+        })
+
+        await waitFor(() => {
+            expect(onPayload).toHaveBeenCalledTimes(1)
+        })
+        expect(onPayload).toHaveBeenCalledWith(
+            expect.objectContaining({
+                generated_at: '2026-04-24T10:00:00Z',
+            })
+        )
+        expect(onError).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'Monitoring stream closed unexpectedly.' })
+        )
+
+        streamHandle.close()
+    })
+
+    it('parses final partial stream frame from trailing payload after stream closes', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-trailing')
+        const onPayload = vi.fn()
+        const onError = vi.fn()
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                createStreamResponse([`data: ${createMonitoringStatsStreamPayload('2026-04-24T10:00:09Z', 7)}`])
+            )
+        )
+
+        const streamHandle = await getMonitoringStatsStream({
+            onPayload,
+            onError,
+        })
+
+        await waitFor(() => {
+            expect(onPayload).toHaveBeenCalledTimes(1)
+        })
+        expect(onPayload).toHaveBeenCalledWith(
+            expect.objectContaining({
+                generated_at: '2026-04-24T10:00:09Z',
+            })
+        )
+        expect(onError).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'Monitoring stream closed unexpectedly.' })
+        )
+
+        streamHandle.close()
+    })
+
+    it('does not emit parse errors when the stream is manually closed before data is emitted', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-close')
+
+        let signal: AbortSignal | undefined
+        const cancel = vi.fn().mockResolvedValue(undefined)
+        const read = vi.fn(() =>
+            new Promise<ReadableStreamReadResult<Uint8Array>>((resolve) => {
+                if (signal?.aborted) {
+                    resolve({ done: true, value: undefined })
+                    return
+                }
+
+                signal?.addEventListener(
+                    'abort',
+                    () => {
+                        resolve({ done: true, value: undefined })
+                    },
+                    { once: true }
+                )
+            })
+        )
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockImplementation((_url, init) => {
+                signal = init?.signal as AbortSignal
+                return Promise.resolve({
+                    ok: true,
+                    body: {
+                        getReader: () => ({ read, cancel }),
+                    },
+                })
+            })
+        )
+
+        const onPayload = vi.fn()
+        const onError = vi.fn()
+        const streamHandle = await getMonitoringStatsStream({
+            onPayload,
+            onError,
+        })
+
+        streamHandle.close()
+        streamHandle.close()
+
+        await waitFor(() => {
+            expect(onPayload).not.toHaveBeenCalled()
+            expect(onError).not.toHaveBeenCalled()
+            expect(cancel).toHaveBeenCalledTimes(1)
+        })
+    })
+
     it('retries stream gracefully when SSE payload is malformed', async () => {
         const { getValidAccessToken } = await import('@/lib/auth')
         const { getMonitoringStatsStream } = await import('@/services/monitoring')
@@ -395,6 +675,78 @@ describe('monitoring service', () => {
         })
         expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(Error)
         expect(onPayload).not.toHaveBeenCalled()
+    })
+
+    it('falls back to generic stream parsing error when reader fails with non-Error rejection', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-non-error')
+
+        const read = vi.fn().mockRejectedValue('bad stream payload')
+        const cancel = vi.fn().mockResolvedValue(undefined)
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: true,
+                body: {
+                    getReader: () => ({ read, cancel }),
+                },
+            })
+        )
+
+        const onPayload = vi.fn()
+        const onError = vi.fn()
+
+        await getMonitoringStatsStream({
+            accessToken: 'token-non-error',
+            onPayload,
+            onError,
+        })
+
+        await waitFor(() => {
+            expect(onError).toHaveBeenCalledTimes(1)
+        })
+        expect(onPayload).not.toHaveBeenCalled()
+        expect(onError).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'Monitoring stream parse failed.' })
+        )
+    })
+
+    it('ignores reader AbortError rejections from stream parser', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-abort-error')
+        const abortError = new DOMException('Stream closed', 'AbortError')
+        const read = vi.fn().mockRejectedValue(abortError)
+        const cancel = vi.fn().mockResolvedValue(undefined)
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: true,
+                body: {
+                    getReader: () => ({ read, cancel }),
+                },
+            })
+        )
+
+        const onPayload = vi.fn()
+        const onError = vi.fn()
+
+        await getMonitoringStatsStream({
+            accessToken: 'token-abort-error',
+            onPayload,
+            onError,
+        })
+
+        await waitFor(() => {
+            expect(onPayload).not.toHaveBeenCalled()
+            expect(onError).not.toHaveBeenCalled()
+            expect(cancel).toHaveBeenCalledTimes(1)
+        })
     })
 
     it('throws when streaming endpoint is unavailable', async () => {

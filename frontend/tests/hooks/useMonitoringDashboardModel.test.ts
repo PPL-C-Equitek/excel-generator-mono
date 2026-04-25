@@ -509,13 +509,7 @@ describe('useMonitoringDashboardModel', () => {
     })
 
     it('keeps latency chart generation stable when sparse series has no last point value', async () => {
-        const sparsePoints: Array<{
-            timestamp: string
-            requests: number
-            errors: number
-            error_rate: number
-            avg_latency_ms: number
-        }> = [
+        const sparsePoints = [
             {
                 timestamp: '2026-04-24T10:00:00Z',
                 requests: 1,
@@ -523,8 +517,8 @@ describe('useMonitoringDashboardModel', () => {
                 error_rate: 0,
                 avg_latency_ms: 20,
             },
-        ]
-        sparsePoints.length = 2
+            null,
+        ] as unknown as MonitoringStatsPayload['timeseries']['points']
 
         const service = createMonitoringService({
             getMonitoringStats: vi.fn().mockResolvedValue({
@@ -554,6 +548,63 @@ describe('useMonitoringDashboardModel', () => {
 
         expect(result.current.latencyChart.linePoints).toContain(',')
         expect(result.current.latencyChart.areaPath).toContain('Z')
+    })
+
+    it('falls back to route-level latency data when timeseries points are unavailable', async () => {
+        const service = createMonitoringService({
+            getMonitoringStats: vi.fn().mockResolvedValue({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 10, errors: 0, error_rate: 0 },
+                routes: [
+                    {
+                        route: '/history/',
+                        method: 'GET',
+                        total_requests: 15,
+                        total_errors: 1,
+                        error_rate: 0.066,
+                        avg_latency_ms: 120,
+                        max_latency_ms: 200,
+                    },
+                    {
+                        route: '/health',
+                        method: 'GET',
+                        total_requests: 5,
+                        total_errors: 0,
+                        error_rate: 0,
+                        avg_latency_ms: 60,
+                        max_latency_ms: 90,
+                    },
+                ],
+                events: {
+                    'auth.login': {
+                        success: 1,
+                    },
+                },
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.hasRealtimeSeries).toBe(false)
+        expect(result.current.latencySeries).toHaveLength(2)
+        expect(result.current.latencySeries[0]?.label).toBe('/history/')
+        expect(result.current.latencySeries[0]?.id).toBe(1)
+        expect(result.current.latencySeries).toMatchObject([
+            { id: 1, label: '/history/', value: 120, requests: 15 },
+            { id: 2, label: '/health', value: 60, requests: 5 },
+        ])
+        expect(result.current.latencyChart.maxLatency).toBe(120)
+        expect(result.current.latencyChart.linePoints).toContain(',')
     })
 
     it('uses authenticated snapshot service when available to avoid extra per-endpoint orchestration', async () => {
@@ -631,6 +682,73 @@ describe('useMonitoringDashboardModel', () => {
 
         unmount()
         expect(streamClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('ignores stream errors after the hook is unmounted', async () => {
+        const streamClose = vi.fn()
+        let capturedError: ((error: Error) => void) | undefined
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockImplementation(async ({ onError }) => {
+                capturedError = onError
+                return { close: streamClose }
+            }),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        })
+
+        unmount()
+
+        act(() => {
+            capturedError?.(new Error('stream error after unmount'))
+        })
+
+        expect(streamClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('marks data as stale immediately when stale threshold is already exceeded', async () => {
+        const now = vi.spyOn(Date, 'now')
+
+        const service = createMonitoringService()
+        now.mockReturnValue(new Date('2026-04-24T10:00:00Z').getTime())
+
+        try {
+            const { result, rerender } = renderHook(
+                ({ autoRefreshIntervalMs }) =>
+                    useMonitoringDashboardModel({
+                        monitoringService: service,
+                        autoRefreshIntervalMs,
+                    }),
+                {
+                    initialProps: {
+                        autoRefreshIntervalMs: 60000,
+                    },
+                }
+            )
+
+            await waitFor(() => {
+                expect(result.current.isLoading).toBe(false)
+            })
+            expect(result.current.isDataStale).toBe(false)
+
+            now.mockReturnValue(new Date('2026-04-24T10:00:20Z').getTime())
+            rerender({ autoRefreshIntervalMs: 1000 })
+
+            await waitFor(() => {
+                expect(result.current.isDataStale).toBe(true)
+            })
+        } finally {
+            now.mockRestore()
+        }
     })
 
     it('defaults visibility to true when document is unavailable', () => {

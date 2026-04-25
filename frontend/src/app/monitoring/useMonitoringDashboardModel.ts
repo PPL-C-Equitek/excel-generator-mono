@@ -62,10 +62,10 @@ export type MonitoringDashboardViewModel = {
     refreshDashboard: () => void
 }
 
-type UseMonitoringDashboardModelParams = {
+type UseMonitoringDashboardModelParams = Readonly<{
     monitoringService: MonitoringDashboardService
     autoRefreshIntervalMs?: number
-}
+}>
 
 function calculateRetryDelayMs(consecutiveFailures: number): number {
     return Math.min(
@@ -129,6 +129,69 @@ export function useMonitoringDashboardModel({
         setRetryClockNowMs(failedAtMs)
     }, [])
 
+    const loadWithAuthenticatedSnapshot = useCallback(async () => {
+        const [liveResponse, snapshot] = await Promise.all([
+            monitoringService.getMonitoringLive(),
+            monitoringService.getMonitoringAuthenticatedSnapshot(),
+        ])
+
+        setLivePayload(liveResponse)
+        setAccessDecision(snapshot.accessDecision)
+        setReadyPayload(snapshot.readyPayload)
+        setStatsPayload(snapshot.statsPayload)
+        stopMonitoringStatsStream()
+        markSuccessfulLoad(Date.now())
+    }, [markSuccessfulLoad, monitoringService, stopMonitoringStatsStream])
+
+    const loadWithoutSnapshot = useCallback(async () => {
+        const monitoringAuthToken = await getMonitoringAuthToken()
+        const [liveResponse, accessResponse] = await Promise.all([
+            monitoringService.getMonitoringLive(),
+            monitoringService.getMonitoringAccess(monitoringAuthToken),
+        ])
+
+        setLivePayload(liveResponse)
+        setAccessDecision(accessResponse)
+
+        if (!accessResponse.allowed) {
+            setReadyPayload(null)
+            setStatsPayload(null)
+            stopMonitoringStatsStream()
+            markSuccessfulLoad(Date.now())
+            return ''
+        }
+
+        const readyResponse = await monitoringService.getMonitoringReady(monitoringAuthToken)
+        setReadyPayload(readyResponse)
+
+        return monitoringAuthToken
+    }, [markSuccessfulLoad, monitoringService, stopMonitoringStatsStream])
+
+    const startMonitoringStatsStream = useCallback(async (monitoringAuthToken: string) => {
+        const streamPayloads = await monitoringService.getMonitoringStatsStream({
+            accessToken: monitoringAuthToken,
+            intervalSeconds: autoRefreshIntervalMs / 1000,
+            onPayload: (payload) => {
+                setStatsPayload(payload)
+                markSuccessfulLoad(Date.now())
+            },
+            onError: (error) => {
+                if (!isMountedRef.current) {
+                    return
+                }
+                setErrorMessage(error.message)
+                stopMonitoringStatsStream()
+                scheduleRetry(Date.now())
+            },
+        })
+        monitoringStreamRef.current = streamPayloads
+    }, [autoRefreshIntervalMs, markSuccessfulLoad, monitoringService, scheduleRetry, stopMonitoringStatsStream])
+
+    const loadMonitoringStatsSnapshot = useCallback(async (monitoringAuthToken: string) => {
+        const statsResponse = await monitoringService.getMonitoringStats(monitoringAuthToken)
+        setStatsPayload(statsResponse)
+    }, [monitoringService])
+
     const loadDashboard = useCallback(
         async (isBackgroundRefresh: boolean) => {
             if (isDashboardRequestInFlightRef.current) {
@@ -145,64 +208,23 @@ export function useMonitoringDashboardModel({
 
             try {
                 if (monitoringService.getMonitoringAuthenticatedSnapshot) {
-                    const [liveResponse, snapshot] = await Promise.all([
-                        monitoringService.getMonitoringLive(),
-                        monitoringService.getMonitoringAuthenticatedSnapshot(),
-                    ])
-                    setLivePayload(liveResponse)
-                    setAccessDecision(snapshot.accessDecision)
-                    setReadyPayload(snapshot.readyPayload)
-                    setStatsPayload(snapshot.statsPayload)
-                    stopMonitoringStatsStream()
-                    markSuccessfulLoad(Date.now())
+                    await loadWithAuthenticatedSnapshot()
                     return
                 }
 
-                const monitoringAuthToken = await getMonitoringAuthToken()
-                const [liveResponse, accessResponse] = await Promise.all([
-                    monitoringService.getMonitoringLive(),
-                    monitoringService.getMonitoringAccess(monitoringAuthToken),
-                ])
-
-                setLivePayload(liveResponse)
-                setAccessDecision(accessResponse)
-
-                if (!accessResponse.allowed) {
-                    setReadyPayload(null)
-                    setStatsPayload(null)
-                    stopMonitoringStatsStream()
-                    markSuccessfulLoad(Date.now())
+                const monitoringAuthToken = await loadWithoutSnapshot()
+                if (!monitoringAuthToken) {
                     return
                 }
 
-                const readyResponse = await monitoringService.getMonitoringReady(monitoringAuthToken)
-                setReadyPayload(readyResponse)
-
-                if (
-                    monitoringService.getMonitoringStatsStream
+                const shouldUseStream = monitoringService.getMonitoringStatsStream !== undefined
                     && monitoringStreamRef.current === null
-                ) {
-                    const streamPayloads = await monitoringService.getMonitoringStatsStream({
-                        accessToken: monitoringAuthToken,
-                        intervalSeconds: autoRefreshIntervalMs / 1000,
-                        onPayload: (payload) => {
-                            setStatsPayload(payload)
-                            markSuccessfulLoad(Date.now())
-                        },
-                        onError: (error) => {
-                            if (!isMountedRef.current) {
-                                return
-                            }
-                            setErrorMessage(error.message)
-                            stopMonitoringStatsStream()
-                            scheduleRetry(Date.now())
-                        },
-                    })
-                    monitoringStreamRef.current = streamPayloads
+                if (shouldUseStream) {
+                    await startMonitoringStatsStream(monitoringAuthToken)
                 } else {
-                    const statsResponse = await monitoringService.getMonitoringStats(monitoringAuthToken)
-                    setStatsPayload(statsResponse)
+                    await loadMonitoringStatsSnapshot(monitoringAuthToken)
                 }
+
                 markSuccessfulLoad(Date.now())
             } catch (error) {
                 const failedAtMs = Date.now()
@@ -217,7 +239,16 @@ export function useMonitoringDashboardModel({
                 isDashboardRequestInFlightRef.current = false
             }
         },
-        [autoRefreshIntervalMs, markSuccessfulLoad, monitoringService, scheduleRetry, stopMonitoringStatsStream]
+        [
+            loadWithAuthenticatedSnapshot,
+            loadWithoutSnapshot,
+            loadMonitoringStatsSnapshot,
+            markSuccessfulLoad,
+            monitoringService,
+            startMonitoringStatsStream,
+            stopMonitoringStatsStream,
+            scheduleRetry,
+        ]
     )
 
     useEffect(() => {
@@ -342,7 +373,8 @@ export function useMonitoringDashboardModel({
     }, [eventRows])
 
     const timeseriesPoints = useMemo(() => {
-        return statsPayload?.timeseries?.points ?? []
+        const points = statsPayload?.timeseries?.points ?? []
+        return points.filter((point) => point !== null && point !== undefined)
     }, [statsPayload])
 
     const realtimeWindowSeconds = statsPayload?.timeseries?.window_seconds ?? 0
@@ -411,23 +443,13 @@ export function useMonitoringDashboardModel({
             const x = paddingX + normalizedX * plotWidth
             const y = topPadding + (1 - normalizedY) * plotHeight
             return { x, y }
-        }).filter((point): point is { x: number; y: number } => point !== undefined)
+        })
 
         const linePoints = points.map((point) => `${point.x},${point.y}`).join(' ')
-        const first = points[0]
-        const last = points[points.length - 1]
+        const firstPoint = points.at(0)!
+        const lastPoint = points.at(-1)!
 
-        if (!first || !last) {
-            return {
-                linePoints: '',
-                areaPath: '',
-                maxLatency: 0,
-            }
-        }
-
-        const areaPath = `M ${first.x} ${height - bottomPadding} L ${points
-            .map((point) => `${point.x} ${point.y}`)
-            .join(' L ')} L ${last.x} ${height - bottomPadding} Z`
+        const areaPath = `M ${firstPoint.x} ${height - bottomPadding} L ${points.map((point) => `${point.x} ${point.y}`).join(' L ')} L ${lastPoint.x} ${height - bottomPadding} Z`
 
         return {
             linePoints,
