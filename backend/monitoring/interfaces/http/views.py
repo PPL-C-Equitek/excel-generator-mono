@@ -118,7 +118,6 @@ def stats(request):
 @api_view(["GET"])
 @_monitoring_rate_limit()
 def snapshot(request):
-    service = get_monitoring_service()
     decision = MonitoringAccessPolicy().evaluate(getattr(request, "user", None))
     decision_payload = decision.to_dict()
 
@@ -132,6 +131,7 @@ def snapshot(request):
             status=status.HTTP_200_OK,
         )
 
+    service = get_monitoring_service()
     _, ready_payload = service.readiness()
     return Response(
         {

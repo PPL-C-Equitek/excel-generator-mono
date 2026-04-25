@@ -5,6 +5,12 @@ from django.test import SimpleTestCase, override_settings
 
 from monitoring import container
 from monitoring.services import MonitoringService
+from monitoring.infrastructure.repositories import (
+    REALTIME_DEFAULT_BUCKET_SECONDS,
+    REALTIME_DEFAULT_MAX_RECORDS,
+    REALTIME_DEFAULT_WINDOW_SECONDS,
+    ROUTE_DEFAULT_MAX_LATENCY_SAMPLES,
+)
 
 
 class MonitoringContainerTest(SimpleTestCase):
@@ -238,8 +244,48 @@ class MonitoringContainerTest(SimpleTestCase):
         in_memory_repository_cls.assert_called_once()
 
     @override_settings(MONITORING_METRICS_BACKEND="redis")
-    def test_build_monitoring_service_adds_redis_check_when_backend_is_redis(self):
+    @patch("monitoring.container.InMemoryMetricsRepository")
+    @patch("monitoring.container.RedisMetricsRepository")
+    @patch("monitoring.container.ResilientMetricsRepository")
+    def test_build_monitoring_service_adds_redis_check_when_backend_is_redis(
+        self,
+        resilient_repository_cls,
+        redis_repository_cls,
+        in_memory_repository_cls,
+    ):
+        redis_repository = object()
+        in_memory_repository = object()
+        resilient_repository = object()
+        redis_repository_cls.return_value = redis_repository
+        in_memory_repository_cls.return_value = in_memory_repository
+        resilient_repository_cls.return_value = resilient_repository
+
         service = container.build_monitoring_service()
 
         checks = service._readiness_service._checks
         self.assertEqual([check.name for check in checks], ["database", "storage", "openai_config", "redis"])
+        self.assertIs(service._metrics_repository, resilient_repository)
+        redis_repository_cls.assert_called_once_with(
+            redis_url="redis://127.0.0.1:6379/0",
+            key_prefix="monitoring",
+            key_namespace_version="v1",
+            key_ttl_seconds=86400,
+            socket_timeout_seconds=1.0,
+            connect_timeout_seconds=1.0,
+            snapshot_cache_ttl_seconds=2.0,
+            realtime_window_seconds=REALTIME_DEFAULT_WINDOW_SECONDS,
+            realtime_bucket_seconds=REALTIME_DEFAULT_BUCKET_SECONDS,
+            max_realtime_records=REALTIME_DEFAULT_MAX_RECORDS,
+            max_route_latency_samples=ROUTE_DEFAULT_MAX_LATENCY_SAMPLES,
+            max_routes_per_snapshot=None,
+        )
+        in_memory_repository_cls.assert_called_once_with(
+            realtime_window_seconds=REALTIME_DEFAULT_WINDOW_SECONDS,
+            realtime_bucket_seconds=REALTIME_DEFAULT_BUCKET_SECONDS,
+            max_realtime_records=REALTIME_DEFAULT_MAX_RECORDS,
+            max_route_latency_samples=ROUTE_DEFAULT_MAX_LATENCY_SAMPLES,
+        )
+        resilient_repository_cls.assert_called_once_with(
+            primary_repository=redis_repository,
+            fallback_repository=in_memory_repository,
+        )

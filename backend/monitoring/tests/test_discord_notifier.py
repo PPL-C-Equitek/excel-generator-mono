@@ -124,5 +124,9 @@ class DiscordWebhookNotifierTest(SimpleTestCase):
         self.assertEqual(request_capture.full_url, "https://discord.test/webhook")
         self.assertEqual(request_capture.method, "POST")
         self.assertEqual(request_capture.timeout, 7.5)
-        self.assertEqual(request_capture.headers["Content-Type"], "application/json")
+        request_headers = request_capture.headers
+        self.assertEqual(
+            request_headers.get("Content-Type", request_headers.get("Content-type")),
+            "application/json",
+        )
         self.assertEqual(request_capture.data, b'{"content":"test"}')
