@@ -632,7 +632,6 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         redis_mock.ltrim.assert_not_called()
 
     def test_queue_expire_respects_disabled_ttl(self):
-        redis_mock = self.repo._redis
         pipeline = Mock()
         original_ttl = self.repo._key_ttl_seconds
         self.repo._key_ttl_seconds = None
