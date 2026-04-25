@@ -768,9 +768,7 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         if self._max_routes_per_snapshot is None:
             route_hash_keys = self._limit_route_hash_keys(route_hash_keys)
         elif not route_hash_keys:
-            route_hash_keys = self._limit_route_hash_keys(
-                self._redis.smembers(self._routes_index_key)
-            )
+            route_hash_keys = self._limit_route_hash_keys_from_index()
         route_items = self._build_route_items(route_hash_keys)
         event_items = self._build_event_items(raw_events)
         realtime_records = self._build_realtime_records(raw_realtime)
@@ -789,6 +787,34 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             self._snapshot_cache = None
             self._snapshot_cache_expires_at_ms = None
         return snapshot
+
+    def _limit_route_hash_keys_from_index(self) -> list[str]:
+        route_hash_keys = self._redis.smembers(self._routes_index_key)
+        route_hash_keys = list(route_hash_keys)
+        if not route_hash_keys or self._max_routes_per_snapshot is None:
+            return route_hash_keys
+
+        pipeline = self._redis.pipeline()
+        for route_hash_key in route_hash_keys:
+            pipeline.hmget(route_hash_key, REDIS_FIELD_ROUTE, REDIS_FIELD_METHOD)
+        route_metadata = pipeline.execute()
+
+        parsed: list[tuple[str, str, str]] = []
+        for route_hash_key, raw_metadata in zip(route_hash_keys, route_metadata):
+            if isinstance(raw_metadata, (list, tuple)) and len(raw_metadata) >= 2:
+                raw_route, raw_method = raw_metadata[0], raw_metadata[1]
+            else:
+                raw_route, raw_method = None, None
+            route = self._normalize_text(raw_route, default=UNKNOWN_ROUTE)
+            method = self._normalize_text(
+                raw_method,
+                default=UNKNOWN_METHOD,
+                transform=str.upper,
+            )
+            parsed.append((route, method, route_hash_key))
+
+        parsed.sort(key=lambda item: (item[0], item[1], item[2]))
+        return [item[2] for item in parsed][: self._max_routes_per_snapshot]
 
     def reset(self) -> None:
         self._invalidate_snapshot_cache()
