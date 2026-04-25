@@ -6,6 +6,7 @@ from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from django.db import transaction
 
 from artifact_history.services import create_artifact_history
 from chat_sessions.services import (
@@ -241,12 +242,11 @@ def send_message(request):
     else:
         session = create_session_for_user(request.user)
 
-    append_user_message(session, message)
-
     history = [
         {"role": msg.role, "content": msg.content}
         for msg in session.messages.order_by("created_at")
     ]
+    history.append({"role": "user", "content": message})
 
     try:
         reply = generate_chat_response(history)
@@ -261,7 +261,9 @@ def send_message(request):
         logger.exception("Unexpected error while handling send_message request.")
         return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
-    append_assistant_message(session, reply)
+    with transaction.atomic():
+        append_user_message(session, message)
+        append_assistant_message(session, reply)
 
     response_serializer = SendMessageResponseSerializer(
         data={"session_id": session.id, "reply": reply}
