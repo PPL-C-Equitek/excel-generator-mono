@@ -7,6 +7,7 @@ from monitoring.checks import (
     BaseHealthCheck,
     DatabaseHealthCheck,
     OpenAIConfigHealthCheck,
+    RedisHealthCheck,
     StorageHealthCheck,
 )
 
@@ -110,3 +111,40 @@ class OpenAIConfigHealthCheckTest(SimpleTestCase):
     @override_settings(OPENAI_API_KEY="sk-test")
     def test_perform_check_succeeds_when_api_key_exists(self):
         OpenAIConfigHealthCheck().perform_check()
+
+
+class RedisHealthCheckTest(SimpleTestCase):
+    def test_perform_check_uses_provided_client(self):
+        client = MagicMock()
+        check = RedisHealthCheck(redis_url="redis://localhost:6379/0", redis_client=client)
+
+        check.perform_check()
+
+        client.ping.assert_called_once()
+
+    @patch("monitoring.infrastructure.health_checks.redis")
+    def test_perform_check_builds_client_from_url_when_client_not_provided(self, redis_module):
+        client = MagicMock()
+        redis_module.Redis.from_url.return_value = client
+        check = RedisHealthCheck(
+            redis_url="redis://localhost:6379/0",
+            socket_timeout_seconds=2.5,
+            connect_timeout_seconds=1.5,
+        )
+
+        check.perform_check()
+
+        redis_module.Redis.from_url.assert_called_once_with(
+            "redis://localhost:6379/0",
+            decode_responses=True,
+            socket_timeout=2.5,
+            socket_connect_timeout=1.5,
+        )
+        client.ping.assert_called_once()
+
+    @patch("monitoring.infrastructure.health_checks.redis", new=None)
+    def test_perform_check_raises_when_redis_is_missing(self):
+        check = RedisHealthCheck(redis_url="redis://localhost:6379/0")
+
+        with self.assertRaises(RuntimeError):
+            check.perform_check()
