@@ -660,6 +660,10 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
     def _realtime_key(self) -> str:
         return f"{self._key_prefix}:realtime"
 
+    @property
+    def _route_rankings_key(self) -> str:
+        return f"{self._key_prefix}:routes_by_volume"
+
     def _route_latency_samples_key(self, route_hash_key: str) -> str:
         return f"{route_hash_key}:latency_samples"
 
@@ -692,6 +696,8 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             self._realtime_key,
             {self._encode_realtime_member(is_error=bool(is_error), duration_ms=duration_ms): created_epoch},
         )
+        if self._max_routes_per_snapshot is not None:
+            pipeline.zincrby(self._route_rankings_key, 1, route_hash_key)
         pipeline.zremrangebyscore(
             self._realtime_key,
             "-inf",
@@ -712,6 +718,8 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         self._queue_expire(pipeline, route_hash_key)
         self._queue_expire(pipeline, route_latency_samples_key)
         self._queue_expire(pipeline, self._realtime_key)
+        if self._max_routes_per_snapshot is not None:
+            self._queue_expire(pipeline, self._route_rankings_key)
         pipeline.execute()
 
     def record_event(self, event: AuthMetricEvent) -> None:
@@ -728,13 +736,25 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         min_epoch = now_epoch - self._realtime_window_seconds
 
         pipeline = self._redis.pipeline()
-        pipeline.smembers(self._routes_index_key)
+        if self._max_routes_per_snapshot is None:
+            pipeline.smembers(self._routes_index_key)
+        else:
+            pipeline.zrevrange(
+                self._route_rankings_key,
+                0,
+                self._max_routes_per_snapshot - 1,
+            )
         pipeline.hgetall(self._events_key)
         pipeline.zremrangebyscore(self._realtime_key, "-inf", f"({min_epoch}")
         pipeline.zrangebyscore(self._realtime_key, min_epoch, "+inf", withscores=True)
         route_hash_keys, raw_events, _, raw_realtime = pipeline.execute()
 
-        route_hash_keys = self._limit_route_hash_keys(route_hash_keys)
+        if self._max_routes_per_snapshot is None:
+            route_hash_keys = self._limit_route_hash_keys(route_hash_keys)
+        elif not route_hash_keys:
+            route_hash_keys = self._limit_route_hash_keys(
+                self._redis.smembers(self._routes_index_key)
+            )
         route_items = self._build_route_items(route_hash_keys)
         event_items = self._build_event_items(raw_events)
         realtime_records = self._build_realtime_records(raw_realtime)
@@ -747,7 +767,12 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
 
     def reset(self) -> None:
         route_hash_keys = self._redis.smembers(self._routes_index_key)
-        keys_to_delete = [self._routes_index_key, self._events_key, self._realtime_key]
+        keys_to_delete = [
+            self._routes_index_key,
+            self._events_key,
+            self._realtime_key,
+            self._route_rankings_key,
+        ]
         for route_hash_key in route_hash_keys:
             keys_to_delete.append(route_hash_key)
             keys_to_delete.append(self._route_latency_samples_key(route_hash_key))

@@ -71,10 +71,11 @@ function calculateRetryDelayMs(consecutiveFailures: number): number {
 }
 
 export function getIsPageVisible(): boolean {
-    if (typeof document === 'undefined') {
+    const pageDocument = globalThis.document
+    if (!pageDocument) {
         return true
     }
-    return document.visibilityState === 'visible'
+    return pageDocument.visibilityState === 'visible'
 }
 
 export function useMonitoringDashboardModel({
@@ -185,10 +186,10 @@ export function useMonitoringDashboardModel({
     }, [loadDashboard])
 
     useEffect(() => {
-        if (typeof document === 'undefined') {
+        if (!globalThis.document) {
             return
         }
-        const visibilityDocument = document
+        const visibilityDocument = globalThis.document
 
         const handleVisibilityChange = () => {
             const nextVisible = getIsPageVisible()
@@ -360,11 +361,20 @@ export function useMonitoringDashboardModel({
             const x = paddingX + normalizedX * plotWidth
             const y = topPadding + (1 - normalizedY) * plotHeight
             return { x, y }
-        })
+        }).filter((point): point is { x: number; y: number } => point !== undefined)
 
         const linePoints = points.map((point) => `${point.x},${point.y}`).join(' ')
         const first = points[0]
-        const last = points.at(-1) ?? points[0]
+        const last = points[points.length - 1]
+
+        if (!first || !last) {
+            return {
+                linePoints: '',
+                areaPath: '',
+                maxLatency: 0,
+            }
+        }
+
         const areaPath = `M ${first.x} ${height - bottomPadding} L ${points
             .map((point) => `${point.x} ${point.y}`)
             .join(' L ')} L ${last.x} ${height - bottomPadding} Z`

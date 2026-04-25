@@ -69,6 +69,34 @@ def stats(request):
 
 
 @require_GET
+@api_view(["GET"])
+def snapshot(request):
+    service = get_monitoring_service()
+    decision = MonitoringAccessPolicy().evaluate(getattr(request, "user", None))
+    decision_payload = decision.to_dict()
+
+    if not decision.allowed:
+        return Response(
+            {
+                "access": decision_payload,
+                "ready": None,
+                "stats": None,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    _, ready_payload = service.readiness()
+    return Response(
+        {
+            "access": decision_payload,
+            "ready": ready_payload,
+            "stats": service.stats(),
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@require_GET
 @monitoring_protected_get
 def stream(request):
     service = get_monitoring_service()

@@ -2,6 +2,7 @@ import logging
 
 from django.conf import settings
 
+from monitoring.domain.contracts import MonitoringAlertNotifier
 from monitoring.application.services import MonitoringService, ReadinessService
 from monitoring.infrastructure.health_checks import (
     DatabaseHealthCheck,
@@ -9,6 +10,7 @@ from monitoring.infrastructure.health_checks import (
     RedisHealthCheck,
     StorageHealthCheck,
 )
+from monitoring.infrastructure.discord_notifier import DiscordWebhookNotifier
 from monitoring.infrastructure.repositories import (
     InMemoryMetricsRepository,
     ResilientMetricsRepository,
@@ -23,6 +25,9 @@ from monitoring.infrastructure.repositories import (
     ROUTE_DEFAULT_MAX_LATENCY_SAMPLES,
 )
 
+MONITORING_DEFAULT_DISCORD_WEBHOOK_TIMEOUT_SECONDS = 3.0
+MONITORING_DEFAULT_STATS_CACHE_TTL_SECONDS = 2.0
+
 _monitoring_service: MonitoringService | None = None
 logger = logging.getLogger(__name__)
 
@@ -32,6 +37,17 @@ def _monitoring_backend_setting() -> str:
 
 
 def _build_repository_kwargs() -> dict[str, int]:
+    max_routes_per_snapshot_setting = getattr(
+        settings, "MONITORING_MAX_ROUTES_PER_SNAPSHOT", None
+    )
+    max_routes_per_snapshot = None
+    try:
+        parsed_max_routes = int(max_routes_per_snapshot_setting)
+        if parsed_max_routes > 0:
+            max_routes_per_snapshot = parsed_max_routes
+    except (TypeError, ValueError):
+        pass
+
     return {
         "realtime_window_seconds": int(
             getattr(settings, "MONITORING_REALTIME_WINDOW_SECONDS", REALTIME_DEFAULT_WINDOW_SECONDS)
@@ -49,6 +65,7 @@ def _build_repository_kwargs() -> dict[str, int]:
                 ROUTE_DEFAULT_MAX_LATENCY_SAMPLES,
             )
         ),
+        "max_routes_per_snapshot": max_routes_per_snapshot,
     }
 
 
@@ -87,7 +104,9 @@ def _build_redis_repository(*, repository_kwargs: dict[str, int]) -> RedisMetric
 def _build_metrics_repository():
     backend = _monitoring_backend_setting()
     repository_kwargs = _build_repository_kwargs()
-    fallback_repository = InMemoryMetricsRepository(**repository_kwargs)
+    in_memory_repository_kwargs = dict(repository_kwargs)
+    in_memory_repository_kwargs.pop("max_routes_per_snapshot", None)
+    fallback_repository = InMemoryMetricsRepository(**in_memory_repository_kwargs)
 
     if backend == "redis":
         try:
@@ -132,13 +151,51 @@ def _build_readiness_checks():
     return checks
 
 
+def _build_readiness_alert_notifier() -> MonitoringAlertNotifier | None:
+    webhook_url = str(getattr(settings, "MONITORING_DISCORD_WEBHOOK_URL", "")).strip()
+    if not webhook_url:
+        return None
+
+    username = str(getattr(settings, "MONITORING_DISCORD_WEBHOOK_USERNAME", "MonitoringBot")).strip()
+    timeout_seconds = float(
+        getattr(
+            settings,
+            "MONITORING_DISCORD_WEBHOOK_TIMEOUT_SECONDS",
+            MONITORING_DEFAULT_DISCORD_WEBHOOK_TIMEOUT_SECONDS,
+        )
+    )
+    return DiscordWebhookNotifier(
+        webhook_url=webhook_url,
+        username=username,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def build_monitoring_service() -> MonitoringService:
     checks = _build_readiness_checks()
     readiness = ReadinessService(checks=checks)
     repository = _build_metrics_repository()
+    alert_notifier = _build_readiness_alert_notifier()
+    alert_cooldown_seconds = int(
+        getattr(
+            settings,
+            "MONITORING_READINESS_ALERT_COOLDOWN_SECONDS",
+            300,
+        )
+    )
+    stats_cache_ttl_seconds = float(
+        getattr(
+            settings,
+            "MONITORING_STATS_CACHE_TTL_SECONDS",
+            MONITORING_DEFAULT_STATS_CACHE_TTL_SECONDS,
+        )
+    )
     return MonitoringService(
         readiness_service=readiness,
         metrics_repository=repository,
+        alert_notifier=alert_notifier,
+        readiness_alert_cooldown_seconds=alert_cooldown_seconds,
+        stats_cache_ttl_seconds=stats_cache_ttl_seconds,
     )
 
 

@@ -186,6 +186,7 @@ export function MonitoringLatencyAndMetersSection({
         ? `Latency trend over ${realtimeWindowSeconds} seconds, grouped every ${realtimeBucketSeconds} seconds.`
         : 'Latency trend for the top monitored routes from the latest snapshot.'
     const latestLatencyPoint = latencySeries.at(-1)
+    const lastLatencyEntry = latencySeries.at(-1)
 
     return (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
@@ -237,7 +238,7 @@ export function MonitoringLatencyAndMetersSection({
                                     )
                                     const x = 26 + normalizedX * (520 - 52)
                                     const y = 16 + (1 - normalizedY) * (220 - 46)
-                                    const showLabel = latencySeries.length <= 6 || index % 2 === 0 || index === latencySeries.length - 1
+                                    const showLabel = latencySeries.length <= 6 || index % 2 === 0 || entry === lastLatencyEntry
                                     const xLabel = hasRealtimeSeries ? entry.label : String(entry.id)
 
                                     return (

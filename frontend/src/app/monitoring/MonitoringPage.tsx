@@ -26,9 +26,9 @@ import {
     useMonitoringDashboardModel,
 } from './useMonitoringDashboardModel'
 
-type MonitoringPageProps = {
+type MonitoringPageProps = Readonly<{
     readonly monitoringService?: MonitoringDashboardService
-}
+}>
 
 const defaultMonitoringService: MonitoringDashboardService = {
     getMonitoringLive,
@@ -65,6 +65,7 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
         refreshDashboard,
     } = useMonitoringDashboardModel({ monitoringService })
     const hasMonitoringAccess = Boolean(accessDecision?.allowed)
+    const hasLoadedSnapshot = !isLoading && livePayload !== null && accessDecision !== null
     let monitoringDetailsSection: ReactNode = null
 
     if (hasMonitoringAccess) {
@@ -171,7 +172,7 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
                         </>
                     ) : null}
 
-                    {!isLoading && livePayload && accessDecision ? (
+                    {hasLoadedSnapshot && livePayload && accessDecision ? (
                         <>
                             <MonitoringTrafficSummarySection
                                 livePayload={livePayload}
