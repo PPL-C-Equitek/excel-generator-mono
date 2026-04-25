@@ -4,6 +4,8 @@ from typing import Any, Callable, Protocol
 
 from django.conf import settings
 
+from llm.prompts.schemas import build_conversion_reasoning_prompt
+
 from .openai_client import OpenAIServiceError
 
 
@@ -33,7 +35,7 @@ ReasoningLimits = tuple[int, int, int, int, int]
 
 
 class TextGenerationProvider(Protocol):
-    def generate_text(self, prompt: str, system_prompt: str | None = None) -> str: ...
+    def generate_text(self, prompt: str, system_prompt: str | None = None) -> str: ...  # pragma: no cover
 
 
 def get_base_system_prompt() -> str:
@@ -581,6 +583,29 @@ class LlmReasoningService:
             parsed_output,
             reasoning_limits=reasoning_limits,
         )
+
+
+def generate_reasoning_response(
+    reasoning_service: LlmReasoningService,
+    prompt: str,
+) -> dict[str, Any]:
+    return reasoning_service.generate(prompt=prompt)
+
+
+def generate_conversion_reasoning_response(
+    reasoning_service: LlmReasoningService,
+    input_json: dict[str, Any] | list[Any],
+    output_json: dict[str, Any] | list[Any],
+    file_name: str = "unknown",
+    document_type: str = "unknown",
+) -> dict[str, Any]:
+    prompt = build_conversion_reasoning_prompt(
+        input_json=input_json,
+        output_json=output_json,
+        file_name=file_name,
+        document_type=document_type,
+    )
+    return generate_reasoning_response(reasoning_service=reasoning_service, prompt=prompt)
 
 
 def validate_reasoning_response(

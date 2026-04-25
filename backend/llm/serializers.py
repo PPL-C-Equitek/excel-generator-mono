@@ -1,9 +1,13 @@
 from rest_framework import serializers
 
 
+REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
+
+
 class LlmGenerateRequestSerializer(serializers.Serializer):
     input_json = serializers.JSONField()
     custom_schema_id = serializers.UUIDField(required=False, allow_null=True)
+    include_reasoning = serializers.BooleanField(required=False, default=True)
 
     def validate_input_json(self, value):
         if not isinstance(value, (dict, list)):
@@ -20,8 +24,29 @@ class LlmGenerateRequestSerializer(serializers.Serializer):
         return attrs
 
 
+class ReasoningPayloadSerializer(serializers.Serializer):
+    final_answer = serializers.CharField(trim_whitespace=True, allow_blank=False)
+    reasoning_steps = serializers.ListField(
+        child=serializers.CharField(trim_whitespace=True, allow_blank=False),
+        allow_empty=False,
+    )
+    thinking_log = serializers.CharField(trim_whitespace=True, allow_blank=False)
+
+
 class LlmGenerateResponseSerializer(serializers.Serializer):
     output_json = serializers.JSONField()
+    reasoning = ReasoningPayloadSerializer(required=False, allow_null=True)
+
+    def validate_output_json(self, value):
+        if isinstance(value, dict):
+            conflicting_keys = sorted(REASONING_META_KEYS.intersection(value.keys()))
+            if conflicting_keys:
+                raise serializers.ValidationError(
+                    "output_json must not include reasoning fields: "
+                    + ", ".join(conflicting_keys)
+                )
+
+        return value
 
 
 class LlmReasoningRequestSerializer(serializers.Serializer):
@@ -35,11 +60,6 @@ class LlmReasoningRequestSerializer(serializers.Serializer):
         return attrs
 
 
-class LlmReasoningResponseSerializer(serializers.Serializer):
-    final_answer = serializers.CharField(trim_whitespace=True, allow_blank=False)
-    reasoning_steps = serializers.ListField(
-        child=serializers.CharField(trim_whitespace=True, allow_blank=False),
-        allow_empty=False,
-    )
-    thinking_log = serializers.CharField(trim_whitespace=True, allow_blank=False)
+class LlmReasoningResponseSerializer(ReasoningPayloadSerializer):
+    pass
 
