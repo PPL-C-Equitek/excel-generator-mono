@@ -37,7 +37,7 @@ def handle_openai_exceptions():
     try:
         yield
     except AuthenticationError as exc:
-        raise OpenAIUpstreamError("LLM authentication failed.", status_code=401) from exc
+        raise OpenAIUpstreamError("LLM authentication failed.", status_code=502) from exc
     except RateLimitError as exc:
         raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
     except APITimeoutError as exc:
@@ -88,8 +88,6 @@ def _build_client() -> OpenAI:
 
 
 def _map_api_status_to_http(status_code: int | None) -> int:
-    if status_code == 401:
-        return 401
     if status_code == 429:
         return 429
     if status_code in (408, 504):

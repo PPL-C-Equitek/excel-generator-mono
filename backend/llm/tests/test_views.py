@@ -219,17 +219,17 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
     @patch("llm.views.logger")
     @patch("llm.views.build_llm_generation_service")
-    def test_llm_generate_returns_401_for_upstream_auth_error(self, mock_build_service, mock_logger):
+    def test_llm_generate_returns_502_for_upstream_auth_error(self, mock_build_service, mock_logger):
         mock_service = mock_build_service.return_value
         mock_service.generate.side_effect = OpenAIUpstreamError(
             "LLM authentication failed.",
-            status_code=401,
+            status_code=502,
         )
         client = APIClient()
 
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
         mock_logger.exception.assert_called_once_with("Upstream LLM provider error while handling llm_generate request.")
 
@@ -1118,6 +1118,21 @@ class SendMessageNegativeTest(TestCase):
         self.assertIn("message", response.data["errors"])
         mock_generate.assert_not_called()
 
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_rejects_invalid_session_id_format(self, mock_generate):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"session_id": "not-a-valid-UUID", "message": "Halo"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertIn("session_id", response.data["errors"])
+        mock_generate.assert_not_called()
+
     def test_send_message_rejects_non_json_content_type(self):
         self.client.force_authenticate(user=self.user)
 
@@ -1176,8 +1191,8 @@ class SendMessageErrorHandlingTest(TestCase):
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
 
     @patch("llm.views.generate_chat_response")
-    def test_send_message_returns_401_for_upstream_auth_error(self, mock_generate):
-        mock_generate.side_effect = OpenAIUpstreamError("LLM authentication failed.", status_code=401)
+    def test_send_message_returns_502_for_upstream_auth_error(self, mock_generate):
+        mock_generate.side_effect = OpenAIUpstreamError("LLM authentication failed.", status_code=502)
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
@@ -1186,7 +1201,7 @@ class SendMessageErrorHandlingTest(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
 
     @patch("llm.views.generate_chat_response")

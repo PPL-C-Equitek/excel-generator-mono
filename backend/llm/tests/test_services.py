@@ -158,7 +158,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
         with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
             generate_text("Hello")
 
-        self.assertEqual(exc_ctx.exception.status_code, 401)
+        self.assertEqual(exc_ctx.exception.status_code, 502)
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.RateLimitError", new=DummyRateLimitError)
@@ -202,7 +202,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
     @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_api_status_401_to_401(self, mock_openai):
+    def test_generate_text_maps_api_status_401_to_502(self, mock_openai):
         mock_client = Mock()
         mock_openai.return_value = mock_client
         mock_client.responses.create.side_effect = DummyAPIStatusError("api status", status_code=401)
@@ -210,7 +210,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
         with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
             generate_text("Hello")
 
-        self.assertEqual(exc_ctx.exception.status_code, 401)
+        self.assertEqual(exc_ctx.exception.status_code, 502)
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
@@ -653,7 +653,7 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.AuthenticationError", new=DummyAuthenticationError)
     @patch("llm.services.openai_client.OpenAI")
-    def test_generate_chat_response_maps_authentication_error_to_401(self, mock_openai):
+    def test_generate_chat_response_maps_authentication_error_to_502(self, mock_openai):
         mock_client = Mock()
         mock_openai.return_value = mock_client
         mock_client.chat.completions.create.side_effect = DummyAuthenticationError("bad auth")
@@ -661,7 +661,7 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
         with self.assertRaises(OpenAIUpstreamError) as ctx:
             generate_chat_response([{"role": "user", "content": "Halo"}])
 
-        self.assertEqual(ctx.exception.status_code, 401)
+        self.assertEqual(ctx.exception.status_code, 502)
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.RateLimitError", new=DummyRateLimitError)
