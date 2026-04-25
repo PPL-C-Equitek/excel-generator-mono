@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from urllib.error import URLError
 from unittest.mock import patch
@@ -129,4 +130,4 @@ class DiscordWebhookNotifierTest(SimpleTestCase):
             request_headers.get("Content-Type", request_headers.get("Content-type")),
             "application/json",
         )
-        self.assertEqual(request_capture.data, b'{"content":"test"}')
+        self.assertEqual(json.loads(request_capture.data.decode("utf-8")), payload)
