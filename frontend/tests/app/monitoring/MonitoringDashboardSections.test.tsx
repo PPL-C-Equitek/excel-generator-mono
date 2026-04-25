@@ -143,8 +143,8 @@ describe('MonitoringDashboardSections', () => {
         )
 
         expect(screen.getByText('Readiness Degraded')).toBeInTheDocument()
-        expect(screen.getByText(/queue/i)).toBeInTheDocument()
-        expect(screen.getByText(/filesystem/i)).toBeInTheDocument()
+        expect(screen.getByText('queue', { exact: true })).toBeInTheDocument()
+        expect(screen.getByText('filesystem', { exact: true })).toBeInTheDocument()
         expect(screen.getByText(/queue backlog too high/i)).toBeInTheDocument()
     })
 
