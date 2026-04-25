@@ -15,17 +15,17 @@ class GeneratedOutputSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField()
 
 
-class PaginatedChatMessageCollectionSerializer(serializers.Serializer):
+class PaginatedCollectionSerializer(serializers.Serializer):
     count = serializers.IntegerField(min_value=0)
     limit = serializers.IntegerField(min_value=1)
     offset = serializers.IntegerField(min_value=0)
+
+
+class PaginatedChatMessageCollectionSerializer(PaginatedCollectionSerializer):
     results = ChatMessageSerializer(many=True)
 
 
-class PaginatedGeneratedOutputCollectionSerializer(serializers.Serializer):
-    count = serializers.IntegerField(min_value=0)
-    limit = serializers.IntegerField(min_value=1)
-    offset = serializers.IntegerField(min_value=0)
+class PaginatedGeneratedOutputCollectionSerializer(PaginatedCollectionSerializer):
     results = GeneratedOutputSerializer(many=True)
 
 

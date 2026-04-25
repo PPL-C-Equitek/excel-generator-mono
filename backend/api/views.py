@@ -30,10 +30,17 @@ from chat_sessions.serializers import (
 )
 from chat_sessions.services import (
     delete_session,
+    get_default_session_detail_pagination,
     get_paginated_session_detail_for_user,
     get_session_for_user,
     list_sessions_for_user,
+    SESSION_DETAIL_MAX_LIMIT,
+    SESSION_DETAIL_LIMIT_FIELDS,
+    SESSION_DETAIL_OFFSET_FIELDS,
+    SESSION_LIST_DEFAULT_LIMIT,
+    SESSION_LIST_MAX_LIMIT,
     update_session_title,
+    validate_session_detail_pagination_params as validate_session_detail_pagination_params_service,
 )
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
@@ -63,7 +70,6 @@ from file_processing.services.export_service import (
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
 NOT_FOUND_DETAIL = "Not found."
-SESSION_LIST_DEFAULT_LIMIT = 10
 INVALID_SESSION_LIST_PAGINATION_DETAIL = "Invalid session list pagination."
 INVALID_SESSION_DETAIL_PAGINATION_DETAIL = "Invalid session detail pagination."
 SESSION_LIST_PAGINATION_ERROR_DETAILS = {
@@ -71,22 +77,17 @@ SESSION_LIST_PAGINATION_ERROR_DETAILS = {
     "offset must be an integer.",
     "offset must be greater than or equal to 0.",
     "limit must be greater than 0.",
-    "limit must be less than or equal to 50.",
+    f"limit must be less than or equal to {SESSION_LIST_MAX_LIMIT}.",
 }
-SESSION_DETAIL_PAGINATION_FIELDS = (
-    "messages_limit",
-    "messages_offset",
-    "outputs_limit",
-    "outputs_offset",
-)
 SESSION_DETAIL_PAGINATION_ERROR_DETAILS = {
-    f"{field} must be an integer." for field in SESSION_DETAIL_PAGINATION_FIELDS
+    f"{field} must be an integer."
+    for field in (*SESSION_DETAIL_LIMIT_FIELDS, *SESSION_DETAIL_OFFSET_FIELDS)
 } | {
     "messages_limit must be greater than 0.",
-    "messages_limit must be less than or equal to 50.",
+    f"messages_limit must be less than or equal to {SESSION_DETAIL_MAX_LIMIT}.",
     "messages_offset must be greater than or equal to 0.",
     "outputs_limit must be greater than 0.",
-    "outputs_limit must be less than or equal to 50.",
+    f"outputs_limit must be less than or equal to {SESSION_DETAIL_MAX_LIMIT}.",
     "outputs_offset must be greater than or equal to 0.",
 }
 
@@ -139,28 +140,13 @@ def _build_session_list_pagination_error_response(detail):
 
 
 def _parse_session_detail_pagination(request):
-    pagination = {
-        "messages_limit": _parse_session_detail_int_param(
+    pagination = get_default_session_detail_pagination()
+    for name, default in pagination.items():
+        pagination[name] = _parse_session_detail_int_param(
             request,
-            "messages_limit",
-            default=20,
-        ),
-        "messages_offset": _parse_session_detail_int_param(
-            request,
-            "messages_offset",
-            default=0,
-        ),
-        "outputs_limit": _parse_session_detail_int_param(
-            request,
-            "outputs_limit",
-            default=10,
-        ),
-        "outputs_offset": _parse_session_detail_int_param(
-            request,
-            "outputs_offset",
-            default=0,
-        ),
-    }
+            name,
+            default=default,
+        )
     _validate_session_detail_pagination_params(pagination)
     return pagination
 
@@ -174,18 +160,12 @@ def _parse_session_detail_int_param(request, name, default):
     except (TypeError, ValueError):
         raise SessionDetailPaginationError(f"{name} must be an integer.")
 
-
 def _validate_session_detail_pagination_params(pagination):
-    for name in ("messages_limit", "outputs_limit"):
-        value = pagination[name]
-        if value <= 0:
-            raise SessionDetailPaginationError(f"{name} must be greater than 0.")
-        if value > 50:
-            raise SessionDetailPaginationError(f"{name} must be less than or equal to 50.")
-
-    for name in ("messages_offset", "outputs_offset"):
-        if pagination[name] < 0:
-            raise SessionDetailPaginationError(f"{name} must be greater than or equal to 0.")
+    try:
+        validate_session_detail_pagination_params_service(pagination)
+    except ValueError as exc:
+        detail = exc.args[0] if exc.args else INVALID_SESSION_DETAIL_PAGINATION_DETAIL
+        raise SessionDetailPaginationError(detail) from exc
 
 
 def _build_session_detail_pagination_error_response(detail):

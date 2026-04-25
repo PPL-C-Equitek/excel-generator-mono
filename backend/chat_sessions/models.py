@@ -48,6 +48,14 @@ class ChatMessage(models.Model):
     thinking_log = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now)
 
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=("session", "created_at", "id"),
+                name="chatmsg_sess_created_idx",
+            ),
+        ]
+
 
 class GeneratedOutput(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -58,6 +66,14 @@ class GeneratedOutput(models.Model):
     )
     output_json = models.JSONField()
     created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=("session", "created_at", "id"),
+                name="genout_sess_created_idx",
+            ),
+        ]
 
     def clean(self):
         super().clean()

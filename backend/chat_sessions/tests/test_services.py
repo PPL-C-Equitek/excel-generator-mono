@@ -6,10 +6,12 @@ from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from chat_sessions.services import (
     create_session_for_user,
     delete_session,
+    get_default_session_detail_pagination,
     get_paginated_session_detail_for_user,
     get_session_for_user,
     list_sessions_for_user,
     update_session_title,
+    validate_session_detail_pagination_params,
 )
 
 
@@ -235,6 +237,46 @@ class ChatSessionServiceTest(TestCase):
 
         with self.assertRaisesMessage(ValueError, "outputs_offset must be greater than or equal to 0."):
             get_paginated_session_detail_for_user(self.owner, session.id, outputs_offset=-1)
+
+    def test_get_default_session_detail_pagination_returns_fresh_copy(self):
+        first = get_default_session_detail_pagination()
+        second = get_default_session_detail_pagination()
+
+        first["messages_limit"] = 99
+
+        self.assertEqual(second["messages_limit"], 20)
+        self.assertEqual(second["outputs_limit"], 10)
+
+    def test_validate_session_detail_pagination_params_accepts_valid_values(self):
+        pagination = {
+            "messages_limit": 20,
+            "messages_offset": 0,
+            "outputs_limit": 10,
+            "outputs_offset": 0,
+        }
+
+        validate_session_detail_pagination_params(pagination)
+
+    def test_validate_session_detail_pagination_params_rejects_invalid_values(self):
+        with self.assertRaisesMessage(ValueError, "messages_limit must be less than or equal to 50."):
+            validate_session_detail_pagination_params(
+                {
+                    "messages_limit": 51,
+                    "messages_offset": 0,
+                    "outputs_limit": 10,
+                    "outputs_offset": 0,
+                }
+            )
+
+        with self.assertRaisesMessage(ValueError, "outputs_offset must be greater than or equal to 0."):
+            validate_session_detail_pagination_params(
+                {
+                    "messages_limit": 20,
+                    "messages_offset": 0,
+                    "outputs_limit": 10,
+                    "outputs_offset": -1,
+                }
+            )
 
     def test_update_session_title_trims_and_saves_value(self):
         session = Session.objects.create(

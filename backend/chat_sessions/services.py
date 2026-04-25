@@ -4,9 +4,18 @@ from chat_sessions.models import Session
 
 
 SESSION_LIST_MAX_LIMIT = 50
+SESSION_LIST_DEFAULT_LIMIT = 10
 SESSION_DETAIL_MAX_LIMIT = 50
 SESSION_DETAIL_MESSAGES_DEFAULT_LIMIT = 20
 SESSION_DETAIL_OUTPUTS_DEFAULT_LIMIT = 10
+SESSION_DETAIL_PAGINATION_DEFAULTS = {
+    "messages_limit": SESSION_DETAIL_MESSAGES_DEFAULT_LIMIT,
+    "messages_offset": 0,
+    "outputs_limit": SESSION_DETAIL_OUTPUTS_DEFAULT_LIMIT,
+    "outputs_offset": 0,
+}
+SESSION_DETAIL_LIMIT_FIELDS = ("messages_limit", "outputs_limit")
+SESSION_DETAIL_OFFSET_FIELDS = ("messages_offset", "outputs_offset")
 SESSION_LIST_FIELDS = (
     "id",
     "title",
@@ -50,11 +59,13 @@ def get_paginated_session_detail_for_user(
     outputs_limit=SESSION_DETAIL_OUTPUTS_DEFAULT_LIMIT,
     outputs_offset=0,
 ):
-    _validate_session_detail_pagination(
-        messages_limit=messages_limit,
-        messages_offset=messages_offset,
-        outputs_limit=outputs_limit,
-        outputs_offset=outputs_offset,
+    validate_session_detail_pagination_params(
+        {
+            "messages_limit": messages_limit,
+            "messages_offset": messages_offset,
+            "outputs_limit": outputs_limit,
+            "outputs_offset": outputs_offset,
+        }
     )
     session = get_session_for_user(user, session_id)
     if session is None:
@@ -83,16 +94,15 @@ def get_paginated_session_detail_for_user(
     )
 
 
-def _validate_session_detail_pagination(
-    messages_limit,
-    messages_offset,
-    outputs_limit,
-    outputs_offset,
-):
-    _validate_positive_limit("messages_limit", messages_limit)
-    _validate_positive_limit("outputs_limit", outputs_limit)
-    _validate_non_negative_offset("messages_offset", messages_offset)
-    _validate_non_negative_offset("outputs_offset", outputs_offset)
+def get_default_session_detail_pagination():
+    return dict(SESSION_DETAIL_PAGINATION_DEFAULTS)
+
+
+def validate_session_detail_pagination_params(pagination):
+    for name in SESSION_DETAIL_LIMIT_FIELDS:
+        _validate_positive_limit(name, pagination[name])
+    for name in SESSION_DETAIL_OFFSET_FIELDS:
+        _validate_non_negative_offset(name, pagination[name])
 
 
 def _validate_positive_limit(name, value):

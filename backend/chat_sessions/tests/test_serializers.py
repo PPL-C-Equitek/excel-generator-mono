@@ -5,6 +5,8 @@ from django.test import SimpleTestCase
 from rest_framework import serializers
 
 from chat_sessions.serializers import (
+    PaginatedChatMessageCollectionSerializer,
+    PaginatedCollectionSerializer,
     PaginatedGeneratedOutputCollectionSerializer,
     SessionDetailSerializer,
     SessionListItemSerializer,
@@ -134,6 +136,22 @@ class ChatSessionSerializerTest(SimpleTestCase):
             serializer.data["generated_outputs"],
             {"count": 0, "limit": 10, "offset": 0, "results": []},
         )
+
+    def test_paginated_collection_serializer_defines_shared_pagination_fields(self):
+        serializer = PaginatedCollectionSerializer(data={"count": 1, "limit": 10, "offset": 0})
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["count"], 1)
+        self.assertEqual(serializer.validated_data["limit"], 10)
+        self.assertEqual(serializer.validated_data["offset"], 0)
+
+    def test_paginated_chat_message_collection_serializer_reuses_base_fields(self):
+        serializer = PaginatedChatMessageCollectionSerializer(
+            data={"count": 1, "limit": 1, "offset": 0, "results": []}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["limit"], 1)
 
     def test_paginated_generated_output_collection_serializer_rejects_missing_results(self):
         serializer = PaginatedGeneratedOutputCollectionSerializer(
