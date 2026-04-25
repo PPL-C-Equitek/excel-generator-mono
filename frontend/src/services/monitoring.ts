@@ -72,7 +72,7 @@ function parseMonitoringSseEventBlock(rawEvent: string): string | null {
         return null
     }
 
-    return dataSegments.join('')
+    return dataSegments.join('\n')
 }
 
 function splitMonitoringSseFrames(
@@ -84,7 +84,10 @@ function splitMonitoringSseFrames(
     }
 
     const remainder = frames.pop() ?? ''
-    return { frames, remainder }
+    return {
+        frames: frames.filter((frame) => frame.trim() !== ''),
+        remainder,
+    }
 }
 
 async function collectMonitoringStreamPayloads({
@@ -136,6 +139,9 @@ async function collectMonitoringStreamPayloads({
             while (true) {
                 const result = await reader.read()
                 if (result.done) {
+                    if (!controller.signal.aborted) {
+                        onError?.(new Error('Monitoring stream closed unexpectedly.'))
+                    }
                     break
                 }
 
@@ -157,8 +163,12 @@ async function collectMonitoringStreamPayloads({
             buffer = decoder.decode()
             const data = parseMonitoringSseEventBlock(buffer)
             if (data) {
-                const payload = mapMonitoringStatsResponse(JSON.parse(data))
-                onPayload(payload)
+                try {
+                    const payload = mapMonitoringStatsResponse(JSON.parse(data))
+                    onPayload(payload)
+                } catch {
+                    // Ignore malformed trailing fragments after close.
+                }
             }
         } catch (error) {
             if (error instanceof DOMException && error.name === 'AbortError') {
