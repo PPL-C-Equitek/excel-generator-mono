@@ -129,14 +129,12 @@ export function useMonitoringDashboardModel({
         setRetryClockNowMs(failedAtMs)
     }, [])
 
-    const loadWithAuthenticatedSnapshot = useCallback(async () => {
-        if (!monitoringService.getMonitoringAuthenticatedSnapshot) {
-            return
-        }
-
+    const loadWithAuthenticatedSnapshot = useCallback(async (
+        getMonitoringAuthenticatedSnapshot: NonNullable<MonitoringDashboardService['getMonitoringAuthenticatedSnapshot']>,
+    ) => {
         const [liveResponse, snapshot] = await Promise.all([
             monitoringService.getMonitoringLive(),
-            monitoringService.getMonitoringAuthenticatedSnapshot(),
+            getMonitoringAuthenticatedSnapshot(),
         ])
 
         setLivePayload(liveResponse)
@@ -171,12 +169,11 @@ export function useMonitoringDashboardModel({
         return monitoringAuthToken
     }, [markSuccessfulLoad, monitoringService, stopMonitoringStatsStream])
 
-    const startMonitoringStatsStream = useCallback(async (monitoringAuthToken: string) => {
-        if (!monitoringService.getMonitoringStatsStream) {
-            return
-        }
-
-        const streamPayloads = await monitoringService.getMonitoringStatsStream({
+    const startMonitoringStatsStream = useCallback(async (
+        monitoringAuthToken: string,
+        getMonitoringStatsStream: NonNullable<MonitoringDashboardService['getMonitoringStatsStream']>,
+    ) => {
+        const streamPayloads = await getMonitoringStatsStream({
             accessToken: monitoringAuthToken,
             intervalSeconds: autoRefreshIntervalMs / 1000,
             onPayload: (payload) => {
@@ -193,7 +190,7 @@ export function useMonitoringDashboardModel({
             },
         })
         monitoringStreamRef.current = streamPayloads
-    }, [autoRefreshIntervalMs, markSuccessfulLoad, monitoringService, scheduleRetry, stopMonitoringStatsStream])
+    }, [autoRefreshIntervalMs, markSuccessfulLoad, scheduleRetry, stopMonitoringStatsStream])
 
     const loadMonitoringStatsSnapshot = useCallback(async (monitoringAuthToken: string) => {
         const statsResponse = await monitoringService.getMonitoringStats(monitoringAuthToken)
@@ -212,11 +209,11 @@ export function useMonitoringDashboardModel({
                 setIsRefreshing(true)
             } else {
                 setIsLoading(true)
-            }
+        }
 
-            try {
+        try {
                 if (monitoringService.getMonitoringAuthenticatedSnapshot) {
-                    await loadWithAuthenticatedSnapshot()
+                    await loadWithAuthenticatedSnapshot(monitoringService.getMonitoringAuthenticatedSnapshot)
                     return
                 }
 
@@ -225,10 +222,14 @@ export function useMonitoringDashboardModel({
                     return
                 }
 
-                const shouldUseStream = monitoringService.getMonitoringStatsStream !== undefined
+                const getMonitoringStatsStream = monitoringService.getMonitoringStatsStream
+                const shouldUseStream = getMonitoringStatsStream !== undefined
                     && monitoringStreamRef.current === null
                 if (shouldUseStream) {
-                    await startMonitoringStatsStream(monitoringAuthToken)
+                    await startMonitoringStatsStream(
+                        monitoringAuthToken,
+                        getMonitoringStatsStream
+                    )
                 } else {
                     await loadMonitoringStatsSnapshot(monitoringAuthToken)
                 }
@@ -456,8 +457,8 @@ export function useMonitoringDashboardModel({
         const linePoints = points.map((point) => `${point.x},${point.y}`).join(' ')
         const firstPoint = points.at(0)!
         const lastPoint = points.at(-1)!
-
-        const areaPath = `M ${firstPoint.x} ${height - bottomPadding} L ${points.map((point) => `${point.x} ${point.y}`).join(' L ')} L ${lastPoint.x} ${height - bottomPadding} Z`
+        const polylinePoints = points.map((point) => `${point.x} ${point.y}`).join(' L ')
+        const areaPath = `M ${firstPoint.x} ${height - bottomPadding} L ${polylinePoints} L ${lastPoint.x} ${height - bottomPadding} Z`
 
         return {
             linePoints,

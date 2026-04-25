@@ -83,8 +83,8 @@ function splitMonitoringSseFrames(
         return { frames: [], remainder: buffer }
     }
 
-    const remainder = frames.at(-1) ?? ''
-    const payloadFrames = frames.slice(0, -1)
+    const remainder = frames.pop() as string
+    const payloadFrames = frames
 
     return {
         frames: payloadFrames.filter((frame) => frame.trim() !== ''),
