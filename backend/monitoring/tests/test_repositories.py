@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from django.test import SimpleTestCase
 
@@ -854,8 +854,8 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         )
         pipeline.hmget.assert_has_calls(
             [
-                Mock.call("route-a", "route", "method"),
-                Mock.call("route-b", "route", "method"),
+                call("route-a", "route", "method"),
+                call("route-b", "route", "method"),
             ],
             any_order=True,
         )
