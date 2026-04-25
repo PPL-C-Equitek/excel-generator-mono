@@ -145,7 +145,7 @@ def _generate_optional_reasoning(include_reasoning, input_json, output_json):
             file_name=original_name,
             document_type=document_type,
         )
-    except (OpenAIConfigurationError, OpenAIUpstreamError, OpenAIServiceError, ValueError):
+    except (OpenAIServiceError, ValueError):
         logger.exception("Automatic reasoning failed while handling llm_generate request.")
         return None
     except Exception:
