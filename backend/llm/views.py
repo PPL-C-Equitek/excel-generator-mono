@@ -127,6 +127,32 @@ def _sanitize_output_json(payload: Any) -> Any:
         for key, value in payload.items()
         if key not in REASONING_META_KEYS
     }
+
+
+def _generate_optional_reasoning(include_reasoning, input_json, output_json):
+    if not include_reasoning:
+        return None
+
+    original_name = extract_original_name(input_json, output_json)
+    document_type = _extract_document_type(input_json)
+    reasoning_service = build_llm_reasoning_service()
+
+    try:
+        return generate_conversion_reasoning_response(
+            reasoning_service=reasoning_service,
+            input_json=input_json,
+            output_json=output_json,
+            file_name=original_name,
+            document_type=document_type,
+        )
+    except (OpenAIConfigurationError, OpenAIUpstreamError, OpenAIServiceError, ValueError):
+        logger.exception("Automatic reasoning failed while handling llm_generate request.")
+        return None
+    except Exception:
+        logger.exception("Unexpected error while generating automatic reasoning.")
+        return None
+
+
 def _thinking_log_not_found_response():
     return Response({"detail": THINKING_LOG_NOT_FOUND_DETAIL}, status=404)
 
@@ -223,25 +249,11 @@ def llm_generate(request):
         logger.exception("Unexpected error while handling llm_generate request.")
         return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
-    reasoning_response = None
-    if include_reasoning:
-        original_name = extract_original_name(input_json, output_json)
-        document_type = _extract_document_type(input_json)
-        reasoning_service = build_llm_reasoning_service()
-        try:
-            reasoning_response = generate_conversion_reasoning_response(
-                reasoning_service=reasoning_service,
-                input_json=input_json,
-                output_json=output_json,
-                file_name=original_name,
-                document_type=document_type,
-            )
-        except (OpenAIConfigurationError, OpenAIUpstreamError, OpenAIServiceError, ValueError):
-            logger.exception("Automatic reasoning failed while handling llm_generate request.")
-            reasoning_response = None
-        except Exception:
-            logger.exception("Unexpected error while generating automatic reasoning.")
-            reasoning_response = None
+    reasoning_response = _generate_optional_reasoning(
+        include_reasoning=include_reasoning,
+        input_json=input_json,
+        output_json=output_json,
+    )
 
     response_serializer = LlmGenerateResponseSerializer(
         data={
