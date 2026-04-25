@@ -41,6 +41,7 @@ class DefaultLoginUserUseCaseTest(APISimpleTestCase):
         user.email = "user@example.com"
         user.name = "User"
         user.status = "verified"
+        user.session_version = 3
         user.check_password.return_value = True
 
         lookup = MagicMock()
@@ -71,6 +72,11 @@ class DefaultLoginUserUseCaseTest(APISimpleTestCase):
                     name="User",
                 ),
             ),
+        )
+        token_generator.generate.assert_called_once_with(
+            "u-1",
+            "user@example.com",
+            session_version=3,
         )
         tracker.reset_failures.assert_called_once_with("user@example.com")
 
@@ -131,6 +137,11 @@ class DefaultLoginUserUseCaseTest(APISimpleTestCase):
 
         user.check_password.assert_called_once_with("secret")
         tracker.record_failure.assert_called_once_with("user@example.com")
+
+    def test_resolve_session_version_returns_default_for_non_int(self):
+        user = MagicMock(session_version="v2")
+
+        self.assertEqual(DefaultLoginUserUseCase._resolve_session_version(user), 1)
 
     # Edge Case
     def test_raises_rate_limited_when_tracker_blocks_email(self):
@@ -254,9 +265,13 @@ class LoginAdaptersTest(APISimpleTestCase):
             "refresh_token": "refresh",
         }
 
-        result = token_generator.generate("user-id", "user@example.com")
+        result = token_generator.generate("user-id", "user@example.com", session_version=2)
 
-        mock_generate_tokens.assert_called_once_with("user-id", "user@example.com")
+        mock_generate_tokens.assert_called_once_with(
+            "user-id",
+            "user@example.com",
+            session_version=2,
+        )
         self.assertEqual(result["access_token"], "access")
         self.assertEqual(result["refresh_token"], "refresh")
 
@@ -282,7 +297,7 @@ class LoginContractsTest(APISimpleTestCase):
 
     def test_token_generator_port_base_method_raises_not_implemented(self):
         with self.assertRaises(NotImplementedError):
-            LoginTokenGeneratorPort.generate(object(), "user-id", "user@example.com")
+            LoginTokenGeneratorPort.generate(object(), "user-id", "user@example.com", 1)
 
     def test_use_case_port_base_method_raises_not_implemented(self):
         with self.assertRaises(NotImplementedError):
