@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+MAX_MESSAGE_LENGTH = 4096
 
 class LlmGenerateRequestSerializer(serializers.Serializer):
     input_json = serializers.JSONField()
@@ -22,6 +23,24 @@ class LlmGenerateRequestSerializer(serializers.Serializer):
 
 class LlmGenerateResponseSerializer(serializers.Serializer):
     output_json = serializers.JSONField()
+
+
+class SendMessageRequestSerializer(serializers.Serializer):
+    session_id = serializers.CharField(required=False, allow_blank=True)
+    message = serializers.CharField(
+        max_length=MAX_MESSAGE_LENGTH,
+        allow_blank=False,
+        trim_whitespace=False,
+    )
+
+    def validate_message(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("This field may not be blank.")
+        return value
+
+
+class SendMessageResponseSerializer(serializers.Serializer):
+    reply = serializers.CharField()
 
 
 class LlmReasoningRequestSerializer(serializers.Serializer):

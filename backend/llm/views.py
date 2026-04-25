@@ -12,6 +12,8 @@ from authentication.permissions import IsVerifiedUser
 from .serializers import (
     LlmGenerateRequestSerializer,
     LlmGenerateResponseSerializer,
+    SendMessageRequestSerializer,
+    SendMessageResponseSerializer,
     LlmReasoningRequestSerializer,
     LlmReasoningResponseSerializer,
     ThinkingLogItemSerializer,
@@ -28,9 +30,12 @@ from .services.openai_client import (
     OpenAIConfigurationError,
     OpenAIServiceError,
     OpenAIUpstreamError,
+    generate_text,
 )
 
 logger = logging.getLogger(__name__)
+
+_JSON_CONTENT_TYPE = "application/json"
 
 INVALID_REQUEST_DETAIL = "Invalid request payload."
 UNSUPPORTED_MEDIA_TYPE_DETAIL = "Content-Type must be application/json."
@@ -140,7 +145,7 @@ def _build_thinking_log_queryset_for_user(user, session_id=None, request_id=None
 @require_http_methods(["POST"])
 def llm_generate(request):
     content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != "application/json":
+    if content_type != _JSON_CONTENT_TYPE:
         return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
 
     request_serializer = LlmGenerateRequestSerializer(data=request.data)
@@ -196,13 +201,47 @@ def llm_generate(request):
         )
     return Response(response_serializer.data)
 
+@api_view(["POST"])
+@require_http_methods(["POST"])
+def send_message(request):
+    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type != _JSON_CONTENT_TYPE:
+        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+
+    serializer = SendMessageRequestSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"detail": INVALID_REQUEST_DETAIL, "errors": serializer.errors},
+            status=400,
+        )
+
+    message = serializer.validated_data["message"]
+
+    try:
+        reply = generate_text(message)
+    except OpenAIConfigurationError:
+        return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
+    except OpenAIUpstreamError as exc:
+        logger.exception("Upstream LLM provider error while handling send_message request.")
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
+    except OpenAIServiceError:
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    except Exception:
+        logger.exception("Unexpected error while handling send_message request.")
+        return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+
+    response_serializer = SendMessageResponseSerializer(data={"reply": reply})
+    if not response_serializer.is_valid():
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    return Response(response_serializer.data)
+
 
 @require_http_methods(["POST"])
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def llm_reasoning(request):
     content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != "application/json":
+    if content_type != _JSON_CONTENT_TYPE:
         return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
 
     request_serializer = LlmReasoningRequestSerializer(data=request.data)
