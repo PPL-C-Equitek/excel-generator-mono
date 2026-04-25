@@ -6,6 +6,7 @@ from django.test import SimpleTestCase
 from monitoring.entities import AuthMetricEvent, RequestMetricEvent
 from monitoring.infrastructure.repositories import (
     _build_realtime_series_config,
+    _MetricKeyNormalizerMixin,
     _RealtimeSeriesBuilder,
     _RealtimeRequestRecord,
     _RouteAccumulator,
@@ -107,6 +108,24 @@ class SnapshotFactoryTest(SimpleTestCase):
         )
         self.assertEqual(events[0].event_name, "register")
         self.assertEqual(events[1].event_name, "login")
+
+
+class MetricKeyNormalizerMixinTest(SimpleTestCase):
+    def test_normalize_text_handles_bytes_input(self):
+        value = _MetricKeyNormalizerMixin._normalize_text(
+            b"  /monitoring  ",
+            default="unknown",
+        )
+
+        self.assertEqual(value, "/monitoring")
+
+    def test_normalize_text_handles_non_string_input(self):
+        value = _MetricKeyNormalizerMixin._normalize_text(
+            401,
+            default="unknown",
+        )
+
+        self.assertEqual(value, "401")
 
 
 class InMemoryMetricsRepositoryTest(SimpleTestCase):

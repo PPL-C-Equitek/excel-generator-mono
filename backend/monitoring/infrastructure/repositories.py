@@ -631,10 +631,9 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
     ):
         resolved_connection_settings = connection_settings or RedisConnectionSettings()
         self._now = now or datetime.utcnow
-        parsed_snapshot_cache_ttl_seconds = (
-            0.0 if snapshot_cache_ttl_seconds is None else float(snapshot_cache_ttl_seconds)
+        self._snapshot_cache_ttl_seconds = self._resolve_snapshot_cache_ttl_seconds(
+            snapshot_cache_ttl_seconds
         )
-        self._snapshot_cache_ttl_seconds = max(0.0, parsed_snapshot_cache_ttl_seconds)
         self._apply_realtime_state(
             realtime_window_seconds=realtime_window_seconds,
             realtime_bucket_seconds=realtime_bucket_seconds,
@@ -642,6 +641,30 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             max_route_latency_samples=max_route_latency_samples,
         )
         namespace_settings = key_namespace_settings or RedisNamespaceSettings()
+        self._key_prefix = self._build_key_prefix(namespace_settings)
+        self._key_ttl_seconds = self._resolve_optional_positive_int(key_ttl_seconds)
+        self._redis = self._create_redis_client(
+            redis_client=redis_client,
+            connection_settings=resolved_connection_settings,
+        )
+        self._redis.ping()
+        self._max_routes_per_snapshot = self._resolve_optional_positive_int(
+            max_routes_per_snapshot
+        )
+        self._snapshot_cache_expires_at_ms: float | None = None
+        self._snapshot_cache: MetricsSnapshot | None = None
+
+    @staticmethod
+    def _resolve_snapshot_cache_ttl_seconds(
+        snapshot_cache_ttl_seconds: float | None,
+    ) -> float:
+        parsed_snapshot_cache_ttl_seconds = (
+            0.0 if snapshot_cache_ttl_seconds is None else float(snapshot_cache_ttl_seconds)
+        )
+        return max(0.0, parsed_snapshot_cache_ttl_seconds)
+
+    @staticmethod
+    def _build_key_prefix(namespace_settings: RedisNamespaceSettings) -> str:
         base_prefix = (
             str(namespace_settings.key_prefix or REDIS_DEFAULT_KEY_PREFIX).strip()
             or REDIS_DEFAULT_KEY_PREFIX
@@ -650,32 +673,31 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             str(namespace_settings.key_namespace_version or REDIS_DEFAULT_KEY_NAMESPACE_VERSION).strip()
             or REDIS_DEFAULT_KEY_NAMESPACE_VERSION
         )
-        self._key_prefix = f"{base_prefix}:{namespace_version}"
-        parsed_ttl = None if key_ttl_seconds is None else int(key_ttl_seconds)
-        self._key_ttl_seconds = parsed_ttl if parsed_ttl and parsed_ttl > 0 else None
+        return f"{base_prefix}:{namespace_version}"
 
-        if redis_client is None:
-            if redis is None:
-                raise RuntimeError(
-                    "Redis dependency is missing. Install with `pip install redis`."
-                )
-            redis_client = redis.Redis.from_url(
-                resolved_connection_settings.redis_url,
-                decode_responses=True,
-                socket_timeout=resolved_connection_settings.socket_timeout_seconds,
-                socket_connect_timeout=resolved_connection_settings.connect_timeout_seconds,
+    @staticmethod
+    def _resolve_optional_positive_int(value: int | None) -> int | None:
+        parsed_value = None if value is None else int(value)
+        return parsed_value if parsed_value and parsed_value > 0 else None
+
+    @staticmethod
+    def _create_redis_client(
+        *,
+        redis_client,
+        connection_settings: RedisConnectionSettings,
+    ):
+        if redis_client is not None:
+            return redis_client
+        if redis is None:
+            raise RuntimeError(
+                "Redis dependency is missing. Install with `pip install redis`."
             )
-
-        self._redis = redis_client
-        self._redis.ping()
-        parsed_max_routes = (
-            None if max_routes_per_snapshot is None else int(max_routes_per_snapshot)
+        return redis.Redis.from_url(
+            connection_settings.redis_url,
+            decode_responses=True,
+            socket_timeout=connection_settings.socket_timeout_seconds,
+            socket_connect_timeout=connection_settings.connect_timeout_seconds,
         )
-        self._max_routes_per_snapshot = (
-            parsed_max_routes if (parsed_max_routes and parsed_max_routes > 0) else None
-        )
-        self._snapshot_cache_expires_at_ms: float | None = None
-        self._snapshot_cache: MetricsSnapshot | None = None
 
     @property
     def _routes_index_key(self) -> str:

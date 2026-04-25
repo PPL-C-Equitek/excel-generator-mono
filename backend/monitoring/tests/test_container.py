@@ -89,6 +89,50 @@ class MonitoringContainerTest(SimpleTestCase):
             ),
         )
 
+    @override_settings(
+        MONITORING_REDIS_SNAPSHOT_CACHE_TTL_SECONDS=7.5,
+        MONITORING_STATS_CACHE_TTL_SECONDS=4.5,
+        MONITORING_REDIS_SOCKET_TIMEOUT_SECONDS=1.5,
+        MONITORING_REDIS_CONNECT_TIMEOUT_SECONDS=2.5,
+        MONITORING_REALTIME_WINDOW_SECONDS=120,
+        MONITORING_REALTIME_BUCKET_SECONDS=15,
+        MONITORING_MAX_REALTIME_RECORDS=200,
+        MONITORING_MAX_ROUTE_LATENCY_SAMPLES=64,
+    )
+    @patch("monitoring.container.RedisMetricsRepository")
+    def test_build_redis_repository_uses_snapshot_ttl_when_positive(
+        self,
+        redis_repository_cls,
+    ):
+        container._build_redis_repository(
+            repository_kwargs={
+                "realtime_window_seconds": 120,
+                "realtime_bucket_seconds": 15,
+                "max_realtime_records": 200,
+                "max_route_latency_samples": 64,
+                "max_routes_per_snapshot": None,
+            }
+        )
+
+        redis_repository_cls.assert_called_once_with(
+            key_namespace_settings=RedisNamespaceSettings(
+                key_prefix="monitoring",
+                key_namespace_version="v1",
+            ),
+            key_ttl_seconds=86400,
+            snapshot_cache_ttl_seconds=7.5,
+            realtime_window_seconds=120,
+            realtime_bucket_seconds=15,
+            max_realtime_records=200,
+            max_route_latency_samples=64,
+            max_routes_per_snapshot=None,
+            connection_settings=RedisConnectionSettings(
+                redis_url="redis://127.0.0.1:6379/0",
+                socket_timeout_seconds=1.5,
+                connect_timeout_seconds=2.5,
+            ),
+        )
+
     @override_settings(MONITORING_METRICS_BACKEND="memory")
     def test_build_readiness_checks_does_not_include_redis_check_by_default(self):
         checks = container._build_readiness_checks()
