@@ -12,6 +12,9 @@ from openai import (
 )
 
 
+_LLM_PROVIDER_FAILED = "LLM provider request failed."
+
+
 class OpenAIServiceError(Exception):
     """Raised when the OpenAI integration cannot return a valid result."""
 
@@ -53,9 +56,9 @@ class OpenAITextGenerationProvider:
             raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
         except APIStatusError as exc:
             status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
-            raise OpenAIUpstreamError("LLM provider request failed.", status_code=status_code) from exc
+            raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=status_code) from exc
         except (APIConnectionError, APIError) as exc:
-            raise OpenAIUpstreamError("LLM provider request failed.", status_code=502) from exc
+            raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=502) from exc
 
         output_text = getattr(response, "output_text", None)
         if not output_text:
@@ -90,6 +93,39 @@ def _map_api_status_to_http(status_code: int | None) -> int:
 def generate_text(prompt: str, system_prompt: str | None = None) -> str:
     provider = OpenAITextGenerationProvider()
     return provider.generate_text(prompt=prompt, system_prompt=system_prompt)
+
+
+def generate_chat_response(messages: list[dict]) -> str:
+    if not messages:
+        raise ValueError("messages must be a non-empty list.")
+
+    client = _build_client()
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=messages,
+        )
+    except AuthenticationError as exc:
+        raise OpenAIUpstreamError("LLM authentication failed.", status_code=401) from exc
+    except RateLimitError as exc:
+        raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
+    except APITimeoutError as exc:
+        raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
+    except APIStatusError as exc:
+        status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
+        raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=status_code) from exc
+    except (APIConnectionError, APIError) as exc:
+        raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=502) from exc
+
+    try:
+        content = response.choices[0].message.content
+    except (AttributeError, IndexError):
+        content = None
+
+    if not content:
+        raise OpenAIServiceError("OpenAI response did not include a reply.")
+    return content
 
 
 def generate_json(
