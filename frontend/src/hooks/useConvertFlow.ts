@@ -82,10 +82,7 @@ function toScalarCell(value: unknown): ScalarCell {
     try {
         return JSON.stringify(value)
     } catch {
-        if (value !== null && typeof value === 'object') {
-            return '[unserializable object]'
-        }
-        return String(value)
+        return '[Unserializable Value]'
     }
 }
 
