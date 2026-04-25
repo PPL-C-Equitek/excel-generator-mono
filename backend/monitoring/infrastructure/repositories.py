@@ -200,12 +200,19 @@ def _normalize_max_latency_samples(value: int) -> int:
 class _MetricKeyNormalizerMixin:
     @staticmethod
     def _normalize_text(
-        value: str | None,
+        value: str | bytes | None,
         *,
         default: str,
         transform: Callable[[str], str] | None = None,
     ) -> str:
-        normalized = (value or "").strip()
+        if value is None:
+            normalized = ""
+        elif isinstance(value, bytes):
+            normalized = value.decode("utf-8", errors="ignore").strip()
+        elif isinstance(value, str):
+            normalized = value.strip()
+        else:
+            normalized = str(value).strip()
         if not normalized:
             return default
         if transform is None:
