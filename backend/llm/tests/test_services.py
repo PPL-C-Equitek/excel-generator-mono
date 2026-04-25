@@ -702,5 +702,33 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
 
         self.assertEqual(ctx.exception.status_code, 502)
 
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_maps_api_status_error(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = DummyAPIStatusError("api status", status_code=502)
 
+        with self.assertRaises(OpenAIUpstreamError) as ctx:
+            generate_chat_response([{"role": "user", "content": "Halo"}])
 
+        self.assertEqual(ctx.exception.status_code, 502)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_raises_when_choices_missing_or_invalid(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        
+        # Simulating IndexError by returning empty choices
+        mock_client.chat.completions.create.return_value = Mock(choices=[])
+
+        with self.assertRaises(OpenAIServiceError):
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+            
+        # Simulating AttributeError by returning an object without choices
+        mock_client.chat.completions.create.return_value = Mock(spec=[])
+        
+        with self.assertRaises(OpenAIServiceError):
+            generate_chat_response([{"role": "user", "content": "Halo"}])

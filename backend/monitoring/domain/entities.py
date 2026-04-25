@@ -57,6 +57,8 @@ class RouteMetricSnapshot:
     total_errors: int
     avg_latency_ms: float
     max_latency_ms: float
+    p95_latency_ms: float = 0.0
+    p99_latency_ms: float = 0.0
 
     @property
     def error_rate(self) -> float:
@@ -71,6 +73,8 @@ class RouteMetricSnapshot:
             "error_rate": self.error_rate,
             "avg_latency_ms": self.avg_latency_ms,
             "max_latency_ms": self.max_latency_ms,
+            "p95_latency_ms": self.p95_latency_ms,
+            "p99_latency_ms": self.p99_latency_ms,
         }
 
 
@@ -89,12 +93,36 @@ class EventMetricSnapshot:
 
 
 @dataclass(frozen=True)
+class RealtimeMetricPoint:
+    timestamp: datetime
+    requests: int
+    errors: int
+    avg_latency_ms: float
+
+    @property
+    def error_rate(self) -> float:
+        return _ratio_or_zero(self.errors, self.requests)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "timestamp": self.timestamp.isoformat(),
+            "requests": self.requests,
+            "errors": self.errors,
+            "error_rate": self.error_rate,
+            "avg_latency_ms": self.avg_latency_ms,
+        }
+
+
+@dataclass(frozen=True)
 class MetricsSnapshot:
     generated_at: datetime
     total_requests: int
     total_errors: int
     routes: tuple[RouteMetricSnapshot, ...]
     events: tuple[EventMetricSnapshot, ...] = ()
+    timeseries: tuple[RealtimeMetricPoint, ...] = ()
+    timeseries_window_seconds: int = 300
+    timeseries_bucket_seconds: int = 10
 
     @property
     def error_rate(self) -> float:
@@ -110,6 +138,11 @@ class MetricsSnapshot:
             },
             "routes": [route.to_dict() for route in self.routes],
             "events": self._events_to_dict(),
+            "timeseries": {
+                "window_seconds": self.timeseries_window_seconds,
+                "bucket_seconds": self.timeseries_bucket_seconds,
+                "points": [point.to_dict() for point in self.timeseries],
+            },
         }
 
     def _events_to_dict(self) -> dict[str, dict[str, int]]:

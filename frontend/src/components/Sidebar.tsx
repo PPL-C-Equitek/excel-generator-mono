@@ -5,7 +5,7 @@ import { useState } from "react"
 import { getStoredUser } from "@/lib/auth"
 import LogoutButton from "@/components/LogoutButton"
 interface SidebarProps {
-    readonly activeMenu: 'home' | 'convert' | 'schema' | 'history' | 'change-password'
+    readonly activeMenu: 'home' | 'convert' | 'schema' | 'history' | 'monitoring' | 'change-password'
     readonly onLogout?: () => void
 }
 
@@ -14,6 +14,7 @@ export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
         { key: 'convert', label: 'Convert', href: '/convert' },
         { key: 'schema', label: 'Schema', href: '/schema' },
         { key: 'history', label: 'History', href: '/history' },
+        { key: 'monitoring', label: 'Monitoring', href: '/monitoring' },
         { key: 'change-password', label: 'Change Password', href: '/change-password' },
     ]
 
