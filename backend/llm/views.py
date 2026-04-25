@@ -1,12 +1,14 @@
 import logging
 from typing import Any, cast
 
+from artifact_history.models import ArtifactHistory
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from artifact_history.services import create_artifact_history
+from authentication.permissions import IsVerifiedUser
 from .serializers import (
     LlmGenerateRequestSerializer,
     LlmGenerateResponseSerializer,
@@ -14,6 +16,7 @@ from .serializers import (
     SendMessageResponseSerializer,
     LlmReasoningRequestSerializer,
     LlmReasoningResponseSerializer,
+    ThinkingLogItemSerializer,
 )
 from .services.generation_service import (
     CustomSchemaNotFoundError,
@@ -42,6 +45,9 @@ INTERNAL_FAILURE_DETAIL = "Internal server error."
 INVALID_INPUT_JSON_DETAIL = "Invalid input_json payload."
 INVALID_PROMPT_DETAIL = "Invalid prompt payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
+THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
+INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
+MAX_THINKING_LOG_PAGE_SIZE = 100
 
 
 def get_authenticated_user_id(user) -> object | None:
@@ -93,6 +99,54 @@ def extract_original_name(input_json, output_json) -> str:
         or _extract_document_info_filename(output_json)
         or "generated-output"
     )
+
+
+def _thinking_log_not_found_response():
+    return Response({"detail": THINKING_LOG_NOT_FOUND_DETAIL}, status=404)
+
+
+def _invalid_thinking_log_pagination_response():
+    return Response(
+        {
+            "detail": INVALID_REQUEST_DETAIL,
+            "errors": {
+                "pagination": [INVALID_THINKING_LOG_PAGINATION_DETAIL],
+            },
+        },
+        status=400,
+    )
+
+
+def _parse_thinking_log_positive_int(value, default, minimum=1):
+    if value is None:
+        return default
+
+    parsed = int(value)
+    if parsed < minimum:
+        raise ValueError
+    return parsed
+
+
+def _parse_thinking_log_page_size(value, default=10):
+    parsed = _parse_thinking_log_positive_int(value, default=default)
+    if parsed > MAX_THINKING_LOG_PAGE_SIZE:
+        raise ValueError
+    return parsed
+
+
+def _build_thinking_log_queryset_for_user(user, session_id=None, request_id=None):
+    queryset = ArtifactHistory.objects.filter(owner=user)
+
+    normalized_session_id = session_id.strip() if isinstance(session_id, str) else ""
+    normalized_request_id = request_id.strip() if isinstance(request_id, str) else ""
+
+    if normalized_session_id:
+        queryset = queryset.filter(output_json__session_id=normalized_session_id)
+
+    if normalized_request_id:
+        queryset = queryset.filter(output_json__request_id=normalized_request_id)
+
+    return queryset
 
 
 @api_view(["POST"])
@@ -236,3 +290,50 @@ def llm_reasoning(request):
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
 
     return Response(response_serializer.data)
+
+
+@api_view(["GET"])
+@require_http_methods(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def thinking_log_list(request):
+    try:
+        page = _parse_thinking_log_positive_int(request.query_params.get("page"), default=1)
+        page_size = _parse_thinking_log_page_size(
+            request.query_params.get("page_size"),
+            default=10,
+        )
+    except (TypeError, ValueError):
+        return _invalid_thinking_log_pagination_response()
+
+    session_id = request.query_params.get("session_id")
+    request_id = request.query_params.get("request_id")
+    queryset = _build_thinking_log_queryset_for_user(
+        user=request.user,
+        session_id=session_id,
+        request_id=request_id,
+    )
+
+    total_count = queryset.count()
+    offset = (page - 1) * page_size
+    paged_records = queryset[offset : offset + page_size]
+
+    return Response(
+        {
+            "count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "results": ThinkingLogItemSerializer(paged_records, many=True).data,
+        },
+        status=200,
+    )
+
+
+@api_view(["GET"])
+@require_http_methods(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def thinking_log_detail(request, history_id):
+    record = ArtifactHistory.objects.filter(owner=request.user, id=history_id).first()
+    if record is None:
+        return _thinking_log_not_found_response()
+
+    return Response(ThinkingLogItemSerializer(record).data, status=200)

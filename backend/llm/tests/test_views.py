@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 from unittest.mock import patch
 from uuid import uuid4
@@ -665,6 +666,230 @@ class LlmGenerateHistoryIntegrationTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(ArtifactHistory.objects.exists())
 
+
+class ThinkingLogEndpointTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.verified_user = User.objects.create_user(
+            email="thinking-log-owner@example.com",
+            name="Thinking Log Owner",
+            password="secret",
+            status="verified",
+        )
+        self.unverified_user = User.objects.create_user(
+            email="thinking-log-unverified@example.com",
+            name="Thinking Log Unverified",
+            password="secret",
+            status="unverified",
+        )
+        self.other_user = User.objects.create_user(
+            email="thinking-log-other@example.com",
+            name="Thinking Log Other",
+            password="secret",
+            status="verified",
+        )
+
+    def _create_history(self, owner, *, session_id, request_id, thinking_log):
+        return ArtifactHistory.objects.create(
+            owner=owner,
+            original_name="invoice.pdf",
+            custom_name=None,
+            output_json={
+                "session_id": session_id,
+                "request_id": request_id,
+                "thinking_log": thinking_log,
+                "summary": {"table_count": 1},
+                "content_data": [
+                    {"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}
+                ],
+            },
+            status_processing="completed",
+            created_at=timezone.now(),
+        )
+
+    def test_thinking_log_list_returns_filtered_records_for_owner(self):
+        owned_match = self._create_history(
+            self.verified_user,
+            session_id="session-1",
+            request_id="request-a",
+            thinking_log="Mapped invoice total to total_amount.",
+        )
+        self._create_history(
+            self.verified_user,
+            session_id="session-2",
+            request_id="request-b",
+            thinking_log="Validated header consistency.",
+        )
+        self._create_history(
+            self.other_user,
+            session_id="session-1",
+            request_id="request-c",
+            thinking_log="Other user log.",
+        )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get("/llm/thinking-logs/?session_id=session-1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["page"], 1)
+        self.assertEqual(response.data["page_size"], 10)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["id"], str(owned_match.id))
+        self.assertEqual(response.data["results"][0]["session_id"], "session-1")
+        self.assertEqual(response.data["results"][0]["request_id"], "request-a")
+
+    def test_thinking_log_list_filters_by_request_id_without_session_filter(self):
+        matched = self._create_history(
+            self.verified_user,
+            session_id="session-x",
+            request_id="request-target",
+            thinking_log="Request filtered record.",
+        )
+        self._create_history(
+            self.verified_user,
+            session_id="session-y",
+            request_id="request-other",
+            thinking_log="Non matching request.",
+        )
+        self._create_history(
+            self.other_user,
+            session_id="session-z",
+            request_id="request-target",
+            thinking_log="Other owner record.",
+        )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get("/llm/thinking-logs/?request_id=request-target")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["id"], str(matched.id))
+        self.assertEqual(response.data["results"][0]["request_id"], "request-target")
+
+    def test_thinking_log_list_without_filters_returns_all_owned_records(self):
+        self._create_history(
+            self.verified_user,
+            session_id="session-a",
+            request_id="request-a",
+            thinking_log="Owned record A.",
+        )
+        self._create_history(
+            self.verified_user,
+            session_id="session-b",
+            request_id="request-b",
+            thinking_log="Owned record B.",
+        )
+        self._create_history(
+            self.other_user,
+            session_id="session-c",
+            request_id="request-c",
+            thinking_log="Other owner record.",
+        )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get("/llm/thinking-logs/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(len(response.data["results"]), 2)
+
+    def test_thinking_log_detail_returns_record_for_owner(self):
+        record = self._create_history(
+            self.verified_user,
+            session_id="session-9",
+            request_id="request-z",
+            thinking_log="Normalization notes for numeric columns.",
+        )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get(f"/llm/thinking-logs/{record.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], str(record.id))
+        self.assertEqual(response.data["session_id"], "session-9")
+        self.assertEqual(response.data["request_id"], "request-z")
+        self.assertEqual(
+            response.data["thinking_log"],
+            "Normalization notes for numeric columns.",
+        )
+
+    def test_thinking_log_detail_returns_404_when_not_found(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/llm/thinking-logs/00000000-0000-0000-0000-000000000000/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data, {"detail": "Thinking log not found."})
+
+    def test_thinking_log_detail_blocks_access_to_other_user_record(self):
+        foreign_record = self._create_history(
+            self.other_user,
+            session_id="session-foreign",
+            request_id="request-foreign",
+            thinking_log="Foreign record.",
+        )
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(f"/llm/thinking-logs/{foreign_record.id}/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data, {"detail": "Thinking log not found."})
+
+    def test_thinking_log_list_supports_large_dataset_pagination(self):
+        for index in range(25):
+            self._create_history(
+                self.verified_user,
+                session_id="session-bulk",
+                request_id=f"req-{index}",
+                thinking_log=f"Summary item {index}",
+            )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get("/llm/thinking-logs/?session_id=session-bulk&page=2&page_size=10")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 25)
+        self.assertEqual(response.data["page"], 2)
+        self.assertEqual(response.data["page_size"], 10)
+        self.assertEqual(len(response.data["results"]), 10)
+
+    def test_thinking_log_list_requires_authentication(self):
+        response = self.client.get("/llm/thinking-logs/")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_thinking_log_list_returns_403_for_authenticated_unverified_user(self):
+        self.client.force_authenticate(user=self.unverified_user)
+
+        response = self.client.get("/llm/thinking-logs/")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_thinking_log_list_error_schema_is_consistent_for_invalid_pagination(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/llm/thinking-logs/?page=0&page_size=10")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(
+            response.data["errors"],
+            {"pagination": ["Invalid thinking log pagination request."]},
+        )
+
+    def test_thinking_log_list_rejects_page_size_above_maximum(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/llm/thinking-logs/?page_size=101")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(
+            response.data["errors"],
+            {"pagination": ["Invalid thinking log pagination request."]},
+        )
 class SendMessagePositiveTest(SimpleTestCase):
 
     def setUp(self):
