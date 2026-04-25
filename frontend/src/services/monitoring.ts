@@ -27,7 +27,7 @@ export type {
 
 const MONITORING_AUTH_REQUIRED_MESSAGE = 'Authentication credentials were not provided.'
 
-async function getMonitoringAuthToken(): Promise<string> {
+export async function getMonitoringAuthToken(): Promise<string> {
     const accessToken = await getValidAccessToken()
     if (!accessToken) {
         throw new Error(MONITORING_AUTH_REQUIRED_MESSAGE)

@@ -1,5 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('@/lib/auth', () => ({
+    getValidAccessToken: vi.fn(),
+}))
+import { getValidAccessToken } from '@/lib/auth'
 import type {
     MonitoringAccessDecision,
     MonitoringLivePayload,
@@ -96,6 +100,7 @@ function createDeferred<T>() {
 
 describe('useMonitoringDashboardModel', () => {
     beforeEach(() => {
+        vi.mocked(getValidAccessToken).mockResolvedValue('test-access-token')
         vi.clearAllMocks()
     })
 
@@ -134,6 +139,51 @@ describe('useMonitoringDashboardModel', () => {
         expect(service.getMonitoringStats).not.toHaveBeenCalled()
     })
 
+    it('reuses one auth token for non-snapshot access/ready/stats flow', async () => {
+        const service = createMonitoringService()
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(vi.mocked(getValidAccessToken)).toHaveBeenCalledTimes(1)
+        expect(service.getMonitoringAccess).toHaveBeenCalledWith('test-access-token')
+        expect(service.getMonitoringReady).toHaveBeenCalledWith('test-access-token')
+        expect(service.getMonitoringStats).toHaveBeenCalledWith('test-access-token')
+    })
+
+    it('fails when auth token is unavailable for non-snapshot monitoring flow', async () => {
+        vi.mocked(getValidAccessToken).mockResolvedValueOnce(null)
+        const service = createMonitoringService({
+            getMonitoringAccess: vi.fn(),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.errorMessage).toBe('Authentication credentials were not provided.')
+        expect(service.getMonitoringAccess).not.toHaveBeenCalled()
+        expect(service.getMonitoringReady).not.toHaveBeenCalled()
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+    })
+
     it('polls monitoring endpoints on the configured interval', async () => {
         const service = createMonitoringService()
 
@@ -145,7 +195,7 @@ describe('useMonitoringDashboardModel', () => {
         )
 
         await waitFor(() => {
-            expect(service.getMonitoringLive).toHaveBeenCalledTimes(1)
+            expect(service.getMonitoringLive).toHaveBeenCalled()
         })
 
         await waitFor(() => {

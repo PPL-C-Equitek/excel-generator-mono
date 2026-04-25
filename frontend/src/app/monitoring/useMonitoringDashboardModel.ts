@@ -15,6 +15,7 @@ import type {
     ReadinessMeter,
     RealtimeTotals,
 } from './monitoringViewModelTypes'
+import { getMonitoringAuthToken } from '@/services/monitoring'
 
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 5000
 const STALE_THRESHOLD_MULTIPLIER = 3
@@ -131,11 +132,11 @@ export function useMonitoringDashboardModel({
             }
 
             try {
-                if (monitoringService.getMonitoringAuthenticatedSnapshot) {
-                    const [liveResponse, snapshot] = await Promise.all([
-                        monitoringService.getMonitoringLive(),
-                        monitoringService.getMonitoringAuthenticatedSnapshot(),
-                    ])
+            if (monitoringService.getMonitoringAuthenticatedSnapshot) {
+                const [liveResponse, snapshot] = await Promise.all([
+                    monitoringService.getMonitoringLive(),
+                    monitoringService.getMonitoringAuthenticatedSnapshot(),
+                ])
                     setLivePayload(liveResponse)
                     setAccessDecision(snapshot.accessDecision)
                     setReadyPayload(snapshot.readyPayload)
@@ -144,9 +145,10 @@ export function useMonitoringDashboardModel({
                     return
                 }
 
+                const monitoringAuthToken = await getMonitoringAuthToken()
                 const [liveResponse, accessResponse] = await Promise.all([
                     monitoringService.getMonitoringLive(),
-                    monitoringService.getMonitoringAccess(),
+                    monitoringService.getMonitoringAccess(monitoringAuthToken),
                 ])
 
                 setLivePayload(liveResponse)
@@ -160,8 +162,8 @@ export function useMonitoringDashboardModel({
                 }
 
                 const [readyResponse, statsResponse] = await Promise.all([
-                    monitoringService.getMonitoringReady(),
-                    monitoringService.getMonitoringStats(),
+                    monitoringService.getMonitoringReady(monitoringAuthToken),
+                    monitoringService.getMonitoringStats(monitoringAuthToken),
                 ])
                 setReadyPayload(readyResponse)
                 setStatsPayload(statsResponse)
