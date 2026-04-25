@@ -95,6 +95,8 @@ class MonitoringViewsTest(APITestCase):
             },
         )
         service.live.assert_called_once()
+        self.assertIn("X-RateLimit-Limit", response)
+        self.assertIn("X-RateLimit-Remaining", response)
 
     @patch("monitoring.interfaces.http.views.get_monitoring_service")
     def test_ready_endpoint_returns_401_for_unauthenticated_user(
@@ -365,6 +367,8 @@ class MonitoringViewsTest(APITestCase):
                 "reason": "unauthenticated",
             },
         )
+        self.assertIn("X-RateLimit-Limit", response)
+        self.assertIn("X-RateLimit-Remaining", response)
 
     def test_access_endpoint_returns_no_account_decision_for_verified_user_without_monitoring_account(
         self,
