@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from itertools import islice
 from typing import Callable, Mapping, TypeAlias
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -63,8 +64,9 @@ class DiscordWebhookNotifier:
 
     def _build_message(self, *, event_name: str, payload: Mapping[str, object]) -> DiscordPayload:
         checks_data = payload.get("checks", ())
-        checks = list(checks_data) if isinstance(checks_data, list | tuple) else []
-        checks_preview = checks[:3]
+        checks_preview = (
+            list(islice(checks_data, 3)) if isinstance(checks_data, (list, tuple)) else []
+        )
         return {
             "username": self._username,
             "content": f"[Monitoring] {event_name}",
