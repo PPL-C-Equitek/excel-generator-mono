@@ -2,6 +2,7 @@ import logging
 from typing import Any, cast
 
 from artifact_history.models import ArtifactHistory
+from chat_sessions.models import ChatMessage
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -134,19 +135,21 @@ def _parse_thinking_log_page_size(value, default=10):
     return parsed
 
 
-def _build_thinking_log_queryset_for_user(user, session_id=None, request_id=None):
-    queryset = ArtifactHistory.objects.filter(owner=user)
+def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, request_id=None):
+    queryset = ChatMessage.objects.filter(session__owner=user).exclude(thinking_log="")
 
     normalized_session_id = session_id.strip() if isinstance(session_id, str) else ""
+    normalized_chat_id = chat_id.strip() if isinstance(chat_id, str) else ""
     normalized_request_id = request_id.strip() if isinstance(request_id, str) else ""
 
     if normalized_session_id:
-        queryset = queryset.filter(output_json__session_id=normalized_session_id)
+        queryset = queryset.filter(session_id=normalized_session_id)
 
-    if normalized_request_id:
-        queryset = queryset.filter(output_json__request_id=normalized_request_id)
+    identifier = normalized_chat_id or normalized_request_id
+    if identifier:
+        queryset = queryset.filter(id=identifier)
 
-    return queryset
+    return queryset.order_by("-created_at", "-id")
 
 
 @api_view(["POST"])
@@ -306,10 +309,12 @@ def thinking_log_list(request):
         return _invalid_thinking_log_pagination_response()
 
     session_id = request.query_params.get("session_id")
+    chat_id = request.query_params.get("chat_id")
     request_id = request.query_params.get("request_id")
     queryset = _build_thinking_log_queryset_for_user(
         user=request.user,
         session_id=session_id,
+        chat_id=chat_id,
         request_id=request_id,
     )
 
@@ -332,7 +337,7 @@ def thinking_log_list(request):
 @require_http_methods(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def thinking_log_detail(request, history_id):
-    record = ArtifactHistory.objects.filter(owner=request.user, id=history_id).first()
+    record = ChatMessage.objects.filter(session__owner=request.user, id=history_id).first()
     if record is None:
         return _thinking_log_not_found_response()
 
