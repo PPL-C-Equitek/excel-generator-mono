@@ -204,17 +204,6 @@ function inferHeadersAndRowsFromRowsArray(rows: unknown[]): { headers: string[];
 
 function inferHeadersAndRowsFromOutput(output: JsonValue): { headers: string[]; rows: JsonObject[] } {
     if (isJsonObject(output)) {
-        const rawHeaders = output.headers
-        const rawRows = output.rows
-
-        if (Array.isArray(rawHeaders) && Array.isArray(rawRows)) {
-            const headers = normalizeHeaders(rawHeaders)
-            return {
-                headers,
-                rows: buildRowsFromGeneratedOutputRows(rawRows, headers),
-            }
-        }
-
         const headers = normalizeHeaders(Object.keys(output))
         return {
             headers,
@@ -330,12 +319,12 @@ function buildTabularExportPayload(
 
     const contentData = buildContentDataFromOutput(generatedOutput)
     const totalRows = contentData.reduce((sum, table) => {
-        const rows = table.rows
-        return sum + (Array.isArray(rows) ? rows.length : 0)
+        const rows = table.rows as unknown[]
+        return sum + rows.length
     }, 0)
     const totalColumns = contentData.reduce((max, table) => {
-        const headers = table.headers
-        return Math.max(max, Array.isArray(headers) ? headers.length : 0)
+        const headers = table.headers as unknown[]
+        return Math.max(max, headers.length)
     }, 0)
 
     return {
@@ -498,10 +487,7 @@ export function useConvertFlow(
             return
         }
 
-        const nonEmptyOutput = generatedOutput
-        if (nonEmptyOutput === null) {
-            return
-        }
+        const nonEmptyOutput = generatedOutput as JsonValue
 
         const requestId = conversionRequestIdRef.current
         const csvOutput = buildTabularExportPayload(

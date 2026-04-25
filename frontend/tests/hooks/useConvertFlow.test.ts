@@ -1137,6 +1137,378 @@ describe('useConvertFlow', () => {
             expect(result.current.error).toBeNull()
             expect(result.current.csvMetadata).toBeNull()
         })
+
+        it('normalizes duplicate and blank headers in direct headers/rows output', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: {
+                        headers: ['Name', 'name', '   '],
+                        rows: [[1, 2, 3]],
+                    },
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                content_data: Array<{ headers: string[]; rows: Array<Record<string, unknown>> }>
+            }
+
+            expect(payload.content_data[0].headers).toEqual(['Name', 'name_2', 'column_3'])
+            expect(payload.content_data[0].rows[0]).toEqual({ Name: 1, name_2: 2, column_3: 3 })
+        })
+
+        it('falls back to value header when direct headers array is empty', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: {
+                        headers: [],
+                        rows: [[123]],
+                    },
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                content_data: Array<{ headers: string[]; rows: Array<Record<string, unknown>> }>
+            }
+
+            expect(payload.content_data[0].headers).toEqual(['value'])
+            expect(payload.content_data[0].rows[0]).toEqual({ value: 123 })
+        })
+
+        it('maps unknown row values with null padding when headers have multiple columns', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: {
+                        headers: ['first', 'second'],
+                        rows: ['raw-text-row'],
+                    },
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                content_data: Array<{ rows: Array<Record<string, unknown>> }>
+            }
+
+            expect(payload.content_data[0].rows[0]).toEqual({ first: 'raw-text-row', second: null })
+        })
+
+        it('builds tabular payload from array-of-arrays output', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: [[1, 2], [3]] }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                content_data: Array<{ headers: string[]; rows: Array<Record<string, unknown>> }>
+            }
+
+            expect(payload.content_data[0].headers).toEqual(['column_1', 'column_2'])
+            expect(payload.content_data[0].rows).toEqual([
+                { column_1: 1, column_2: 2 },
+                { column_1: 3, column_2: null },
+            ])
+        })
+
+        it('builds tabular payload from scalar array output', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: ['alpha', 2, true] }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                content_data: Array<{ headers: string[]; rows: Array<Record<string, unknown>> }>
+            }
+
+            expect(payload.content_data[0].headers).toEqual(['value'])
+            expect(payload.content_data[0].rows).toEqual([
+                { value: 'alpha' },
+                { value: 2 },
+                { value: true },
+            ])
+        })
+
+        it('builds tabular payload from scalar output', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: 42 }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                content_data: Array<{ headers: string[]; rows: Array<Record<string, unknown>> }>
+            }
+
+            expect(payload.content_data[0].headers).toEqual(['value'])
+            expect(payload.content_data[0].rows).toEqual([{ value: 42 }])
+        })
+
+        it('serializes object cells and safely falls back for circular values', async () => {
+            const circular: { self?: unknown } = {}
+            circular.self = circular
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: {
+                        headers: ['plain_obj', 'circular_obj'],
+                        rows: [[{ nested: 'ok' }, circular]],
+                    },
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                content_data: Array<{ rows: Array<Record<string, unknown>> }>
+            }
+
+            expect(payload.content_data[0].rows[0]).toEqual({
+                plain_obj: '{"nested":"ok"}',
+                circular_obj: '[object Object]',
+            })
+        })
+
+        it('uses upload document_info source_type and filename priorities in canonical payload', async () => {
+            mockUploadFile.mockResolvedValue({
+                document_info: {
+                    source_type: ' excel ',
+                    filename: 'nested-name.pdf',
+                },
+            })
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+            })
+
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                document_info: { source_type: string; filename: string }
+            }
+
+            expect(payload.document_info).toEqual({
+                source_type: 'Excel',
+                filename: 'nested-name.pdf',
+            })
+        })
+
+        it('resolves PDF source_type from upload metadata and falls back to output filename', async () => {
+            mockUploadFile.mockResolvedValue({
+                document_info: {
+                    source_type: ' PDF ',
+                },
+            })
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+            })
+
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                document_info: { source_type: string; filename: string }
+            }
+
+            expect(payload.document_info).toEqual({
+                source_type: 'PDF',
+                filename: 'report.pdf',
+            })
+        })
+
+        it('passes through canonical export payload without rebuilding it', async () => {
+            const canonicalOutput = {
+                document_info: {
+                    source_type: 'PDF',
+                    filename: 'canonical.pdf',
+                },
+                summary: {
+                    total_tables: 1,
+                    total_rows: 1,
+                    total_columns: 1,
+                },
+                content_data: [
+                    {
+                        table_name: 'SheetCanonical',
+                        headers: ['status'],
+                        rows: [{ status: 'ready' }],
+                    },
+                ],
+            }
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: canonicalOutput }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.exportToCsv).toHaveBeenCalledWith(
+                canonicalOutput,
+                expect.any(AbortSignal)
+            )
+        })
+
+        it('fills missing object-row fields with null when inferring union headers', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: [{ a: 1 }, { b: 2 }],
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                content_data: Array<{ headers: string[]; rows: Array<Record<string, unknown>> }>
+            }
+
+            expect(payload.content_data[0].headers).toEqual(['a', 'b'])
+            expect(payload.content_data[0].rows).toEqual([
+                { a: 1, b: null },
+                { a: null, b: 2 },
+            ])
+        })
+
+        it('uses generated fallback sheet name when a sheet key is blank', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: {
+                        '': [{ value: 'first' }],
+                        sheet2: [{ value: 'second' }],
+                    },
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                content_data: Array<{ table_name: string }>
+            }
+
+            expect(payload.content_data[0].table_name).toBe('Sheet1')
+            expect(payload.content_data[1].table_name).toBe('sheet2')
+        })
+
+        it('falls back to output format when source_type is unrecognized', async () => {
+            mockUploadFile.mockResolvedValue({
+                filename: 'report.xlsx',
+                document_info: {
+                    source_type: 'word',
+                },
+            })
+
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            const payload = (service.exportToCsv as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+                document_info: { source_type: string; filename: string }
+            }
+
+            expect(payload.document_info).toEqual({
+                source_type: 'Excel',
+                filename: 'report.xlsx',
+            })
+        })
     })
 
     // -----------------------------------------------------------------------
