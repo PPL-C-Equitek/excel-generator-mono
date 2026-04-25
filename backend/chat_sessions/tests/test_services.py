@@ -1,16 +1,22 @@
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
+from unittest.mock import patch
 
 from authentication.models import User
 from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
+    build_history_with_summary,
     create_generated_output,
     create_session_for_user,
     delete_session,
     get_session_for_user,
     list_sessions_for_user,
+    summarize_old_messages,
+    SUMMARY_RECENT_MESSAGES_KEEP,
+    SUMMARY_REFRESH_THRESHOLD,
+    SUMMARY_THRESHOLD,
     update_session_title,
 )
 
@@ -256,3 +262,187 @@ class CreateGeneratedOutputServiceTest(TestCase):
     def test_create_generated_output_rejects_non_dict_output_json(self):
         with self.assertRaises(ValidationError):
             create_generated_output(self.session, ["bukan", "dict"])
+
+
+class SummarizeOldMessagesServiceTest(SimpleTestCase):
+    
+    def _make_messages(self, n):
+        roles = ["user", "assistant"]
+        return [{"role": roles[i % 2], "content": f"message {i}"} for i in range(n)]
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_returns_empty_string_for_empty_message_list(self, mock_llm):
+        result = summarize_old_messages([])
+
+        self.assertEqual(result, "")
+        mock_llm.assert_not_called()
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_calls_llm_and_returns_summary_text(self, mock_llm):
+        mock_llm.return_value = "User asked about X and assistant explained Y."
+        messages = self._make_messages(4)
+
+        result = summarize_old_messages(messages)
+
+        self.assertEqual(result, "User asked about X and assistant explained Y.")
+        mock_llm.assert_called_once()
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_prompt_includes_all_message_content(self, mock_llm):
+        mock_llm.return_value = "summary"
+        messages = [
+            {"role": "user", "content": "Hello there"},
+            {"role": "assistant", "content": "Hi! How can I help?"},
+        ]
+
+        summarize_old_messages(messages)
+
+        call_args = mock_llm.call_args[0][0]
+        combined = " ".join(m["content"] for m in call_args)
+        self.assertIn("Hello there", combined)
+        self.assertIn("Hi! How can I help?", combined)
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_prompt_is_sent_as_user_role(self, mock_llm):
+        mock_llm.return_value = "summary"
+
+        summarize_old_messages(self._make_messages(2))
+
+        call_args = mock_llm.call_args[0][0]
+        self.assertEqual(len(call_args), 1)
+        self.assertEqual(call_args[0]["role"], "user")
+
+
+class BuildHistoryWithSummaryServiceTest(TestCase):
+
+    def setUp(self):
+        owner = User.objects.create_user(
+            email="summary-svc@example.com",
+            name="Summary User",
+            password="secret",
+            status="verified",
+        )
+        self.session = Session.objects.create(owner=owner)
+
+    def _make_history(self, n):
+        roles = ["user", "assistant"]
+        return [{"role": roles[i % 2], "content": f"msg {i}"} for i in range(n)]
+
+
+    def test_returns_history_unchanged_when_at_or_below_threshold(self):
+        history = self._make_history(SUMMARY_THRESHOLD)
+
+        result = build_history_with_summary(self.session, history)
+
+        self.assertEqual(result, history)
+
+
+    def test_does_not_call_llm_when_history_is_short(self):
+        history = self._make_history(SUMMARY_THRESHOLD - 1)
+
+        with patch("chat_sessions.services.summarize_old_messages") as mock_sum:
+            build_history_with_summary(self.session, history)
+            mock_sum.assert_not_called()
+
+
+    @patch("chat_sessions.services.summarize_old_messages")
+    def test_calls_summarize_when_history_exceeds_threshold_and_no_summary_cached(
+        self, mock_sum
+    ):
+        mock_sum.return_value = "First summary."
+        history = self._make_history(SUMMARY_THRESHOLD + 1)
+
+        build_history_with_summary(self.session, history)
+
+        mock_sum.assert_called_once()
+
+    @patch("chat_sessions.services.summarize_old_messages")
+    def test_persists_summary_to_session_on_first_creation(self, mock_sum):
+        mock_sum.return_value = "Persisted summary."
+        history = self._make_history(SUMMARY_THRESHOLD + 1)
+
+        build_history_with_summary(self.session, history)
+
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.history_summary, "Persisted summary.")
+
+    @patch("chat_sessions.services.summarize_old_messages")
+    def test_result_starts_with_summary_system_message(self, mock_sum):
+        mock_sum.return_value = "My summary."
+        history = self._make_history(SUMMARY_THRESHOLD + 1)
+
+        result = build_history_with_summary(self.session, history)
+
+        self.assertEqual(result[0]["role"], "system")
+        self.assertIn("My summary.", result[0]["content"])
+
+    @patch("chat_sessions.services.summarize_old_messages")
+    def test_result_contains_recent_messages_verbatim(self, mock_sum):
+        mock_sum.return_value = "summary"
+        history = self._make_history(SUMMARY_THRESHOLD + 5)
+
+        result = build_history_with_summary(self.session, history)
+
+        self.assertEqual(len(result), 1 + SUMMARY_RECENT_MESSAGES_KEEP)
+        self.assertEqual(result[1:], history[-SUMMARY_RECENT_MESSAGES_KEEP:])
+
+
+    @patch("chat_sessions.services.summarize_old_messages")
+    def test_reuses_cached_summary_without_calling_llm_again(self, mock_sum):
+        self.session.history_summary = "Cached summary."
+        self.session.save(update_fields=["history_summary"])
+        old_count = SUMMARY_THRESHOLD + 1 - SUMMARY_RECENT_MESSAGES_KEEP
+        self.session.history_summary_watermark = old_count
+        self.session.save(update_fields=["history_summary", "history_summary_watermark"])
+        history = self._make_history(SUMMARY_THRESHOLD + 1)
+
+        result = build_history_with_summary(self.session, history)
+
+        mock_sum.assert_not_called()
+        self.assertIn("Cached summary.", result[0]["content"])
+
+
+    @patch("chat_sessions.services.summarize_old_messages")
+    def test_refreshes_summary_when_new_old_messages_exceed_refresh_threshold(
+        self, mock_sum
+    ):
+        mock_sum.return_value = "Refreshed summary."
+        self.session.history_summary = "Old summary."
+        history = self._make_history(SUMMARY_THRESHOLD + SUMMARY_REFRESH_THRESHOLD + 1)
+        old_count = len(history) - SUMMARY_RECENT_MESSAGES_KEEP
+        self.session.history_summary_watermark = old_count - SUMMARY_REFRESH_THRESHOLD
+        self.session.save(update_fields=["history_summary", "history_summary_watermark"])
+
+        result = build_history_with_summary(self.session, history)
+
+        mock_sum.assert_called_once()
+        self.assertIn("Refreshed summary.", result[0]["content"])
+
+    @patch("chat_sessions.services.summarize_old_messages")
+    def test_persists_refreshed_summary_to_db(self, mock_sum):
+        mock_sum.return_value = "New rolled summary."
+        self.session.history_summary = "Old summary."
+        history = self._make_history(SUMMARY_THRESHOLD + SUMMARY_REFRESH_THRESHOLD + 1)
+        old_count = len(history) - SUMMARY_RECENT_MESSAGES_KEEP
+        self.session.history_summary_watermark = old_count - SUMMARY_REFRESH_THRESHOLD
+        self.session.save(update_fields=["history_summary", "history_summary_watermark"])
+
+        build_history_with_summary(self.session, history)
+
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.history_summary, "New rolled summary.")
+
+    @patch("chat_sessions.services.summarize_old_messages")
+    def test_does_not_refresh_when_new_messages_below_refresh_threshold(
+        self, mock_sum
+    ):
+        self.session.history_summary = "Still valid summary."
+        self.session.save(update_fields=["history_summary"])
+        history = self._make_history(SUMMARY_THRESHOLD + 1)
+        old_count = len(history) - SUMMARY_RECENT_MESSAGES_KEEP
+        self.session.history_summary_watermark = old_count - 1
+        self.session.save(update_fields=["history_summary", "history_summary_watermark"])
+
+        build_history_with_summary(self.session, history)
+
+        mock_sum.assert_not_called()
