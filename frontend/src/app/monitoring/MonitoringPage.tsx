@@ -15,6 +15,7 @@ import {
     MonitoringAuthEventsSection,
     MonitoringAuthEventsSkeleton,
     MonitoringHeroSection,
+    MonitoringReadinessAlertSection,
     MonitoringLatencyAndMetersSection,
     MonitoringPanelsSkeleton,
     MonitoringRoutesAndReadinessSection,
@@ -184,6 +185,7 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
                                 hasRealtimeSeries={hasRealtimeSeries}
                                 realtimeWindowSeconds={realtimeWindowSeconds}
                             />
+                            <MonitoringReadinessAlertSection readyPayload={readyPayload} />
 
                             {monitoringDetailsSection}
                         </>
