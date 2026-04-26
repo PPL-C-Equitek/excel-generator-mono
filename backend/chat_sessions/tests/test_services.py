@@ -8,6 +8,7 @@ from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
+    build_frontend_thinking_log_response,
     build_history_with_summary,
     create_generated_output,
     create_session_for_user,
@@ -591,6 +592,82 @@ class SummarizeOldMessagesServiceTest(SimpleTestCase):
         call_args = mock_llm.call_args[0][0]
         self.assertEqual(len(call_args), 1)
         self.assertEqual(call_args[0]["role"], "user")
+
+
+class BuildFrontendThinkingLogResponseTest(SimpleTestCase):
+    def test_reuses_existing_valid_thinking_log_unchanged(self):
+        payload = {
+            "result": {"ok": True},
+            "reasoning": {
+                "final_answer": "Normalized output prepared.",
+                "reasoning_steps": ["Mapped headers", "Validated totals"],
+                "thinking_log": [
+                    "Detected headers: ID, Barang, Harga, Discount, Total.",
+                    "Grouped remaining values into rows of five columns.",
+                    "Validated row consistency.",
+                    "Confidence: High",
+                ],
+            },
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Detected headers: ID, Barang, Harga, Discount, Total.",
+                    "Grouped remaining values into rows of five columns.",
+                    "Validated row consistency.",
+                    "Confidence: High",
+                ]
+            },
+        )
+
+    def test_generates_fallback_when_existing_thinking_log_contains_blocked_pattern(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Extraction result prepared.",
+                "reasoning_steps": [
+                    "Detected headers",
+                    "Grouped rows",
+                ],
+                "thinking_log": [
+                    "I considered multiple options before choosing this format.",
+                ],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Identified available response reasoning fields.",
+                    "Summarized key transformation steps from response data.",
+                    "Aligned summary details with the final answer content.",
+                    "Validated thinking log consistency for frontend parsing.",
+                    "Prepared parser-safe thinking log output.",
+                    "Confidence: High",
+                ]
+            },
+        )
+
+    def test_returns_fail_safe_when_reasoning_fields_are_missing(self):
+        response = build_frontend_thinking_log_response({"result": {"items": []}})
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Processed available response data.",
+                    "Unable to extract detailed reasoning.",
+                    "Prepared safest structured output.",
+                    "Confidence: Low",
+                ]
+            },
+        )
 
 
 class BuildHistoryWithSummaryServiceTest(TestCase):
