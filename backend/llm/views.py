@@ -431,7 +431,12 @@ def _generate_output_json(llm_generation_service, input_json, custom_schema_id):
         return None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
 
-def _persist_generate_output_for_authenticated_user(user, session, output_json):
+def _persist_generate_output_for_authenticated_user(
+    user,
+    session,
+    output_json,
+    export_output_json,
+):
     if not getattr(user, "is_authenticated", False):
         return None, None, None
 
@@ -442,7 +447,7 @@ def _persist_generate_output_for_authenticated_user(user, session, output_json):
             generated_output = create_generated_output(
                 session,
                 output_json,
-                output_json,
+                export_output_json,
             )
         return session.id, generated_output.id, None
     except Exception:
@@ -498,6 +503,10 @@ def llm_generate(request):
         return error_response
 
     output_json = _sanitize_output_json(output_json)
+    export_output_json = build_export_output_json(
+        input_json=input_json,
+        output_json=output_json,
+    )
     reasoning_response = _generate_optional_reasoning(
         include_reasoning=include_reasoning,
         input_json=input_json,
@@ -508,6 +517,7 @@ def llm_generate(request):
         request.user,
         session,
         output_json,
+        export_output_json,
     )
     if error_response is not None:
         return error_response
