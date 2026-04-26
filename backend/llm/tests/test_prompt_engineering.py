@@ -14,18 +14,19 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
         prompt = build_extraction_prompt()
 
         self.assertIn("ONLY valid JSON", prompt)
-        self.assertIn('"headers"', prompt)
-        self.assertIn('"rows"', prompt)
+        self.assertIn('"document_info"', prompt)
+        self.assertIn('"summary"', prompt)
+        self.assertIn('"content_data"', prompt)
         self.assertNotIn('"reasoning_steps"', prompt)
         self.assertNotIn('"final_answer"', prompt)
-        self.assertIn("Return extraction data only", prompt)
+        self.assertIn("no top-level keys besides: document_info, summary, content_data", prompt)
 
     def test_negative_ambiguous_input_still_enforces_schema_no_free_form(self):
         prompt = build_extraction_prompt()
 
-        self.assertIn("If input is ambiguous or insufficient", prompt)
-        self.assertIn('"headers": []', prompt)
-        self.assertIn('"rows": []', prompt)
+        self.assertIn("If extraction is ambiguous or insufficient", prompt)
+        self.assertIn("keep the same required output contract", prompt)
+        self.assertIn("do not invent values", prompt)
         self.assertIn("no markdown", prompt)
         self.assertIn("no code fences", prompt)
         self.assertIn("no extra explanation outside JSON", prompt)
@@ -36,7 +37,12 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
         self.assertIn("infer likely headers", prompt)
         self.assertIn("normalize values", prompt)
         self.assertIn("preserve row consistency", prompt)
-        self.assertNotIn("explain mapping in reasoning_steps", prompt)
+        self.assertIn('"unit"', prompt)
+        self.assertIn('"item"', prompt)
+        self.assertIn('"num_type"', prompt)
+        self.assertIn('"status_type"', prompt)
+        self.assertIn('"value"', prompt)
+        self.assertIn("Never use translated or alternative names", prompt)
         for required_key in EXTRACTION_OUTPUT_SCHEMA_KEYS:
             self.assertIn(f'"{required_key}"', prompt)
 
@@ -48,7 +54,7 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
         self.assertLess(prompt.find("## TASK"), prompt.find("## OUTPUT_FORMAT"))
         self.assertEqual(
             EXTRACTION_OUTPUT_SCHEMA_KEYS,
-            ["headers", "rows"],
+            ["document_info", "summary", "content_data"],
         )
 
     def test_sanitize_user_input_returns_placeholder_for_blank_text(self):
