@@ -36,6 +36,9 @@ GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+LLM_REFINEMENT_DEFAULT_MAX_ITER = os.environ.get("LLM_REFINEMENT_DEFAULT_MAX_ITER", "3")
+LLM_REFINEMENT_MAX_ITER_CAP = os.environ.get("LLM_REFINEMENT_MAX_ITER_CAP", "3")
+LLM_EXPOSE_VALIDATION_LOG = os.environ.get("LLM_EXPOSE_VALIDATION_LOG", "False").strip().lower() in ("true", "1", "yes")
 
 # Login rate-limit configuration
 LOGIN_FAILURE_LIMIT = int(os.environ.get("LOGIN_FAILURE_LIMIT", "5"))
