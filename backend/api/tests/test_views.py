@@ -2533,6 +2533,8 @@ class SessionEndpointTests(TestCase):
             password="Test12345",
             status="unverified",
         )
+        self.session_id = "123e4567-e89b-12d3-a456-426614174000"
+        self.output_id = "123e4567-e89b-12d3-a456-426614174001"
 
     @patch("api.views.list_sessions_for_user")
     def test_session_list_requires_authentication(self, mock_list_sessions):
@@ -2952,3 +2954,153 @@ class SessionEndpointTests(TestCase):
         mock_session_delete.assert_called_once()
         self.assertEqual(mock_session_delete.call_args.args[0], self.user)
         self.assertEqual(mock_session_delete.call_args.args[1], "session-1")
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_requires_authentication(self, mock_get_output):
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        mock_get_output.assert_not_called()
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_requires_verified_user(self, mock_get_output):
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.unverified_user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        mock_get_output.assert_not_called()
+
+    @patch("api.views.open")
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_file_for_owned_output(
+        self,
+        mock_get_output,
+        mock_export_csv,
+        mock_open_file,
+    ):
+        stub_output = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_get_output.return_value = stub_output
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"col\n1\n")
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn(
+            'attachment; filename="export_token.csv"',
+            response["Content-Disposition"],
+        )
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+        self.assertEqual(
+            mock_export_csv.call_args.kwargs["output_json"],
+            stub_output.output_json,
+        )
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_not_found_when_output_missing(
+        self,
+        mock_get_output,
+    ):
+        mock_get_output.return_value = None
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"detail": "Not found."})
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+
+    @patch("api.views.export_csv_to_filesystem", side_effect=OutputCSVGenerationError("boom"))
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_internal_error_when_generation_fails(
+        self,
+        mock_get_output,
+        mock_export_csv,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+        mock_export_csv.assert_called_once()
