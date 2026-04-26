@@ -27,9 +27,11 @@ from authentication.permissions import IsVerifiedUser
 from chat_sessions.serializers import (
     SessionDetailSerializer,
     SessionListItemSerializer,
+    SessionResumeSerializer,
     SessionTitleUpdateSerializer,
 )
 from chat_sessions.services import (
+    build_resume_context_for_user,
     delete_session,
     get_generated_output_for_session_user,
     get_default_session_detail_pagination,
@@ -1064,6 +1066,19 @@ def _build_session_detail_response(request, session_id):
         return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
 
     return Response(SessionDetailSerializer(session).data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_resume(request, session_id):
+    resume_context = build_resume_context_for_user(request.user, session_id)
+    if resume_context is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response(
+        SessionResumeSerializer(resume_context).data,
+        status=status.HTTP_200_OK,
+    )
 
 
 @api_view(["PATCH"])
