@@ -53,7 +53,7 @@ class LlmGenerateResponseSerializer(serializers.Serializer):
 
 
 class SendMessageRequestSerializer(serializers.Serializer):
-    session_id = serializers.CharField(required=False, allow_blank=True)
+    session_id = serializers.UUIDField(required=False, allow_null=True)
     message = serializers.CharField(
         max_length=MAX_MESSAGE_LENGTH,
         allow_blank=False,
@@ -67,6 +67,7 @@ class SendMessageRequestSerializer(serializers.Serializer):
 
 
 class SendMessageResponseSerializer(serializers.Serializer):
+    session_id = serializers.UUIDField()
     reply = serializers.CharField()
 
 

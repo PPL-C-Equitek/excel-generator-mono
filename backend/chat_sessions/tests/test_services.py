@@ -1,13 +1,21 @@
+from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.utils import timezone
 
 from authentication.models import User
-from chat_sessions.models import Session
+from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from chat_sessions.services import (
+    append_assistant_message,
+    append_user_message,
+    create_generated_output,
     create_session_for_user,
     delete_session,
+    get_default_session_detail_pagination,
+    get_paginated_session_detail_for_user,
     get_session_for_user,
     list_sessions_for_user,
     update_session_title,
+    validate_session_detail_pagination_params,
 )
 
 
@@ -113,6 +121,167 @@ class ChatSessionServiceTest(TestCase):
 
         self.assertIsNone(result)
 
+    def test_get_paginated_session_detail_for_user_returns_default_slices(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+        for index in range(21):
+            ChatMessage.objects.create(
+                session=session,
+                role=ChatMessage.ROLE_USER,
+                content=f"Message {index}",
+                created_at=timezone.now() + timezone.timedelta(minutes=index),
+            )
+        for index in range(11):
+            GeneratedOutput.objects.create(
+                session=session,
+                output_json={"document_info": {}, "summary": {}, "content_data": [index]},
+                created_at=timezone.now() + timezone.timedelta(minutes=index),
+            )
+
+        result = get_paginated_session_detail_for_user(self.owner, session.id)
+
+        self.assertEqual(result.id, session.id)
+        self.assertEqual(result.messages["count"], 21)
+        self.assertEqual(result.messages["limit"], 20)
+        self.assertEqual(result.messages["offset"], 0)
+        self.assertEqual(len(result.messages["results"]), 20)
+        self.assertEqual(result.messages["results"][0].content, "Message 0")
+        self.assertEqual(result.generated_outputs["count"], 11)
+        self.assertEqual(result.generated_outputs["limit"], 10)
+        self.assertEqual(result.generated_outputs["offset"], 0)
+        self.assertEqual(len(result.generated_outputs["results"]), 10)
+
+    def test_get_paginated_session_detail_for_user_applies_explicit_offsets(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+        messages = [
+            ChatMessage.objects.create(
+                session=session,
+                role=ChatMessage.ROLE_USER,
+                content=f"Message {index}",
+                created_at=timezone.now() + timezone.timedelta(minutes=index),
+            )
+            for index in range(3)
+        ]
+        outputs = [
+            GeneratedOutput.objects.create(
+                session=session,
+                output_json={"document_info": {}, "summary": {}, "content_data": [index]},
+                created_at=timezone.now() + timezone.timedelta(minutes=index),
+            )
+            for index in range(3)
+        ]
+
+        result = get_paginated_session_detail_for_user(
+            self.owner,
+            session.id,
+            messages_limit=1,
+            messages_offset=2,
+            outputs_limit=1,
+            outputs_offset=1,
+        )
+
+        self.assertEqual(result.messages["results"], [messages[2]])
+        self.assertEqual(result.generated_outputs["results"], [outputs[1]])
+
+    def test_get_paginated_session_detail_for_user_returns_empty_slices_when_offset_exceeds_count(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+
+        result = get_paginated_session_detail_for_user(
+            self.owner,
+            session.id,
+            messages_limit=20,
+            messages_offset=50,
+            outputs_limit=10,
+            outputs_offset=50,
+        )
+
+        self.assertEqual(result.messages["count"], 0)
+        self.assertEqual(result.messages["results"], [])
+        self.assertEqual(result.generated_outputs["count"], 0)
+        self.assertEqual(result.generated_outputs["results"], [])
+
+    def test_get_paginated_session_detail_for_user_returns_none_for_non_owned_session(self):
+        session = Session.objects.create(
+            owner=self.other_user,
+            title="Other User Session",
+        )
+
+        result = get_paginated_session_detail_for_user(self.owner, session.id)
+
+        self.assertIsNone(result)
+
+    def test_get_paginated_session_detail_for_user_rejects_invalid_limits(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+
+        with self.assertRaisesMessage(ValueError, "messages_limit must be greater than 0."):
+            get_paginated_session_detail_for_user(self.owner, session.id, messages_limit=0)
+
+        with self.assertRaisesMessage(ValueError, "outputs_limit must be less than or equal to 50."):
+            get_paginated_session_detail_for_user(self.owner, session.id, outputs_limit=51)
+
+    def test_get_paginated_session_detail_for_user_rejects_invalid_offsets(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+
+        with self.assertRaisesMessage(ValueError, "messages_offset must be greater than or equal to 0."):
+            get_paginated_session_detail_for_user(self.owner, session.id, messages_offset=-1)
+
+        with self.assertRaisesMessage(ValueError, "outputs_offset must be greater than or equal to 0."):
+            get_paginated_session_detail_for_user(self.owner, session.id, outputs_offset=-1)
+
+    def test_get_default_session_detail_pagination_returns_fresh_copy(self):
+        first = get_default_session_detail_pagination()
+        second = get_default_session_detail_pagination()
+
+        first["messages_limit"] = 99
+
+        self.assertEqual(second["messages_limit"], 20)
+        self.assertEqual(second["outputs_limit"], 10)
+
+    def test_validate_session_detail_pagination_params_accepts_valid_values(self):
+        pagination = {
+            "messages_limit": 20,
+            "messages_offset": 0,
+            "outputs_limit": 10,
+            "outputs_offset": 0,
+        }
+
+        validate_session_detail_pagination_params(pagination)
+
+    def test_validate_session_detail_pagination_params_rejects_invalid_values(self):
+        with self.assertRaisesMessage(ValueError, "messages_limit must be less than or equal to 50."):
+            validate_session_detail_pagination_params(
+                {
+                    "messages_limit": 51,
+                    "messages_offset": 0,
+                    "outputs_limit": 10,
+                    "outputs_offset": 0,
+                }
+            )
+
+        with self.assertRaisesMessage(ValueError, "outputs_offset must be greater than or equal to 0."):
+            validate_session_detail_pagination_params(
+                {
+                    "messages_limit": 20,
+                    "messages_offset": 0,
+                    "outputs_limit": 10,
+                    "outputs_offset": -1,
+                }
+            )
+
     def test_update_session_title_trims_and_saves_value(self):
         session = Session.objects.create(
             owner=self.owner,
@@ -134,3 +303,121 @@ class ChatSessionServiceTest(TestCase):
         delete_session(session)
 
         self.assertFalse(Session.objects.filter(id=session.id).exists())
+
+
+class AppendUserMessageServiceTest(TestCase):
+    def setUp(self):
+        owner = User.objects.create_user(
+            email="append-user@example.com",
+            name="Append User",
+            password="secret",
+            status="verified",
+        )
+        self.session = Session.objects.create(owner=owner)
+
+    def test_append_user_message_creates_message_with_user_role(self):
+        msg = append_user_message(self.session, "Halo")
+
+        self.assertEqual(msg.role, ChatMessage.ROLE_USER)
+        self.assertEqual(msg.content, "Halo")
+        self.assertEqual(msg.session, self.session)
+
+    def test_append_user_message_persists_to_db(self):
+        msg = append_user_message(self.session, "Halo")
+
+        self.assertTrue(ChatMessage.objects.filter(id=msg.id).exists())
+
+    def test_append_user_message_thinking_log_is_empty_by_default(self):
+        msg = append_user_message(self.session, "Halo")
+
+        self.assertEqual(msg.thinking_log, "")
+
+    def test_append_user_message_updates_session_last_message_at(self):
+        self.assertIsNone(self.session.last_message_at)
+
+        append_user_message(self.session, "Halo")
+
+        self.session.refresh_from_db()
+        self.assertIsNotNone(self.session.last_message_at)
+
+
+class AppendAssistantMessageServiceTest(TestCase):
+    def setUp(self):
+        owner = User.objects.create_user(
+            email="append-assistant@example.com",
+            name="Append Assistant",
+            password="secret",
+            status="verified",
+        )
+        self.session = Session.objects.create(owner=owner)
+
+    def test_append_assistant_message_creates_message_with_assistant_role(self):
+        msg = append_assistant_message(self.session, "Berikut jawabannya.")
+
+        self.assertEqual(msg.role, ChatMessage.ROLE_ASSISTANT)
+        self.assertEqual(msg.content, "Berikut jawabannya.")
+        self.assertEqual(msg.session, self.session)
+
+    def test_append_assistant_message_persists_to_db(self):
+        msg = append_assistant_message(self.session, "Berikut jawabannya.")
+
+        self.assertTrue(ChatMessage.objects.filter(id=msg.id).exists())
+
+    def test_append_assistant_message_stores_thinking_log_when_provided(self):
+        msg = append_assistant_message(
+            self.session, "Jawaban.", thinking_log="langkah berpikir"
+        )
+
+        self.assertEqual(msg.thinking_log, "langkah berpikir")
+
+    def test_append_assistant_message_thinking_log_defaults_to_empty(self):
+        msg = append_assistant_message(self.session, "Jawaban.")
+
+        self.assertEqual(msg.thinking_log, "")
+
+    def test_append_assistant_message_updates_session_last_message_at(self):
+        self.assertIsNone(self.session.last_message_at)
+
+        append_assistant_message(self.session, "Berikut jawabannya.")
+
+        self.session.refresh_from_db()
+        self.assertIsNotNone(self.session.last_message_at)
+
+
+class CreateGeneratedOutputServiceTest(TestCase):
+    def setUp(self):
+        owner = User.objects.create_user(
+            email="gen-output@example.com",
+            name="Gen Output",
+            password="secret",
+            status="verified",
+        )
+        self.session = Session.objects.create(owner=owner)
+        self.valid_output_json = {
+            "document_info": {"filename": "test.xlsx"},
+            "summary": {"total_sheets": 1},
+            "content_data": [],
+        }
+
+    def test_create_generated_output_creates_output_with_correct_data(self):
+        output = create_generated_output(self.session, self.valid_output_json)
+
+        self.assertEqual(output.output_json, self.valid_output_json)
+        self.assertEqual(output.session, self.session)
+
+    def test_create_generated_output_persists_to_db(self):
+        output = create_generated_output(self.session, self.valid_output_json)
+
+        self.assertTrue(GeneratedOutput.objects.filter(id=output.id).exists())
+
+    def test_create_generated_output_updates_session_last_output_at(self):
+        self.assertIsNone(self.session.last_output_at)
+
+        create_generated_output(self.session, self.valid_output_json)
+
+        self.session.refresh_from_db()
+        self.assertIsNotNone(self.session.last_output_at)
+
+    def test_create_generated_output_rejects_non_dict_output_json(self):
+        with self.assertRaises(ValidationError):
+            create_generated_output(self.session, ["bukan", "dict"])

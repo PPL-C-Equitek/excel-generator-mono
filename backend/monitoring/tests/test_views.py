@@ -5,10 +5,73 @@ from rest_framework.test import APITestCase
 
 from authentication.models import User
 from monitoring.models import MonitoringAccount
+from monitoring.interfaces.http.views import (
+    _resolve_stream_interval_seconds,
+    _resolve_stream_max_events,
+    _stats_stream,
+)
 
 
 @override_settings(ROOT_URLCONF="monitoring.urls")
 class MonitoringViewsTest(APITestCase):
+    def test_resolve_stream_interval_seconds_handles_invalid_value(self):
+        self.assertEqual(_resolve_stream_interval_seconds("invalid"), 2.0)
+
+    @override_settings(MONITORING_STREAM_INTERVAL_SECONDS=7.5)
+    def test_resolve_stream_interval_seconds_uses_fallback_for_non_positive_value(self):
+        self.assertEqual(_resolve_stream_interval_seconds("0"), 7.5)
+
+    def test_resolve_stream_interval_seconds_uses_positive_value(self):
+        self.assertEqual(_resolve_stream_interval_seconds("2.5"), 2.5)
+
+    def test_resolve_stream_max_events_returns_none_for_invalid_value(self):
+        self.assertIsNone(_resolve_stream_max_events("invalid"))
+
+    def test_resolve_stream_max_events_returns_none_for_zero_or_negative(self):
+        self.assertIsNone(_resolve_stream_max_events("0"))
+        self.assertIsNone(_resolve_stream_max_events("-1"))
+
+    def test_resolve_stream_max_events_returns_positive_int(self):
+        self.assertEqual(_resolve_stream_max_events("4"), 4)
+
+    @patch("monitoring.interfaces.http.views.sleep", return_value=None)
+    def test_stats_stream_yields_expected_event_count(self, mocked_sleep):
+        service = Mock()
+        service.stats.return_value = {
+            "status": "ok",
+            "generated_at": "2026-04-20T10:00:00",
+            "totals": {"requests": 1, "errors": 0, "error_rate": 0.0},
+            "routes": [],
+        }
+
+        stream = _stats_stream(
+            service=service,
+            interval_seconds=1.5,
+            max_events=2,
+        )
+        first_payload = next(stream)
+        second_payload = next(stream)
+        self.assertIn("event: stats", first_payload)
+        self.assertIn("event: stats", second_payload)
+        mocked_sleep.assert_called_once_with(1.5)
+        self.assertEqual(service.stats.call_count, 2)
+
+        with self.assertRaises(StopIteration):
+            next(stream)
+
+    def test_stream_endpoint_with_invalid_query_values_still_returns_stream(self):
+        user = User.objects.create_user(
+            email="stream-invalid-query@example.com",
+            name="Stream Invalid Query",
+            status="verified",
+        )
+        MonitoringAccount.objects.create(user=user, is_active=True)
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get("/monitoring/stream/?interval_seconds=0&max_events=0")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/event-stream", response["Content-Type"])
     @patch("monitoring.interfaces.http.views.get_monitoring_service")
     def test_live_endpoint_returns_payload_for_unauthenticated_user(
         self,
@@ -170,6 +233,57 @@ class MonitoringViewsTest(APITestCase):
 
     def test_stats_endpoint_rejects_post_method(self):
         response = self.client.post("/monitoring/stats/")
+        self.assertEqual(response.status_code, 405)
+
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
+    def test_stream_endpoint_returns_401_for_unauthenticated_user(
+        self,
+        mocked_get_service,
+    ):
+        response = self.client.get("/monitoring/stream/")
+
+        self.assertEqual(response.status_code, 401)
+        mocked_get_service.assert_not_called()
+
+    @patch("monitoring.interfaces.http.views.get_monitoring_service")
+    def test_stream_endpoint_returns_sse_payload_for_authorized_monitoring_account(
+        self,
+        mocked_get_service,
+    ):
+        user = User.objects.create_user(
+            email="stream-monitoring@example.com",
+            name="Stream Monitoring",
+            status="verified",
+        )
+        MonitoringAccount.objects.create(user=user, is_active=True)
+        self.client.force_authenticate(user=user)
+
+        service = Mock()
+        service.stats.return_value = {
+            "status": "ok",
+            "generated_at": "2026-04-20T10:00:00",
+            "totals": {"requests": 2, "errors": 0, "error_rate": 0.0},
+            "routes": [],
+            "events": {},
+            "timeseries": {"window_seconds": 300, "bucket_seconds": 10, "points": []},
+        }
+        mocked_get_service.return_value = service
+
+        response = self.client.get("/monitoring/stream/?max_events=1")
+        first_chunk = next(iter(response.streaming_content))
+        if isinstance(first_chunk, bytes):
+            first_chunk = first_chunk.decode("utf-8")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-cache")
+        self.assertEqual(response["X-Accel-Buffering"], "no")
+        self.assertIn("text/event-stream", response["Content-Type"])
+        self.assertIn("event: stats", first_chunk)
+        self.assertIn('"status":"ok"', first_chunk)
+        service.stats.assert_called_once()
+
+    def test_stream_endpoint_rejects_post_method(self):
+        response = self.client.post("/monitoring/stream/")
         self.assertEqual(response.status_code, 405)
 
     def test_access_endpoint_returns_unauthenticated_decision(self):
