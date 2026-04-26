@@ -3,6 +3,7 @@ import type {
     MonitoringCheck,
     MonitoringLivePayload,
     MonitoringReadyPayload,
+    MonitoringAuthenticatedSnapshot,
     MonitoringRouteStat,
     MonitoringStatsPayload,
     MonitoringTimeseriesPoint,
@@ -142,3 +143,16 @@ export function mapMonitoringStatsResponse(payload: unknown): MonitoringStatsPay
     }
 }
 
+export function mapMonitoringAuthenticatedSnapshotResponse(
+    payload: unknown
+): MonitoringAuthenticatedSnapshot {
+    const record = isRecord(payload) ? payload : {}
+    const readyRaw = record.ready
+    const statsRaw = record.stats
+
+    return {
+        accessDecision: mapMonitoringAccessResponse(record.access),
+        readyPayload: readyRaw ? mapMonitoringReadyResponse(readyRaw) : null,
+        statsPayload: statsRaw ? mapMonitoringStatsResponse(statsRaw) : null,
+    }
+}

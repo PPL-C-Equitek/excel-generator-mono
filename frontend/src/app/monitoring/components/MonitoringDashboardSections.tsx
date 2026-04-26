@@ -161,6 +161,50 @@ export function MonitoringAccessRequiredSection({ reason }: MonitoringAccessRequ
     )
 }
 
+type MonitoringReadinessAlertSectionProps = Readonly<{
+    readyPayload: MonitoringReadyPayload | null
+}>
+
+export function MonitoringReadinessAlertSection({
+    readyPayload,
+}: MonitoringReadinessAlertSectionProps) {
+    if (!readyPayload) {
+        return null
+    }
+
+    const status = readyPayload.status.toLowerCase()
+    const isHealthy = status === 'ok' || status === 'healthy'
+    if (isHealthy) {
+        return null
+    }
+
+    const degradedChecks = readyPayload.checks.filter((check) => check.status.toLowerCase() !== 'ok')
+
+    return (
+        <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 shadow-md">
+            <h3 className="text-base font-semibold text-amber-800">Readiness Degraded</h3>
+            <p className="mt-1 text-sm text-amber-700">
+                Monitoring readiness is not fully green.
+            </p>
+            <ul className="mt-3 space-y-2 text-sm text-amber-800">
+                {degradedChecks.length === 0 ? (
+                    <li>Overall readiness is in degraded state.</li>
+                ) : (
+                    degradedChecks.map((check) => (
+                        <li
+                            key={`${check.name}:${check.status}`}
+                            className="rounded-lg border border-amber-200 bg-amber-100/50 px-3 py-2"
+                        >
+                            <span className="font-semibold">{check.name}</span>: {check.status}
+                            {check.message ? <span className="text-amber-900"> - {check.message}</span> : null}
+                        </li>
+                    ))
+                )}
+            </ul>
+        </section>
+    )
+}
+
 type MonitoringLatencyAndMetersSectionProps = Readonly<{
     latencySeries: LatencySeriesPoint[]
     latencyChart: LatencyChartModel
@@ -186,6 +230,7 @@ export function MonitoringLatencyAndMetersSection({
         ? `Latency trend over ${realtimeWindowSeconds} seconds, grouped every ${realtimeBucketSeconds} seconds.`
         : 'Latency trend for the top monitored routes from the latest snapshot.'
     const latestLatencyPoint = latencySeries.at(-1)
+    const lastLatencyEntry = latestLatencyPoint
 
     return (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
@@ -237,7 +282,7 @@ export function MonitoringLatencyAndMetersSection({
                                     )
                                     const x = 26 + normalizedX * (520 - 52)
                                     const y = 16 + (1 - normalizedY) * (220 - 46)
-                                    const showLabel = latencySeries.length <= 6 || index % 2 === 0 || index === latencySeries.length - 1
+                                    const showLabel = latencySeries.length <= 6 || index % 2 === 0 || entry === lastLatencyEntry
                                     const xLabel = hasRealtimeSeries ? entry.label : String(entry.id)
 
                                     return (

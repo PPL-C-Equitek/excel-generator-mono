@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+    mapMonitoringAuthenticatedSnapshotResponse,
     mapMonitoringAccessResponse,
     mapMonitoringLiveResponse,
     mapMonitoringReadyResponse,
@@ -251,6 +252,75 @@ describe('monitoring adapter', () => {
                 bucket_seconds: 5,
                 points: [],
             },
+        })
+    })
+
+    it('maps monitoring authenticated snapshot with conditional ready/stats payloads', () => {
+        expect(
+            mapMonitoringAuthenticatedSnapshotResponse({
+                access: { allowed: true, reason: 'ok' },
+                ready: {
+                    status: 'ok',
+                    timestamp: '2026-04-24T10:00:00Z',
+                    checks: [],
+                },
+                stats: {
+                    status: 'ok',
+                    generated_at: '2026-04-24T10:00:00Z',
+                    totals: { requests: 2, errors: 0, error_rate: 0 },
+                    routes: [],
+                    events: {},
+                },
+            })
+        ).toEqual({
+            accessDecision: { allowed: true, reason: 'ok' },
+            readyPayload: {
+                status: 'ok',
+                timestamp: '2026-04-24T10:00:00Z',
+                checks: [],
+            },
+            statsPayload: {
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:00Z',
+                totals: {
+                    requests: 2,
+                    errors: 0,
+                    error_rate: 0,
+                },
+                routes: [],
+                events: {},
+                timeseries: undefined,
+            },
+        })
+
+        expect(
+            mapMonitoringAuthenticatedSnapshotResponse({
+                access: { allowed: false, reason: 'no_account' },
+                ready: null,
+                stats: null,
+            })
+        ).toEqual({
+            accessDecision: { allowed: false, reason: 'no_account' },
+            readyPayload: null,
+            statsPayload: null,
+        })
+
+        expect(
+            mapMonitoringAuthenticatedSnapshotResponse({
+                access: { allowed: true, reason: 'ok' },
+            })
+        ).toEqual({
+            accessDecision: { allowed: true, reason: 'ok' },
+            readyPayload: null,
+            statsPayload: null,
+        })
+    })
+
+    it('falls back to defaults for malformed snapshot payload', () => {
+        expect(mapMonitoringAuthenticatedSnapshotResponse('invalid')).toEqual({
+            accessDecision: { allowed: false, reason: 'unauthenticated' },
+            readyPayload: null,
+            statsPayload: null,
         })
     })
 })
