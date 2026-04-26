@@ -146,3 +146,25 @@ class ChatSessionModelTest(TestCase):
             ("owner", "-last_message_at", "-updated_at", "-created_at"),
             composite_index_fields,
         )
+
+    def test_chat_message_model_defines_index_for_session_and_created_at(self):
+        index_fields = {
+            tuple(index.fields)
+            for index in ChatMessage._meta.indexes
+        }
+
+        self.assertIn(
+            ("session", "created_at", "id"),
+            index_fields,
+        )
+
+    def test_generated_output_model_defines_index_for_session_and_created_at(self):
+        index_fields = {
+            tuple(index.fields)
+            for index in GeneratedOutput._meta.indexes
+        }
+
+        self.assertIn(
+            ("session", "created_at", "id"),
+            index_fields,
+        )

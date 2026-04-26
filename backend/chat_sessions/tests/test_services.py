@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from unittest.mock import patch
 
 from authentication.models import User
@@ -11,6 +12,8 @@ from chat_sessions.services import (
     create_generated_output,
     create_session_for_user,
     delete_session,
+    get_default_session_detail_pagination,
+    get_paginated_session_detail_for_user,
     get_session_for_user,
     list_sessions_for_user,
     summarize_old_messages,
@@ -18,6 +21,7 @@ from chat_sessions.services import (
     SUMMARY_REFRESH_THRESHOLD,
     update_session_title,
     get_summary_threshold,
+    validate_session_detail_pagination_params,
 )
 
 
@@ -122,6 +126,167 @@ class ChatSessionServiceTest(TestCase):
         result = get_session_for_user(self.owner, session.id)
 
         self.assertIsNone(result)
+
+    def test_get_paginated_session_detail_for_user_returns_default_slices(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+        for index in range(21):
+            ChatMessage.objects.create(
+                session=session,
+                role=ChatMessage.ROLE_USER,
+                content=f"Message {index}",
+                created_at=timezone.now() + timezone.timedelta(minutes=index),
+            )
+        for index in range(11):
+            GeneratedOutput.objects.create(
+                session=session,
+                output_json={"document_info": {}, "summary": {}, "content_data": [index]},
+                created_at=timezone.now() + timezone.timedelta(minutes=index),
+            )
+
+        result = get_paginated_session_detail_for_user(self.owner, session.id)
+
+        self.assertEqual(result.id, session.id)
+        self.assertEqual(result.messages["count"], 21)
+        self.assertEqual(result.messages["limit"], 20)
+        self.assertEqual(result.messages["offset"], 0)
+        self.assertEqual(len(result.messages["results"]), 20)
+        self.assertEqual(result.messages["results"][0].content, "Message 0")
+        self.assertEqual(result.generated_outputs["count"], 11)
+        self.assertEqual(result.generated_outputs["limit"], 10)
+        self.assertEqual(result.generated_outputs["offset"], 0)
+        self.assertEqual(len(result.generated_outputs["results"]), 10)
+
+    def test_get_paginated_session_detail_for_user_applies_explicit_offsets(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+        messages = [
+            ChatMessage.objects.create(
+                session=session,
+                role=ChatMessage.ROLE_USER,
+                content=f"Message {index}",
+                created_at=timezone.now() + timezone.timedelta(minutes=index),
+            )
+            for index in range(3)
+        ]
+        outputs = [
+            GeneratedOutput.objects.create(
+                session=session,
+                output_json={"document_info": {}, "summary": {}, "content_data": [index]},
+                created_at=timezone.now() + timezone.timedelta(minutes=index),
+            )
+            for index in range(3)
+        ]
+
+        result = get_paginated_session_detail_for_user(
+            self.owner,
+            session.id,
+            messages_limit=1,
+            messages_offset=2,
+            outputs_limit=1,
+            outputs_offset=1,
+        )
+
+        self.assertEqual(result.messages["results"], [messages[2]])
+        self.assertEqual(result.generated_outputs["results"], [outputs[1]])
+
+    def test_get_paginated_session_detail_for_user_returns_empty_slices_when_offset_exceeds_count(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+
+        result = get_paginated_session_detail_for_user(
+            self.owner,
+            session.id,
+            messages_limit=20,
+            messages_offset=50,
+            outputs_limit=10,
+            outputs_offset=50,
+        )
+
+        self.assertEqual(result.messages["count"], 0)
+        self.assertEqual(result.messages["results"], [])
+        self.assertEqual(result.generated_outputs["count"], 0)
+        self.assertEqual(result.generated_outputs["results"], [])
+
+    def test_get_paginated_session_detail_for_user_returns_none_for_non_owned_session(self):
+        session = Session.objects.create(
+            owner=self.other_user,
+            title="Other User Session",
+        )
+
+        result = get_paginated_session_detail_for_user(self.owner, session.id)
+
+        self.assertIsNone(result)
+
+    def test_get_paginated_session_detail_for_user_rejects_invalid_limits(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+
+        with self.assertRaisesMessage(ValueError, "messages_limit must be greater than 0."):
+            get_paginated_session_detail_for_user(self.owner, session.id, messages_limit=0)
+
+        with self.assertRaisesMessage(ValueError, "outputs_limit must be less than or equal to 50."):
+            get_paginated_session_detail_for_user(self.owner, session.id, outputs_limit=51)
+
+    def test_get_paginated_session_detail_for_user_rejects_invalid_offsets(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+
+        with self.assertRaisesMessage(ValueError, "messages_offset must be greater than or equal to 0."):
+            get_paginated_session_detail_for_user(self.owner, session.id, messages_offset=-1)
+
+        with self.assertRaisesMessage(ValueError, "outputs_offset must be greater than or equal to 0."):
+            get_paginated_session_detail_for_user(self.owner, session.id, outputs_offset=-1)
+
+    def test_get_default_session_detail_pagination_returns_fresh_copy(self):
+        first = get_default_session_detail_pagination()
+        second = get_default_session_detail_pagination()
+
+        first["messages_limit"] = 99
+
+        self.assertEqual(second["messages_limit"], 20)
+        self.assertEqual(second["outputs_limit"], 10)
+
+    def test_validate_session_detail_pagination_params_accepts_valid_values(self):
+        pagination = {
+            "messages_limit": 20,
+            "messages_offset": 0,
+            "outputs_limit": 10,
+            "outputs_offset": 0,
+        }
+
+        validate_session_detail_pagination_params(pagination)
+
+    def test_validate_session_detail_pagination_params_rejects_invalid_values(self):
+        with self.assertRaisesMessage(ValueError, "messages_limit must be less than or equal to 50."):
+            validate_session_detail_pagination_params(
+                {
+                    "messages_limit": 51,
+                    "messages_offset": 0,
+                    "outputs_limit": 10,
+                    "outputs_offset": 0,
+                }
+            )
+
+        with self.assertRaisesMessage(ValueError, "outputs_offset must be greater than or equal to 0."):
+            validate_session_detail_pagination_params(
+                {
+                    "messages_limit": 20,
+                    "messages_offset": 0,
+                    "outputs_limit": 10,
+                    "outputs_offset": -1,
+                }
+            )
 
     def test_update_session_title_trims_and_saves_value(self):
         session = Session.objects.create(
