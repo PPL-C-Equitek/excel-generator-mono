@@ -311,12 +311,17 @@ function buildTabularExportPayload(
     }
 
     const contentData = buildContentDataFromOutput(generatedOutput)
-    const { totalRows, totalColumns } = contentData.reduce(
-        (acc, table) => ({
-            totalRows: acc.totalRows + (table.rows as unknown[]).length,
-            totalColumns: Math.max(acc.totalColumns, (table.headers as unknown[]).length),
-        }),
-        { totalRows: 0, totalColumns: 0 } as { totalRows: number; totalColumns: number }
+    const { totalRows, totalColumns } = contentData.reduce<{ totalRows: number; totalColumns: number }>(
+        (acc, table) => {
+            const rowCount = Array.isArray(table.rows) ? table.rows.length : 0
+            const columnCount = Array.isArray(table.headers) ? table.headers.length : 0
+
+            return {
+                totalRows: acc.totalRows + rowCount,
+                totalColumns: Math.max(acc.totalColumns, columnCount),
+            }
+        },
+        { totalRows: 0, totalColumns: 0 }
     )
 
     return {
