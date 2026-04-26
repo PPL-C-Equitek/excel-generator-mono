@@ -13,10 +13,11 @@ from rest_framework.response import Response
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
-    create_generated_output,
     build_history_with_summary,
+    create_generated_output,
     create_session_for_user,
     get_session_for_user,
+    resolve_session_title,
 )
 from authentication.permissions import IsVerifiedUser
 from .serializers import (
@@ -449,6 +450,7 @@ def _persist_generate_output_for_authenticated_user(
     output_json,
     thinking_log,
     export_output_json,
+    title="",
 ):
     if not getattr(user, "is_authenticated", False):
         return None, None, None
@@ -456,7 +458,7 @@ def _persist_generate_output_for_authenticated_user(
     try:
         with transaction.atomic():
             if session is None:
-                session = create_session_for_user(user)
+                session = create_session_for_user(user, title=title)
             generated_output = create_generated_output(
                 session,
                 output_json,
@@ -538,6 +540,7 @@ def llm_generate(request):
         output_json,
         thinking_log,
         export_output_json,
+        title=resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
     )
     if error_response is not None:
         return error_response
@@ -585,15 +588,27 @@ def send_message(request):
             {"role": msg.role, "content": msg.content}
             for msg in session.messages.order_by("created_at")
         ]
+        is_new_session = False
     else:
         history = []
+        is_new_session = True
 
     history.append({"role": "user", "content": message})
+
+    title = "New Chat"
 
     try:
         if session is not None:
             history = build_history_with_summary(session, history)
         reply = generate_chat_response(history)
+
+        if is_new_session:
+            try:
+                title_prompt = f"Berikan judul singkat maksimal 3-5 kata untuk chat berikut. Abaikan sapaan, ambil konteks utama. Jangan gunakan karakter newline, cukup 1 kalimat: {message}"
+                title_suggestion = generate_chat_response([{"role": "user", "content": title_prompt}])
+                title = resolve_session_title(title_suggestion)
+            except Exception:
+                title = "New Chat"
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     except OpenAIUpstreamError as exc:
@@ -607,7 +622,7 @@ def send_message(request):
 
     with transaction.atomic():
         if session is None:
-            session = create_session_for_user(request.user)
+            session = create_session_for_user(request.user, title=title)
         append_user_message(session, message)
         append_assistant_message(session, reply)
 
