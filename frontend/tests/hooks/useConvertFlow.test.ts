@@ -17,12 +17,14 @@ vi.mock('../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: {} }),
     exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_123' }),
     downloadCsvFile: vi.fn().mockResolvedValue(undefined),
+    downloadSessionOutputCsvFile: vi.fn().mockResolvedValue(undefined),
     exportToExcel: vi.fn().mockResolvedValue({
         file_id: 'xlsx_123',
         file_name: 'export_123.xlsx',
         artifact_type: 'xlsx',
     }),
     downloadExcelFile: vi.fn().mockResolvedValue(undefined),
+    downloadSessionOutputExcelFile: vi.fn().mockResolvedValue(undefined),
     getDownloadUrl: vi.fn().mockReturnValue('/mock/url'),
 }))
 
@@ -77,8 +79,10 @@ function makeMockService(overrides?: Partial<ILLMService>): ILLMService {
         generate: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
         exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_12345' }),
         downloadCsvFile: vi.fn().mockResolvedValue(undefined),
+        downloadSessionOutputCsvFile: vi.fn().mockResolvedValue(undefined),
         exportToExcel: vi.fn().mockResolvedValue(validExcelExportResponse),
         downloadExcelFile: vi.fn().mockResolvedValue(undefined),
+        downloadSessionOutputExcelFile: vi.fn().mockResolvedValue(undefined),
         getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_12345/download'),
         ...overrides,
     }
@@ -1468,6 +1472,63 @@ describe('useConvertFlow', () => {
 
             expect(service.exportToExcel).toHaveBeenCalledTimes(2)
             expect(service.downloadExcelFile).toHaveBeenCalledTimes(2)
+            expect(getExcelState(result).excelSuccessMessage).toBe('Successfully downloaded')
+        })
+    })
+
+    describe('session output download flow', () => {
+        it('prefers session output CSV download when generate returns session and output ids', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: { status: 'ok' },
+                    session_id: '11111111-1111-1111-1111-111111111111',
+                    output_id: '22222222-2222-2222-2222-222222222222',
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.downloadSessionOutputCsvFile).toHaveBeenCalledWith(
+                '11111111-1111-1111-1111-111111111111',
+                '22222222-2222-2222-2222-222222222222',
+                'report.csv'
+            )
+            expect(service.exportToCsv).not.toHaveBeenCalled()
+            expect(service.downloadCsvFile).not.toHaveBeenCalled()
+        })
+
+        it('prefers session output Excel download when generate returns session and output ids', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: { status: 'ok' },
+                    session_id: '11111111-1111-1111-1111-111111111111',
+                    output_id: '22222222-2222-2222-2222-222222222222',
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.downloadSessionOutputExcelFile).toHaveBeenCalledWith(
+                '11111111-1111-1111-1111-111111111111',
+                '22222222-2222-2222-2222-222222222222',
+                'report.xlsx'
+            )
+            expect(service.exportToExcel).not.toHaveBeenCalled()
+            expect(service.downloadExcelFile).not.toHaveBeenCalled()
             expect(getExcelState(result).excelSuccessMessage).toBe('Successfully downloaded')
         })
     })
