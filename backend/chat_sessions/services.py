@@ -197,6 +197,21 @@ def update_session_title(session, title):
     return session
 
 
+def sanitize_session_title(title):
+    if not title or not title.strip():
+        return ""
+    
+    normalized = title.replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
+    return normalized[:120]
+
+
+def resolve_session_title(candidate_title, fallback="New Chat"):
+    sanitized = sanitize_session_title(candidate_title)
+    if not sanitized:
+        return fallback
+    return sanitized
+
+
 def delete_session(session):
     session.delete()
 
