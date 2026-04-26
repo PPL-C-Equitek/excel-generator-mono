@@ -211,11 +211,17 @@ def llm_generate(request):
 
     response_session_id = None
     if getattr(request.user, "is_authenticated", False):
-        with transaction.atomic():
-            if session is None:
-                session = create_session_for_user(request.user)
-            create_generated_output(session, output_json)
-        response_session_id = session.id
+        try:
+            with transaction.atomic():
+                if session is None:
+                    session = create_session_for_user(request.user)
+                create_generated_output(session, output_json)
+            response_session_id = session.id
+        except Exception:
+            logger.exception(
+                "Unexpected error while persisting session-aware llm_generate output."
+            )
+            return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
     response_serializer = LlmGenerateResponseSerializer(
         data={"output_json": output_json, "session_id": response_session_id}
