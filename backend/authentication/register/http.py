@@ -11,6 +11,7 @@ from api.decorators import rate_limit
 from authentication.register import RegisterCommand, RegistrationServiceError, build_register_user_use_case
 from authentication.register.exceptions import RegistrationConflictError, UnverifiedRegistrationError
 from authentication.serializers import RegisterSerializer
+from monitoring.interfaces.http.decorators import track_auth_metric
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class RegisterView(APIView):
     def get_register_use_case(self):
         return build_register_user_use_case()
 
+    @track_auth_metric("auth.register")
     @apply_rate_limit_to_method(max_requests=60, per="minute")
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)

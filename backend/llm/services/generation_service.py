@@ -1,15 +1,12 @@
 import json
 from typing import Any, Callable, Protocol
 
-from django.conf import settings
-
 from custom_schemas.models import CustomSchema
 
+from llm.prompts.extraction import build_extraction_prompt
+
 from .openai_client import OpenAIServiceError
-
-
-class TextGenerationProvider(Protocol):
-    def generate_text(self, prompt: str, system_prompt: str | None = None) -> str: ...
+from .reasoning_service import TextGenerationProvider, compose_system_prompt, get_base_system_prompt
 
 
 class JsonGenerationPort(Protocol):
@@ -96,9 +93,13 @@ class LlmGenerationService:
                 custom_schema_id
             )
 
+        extraction_prompt = build_extraction_prompt(
+            schema_hint=schema_prompt_fragment,
+        )
+
         effective_system_prompt = compose_system_prompt(
             self.base_system_prompt_provider(),
-            schema_prompt_fragment,
+            extraction_prompt,
         )
         return self.json_generator.generate(
             input_json=input_json,
@@ -106,32 +107,3 @@ class LlmGenerationService:
         )
 
 
-def get_base_system_prompt() -> str:
-    raw_prompt = getattr(settings, "OPENAI_SYSTEM_PROMPT", "")
-    if not isinstance(raw_prompt, str):
-        return ""
-    return raw_prompt.strip()
-
-
-def compose_system_prompt(
-    base_prompt: str | None,
-    schema_prompt_fragment: str | None = None,
-) -> str | None:
-    parts: list[str] = []
-
-    normalized_base_prompt = base_prompt.strip() if isinstance(base_prompt, str) else ""
-    if normalized_base_prompt:
-        parts.append(normalized_base_prompt)
-
-    normalized_schema_prompt = (
-        schema_prompt_fragment.strip()
-        if isinstance(schema_prompt_fragment, str)
-        else ""
-    )
-    if normalized_schema_prompt:
-        parts.append(normalized_schema_prompt)
-
-    if not parts:
-        return None
-
-    return "\n\n".join(parts)

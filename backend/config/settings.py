@@ -30,11 +30,66 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_SYSTEM_PROMPT = os.environ.get("OPENAI_SYSTEM_PROMPT", "")
 LLM_CACHE_TTL_SECONDS = int(os.environ.get("LLM_CACHE_TTL_SECONDS", "300"))
+CHAT_HISTORY_MAX_MESSAGES = int(os.environ.get("CHAT_HISTORY_MAX_MESSAGES", "20"))
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "")
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+# Login rate-limit configuration
+LOGIN_FAILURE_LIMIT = int(os.environ.get("LOGIN_FAILURE_LIMIT", "5"))
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("LOGIN_RATE_LIMIT_WINDOW_SECONDS", str(15 * 60)))
+
+# Monitoring metrics backend configuration
+MONITORING_METRICS_BACKEND = os.environ.get("MONITORING_METRICS_BACKEND", "memory").strip().lower()
+MONITORING_REALTIME_WINDOW_SECONDS = int(
+    os.environ.get("MONITORING_REALTIME_WINDOW_SECONDS", str(5 * 60))
+)
+MONITORING_REALTIME_BUCKET_SECONDS = int(
+    os.environ.get("MONITORING_REALTIME_BUCKET_SECONDS", "10")
+)
+MONITORING_MAX_REALTIME_RECORDS = int(
+    os.environ.get("MONITORING_MAX_REALTIME_RECORDS", "10000")
+)
+MONITORING_MAX_ROUTE_LATENCY_SAMPLES = int(
+    os.environ.get("MONITORING_MAX_ROUTE_LATENCY_SAMPLES", "2048")
+)
+MONITORING_MAX_ROUTES_PER_SNAPSHOT = int(
+    os.environ.get("MONITORING_MAX_ROUTES_PER_SNAPSHOT", "0")
+)
+MONITORING_REDIS_URL = os.environ.get("MONITORING_REDIS_URL", "redis://127.0.0.1:6379/0")
+MONITORING_REDIS_KEY_PREFIX = os.environ.get("MONITORING_REDIS_KEY_PREFIX", "monitoring")
+MONITORING_REDIS_KEY_NAMESPACE_VERSION = os.environ.get(
+    "MONITORING_REDIS_KEY_NAMESPACE_VERSION",
+    "v1",
+).strip()
+MONITORING_REDIS_KEY_TTL_SECONDS = int(
+    os.environ.get("MONITORING_REDIS_KEY_TTL_SECONDS", "86400")
+)
+MONITORING_REDIS_SOCKET_TIMEOUT_SECONDS = float(
+    os.environ.get("MONITORING_REDIS_SOCKET_TIMEOUT_SECONDS", "1.0")
+)
+MONITORING_REDIS_CONNECT_TIMEOUT_SECONDS = float(
+    os.environ.get("MONITORING_REDIS_CONNECT_TIMEOUT_SECONDS", "1.0")
+)
+MONITORING_STREAM_INTERVAL_SECONDS = float(
+    os.environ.get("MONITORING_STREAM_INTERVAL_SECONDS", "2.0")
+)
+MONITORING_STATS_CACHE_TTL_SECONDS = float(
+    os.environ.get("MONITORING_STATS_CACHE_TTL_SECONDS", "2.0")
+)
+MONITORING_DISCORD_WEBHOOK_URL = os.environ.get("MONITORING_DISCORD_WEBHOOK_URL", "")
+MONITORING_DISCORD_WEBHOOK_USERNAME = os.environ.get(
+    "MONITORING_DISCORD_WEBHOOK_USERNAME",
+    "MonitoringBot",
+).strip()
+MONITORING_DISCORD_WEBHOOK_TIMEOUT_SECONDS = float(
+    os.environ.get("MONITORING_DISCORD_WEBHOOK_TIMEOUT_SECONDS", "3.0")
+)
+MONITORING_READINESS_ALERT_COOLDOWN_SECONDS = int(
+    os.environ.get("MONITORING_READINESS_ALERT_COOLDOWN_SECONDS", "300")
+)
 
 # Application definition
 
@@ -53,6 +108,8 @@ INSTALLED_APPS = [
     "file_processing",
     "authentication",
     "artifact_history",
+    "chat_sessions",
+    "monitoring",
 ]
 
 MIDDLEWARE = [
@@ -64,10 +121,12 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "monitoring.interfaces.http.middleware.MonitoringRequestMetricsMiddleware",
 ]
 
 raw_cors = os.environ.get("DJANGO_CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 CORS_ALLOWED_ORIGINS = [o.strip() for o in raw_cors.split(",") if o.strip()]
+CORS_EXPOSE_HEADERS = ["Content-Disposition"]
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"

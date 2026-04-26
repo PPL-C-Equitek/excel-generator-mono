@@ -6,7 +6,7 @@ import { getStoredUser } from "@/lib/auth"
 import LogoutButton from "@/components/LogoutButton"
 import HistorySidebarList from "@/components/HistorySidebarList"
 interface SidebarProps {
-    readonly activeMenu: 'home' | 'convert' | 'schema' | 'history' | 'change-password'
+    readonly activeMenu: 'home' | 'convert' | 'schema' | 'history' | 'monitoring' | 'change-password'
     readonly onLogout?: () => void
     readonly selectedHistoryId?: string | null
 }
@@ -15,6 +15,8 @@ export default function Sidebar({ activeMenu, onLogout, selectedHistoryId }: Sid
     const menus = [
         { key: 'convert', label: 'Convert', href: '/convert' },
         { key: 'schema', label: 'Schema', href: '/schema' },
+        { key: 'history', label: 'History', href: '/history' },
+        { key: 'monitoring', label: 'Monitoring', href: '/monitoring' },
         { key: 'change-password', label: 'Change Password', href: '/change-password' },
     ]
 

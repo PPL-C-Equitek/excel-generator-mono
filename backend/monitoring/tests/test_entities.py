@@ -2,7 +2,13 @@ from datetime import datetime
 
 from django.test import SimpleTestCase
 
-from monitoring.entities import CheckResult, MetricsSnapshot, RouteMetricSnapshot
+from monitoring.entities import (
+    CheckResult,
+    EventMetricSnapshot,
+    MetricsSnapshot,
+    RealtimeMetricPoint,
+    RouteMetricSnapshot,
+)
 
 
 class CheckResultEntityTest(SimpleTestCase):
@@ -64,6 +70,8 @@ class RouteMetricSnapshotEntityTest(SimpleTestCase):
                 "error_rate": 0.4,
                 "avg_latency_ms": 250.5,
                 "max_latency_ms": 700.0,
+                "p95_latency_ms": 0.0,
+                "p99_latency_ms": 0.0,
             },
         )
 
@@ -96,6 +104,18 @@ class MetricsSnapshotEntityTest(SimpleTestCase):
                     max_latency_ms=500.0,
                 ),
             ),
+            events=(
+                EventMetricSnapshot(
+                    event_name="login",
+                    outcome="success",
+                    count=4,
+                ),
+                EventMetricSnapshot(
+                    event_name="login",
+                    outcome="client_error",
+                    count=2,
+                ),
+            ),
         )
 
         self.assertEqual(snapshot.error_rate, 0.3)
@@ -117,8 +137,21 @@ class MetricsSnapshotEntityTest(SimpleTestCase):
                         "error_rate": 0.3,
                         "avg_latency_ms": 200.0,
                         "max_latency_ms": 500.0,
+                        "p95_latency_ms": 0.0,
+                        "p99_latency_ms": 0.0,
                     }
                 ],
+                "events": {
+                    "login": {
+                        "success": 4,
+                        "client_error": 2,
+                    }
+                },
+                "timeseries": {
+                    "window_seconds": 300,
+                    "bucket_seconds": 10,
+                    "points": [],
+                },
             },
         )
 
@@ -131,4 +164,51 @@ class MetricsSnapshotEntityTest(SimpleTestCase):
         )
 
         self.assertEqual(snapshot.error_rate, 0.0)
+        self.assertEqual(snapshot.to_dict()["events"], {})
+        self.assertEqual(
+            snapshot.to_dict()["timeseries"],
+            {
+                "window_seconds": 300,
+                "bucket_seconds": 10,
+                "points": [],
+            },
+        )
 
+
+class EventMetricSnapshotEntityTest(SimpleTestCase):
+    def test_to_dict(self):
+        event = EventMetricSnapshot(
+            event_name="register",
+            outcome="success",
+            count=3,
+        )
+
+        self.assertEqual(
+            event.to_dict(),
+            {
+                "event_name": "register",
+                "outcome": "success",
+                "count": 3,
+            },
+        )
+
+
+class RealtimeMetricPointEntityTest(SimpleTestCase):
+    def test_to_dict_includes_error_rate(self):
+        point = RealtimeMetricPoint(
+            timestamp=datetime(2026, 4, 20, 10, 0, 10),
+            requests=4,
+            errors=1,
+            avg_latency_ms=120.5,
+        )
+
+        self.assertEqual(
+            point.to_dict(),
+            {
+                "timestamp": "2026-04-20T10:00:10",
+                "requests": 4,
+                "errors": 1,
+                "error_rate": 0.25,
+                "avg_latency_ms": 120.5,
+            },
+        )

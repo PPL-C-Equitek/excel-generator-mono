@@ -55,6 +55,7 @@ Each workflow has 3 jobs: `test`, `sonar`, `deploy`.
 ### `sonar` job
 
 - Runs after `test` (`needs: test`).
+- Backend job regenerates coverage in the Sonar job itself (fresh `coverage.xml`) before scanning.
 - Uses SonarCloud scan action.
 - Waits for quality gate (`sonar.qualitygate.wait=true`).
 

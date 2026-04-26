@@ -1,3 +1,3 @@
-from monitoring.interfaces.http.views import live, ready, stats
+from monitoring.interfaces.http.views import access, live, ready, stats, stream
 
-__all__ = ["live", "ready", "stats"]
+__all__ = ["live", "ready", "stats", "stream", "access"]

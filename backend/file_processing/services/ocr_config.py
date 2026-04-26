@@ -61,12 +61,6 @@ MORPH_KERNEL_SIZE = 2
 # Keep this conservative to avoid missing a better-fit PSM on harder images.
 TESSERACT_CONFIDENCE_EARLY_EXIT = 85.0
 
-# Minimum average EasyOCR confidence (0-100 scale) before falling back
-# to Tesseract.  EasyOCR is the primary engine; if its confidence drops
-# below this threshold, Tesseract (with heavy preprocessing) is tried as
-# a last resort for very noisy or low-contrast scans.
-CONFIDENCE_THRESHOLD = 40.0
-
 # Minimum average characters per page from PyPDF2 text extraction before
 # treating the PDF as "scanned" and switching to OCR.
 TEXT_LAYER_MIN_CHARS_PER_PAGE = 50
