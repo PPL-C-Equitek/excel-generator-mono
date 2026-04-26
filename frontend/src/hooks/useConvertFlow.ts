@@ -584,7 +584,7 @@ export function useConvertFlow(
             const csvResult = await exportCsvIfNeeded(
                 nonEmptyOutput,
                 requestId,
-                outputFile
+                outputFile!
             )
 
             if (!csvResult || !llmService.downloadCsvFile) {
