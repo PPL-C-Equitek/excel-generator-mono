@@ -1067,7 +1067,7 @@ def _build_session_detail_response(request, session_id):
 
     return Response(SessionDetailSerializer(session).data, status=status.HTTP_200_OK)
 
-
+@require_GET
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_resume(request, session_id):
