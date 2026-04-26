@@ -354,6 +354,39 @@ describe('useMonitoringDashboardModel', () => {
         expect(result.current.realtimeWindowSeconds).toBe(60)
     })
 
+    it('derives realtime window from rendered buckets when source window is zero', async () => {
+        const service = createMonitoringService({
+            getMonitoringStats: vi.fn().mockResolvedValue({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 3, errors: 0, error_rate: 0 },
+                routes: [],
+                events: {},
+                timeseries: {
+                    window_seconds: 0,
+                    bucket_seconds: 10,
+                    points: [
+                        { timestamp: '2026-04-24T10:00:00Z', requests: 1, errors: 0, error_rate: 0, avg_latency_ms: 10 },
+                        { timestamp: '2026-04-24T10:00:10Z', requests: 2, errors: 0, error_rate: 0, avg_latency_ms: 20 },
+                    ],
+                },
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.realtimeWindowSeconds).toBe(20)
+    })
+
     it('tracks retry backoff state and clears it after successful retry', async () => {
         vi.useFakeTimers()
         vi.setSystemTime(new Date('2026-04-24T10:00:00Z'))
@@ -1139,5 +1172,35 @@ describe('useMonitoringDashboardModel', () => {
                 (service.getMonitoringStatsStream as ReturnType<typeof vi.fn>).mock.calls.length
             ).toBe(2)
         })
+    })
+
+    it('suppresses error banner message when stream closes unexpectedly', async () => {
+        const streamClose = vi.fn()
+        let capturedError: ((error: Error) => void) | undefined
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockImplementation(async ({ onError }) => {
+                capturedError = onError
+                return { close: streamClose }
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        })
+
+        act(() => {
+            capturedError?.(new Error('Monitoring stream closed unexpectedly.'))
+        })
+
+        expect(result.current.errorMessage).toBeNull()
+        expect(streamClose).toHaveBeenCalledTimes(1)
+        expect(result.current.consecutiveFailures).toBe(1)
     })
 })

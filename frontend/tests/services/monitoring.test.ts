@@ -161,6 +161,107 @@ describe('monitoring service', () => {
         })
     })
 
+    it('falls back to default message when readiness fallback returns non-JSON error body', async () => {
+        const { fetchAPI } = await import('@/lib/api')
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringReady } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-ready-non-json')
+        const readinessUnavailableError = new Error('Service Unavailable') as Error & { status?: number }
+        readinessUnavailableError.status = 503
+        vi.mocked(fetchAPI).mockRejectedValueOnce(readinessUnavailableError)
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                new Response('not-json-body', {
+                    status: 500,
+                    headers: { 'Content-Type': 'text/plain' },
+                })
+            )
+        )
+
+        await expect(getMonitoringReady()).rejects.toThrow('Request failed. Please try again.')
+    })
+
+    it('uses detail field from readiness fallback error payload', async () => {
+        const { fetchAPI } = await import('@/lib/api')
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringReady } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-ready-detail')
+        const readinessUnavailableError = new Error('Service Unavailable') as Error & { status?: number }
+        readinessUnavailableError.status = 503
+        vi.mocked(fetchAPI).mockRejectedValueOnce(readinessUnavailableError)
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                new Response(
+                    JSON.stringify({ detail: 'Readiness backend unavailable.' }),
+                    {
+                        status: 500,
+                        headers: { 'Content-Type': 'application/json' },
+                    }
+                )
+            )
+        )
+
+        await expect(getMonitoringReady()).rejects.toThrow('Readiness backend unavailable.')
+    })
+
+    it('uses message field from readiness fallback error payload', async () => {
+        const { fetchAPI } = await import('@/lib/api')
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringReady } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-ready-message')
+        const readinessUnavailableError = new Error('Service Unavailable') as Error & { status?: number }
+        readinessUnavailableError.status = 503
+        vi.mocked(fetchAPI).mockRejectedValueOnce(readinessUnavailableError)
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                new Response(
+                    JSON.stringify({ message: 'Readiness check failed.' }),
+                    {
+                        status: 500,
+                        headers: { 'Content-Type': 'application/json' },
+                    }
+                )
+            )
+        )
+
+        await expect(getMonitoringReady()).rejects.toThrow('Readiness check failed.')
+    })
+
+    it('uses default message when readiness fallback error payload is non-object JSON', async () => {
+        const { fetchAPI } = await import('@/lib/api')
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringReady } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-ready-scalar')
+        const readinessUnavailableError = new Error('Service Unavailable') as Error & { status?: number }
+        readinessUnavailableError.status = 503
+        vi.mocked(fetchAPI).mockRejectedValueOnce(readinessUnavailableError)
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                new Response(
+                    '123',
+                    {
+                        status: 500,
+                        headers: { 'Content-Type': 'application/json' },
+                    }
+                )
+            )
+        )
+
+        await expect(getMonitoringReady()).rejects.toThrow('Request failed. Please try again.')
+    })
+
     it('calls stats endpoint with bearer token', async () => {
         const { fetchAPI } = await import('@/lib/api')
         const { getValidAccessToken } = await import('@/lib/auth')
