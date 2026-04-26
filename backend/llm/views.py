@@ -365,7 +365,10 @@ def thinking_log_list(request):
 @require_http_methods(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def thinking_log_detail(request, history_id):
-    record = ChatMessage.objects.filter(session__owner=request.user, id=history_id).first()
+    record = _build_thinking_log_queryset_for_user(
+        user=request.user,
+        chat_id=history_id,
+    ).first()
     if record is None:
         return _thinking_log_not_found_response()
 
