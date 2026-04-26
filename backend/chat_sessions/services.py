@@ -52,6 +52,18 @@ def get_session_for_user(user, session_id):
     return Session.objects.filter(owner=user, id=session_id).first()
 
 
+def get_generated_output_for_session_user(user, session_id, output_id):
+    return (
+        GeneratedOutput.objects.filter(
+            session__owner=user,
+            session_id=session_id,
+            id=output_id,
+        )
+        .select_related("session")
+        .first()
+    )
+
+
 def get_paginated_session_detail_for_user(
     user,
     session_id,
