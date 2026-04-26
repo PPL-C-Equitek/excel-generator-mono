@@ -731,7 +731,7 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.data["results"][0]["id"], str(owned_match.id))
         self.assertEqual(response.data["results"][0]["session_id"], str(owned_session.id))
         self.assertEqual(response.data["results"][0]["chat_id"], str(owned_match.id))
-        self.assertEqual(response.data["results"][0]["request_id"], str(owned_match.id))
+        self.assertIsNone(response.data["results"][0]["request_id"])
 
     def test_thinking_log_list_filters_by_chat_id_without_session_filter(self):
         matched_session = Session.objects.create(owner=self.verified_user, title="Matched Session")
@@ -803,7 +803,7 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.data["id"], str(record.id))
         self.assertEqual(response.data["session_id"], str(session.id))
         self.assertEqual(response.data["chat_id"], str(record.id))
-        self.assertEqual(response.data["request_id"], str(record.id))
+        self.assertIsNone(response.data["request_id"])
         self.assertEqual(
             response.data["thinking_log"],
             "Normalization notes for numeric columns.",
