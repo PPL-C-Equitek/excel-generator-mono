@@ -87,31 +87,24 @@ function toScalarCell(value: unknown): ScalarCell {
 }
 
 function normalizeHeaders(rawHeaders: unknown[]): string[] {
-    const normalized: string[] = []
-    const seen = new Set<string>()
+    if (rawHeaders.length === 0) {
+        return [DEFAULT_VALUE_HEADER]
+    }
 
-    rawHeaders.forEach((rawHeader, index) => {
+    const counts = new Map<string, number>()
+
+    return rawHeaders.map((rawHeader, index) => {
         const trimmed =
             typeof rawHeader === 'string' && rawHeader.trim().length > 0
                 ? rawHeader.trim()
                 : `column_${index + 1}`
 
-        let candidate = trimmed
-        let duplicateIndex = 2
-        while (seen.has(candidate.toLowerCase())) {
-            candidate = `${trimmed}_${duplicateIndex}`
-            duplicateIndex += 1
-        }
+        const key = trimmed.toLowerCase()
+        const count = counts.get(key) ?? 0
+        counts.set(key, count + 1)
 
-        seen.add(candidate.toLowerCase())
-        normalized.push(candidate)
+        return count === 0 ? trimmed : `${trimmed}_${count + 1}`
     })
-
-    if (normalized.length === 0) {
-        return [DEFAULT_VALUE_HEADER]
-    }
-
-    return normalized
 }
 
 function mapArrayRowToObject(row: unknown[], headers: string[]): JsonObject {
@@ -318,14 +311,13 @@ function buildTabularExportPayload(
     }
 
     const contentData = buildContentDataFromOutput(generatedOutput)
-    const totalRows = contentData.reduce((sum, table) => {
-        const rows = table.rows as unknown[]
-        return sum + rows.length
-    }, 0)
-    const totalColumns = contentData.reduce((max, table) => {
-        const headers = table.headers as unknown[]
-        return Math.max(max, headers.length)
-    }, 0)
+    const { totalRows, totalColumns } = contentData.reduce(
+        (acc, table) => ({
+            totalRows: acc.totalRows + (table.rows as unknown[]).length,
+            totalColumns: Math.max(acc.totalColumns, (table.headers as unknown[]).length),
+        }),
+        { totalRows: 0, totalColumns: 0 } as { totalRows: number; totalColumns: number }
+    )
 
     return {
         document_info: {
