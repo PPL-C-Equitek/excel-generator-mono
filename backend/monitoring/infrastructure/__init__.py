@@ -6,6 +6,7 @@ from .health_checks import (
     StorageHealthCheck,
 )
 from .repositories import InMemoryMetricsRepository, RedisMetricsRepository, ResilientMetricsRepository
+from .discord_notifier import DiscordWebhookNotifier
 
 __all__ = [
     "BaseHealthCheck",
@@ -16,4 +17,5 @@ __all__ = [
     "InMemoryMetricsRepository",
     "RedisMetricsRepository",
     "ResilientMetricsRepository",
+    "DiscordWebhookNotifier",
 ]

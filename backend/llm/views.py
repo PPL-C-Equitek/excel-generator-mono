@@ -2,6 +2,7 @@ import logging
 from typing import Any, cast
 
 from artifact_history.models import ArtifactHistory
+from artifact_history.services import create_artifact_history
 from django.db import transaction
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
@@ -12,6 +13,7 @@ from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
     create_generated_output,
+    build_history_with_summary,
     create_session_for_user,
     get_session_for_user,
 )
@@ -31,7 +33,11 @@ from .services.generation_service import (
     JsonGenerationService,
     LlmGenerationService,
 )
-from .services.reasoning_service import LlmReasoningService
+from .services.reasoning_service import (
+    LlmReasoningService,
+    generate_conversion_reasoning_response,
+    generate_reasoning_response,
+)
 from .services.openai_client import (
     OpenAITextGenerationProvider,
     OpenAIConfigurationError,
@@ -52,6 +58,7 @@ INTERNAL_FAILURE_DETAIL = "Internal server error."
 INVALID_INPUT_JSON_DETAIL = "Invalid input_json payload."
 INVALID_PROMPT_DETAIL = "Invalid prompt payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
+REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
 SESSION_NOT_FOUND_DETAIL = "Session not found."
 THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
@@ -107,6 +114,53 @@ def extract_original_name(input_json, output_json) -> str:
         or _extract_document_info_filename(output_json)
         or "generated-output"
     )
+
+
+def _extract_document_type(payload) -> str:
+    if not isinstance(payload, dict):
+        return "unknown"
+
+    for key in ("document_type", "file_type", "format"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+
+    return "unknown"
+
+
+def _sanitize_output_json(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in REASONING_META_KEYS
+    }
+
+
+def _generate_optional_reasoning(include_reasoning, input_json, output_json):
+    if not include_reasoning:
+        return None
+
+    original_name = extract_original_name(input_json, output_json)
+    document_type = _extract_document_type(input_json)
+    reasoning_service = build_llm_reasoning_service()
+
+    try:
+        return generate_conversion_reasoning_response(
+            reasoning_service=reasoning_service,
+            input_json=input_json,
+            output_json=output_json,
+            file_name=original_name,
+            document_type=document_type,
+        )
+    except (OpenAIServiceError, ValueError):
+        logger.exception("Automatic reasoning failed while handling llm_generate request.")
+        return None
+    except Exception:
+        logger.exception("Unexpected error while generating automatic reasoning.")
+        return None
 
 
 def _thinking_log_not_found_response():
@@ -214,12 +268,13 @@ def _persist_generate_output_for_authenticated_user(user, session, output_json):
         return None, None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
 
-def _build_generate_success_response(output_json, session_id, output_id):
+def _build_generate_success_response(output_json, session_id, output_id, reasoning):
     response_serializer = LlmGenerateResponseSerializer(
         data={
             "output_json": output_json,
             "session_id": session_id,
             "output_id": output_id,
+            "reasoning": reasoning,
         }
     )
     if not response_serializer.is_valid():
@@ -248,7 +303,7 @@ def llm_generate(request):
     session, error_response = _resolve_generate_session(request.user, session_id)
     if error_response is not None:
         return error_response
-
+    include_reasoning = validated_data.get("include_reasoning", True)
     llm_generation_service = build_llm_generation_service(request.user)
     output_json, error_response = _generate_output_json(
         llm_generation_service,
@@ -258,6 +313,13 @@ def llm_generate(request):
     if error_response is not None:
         return error_response
 
+    output_json = _sanitize_output_json(output_json)
+    reasoning_response = _generate_optional_reasoning(
+        include_reasoning=include_reasoning,
+        input_json=input_json,
+        output_json=output_json,
+    )
+
     response_session_id, response_output_id, error_response = _persist_generate_output_for_authenticated_user(
         request.user,
         session,
@@ -266,10 +328,20 @@ def llm_generate(request):
     if error_response is not None:
         return error_response
 
+    if getattr(request.user, "is_authenticated", False):
+        create_artifact_history(
+            owner=request.user,
+            original_name=extract_original_name(input_json, output_json),
+            custom_name=None,
+            output_json=output_json,
+            status_processing="completed",
+        )
+
     return _build_generate_success_response(
         output_json,
         response_session_id,
         response_output_id,
+        reasoning_response,
     )
 
 @require_http_methods(["POST"])
@@ -305,6 +377,8 @@ def send_message(request):
     history.append({"role": "user", "content": message})
 
     try:
+        if session is not None:
+            history = build_history_with_summary(session, history)
         reply = generate_chat_response(history)
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
@@ -351,7 +425,10 @@ def llm_reasoning(request):
     reasoning_service = build_llm_reasoning_service()
 
     try:
-        reasoning_response = reasoning_service.generate(prompt=prompt)
+        reasoning_response = generate_reasoning_response(
+            reasoning_service=reasoning_service,
+            prompt=prompt,
+        )
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     except OpenAIUpstreamError as exc:

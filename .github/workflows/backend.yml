@@ -62,6 +62,7 @@ jobs:
           POSTGRES_PASSWORD: test_password
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          MONITORING_METRICS_BACKEND: memory
           DJANGO_SECRET_KEY: test-secret-key
           DJANGO_DEBUG: 'True'
           DJANGO_ALLOWED_HOSTS: localhost
@@ -76,6 +77,7 @@ jobs:
           POSTGRES_PASSWORD: test_password
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          MONITORING_METRICS_BACKEND: memory
           DJANGO_SECRET_KEY: test-secret-key
           DJANGO_DEBUG: 'True'
           DJANGO_ALLOWED_HOSTS: localhost
@@ -214,6 +216,7 @@ jobs:
           POSTGRES_PASSWORD: test_password
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          MONITORING_METRICS_BACKEND: memory
           DJANGO_SECRET_KEY: test-secret-key
           DJANGO_DEBUG: 'True'
           DJANGO_ALLOWED_HOSTS: localhost

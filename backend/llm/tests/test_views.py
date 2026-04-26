@@ -17,6 +17,8 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
 )
 from llm.views import (
+    _extract_document_type,
+    _sanitize_output_json,
     build_llm_generation_service,
     build_llm_reasoning_service,
     extract_original_name,
@@ -88,6 +90,43 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(result, "generated-output")
 
+    def test_extract_document_type_returns_unknown_for_non_object_payload(self):
+        result = _extract_document_type(["not-an-object"])
+
+        self.assertEqual(result, "unknown")
+
+    def test_extract_document_type_supports_file_type_and_format_keys(self):
+        file_type_result = _extract_document_type({"file_type": " XLSX "})
+        format_result = _extract_document_type({"format": " CSV "})
+
+        self.assertEqual(file_type_result, "xlsx")
+        self.assertEqual(format_result, "csv")
+
+    def test_sanitize_output_json_removes_reasoning_meta_keys_from_object(self):
+        sanitized = _sanitize_output_json(
+            {
+                "headers": ["A", "B"],
+                "rows": [["1", "2"]],
+                "final_answer": "should be removed",
+                "reasoning_steps": ["should be removed"],
+                "thinking_log": "should be removed",
+            }
+        )
+
+        self.assertEqual(
+            sanitized,
+            {
+                "headers": ["A", "B"],
+                "rows": [["1", "2"]],
+            },
+        )
+
+    def test_sanitize_output_json_keeps_non_object_payload_unchanged(self):
+        payload = [{"row": 1}]
+        sanitized = _sanitize_output_json(payload)
+
+        self.assertEqual(sanitized, payload)
+
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):
         mock_service = mock_build_service.return_value
@@ -105,6 +144,150 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             custom_schema_id=None,
+        )
+
+    @patch("llm.views.build_llm_reasoning_service")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_calls_reasoning_by_default(
+        self,
+        mock_build_generation_service,
+        mock_build_reasoning_service,
+    ):
+        mock_generation_service = mock_build_generation_service.return_value
+        mock_generation_service.generate.return_value = {"status": "ok"}
+        mock_reasoning_service = mock_build_reasoning_service.return_value
+        mock_reasoning_service.generate.return_value = {
+            "final_answer": "Conversion looks consistent.",
+            "reasoning_steps": ["Mapped source fields to normalized headers."],
+            "thinking_log": "Checked mapping, ambiguity, and output consistency.",
+        }
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["output_json"], {"status": "ok"})
+        self.assertEqual(response.data["reasoning"]["final_answer"], "Conversion looks consistent.")
+        mock_reasoning_service.generate.assert_called_once()
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_strips_reasoning_keys_from_output_json(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["A", "B"],
+            "rows": [["1", "2"]],
+            "final_answer": "remove me",
+            "reasoning_steps": ["remove me"],
+            "thinking_log": "remove me",
+        }
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}, "include_reasoning": False},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["output_json"],
+            {
+                "headers": ["A", "B"],
+                "rows": [["1", "2"]],
+            },
+        )
+
+    @patch("llm.views.build_llm_reasoning_service")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_skips_reasoning_when_include_reasoning_false(
+        self,
+        mock_build_generation_service,
+        mock_build_reasoning_service,
+    ):
+        mock_generation_service = mock_build_generation_service.return_value
+        mock_generation_service.generate.return_value = {"status": "ok"}
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "include_reasoning": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["output_json"], {"status": "ok"})
+        self.assertIsNone(response.data["reasoning"])
+        mock_build_reasoning_service.assert_not_called()
+
+    @patch("llm.views.logger")
+    @patch("llm.views.generate_conversion_reasoning_response")
+    @patch("llm.views.build_llm_reasoning_service")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_sets_reasoning_none_when_unexpected_auto_reasoning_error_occurs(
+        self,
+        mock_build_generation_service,
+        mock_build_reasoning_service,
+        mock_generate_conversion_reasoning,
+        mock_logger,
+    ):
+        mock_generation_service = mock_build_generation_service.return_value
+        mock_generation_service.generate.return_value = {"status": "ok"}
+        mock_generate_conversion_reasoning.side_effect = RuntimeError("unexpected")
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["output_json"], {"status": "ok"})
+        self.assertIsNone(response.data["reasoning"])
+        mock_build_reasoning_service.assert_called_once()
+        mock_generate_conversion_reasoning.assert_called_once()
+        mock_logger.exception.assert_called_once_with(
+            "Unexpected error while generating automatic reasoning."
+        )
+
+    @patch("llm.views.logger")
+    @patch("llm.views.generate_conversion_reasoning_response")
+    @patch("llm.views.build_llm_reasoning_service")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_sets_reasoning_none_when_expected_auto_reasoning_error_occurs(
+        self,
+        mock_build_generation_service,
+        mock_build_reasoning_service,
+        mock_generate_conversion_reasoning,
+        mock_logger,
+    ):
+        mock_generation_service = mock_build_generation_service.return_value
+        mock_generation_service.generate.return_value = {"status": "ok"}
+        mock_generate_conversion_reasoning.side_effect = OpenAIServiceError(
+            "invalid reasoning payload"
+        )
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["output_json"], {"status": "ok"})
+        self.assertIsNone(response.data["reasoning"])
+        mock_build_reasoning_service.assert_called_once()
+        mock_generate_conversion_reasoning.assert_called_once()
+        mock_logger.exception.assert_called_once_with(
+            "Automatic reasoning failed while handling llm_generate request."
         )
 
     @patch("llm.views.build_llm_generation_service")
@@ -298,13 +481,23 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.data["detail"], "Internal server error.")
         mock_logger.exception.assert_called_once()
 
+    @patch("llm.views.build_llm_reasoning_service")
     @patch("llm.views.LlmGenerateResponseSerializer")
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_502_when_response_serializer_invalid(
-        self, mock_build_service, mock_response_serializer_class
+        self,
+        mock_build_service,
+        mock_response_serializer_class,
+        mock_build_reasoning_service,
     ):
         mock_service = mock_build_service.return_value
         mock_service.generate.return_value = {"status": "ok"}
+        mock_reasoning_service = mock_build_reasoning_service.return_value
+        mock_reasoning_service.generate.return_value = {
+            "final_answer": "Answer",
+            "reasoning_steps": ["Step one"],
+            "thinking_log": "Summary",
+        }
         mock_response_serializer = mock_response_serializer_class.return_value
         mock_response_serializer.is_valid.return_value = False
         client = APIClient()
@@ -314,7 +507,16 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
         mock_response_serializer_class.assert_called_once_with(
-            data={"output_json": {"status": "ok"}, "session_id": None, "output_id": None}
+            data={
+                "output_json": {"status": "ok"},
+                "session_id": None,
+                "output_id": None,
+                "reasoning": {
+                    "final_answer": "Answer",
+                    "reasoning_steps": ["Step one"],
+                    "thinking_log": "Summary",
+                },
+            }
         )
 
     @patch("llm.views.logger")
@@ -636,7 +838,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         generated_output = GeneratedOutput.objects.get(session=session)
         self.assertEqual(str(generated_output.id), response.data["output_id"])
         self.assertEqual(generated_output.output_json, self.output_json)
-        self.assertEqual(ArtifactHistory.objects.count(), 0)
+        self.assertEqual(ArtifactHistory.objects.count(), 1)
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_does_not_create_session_or_generated_output_when_generation_fails(
@@ -656,6 +858,49 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self.assertFalse(Session.objects.exists())
         self.assertFalse(GeneratedOutput.objects.exists())
         self.assertFalse(ArtifactHistory.objects.exists())
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_persists_sanitized_output_json_without_reasoning_keys(
+        self,
+        mock_build_service,
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "document_info": {"filename": "invoice.pdf"},
+            "headers": ["A", "B"],
+            "rows": [["1", "2"]],
+            "final_answer": "remove me",
+            "reasoning_steps": ["remove me"],
+            "thinking_log": "remove me",
+        }
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                },
+                "include_reasoning": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ArtifactHistory.objects.count(), 1)
+        history = ArtifactHistory.objects.get()
+        self.assertNotIn("final_answer", history.output_json)
+        self.assertNotIn("reasoning_steps", history.output_json)
+        self.assertNotIn("thinking_log", history.output_json)
+        self.assertEqual(
+            history.output_json,
+            {
+                "document_info": {"filename": "invoice.pdf"},
+                "headers": ["A", "B"],
+                "rows": [["1", "2"]],
+            },
+        )
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_reuses_existing_owned_session_when_session_id_is_provided(
@@ -682,7 +927,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         generated_output = GeneratedOutput.objects.get()
         self.assertEqual(generated_output.session, session)
         self.assertEqual(response.data["output_id"], str(generated_output.id))
-        self.assertFalse(ArtifactHistory.objects.exists())
+        self.assertTrue(ArtifactHistory.objects.exists())
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_updates_session_last_output_at(self, mock_build_service):
@@ -1427,3 +1672,24 @@ class SendMessageEdgeCaseTest(TestCase):
         self.assertEqual(response.data["detail"], "Invalid request payload.")
         self.assertIn("message", response.data["errors"])
         mock_generate.assert_not_called()
+
+    @patch("llm.views.build_history_with_summary")
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_passes_summary_history_to_llm(self, mock_generate, mock_build_summary):
+        mock_generate.return_value = "reply"
+        summarized_history = [
+            {"role": "system", "content": "[Summary of earlier conversation]: Old context."},
+            {"role": "user", "content": "new msg"},
+        ]
+        mock_build_summary.return_value = summarized_history
+        session = Session.objects.create(owner=self.user)
+        self.client.force_authenticate(user=self.user)
+
+        self.client.post(
+            "/llm/send-message/",
+            {"session_id": str(session.id), "message": "new msg"},
+            format="json",
+        )
+
+        mock_build_summary.assert_called_once()
+        mock_generate.assert_called_once_with(summarized_history)
