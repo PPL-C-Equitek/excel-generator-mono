@@ -57,6 +57,18 @@ def get_session_for_user(user, session_id):
     return Session.objects.filter(owner=user, id=session_id).first()
 
 
+def get_generated_output_for_session_user(user, session_id, output_id):
+    return (
+        GeneratedOutput.objects.filter(
+            session__owner=user,
+            session_id=session_id,
+            id=output_id,
+        )
+        .select_related("session")
+        .first()
+    )
+
+
 def get_paginated_session_detail_for_user(
     user,
     session_id,
@@ -167,11 +179,24 @@ def append_assistant_message(session, content, thinking_log=None):
     return msg
 
 
-def create_generated_output(session, output_json):
+def create_generated_output(
+    session,
+    output_json,
+    thinking_log="",
+    export_output_json=None,
+):
     now = timezone.now()
+    # Temporary compatibility shim while callers are migrated away from
+    # export_output_json-as-third-positional-arg.
+    if export_output_json is None and isinstance(thinking_log, dict):
+        export_output_json = thinking_log
+        thinking_log = ""
+
     output = GeneratedOutput.objects.create(
         session=session,
         output_json=output_json,
+        thinking_log=thinking_log or "",
+        export_output_json=export_output_json or {},
     )
     session.last_output_at = now
     session.save(update_fields=["last_output_at", "updated_at"])

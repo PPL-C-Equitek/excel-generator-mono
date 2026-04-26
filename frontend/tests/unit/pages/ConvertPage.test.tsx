@@ -12,12 +12,14 @@ vi.mock('../../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
     exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_777' }),
     downloadCsvFile: vi.fn().mockResolvedValue(undefined),
+    downloadSessionOutputCsvFile: vi.fn().mockResolvedValue(undefined),
     exportToExcel: vi.fn().mockResolvedValue({
         file_id: 'xlsx_777',
         file_name: 'export_777.xlsx',
         artifact_type: 'xlsx',
     }),
     downloadExcelFile: vi.fn().mockResolvedValue(undefined),
+    downloadSessionOutputExcelFile: vi.fn().mockResolvedValue(undefined),
     getDownloadUrl: vi.fn().mockReturnValue('/export/csv/csv_777/download?filename=test.csv'),
 }))
 

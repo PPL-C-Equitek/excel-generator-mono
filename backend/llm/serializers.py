@@ -9,6 +9,7 @@ REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
 
 class LlmGenerateRequestSerializer(serializers.Serializer):
     input_json = serializers.JSONField()
+    session_id = serializers.UUIDField(required=False, allow_null=True)
     custom_schema_id = serializers.UUIDField(required=False, allow_null=True)
     include_reasoning = serializers.BooleanField(required=False, default=True)
 
@@ -38,6 +39,8 @@ class ReasoningPayloadSerializer(serializers.Serializer):
 
 class LlmGenerateResponseSerializer(serializers.Serializer):
     output_json = serializers.JSONField()
+    session_id = serializers.UUIDField(required=False, allow_null=True)
+    output_id = serializers.UUIDField(required=False, allow_null=True)
     reasoning = ReasoningPayloadSerializer(required=False, allow_null=True)
 
     def validate_output_json(self, value):
@@ -204,4 +207,3 @@ class ThinkingLogItemSerializer(serializers.Serializer):
             "status_processing": getattr(instance, "status_processing", "completed"),
             "created_at": instance.created_at,
         }
-

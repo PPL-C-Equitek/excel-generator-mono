@@ -168,3 +168,71 @@ class ChatSessionModelTest(TestCase):
             ("session", "created_at", "id"),
             index_fields,
         )
+
+    def test_generated_output_can_store_separate_export_output_json(self):
+        session = Session.objects.create(
+            owner=self.user,
+            title="Transformasi Excel April",
+        )
+
+        generated_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "headers": ["A"],
+                "rows": [["1"]],
+                "final_answer": "Raw output",
+            },
+            export_output_json={
+                "document_info": {"filename": "invoice.pdf"},
+                "summary": {"table_count": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["A"],
+                        "rows": [["1"]],
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(generated_output.output_json["final_answer"], "Raw output")
+        self.assertEqual(
+            generated_output.export_output_json["document_info"]["filename"],
+            "invoice.pdf",
+        )
+
+    def test_generated_output_save_rejects_non_object_export_output_json(self):
+        session = Session.objects.create(
+            owner=self.user,
+            title="Transformasi Excel April",
+        )
+
+        generated_output = GeneratedOutput(
+            session=session,
+            output_json={"headers": ["A"], "rows": [["1"]]},
+            export_output_json=[],
+        )
+
+        with self.assertRaises(ValidationError):
+            generated_output.save()
+
+    def test_generated_output_can_store_thinking_log(self):
+        session = Session.objects.create(
+            owner=self.user,
+            title="Transformasi Excel April",
+        )
+
+        generated_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"filename": "invoice.pdf"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+            thinking_log="Normalized categories and preserved totals.",
+        )
+
+        self.assertEqual(
+            generated_output.thinking_log,
+            "Normalized categories and preserved totals.",
+        )

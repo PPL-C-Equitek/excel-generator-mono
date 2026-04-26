@@ -12,6 +12,7 @@ from chat_sessions.services import (
     create_generated_output,
     create_session_for_user,
     delete_session,
+    get_generated_output_for_session_user,
     get_default_session_detail_pagination,
     get_paginated_session_detail_for_user,
     get_session_for_user,
@@ -124,6 +125,78 @@ class ChatSessionServiceTest(TestCase):
         )
 
         result = get_session_for_user(self.owner, session.id)
+
+        self.assertIsNone(result)
+
+    def test_get_generated_output_for_session_user_returns_owned_output(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+        output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"document_info": {}, "summary": {}, "content_data": []},
+        )
+
+        result = get_generated_output_for_session_user(
+            self.owner,
+            session.id,
+            output.id,
+        )
+
+        self.assertEqual(result, output)
+
+    def test_get_generated_output_for_session_user_returns_none_for_non_owned_session(self):
+        session = Session.objects.create(
+            owner=self.other_user,
+            title="Other User Session",
+        )
+        output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"document_info": {}, "summary": {}, "content_data": []},
+        )
+
+        result = get_generated_output_for_session_user(
+            self.owner,
+            session.id,
+            output.id,
+        )
+
+        self.assertIsNone(result)
+
+    def test_get_generated_output_for_session_user_returns_none_when_output_belongs_to_other_session(self):
+        owned_session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+        other_owned_session = Session.objects.create(
+            owner=self.owner,
+            title="Other Owned Session",
+        )
+        output = GeneratedOutput.objects.create(
+            session=other_owned_session,
+            output_json={"document_info": {}, "summary": {}, "content_data": []},
+        )
+
+        result = get_generated_output_for_session_user(
+            self.owner,
+            owned_session.id,
+            output.id,
+        )
+
+        self.assertIsNone(result)
+
+    def test_get_generated_output_for_session_user_returns_none_when_output_missing(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+
+        result = get_generated_output_for_session_user(
+            self.owner,
+            session.id,
+            "3208d1c1-e26f-4565-a2d8-b756b7f364c7",
+        )
 
         self.assertIsNone(result)
 
@@ -400,33 +473,75 @@ class CreateGeneratedOutputServiceTest(TestCase):
         )
         self.session = Session.objects.create(owner=owner)
         self.valid_output_json = {
-            "document_info": {"filename": "test.xlsx"},
-            "summary": {"total_sheets": 1},
-            "content_data": [],
+            "headers": ["A"],
+            "rows": [["1"]],
+            "final_answer": "Raw output",
         }
+        self.valid_thinking_log = "Checked totals and aligned categories."
 
     def test_create_generated_output_creates_output_with_correct_data(self):
-        output = create_generated_output(self.session, self.valid_output_json)
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+        )
 
         self.assertEqual(output.output_json, self.valid_output_json)
+        self.assertEqual(output.thinking_log, self.valid_thinking_log)
         self.assertEqual(output.session, self.session)
 
     def test_create_generated_output_persists_to_db(self):
-        output = create_generated_output(self.session, self.valid_output_json)
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+        )
 
         self.assertTrue(GeneratedOutput.objects.filter(id=output.id).exists())
 
     def test_create_generated_output_updates_session_last_output_at(self):
         self.assertIsNone(self.session.last_output_at)
 
-        create_generated_output(self.session, self.valid_output_json)
+        create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+        )
 
         self.session.refresh_from_db()
         self.assertIsNotNone(self.session.last_output_at)
 
+    def test_create_generated_output_defaults_thinking_log_to_empty_string(self):
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+        )
+
+        self.assertEqual(output.thinking_log, "")
+
+    def test_create_generated_output_supports_legacy_export_payload_as_third_positional_arg(self):
+        legacy_export_output_json = {
+            "document_info": {"source_type": "Excel"},
+            "summary": {"total_tables": 1},
+            "content_data": [],
+        }
+
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            legacy_export_output_json,
+        )
+
+        self.assertEqual(output.thinking_log, "")
+        self.assertEqual(output.export_output_json, legacy_export_output_json)
+
     def test_create_generated_output_rejects_non_dict_output_json(self):
         with self.assertRaises(ValidationError):
-            create_generated_output(self.session, ["bukan", "dict"])
+            create_generated_output(
+                self.session,
+                ["bukan", "dict"],
+                self.valid_thinking_log,
+            )
 
 
 class SummarizeOldMessagesServiceTest(SimpleTestCase):

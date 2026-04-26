@@ -67,6 +67,8 @@ class GeneratedOutput(models.Model):
         related_name="generated_outputs",
     )
     output_json = models.JSONField()
+    thinking_log = models.TextField(blank=True, default="")
+    export_output_json = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -81,6 +83,10 @@ class GeneratedOutput(models.Model):
         super().clean()
         if not isinstance(self.output_json, dict):
             raise ValidationError({"output_json": "output_json must be an object."})
+        if not isinstance(self.export_output_json, dict):
+            raise ValidationError(
+                {"export_output_json": "export_output_json must be an object."}
+            )
 
     def save(self, *args, **kwargs):
         self.full_clean()
