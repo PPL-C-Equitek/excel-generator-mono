@@ -519,6 +519,22 @@ class CreateGeneratedOutputServiceTest(TestCase):
 
         self.assertEqual(output.thinking_log, "")
 
+    def test_create_generated_output_supports_legacy_export_payload_as_third_positional_arg(self):
+        legacy_export_output_json = {
+            "document_info": {"source_type": "Excel"},
+            "summary": {"total_tables": 1},
+            "content_data": [],
+        }
+
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            legacy_export_output_json,
+        )
+
+        self.assertEqual(output.thinking_log, "")
+        self.assertEqual(output.export_output_json, legacy_export_output_json)
+
     def test_create_generated_output_rejects_non_dict_output_json(self):
         with self.assertRaises(ValidationError):
             create_generated_output(

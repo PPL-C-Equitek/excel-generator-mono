@@ -260,6 +260,80 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             },
         )
 
+    def test_build_export_output_json_normalizes_duplicate_blank_headers_and_mixed_rows(self):
+        export_output_json = build_export_output_json(
+            input_json={"document_info": {"source_type": "xlsx"}},
+            output_json={
+                "headers": [" Unit ", "", "unit"],
+                "rows": [
+                    ["ICU", 10, 20],
+                    {"Unit": "ER", "column_2": 30, "unit_2": 40},
+                    "fallback",
+                ],
+            },
+        )
+
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["Unit", "column_2", "unit_2"],
+                    "rows": [
+                        {"Unit": "ICU", "column_2": 10, "unit_2": 20},
+                        {"Unit": "ER", "column_2": 30, "unit_2": 40},
+                        {"Unit": "fallback", "column_2": None, "unit_2": None},
+                    ],
+                }
+            ],
+        )
+
+    def test_build_export_output_json_uses_sheet_fallback_name_for_blank_sheet_key(self):
+        export_output_json = build_export_output_json(
+            input_json={"filename": "summary.xlsx"},
+            output_json={
+                "   ": [1, 2],
+                "Named": [{"value": 3, "other": "ok"}],
+            },
+        )
+
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["value"],
+                    "rows": [{"value": 1}, {"value": 2}],
+                },
+                {
+                    "table_name": "Named",
+                    "headers": ["value", "other"],
+                    "rows": [{"value": 3, "other": "ok"}],
+                },
+            ],
+        )
+
+    def test_build_export_output_json_wraps_scalar_payload_in_default_value_table(self):
+        export_output_json = build_export_output_json(
+            input_json={"filename": "summary.xlsx"},
+            output_json=123,
+        )
+
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["value"],
+                    "rows": [{"value": 123}],
+                }
+            ],
+        )
+        self.assertEqual(
+            export_output_json["summary"],
+            {"total_tables": 1, "total_rows": 1, "total_columns": 1},
+        )
+
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):
         mock_service = mock_build_service.return_value

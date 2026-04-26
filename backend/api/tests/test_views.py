@@ -3118,6 +3118,92 @@ class SessionEndpointTests(TestCase):
         )
         mock_export_csv.assert_called_once()
 
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_not_found_when_generated_artifact_metadata_is_unsafe(
+        self,
+        mock_get_output,
+        mock_export_csv,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf", "source_type": "PDF"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "CSV file not found.",
+            },
+        )
+
+    @patch("api.views.open", side_effect=OSError("disk error"))
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_internal_error_when_file_open_fails(
+        self,
+        mock_get_output,
+        mock_export_csv,
+        mock_open_file,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf", "source_type": "PDF"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+        mock_open_file.assert_called_once()
+
     @patch("api.views.get_generated_output_for_session_user")
     def test_session_output_download_excel_requires_authentication(self, mock_get_output):
         request = self.factory.get(
@@ -3336,3 +3422,25 @@ class SessionEndpointTests(TestCase):
             self.output_id,
         )
         mock_export_excel.assert_called_once()
+
+    def test_normalize_session_output_export_payload_keeps_non_dict_payload_unchanged(self):
+        payload = ["not", "a", "dict"]
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(output_json=payload)
+        )
+
+        self.assertEqual(normalized, payload)
+
+    def test_normalize_session_output_export_payload_keeps_payload_when_document_info_is_not_object(self):
+        payload = {
+            "document_info": "invalid",
+            "summary": {"table_count": 1},
+            "content_data": [],
+        }
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(output_json=payload)
+        )
+
+        self.assertEqual(normalized, payload)
