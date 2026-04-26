@@ -2,16 +2,16 @@ import logging
 from typing import Any, cast
 
 from artifact_history.models import ArtifactHistory
+from django.db import transaction
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from django.db import transaction
 
-from artifact_history.services import create_artifact_history
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
+    create_generated_output,
     create_session_for_user,
     get_session_for_user,
 )
@@ -173,7 +173,13 @@ def llm_generate(request):
 
     validated_data = cast(dict[str, Any], request_serializer.validated_data)
     input_json = validated_data["input_json"]
+    session_id = validated_data.get("session_id")
     custom_schema_id = validated_data.get("custom_schema_id")
+    session = None
+    if session_id is not None and getattr(request.user, "is_authenticated", False):
+        session = get_session_for_user(request.user, session_id)
+        if session is None:
+            return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
     llm_generation_service = build_llm_generation_service(request.user)
 
     try:
@@ -203,18 +209,20 @@ def llm_generate(request):
         logger.exception("Unexpected error while handling llm_generate request.")
         return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
-    response_serializer = LlmGenerateResponseSerializer(data={"output_json": output_json})
+    response_session_id = None
+    if getattr(request.user, "is_authenticated", False):
+        with transaction.atomic():
+            if session is None:
+                session = create_session_for_user(request.user)
+            create_generated_output(session, output_json)
+        response_session_id = session.id
+
+    response_serializer = LlmGenerateResponseSerializer(
+        data={"output_json": output_json, "session_id": response_session_id}
+    )
     if not response_serializer.is_valid():
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
 
-    if getattr(request.user, "is_authenticated", False):
-        create_artifact_history(
-            owner=request.user,
-            original_name=extract_original_name(input_json, output_json),
-            custom_name=None,
-            output_json=output_json,
-            status_processing="completed",
-        )
     return Response(response_serializer.data)
 
 @require_http_methods(["POST"])

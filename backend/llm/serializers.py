@@ -6,6 +6,7 @@ MAX_MESSAGE_LENGTH = 4096
 
 class LlmGenerateRequestSerializer(serializers.Serializer):
     input_json = serializers.JSONField()
+    session_id = serializers.UUIDField(required=False, allow_null=True)
     custom_schema_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate_input_json(self, value):
@@ -25,6 +26,7 @@ class LlmGenerateRequestSerializer(serializers.Serializer):
 
 class LlmGenerateResponseSerializer(serializers.Serializer):
     output_json = serializers.JSONField()
+    session_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class SendMessageRequestSerializer(serializers.Serializer):
@@ -165,4 +167,3 @@ class ThinkingLogItemSerializer(serializers.Serializer):
             "status_processing": instance.status_processing,
             "created_at": instance.created_at,
         }
-

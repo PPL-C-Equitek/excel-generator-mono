@@ -312,7 +312,9 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
-        mock_response_serializer_class.assert_called_once_with(data={"output_json": {"status": "ok"}})
+        mock_response_serializer_class.assert_called_once_with(
+            data={"output_json": {"status": "ok"}, "session_id": None}
+        )
 
     @patch("llm.views.logger")
     @patch("llm.views.build_llm_generation_service")
