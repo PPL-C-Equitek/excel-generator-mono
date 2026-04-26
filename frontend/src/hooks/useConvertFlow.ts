@@ -638,7 +638,7 @@ export function useConvertFlow(
                     excelFilename
                 )
             } else {
-                if (!hasLegacyExcelDownloadDependencies(generatedOutput, llmService)) {
+                if (!hasLegacyExcelDownloadDependencies(generatedOutput, llmService) || !llmService.exportToExcel || !llmService.downloadExcelFile) {
                     return
                 }
                 const excelOutput = buildTabularExportPayload(
