@@ -1,7 +1,6 @@
 import logging
 from typing import Any, cast
 
-from artifact_history.models import ArtifactHistory
 from chat_sessions.models import ChatMessage
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
