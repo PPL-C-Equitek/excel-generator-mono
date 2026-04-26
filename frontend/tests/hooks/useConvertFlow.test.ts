@@ -2052,6 +2052,54 @@ describe('useConvertFlow', () => {
             expect(service.downloadExcelFile).not.toHaveBeenCalled()
         })
 
+        it('returns early for csv download when no file has been selected', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.exportToCsv).not.toHaveBeenCalled()
+            expect(service.downloadCsvFile).not.toHaveBeenCalled()
+        })
+
+        it('returns early when handleCsvDownload is called but exportToCsv is missing', async () => {
+            const service = makeMockService({
+                downloadSessionOutputCsvFile: undefined,
+                exportToCsv: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.downloadCsvFile).not.toHaveBeenCalled()
+        })
+
+        it('returns early when handleCsvDownload is called but downloadCsvFile is missing', async () => {
+            const service = makeMockService({
+                downloadSessionOutputCsvFile: undefined,
+                downloadCsvFile: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.exportToCsv).not.toHaveBeenCalled()
+        })
+
         it('returns early when session Excel download exists but legacy fallback dependencies are missing', async () => {
             const service = makeMockService({
                 exportToExcel: undefined,
@@ -2084,6 +2132,175 @@ describe('useConvertFlow', () => {
             })
 
             expect(getExcelState(result).canDownloadExcel).toBe(false)
+        })
+
+        it('sets canDownloadExcel to true if downloadSessionOutputExcelFile is available', async () => {
+            const service = makeMockService({
+                downloadSessionOutputExcelFile: vi.fn(),
+                exportToExcel: undefined,
+                downloadExcelFile: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getExcelState(result).canDownloadExcel).toBe(true)
+        })
+
+        it('sets canDownloadExcel to true if both exportToExcel and downloadExcelFile are available', async () => {
+            const service = makeMockService({
+                downloadSessionOutputExcelFile: undefined,
+                exportToExcel: vi.fn(),
+                downloadExcelFile: vi.fn(),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getExcelState(result).canDownloadExcel).toBe(true)
+        })
+
+        it('keeps canDownloadExcel false when generated output exists but downloadExcelFile is missing', async () => {
+            const service = makeMockService({
+                downloadSessionOutputExcelFile: undefined,
+                exportToExcel: vi.fn(),
+                downloadExcelFile: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getExcelState(result).canDownloadExcel).toBe(false)
+        })
+
+        it('keeps canDownloadExcel false when generated output exists but exportToExcel is missing', async () => {
+            const service = makeMockService({
+                downloadSessionOutputExcelFile: undefined,
+                exportToExcel: undefined,
+                downloadExcelFile: vi.fn(),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getExcelState(result).canDownloadExcel).toBe(false)
+        })
+        it('returns early when handleExcelDownload is called but exportToExcel is missing', async () => {
+            const service = makeMockService({
+                downloadSessionOutputExcelFile: undefined,
+                exportToExcel: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(getExcelState(result).isExcelDownloading).toBe(false)
+        })
+
+        it('returns early when handleExcelDownload is called but downloadExcelFile is missing', async () => {
+            const service = makeMockService({
+                downloadSessionOutputExcelFile: undefined,
+                downloadExcelFile: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(getExcelState(result).isExcelDownloading).toBe(false)
+        })
+        it('sets canDownloadCsv to true if both exportToCsv and downloadCsvFile are available', async () => {
+            const service = makeMockService({
+                downloadSessionOutputCsvFile: undefined,
+                exportToCsv: vi.fn(),
+                downloadCsvFile: vi.fn(),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getDownloadState(result).canDownloadCsv).toBe(true)
+        })
+
+        it('sets canDownloadCsv to true if downloadSessionOutputCsvFile is available', async () => {
+            const service = makeMockService({
+                downloadSessionOutputCsvFile: vi.fn(),
+                exportToCsv: undefined,
+                downloadCsvFile: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getDownloadState(result).canDownloadCsv).toBe(true)
+        })
+
+        it('keeps canDownloadCsv false when generated output exists but downloadCsvFile is missing', async () => {
+            const service = makeMockService({
+                downloadSessionOutputCsvFile: undefined,
+                exportToCsv: vi.fn(),
+                downloadCsvFile: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getDownloadState(result).canDownloadCsv).toBe(false)
+        })
+
+        it('keeps canDownloadCsv false when generated output exists but exportToCsv is missing', async () => {
+            const service = makeMockService({
+                downloadSessionOutputCsvFile: undefined,
+                exportToCsv: undefined,
+                downloadCsvFile: vi.fn(),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getDownloadState(result).canDownloadCsv).toBe(false)
+        })
+
+        it('keeps canDownloadCsv false when generated output exists but no csv download path is available', async () => {
+            const service = makeMockService({
+                exportToCsv: undefined,
+                downloadCsvFile: undefined,
+                downloadSessionOutputCsvFile: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getDownloadState(result).canDownloadCsv).toBe(false)
         })
     })
 })

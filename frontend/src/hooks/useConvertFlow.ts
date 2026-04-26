@@ -562,12 +562,8 @@ export function useConvertFlow(
 
         const nonEmptyOutput = generatedOutput as JsonValue
 
-        if (!outputFile) {
-            return
-        }
-
         const requestId = conversionRequestIdRef.current
-        const csvFilename = outputFile.filename.replace(/\.[^/.]+$/, '') + '.csv'
+        const csvFilename = outputFile!.filename.replace(/\.[^/.]+$/, '') + '.csv'
         const sessionCsvDownload = llmService.downloadSessionOutputCsvFile
         const canUseSessionDownload = canUseSessionOutputDownload(
             generatedSessionId,
