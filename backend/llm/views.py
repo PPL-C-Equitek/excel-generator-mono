@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any, cast
 
@@ -120,12 +121,28 @@ def _extract_document_type(payload) -> str:
     if not isinstance(payload, dict):
         return "unknown"
 
+    document_info = payload.get("document_info")
+    if isinstance(document_info, dict):
+        for key in ("source_type", "document_type", "file_type", "format"):
+            value = document_info.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip().lower()
+
     for key in ("document_type", "file_type", "format"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip().lower()
 
     return "unknown"
+
+
+def _format_export_source_type(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"pdf"}:
+        return "PDF"
+    if normalized in {"excel", "xlsx", "xls"}:
+        return "Excel"
+    return value
 
 
 def _sanitize_output_json(payload: Any) -> Any:
@@ -136,6 +153,169 @@ def _sanitize_output_json(payload: Any) -> Any:
         key: value
         for key, value in payload.items()
         if key not in REASONING_META_KEYS
+    }
+
+
+DEFAULT_EXPORT_TABLE_NAME = "Sheet1"
+DEFAULT_EXPORT_VALUE_HEADER = "value"
+
+
+def _to_scalar_cell(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    try:
+        return str(value) if isinstance(value, bytes) else json.dumps(value)
+    except Exception:
+        return "[Unserializable Value]"
+
+
+def _normalize_headers(raw_headers):
+    if not raw_headers:
+        return [DEFAULT_EXPORT_VALUE_HEADER]
+
+    counts = {}
+    normalized = []
+    for index, raw_header in enumerate(raw_headers):
+        trimmed = (
+            raw_header.strip()
+            if isinstance(raw_header, str) and raw_header.strip()
+            else f"column_{index + 1}"
+        )
+        key = trimmed.lower()
+        count = counts.get(key, 0)
+        counts[key] = count + 1
+        normalized.append(trimmed if count == 0 else f"{trimmed}_{count + 1}")
+    return normalized
+
+
+def _map_array_row_to_object(row, headers):
+    return {
+        header: _to_scalar_cell(row[index] if index < len(row) else None)
+        for index, header in enumerate(headers)
+    }
+
+
+def _map_object_row_to_object(row, headers):
+    return {
+        header: _to_scalar_cell(row.get(header))
+        for header in headers
+    }
+
+
+def _map_unknown_row_to_object(row, headers):
+    mapped_row = {}
+    for index, header in enumerate(headers):
+        mapped_row[header] = _to_scalar_cell(row) if index == 0 else None
+    return mapped_row
+
+
+def _build_rows_from_generated_output_rows(rows, headers):
+    normalized_rows = []
+    for row in rows:
+        if isinstance(row, list):
+            normalized_rows.append(_map_array_row_to_object(row, headers))
+        elif isinstance(row, dict):
+            normalized_rows.append(_map_object_row_to_object(row, headers))
+        else:
+            normalized_rows.append(_map_unknown_row_to_object(row, headers))
+    return normalized_rows
+
+
+def _infer_headers_and_rows_from_rows_array(rows):
+    if rows and all(isinstance(row, list) for row in rows):
+        max_columns = max((len(row) for row in rows), default=0)
+        headers = _normalize_headers(
+            [f"column_{index + 1}" for index in range(max_columns)]
+        )
+        return headers, _build_rows_from_generated_output_rows(rows, headers)
+
+    if rows and all(isinstance(row, dict) for row in rows):
+        collected_headers = []
+        for row in rows:
+            for key in row.keys():
+                if key not in collected_headers:
+                    collected_headers.append(key)
+        headers = _normalize_headers(collected_headers)
+        return headers, _build_rows_from_generated_output_rows(rows, headers)
+
+    headers = [DEFAULT_EXPORT_VALUE_HEADER]
+    normalized_rows = [{DEFAULT_EXPORT_VALUE_HEADER: _to_scalar_cell(value)} for value in rows]
+    return headers, normalized_rows
+
+
+def _infer_headers_and_rows_from_output(output_json):
+    if isinstance(output_json, dict):
+        headers = _normalize_headers(list(output_json.keys()))
+        return headers, [_map_object_row_to_object(output_json, headers)]
+
+    if isinstance(output_json, list):
+        return _infer_headers_and_rows_from_rows_array(output_json)
+
+    return [DEFAULT_EXPORT_VALUE_HEADER], [{DEFAULT_EXPORT_VALUE_HEADER: _to_scalar_cell(output_json)}]
+
+
+def _build_content_data_from_output(output_json):
+    if isinstance(output_json, dict):
+        direct_headers = output_json.get("headers")
+        direct_rows = output_json.get("rows")
+        if isinstance(direct_headers, list) and isinstance(direct_rows, list):
+            headers = _normalize_headers(direct_headers)
+            return [
+                {
+                    "table_name": DEFAULT_EXPORT_TABLE_NAME,
+                    "headers": headers,
+                    "rows": _build_rows_from_generated_output_rows(direct_rows, headers),
+                }
+            ]
+
+        entries = list(output_json.items())
+        has_sheet_like_entries = entries and all(isinstance(value, list) for _, value in entries)
+        if has_sheet_like_entries:
+            content_data = []
+            for index, (sheet_name, value) in enumerate(entries):
+                headers, rows = _infer_headers_and_rows_from_rows_array(value)
+                table_name = (
+                    sheet_name.strip()
+                    if isinstance(sheet_name, str) and sheet_name.strip()
+                    else f"Sheet{index + 1}"
+                )
+                content_data.append(
+                    {
+                        "table_name": table_name,
+                        "headers": headers,
+                        "rows": rows,
+                    }
+                )
+            return content_data
+
+    headers, rows = _infer_headers_and_rows_from_output(output_json)
+    return [
+        {
+            "table_name": DEFAULT_EXPORT_TABLE_NAME,
+            "headers": headers,
+            "rows": rows,
+        }
+    ]
+
+
+def build_export_output_json(input_json, output_json):
+    content_data = _build_content_data_from_output(output_json)
+
+    total_rows = sum(len(table["rows"]) for table in content_data)
+    total_columns = max((len(table["headers"]) for table in content_data), default=0)
+
+    return {
+        "document_info": {
+            "source_type": _format_export_source_type(_extract_document_type(input_json)),
+            "filename": extract_original_name(input_json, output_json),
+        },
+        "summary": {
+            "total_tables": len(content_data),
+            "total_rows": total_rows,
+            "total_columns": total_columns,
+        },
+        "content_data": content_data,
     }
 
 
