@@ -3040,7 +3040,14 @@ class SessionEndpointTests(TestCase):
         )
         self.assertEqual(
             mock_export_csv.call_args.kwargs["output_json"],
-            stub_output.export_output_json,
+            {
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
         )
 
     @patch("api.views.get_generated_output_for_session_user")
@@ -3201,7 +3208,71 @@ class SessionEndpointTests(TestCase):
         )
         self.assertEqual(
             mock_export_excel.call_args.kwargs["output_json"],
-            stub_output.export_output_json,
+            {
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+
+    @patch("api.views.open")
+    @patch("api.views.export_excel_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_repairs_legacy_invalid_source_type_from_filename(
+        self,
+        mock_get_output,
+        mock_export_excel,
+        mock_open_file,
+    ):
+        stub_output = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "headers": ["unit", "value"],
+                "rows": [["ICU", 1000]],
+            },
+            export_output_json={
+                "document_info": {
+                    "source_type": "unknown",
+                    "filename": "invoice.pdf",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_get_output.return_value = stub_output
+        mock_export_excel.return_value = {
+            "file_id": "xlsx_token",
+            "file_name": "export_token.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 24,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"excel-bytes")
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            mock_export_excel.call_args.kwargs["output_json"],
+            {
+                "document_info": {
+                    "source_type": "PDF",
+                    "filename": "invoice.pdf",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
         )
 
     @patch("api.views.get_generated_output_for_session_user")

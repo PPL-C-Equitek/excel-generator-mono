@@ -227,6 +227,39 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             ],
         )
 
+    def test_build_export_output_json_infers_pdf_source_type_from_filename(self):
+        export_output_json = build_export_output_json(
+            input_json={"document_info": {"filename": "invoice.pdf"}},
+            output_json={"headers": ["unit"], "rows": [["ICU"]]},
+        )
+
+        self.assertEqual(
+            export_output_json["document_info"],
+            {
+                "source_type": "PDF",
+                "filename": "invoice.pdf",
+            },
+        )
+
+    def test_build_export_output_json_falls_back_to_excel_when_source_type_is_unrecognized(self):
+        export_output_json = build_export_output_json(
+            input_json={
+                "document_info": {
+                    "filename": "invoice.docx",
+                    "source_type": "word",
+                }
+            },
+            output_json={"headers": ["unit"], "rows": [["ICU"]]},
+        )
+
+        self.assertEqual(
+            export_output_json["document_info"],
+            {
+                "source_type": "Excel",
+                "filename": "invoice.docx",
+            },
+        )
+
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):
         mock_service = mock_build_service.return_value
@@ -953,7 +986,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             generated_output.export_output_json,
             {
                 "document_info": {
-                    "source_type": "unknown",
+                    "source_type": "PDF",
                     "filename": "invoice.pdf",
                 },
                 "summary": {

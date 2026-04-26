@@ -900,6 +900,32 @@ def _session_csv_download_internal_error_response():
     )
 
 
+def _normalize_session_output_export_payload(output):
+    payload = getattr(output, "export_output_json", None)
+    if not isinstance(payload, dict):
+        return payload
+
+    normalized_payload = dict(payload)
+    document_info = payload.get("document_info")
+    if not isinstance(document_info, dict):
+        return normalized_payload
+
+    normalized_document_info = dict(document_info)
+    source_type = normalized_document_info.get("source_type")
+    if source_type in {"Excel", "PDF"}:
+        normalized_payload["document_info"] = normalized_document_info
+        return normalized_payload
+
+    filename = normalized_document_info.get("filename")
+    if isinstance(filename, str) and filename.strip().lower().endswith(".pdf"):
+        normalized_document_info["source_type"] = "PDF"
+    else:
+        normalized_document_info["source_type"] = "Excel"
+
+    normalized_payload["document_info"] = normalized_document_info
+    return normalized_payload
+
+
 def _build_session_output_download_response(
     *,
     request,
@@ -928,7 +954,7 @@ def _build_session_output_download_response(
 
     try:
         artifact = export_callable(
-            output_json=output.export_output_json,
+            output_json=_normalize_session_output_export_payload(output),
             storage_dir=storage_dir,
         )
     except Exception as exc:

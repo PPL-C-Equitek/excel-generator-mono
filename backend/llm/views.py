@@ -142,7 +142,19 @@ def _format_export_source_type(value: str) -> str:
         return "PDF"
     if normalized in {"excel", "xlsx", "xls"}:
         return "Excel"
-    return value
+    return ""
+
+
+def _resolve_export_source_type(input_json, output_json) -> str:
+    source_type = _format_export_source_type(_extract_document_type(input_json))
+    if source_type:
+        return source_type
+
+    filename = extract_original_name(input_json, output_json).lower()
+    if filename.endswith(".pdf"):
+        return "PDF"
+
+    return "Excel"
 
 
 def _sanitize_output_json(payload: Any) -> Any:
@@ -307,7 +319,7 @@ def build_export_output_json(input_json, output_json):
 
     return {
         "document_info": {
-            "source_type": _format_export_source_type(_extract_document_type(input_json)),
+            "source_type": _resolve_export_source_type(input_json, output_json),
             "filename": extract_original_name(input_json, output_json),
         },
         "summary": {
