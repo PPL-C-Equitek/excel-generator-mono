@@ -259,7 +259,11 @@ def _persist_generate_output_for_authenticated_user(user, session, output_json):
         with transaction.atomic():
             if session is None:
                 session = create_session_for_user(user)
-            generated_output = create_generated_output(session, output_json)
+            generated_output = create_generated_output(
+                session,
+                output_json,
+                output_json,
+            )
         return session.id, generated_output.id, None
     except Exception:
         logger.exception(

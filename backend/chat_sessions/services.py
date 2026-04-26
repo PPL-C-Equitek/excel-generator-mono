@@ -179,11 +179,12 @@ def append_assistant_message(session, content, thinking_log=None):
     return msg
 
 
-def create_generated_output(session, output_json):
+def create_generated_output(session, output_json, export_output_json):
     now = timezone.now()
     output = GeneratedOutput.objects.create(
         session=session,
         output_json=output_json,
+        export_output_json=export_output_json,
     )
     session.last_output_at = now
     session.save(update_fields=["last_output_at", "updated_at"])
