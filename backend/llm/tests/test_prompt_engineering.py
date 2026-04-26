@@ -90,6 +90,35 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
 
         self.assertNotIn("## INPUT", prompt)
 
+    def test_build_extraction_prompt_includes_refinement_section_when_provided(self):
+        prompt = build_extraction_prompt(
+            schema_hint="headers: [item]",
+            refinement_instruction="Fix summary.total_items mismatch.",
+        )
+
+        self.assertIn("## SCHEMA_HINT", prompt)
+        self.assertIn("## REFINEMENT", prompt)
+        self.assertIn("Fix summary.total_items mismatch.", prompt)
+
+    def test_build_extraction_prompt_ignores_blank_refinement_instruction(self):
+        prompt = build_extraction_prompt(
+            schema_hint="headers: [item]",
+            refinement_instruction="   ",
+        )
+
+        self.assertIn("## SCHEMA_HINT", prompt)
+        self.assertNotIn("## REFINEMENT", prompt)
+
+    def test_build_extraction_prompt_includes_refinement_without_schema_hint(self):
+        prompt = build_extraction_prompt(
+            schema_hint="   ",
+            refinement_instruction="Repair content_data row mapping.",
+        )
+
+        self.assertNotIn("## SCHEMA_HINT", prompt)
+        self.assertIn("## REFINEMENT", prompt)
+        self.assertIn("Repair content_data row mapping.", prompt)
+
     def test_to_json_context_truncates_when_output_too_long(self):
         result = _to_json_context({"value": "x" * 30}, max_chars=10)
 

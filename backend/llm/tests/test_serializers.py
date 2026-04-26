@@ -10,6 +10,7 @@ from llm.serializers import (
     LlmGenerateResponseSerializer,
     LlmReasoningRequestSerializer,
     LlmReasoningResponseSerializer,
+    SendMessageRequestSerializer,
     ThinkingLogItemSerializer,
     _safe_thinking_log_summary,
 )
@@ -209,6 +210,138 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("validation_log", serializer.errors)
 
+    def test_generate_response_serializer_rejects_validation_log_with_missing_keys(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "errors": [],
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_when_warnings_not_list(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": [],
+                    "warnings": "not-a-list",
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_issue_item_when_not_object(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": ["not-object"],
+                    "warnings": [],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_issue_with_blank_required_field(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": [{"path": " ", "message": "bad", "severity": "error"}],
+                    "warnings": [],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_with_invalid_verdict(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "maybe",
+                    "errors": [],
+                    "warnings": [],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_with_non_positive_iteration(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 0,
+                    "verdict": "invalid",
+                    "errors": [],
+                    "warnings": [],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_with_blank_summary(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": [],
+                    "warnings": [],
+                    "summary": "   ",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_accepts_validation_log_with_structured_issue_items(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": [{"path": "$.x", "message": "bad", "severity": "error"}],
+                    "warnings": [{"path": "$.y", "message": "warn", "severity": "warning"}],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
     def test_generate_response_serializer_rejects_validation_log_issue_without_required_fields(self):
         serializer = LlmGenerateResponseSerializer(
             data={
@@ -231,6 +364,65 @@ class LlmGenerateSerializerTest(SimpleTestCase):
             data={
                 "output_json": {"status": "ok"},
                 "refinement_meta": "invalid",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    def test_generate_response_serializer_rejects_refinement_meta_with_missing_keys(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": {"iterations_run": 1},
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    def test_generate_response_serializer_rejects_refinement_meta_with_non_positive_iterations_run(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": {
+                    "iterations_run": 0,
+                    "max_iterations": 3,
+                    "early_exit_triggered": False,
+                    "final_status": "failed",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    def test_generate_response_serializer_rejects_refinement_meta_with_non_positive_max_iterations(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": {
+                    "iterations_run": 1,
+                    "max_iterations": 0,
+                    "early_exit_triggered": False,
+                    "final_status": "failed",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    def test_generate_response_serializer_rejects_refinement_meta_with_non_boolean_early_exit(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": {
+                    "iterations_run": 1,
+                    "max_iterations": 1,
+                    "early_exit_triggered": "no",
+                    "final_status": "failed",
+                },
             }
         )
 
@@ -362,3 +554,17 @@ class ThinkingLogSerializerTest(SimpleTestCase):
         self.assertIsNone(serializer.data["session_id"])
         self.assertIsNone(serializer.data["request_id"])
         self.assertEqual(serializer.data["thinking_log"], "")
+
+
+class SendMessageSerializerTest(SimpleTestCase):
+    def test_send_message_request_serializer_accepts_non_blank_message(self):
+        serializer = SendMessageRequestSerializer(data={"message": "Hello"})
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["message"], "Hello")
+
+    def test_send_message_request_serializer_rejects_whitespace_only_message(self):
+        serializer = SendMessageRequestSerializer(data={"message": "   \n\t"})
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("message", serializer.errors)

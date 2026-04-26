@@ -7,10 +7,17 @@ from llm.services.refinement_service import (
     RefinementOrchestrator,
     build_refinement_instruction,
     build_validation_log,
+    _sanitize_reasoning_meta_keys,
 )
+from file_processing.services.export_service import OutputLLMValidationError
 
 
 class RefinementValidationLogTest(SimpleTestCase):
+    def test_sanitize_reasoning_meta_keys_returns_non_dict_payload_unchanged(self):
+        payload = ["a", "b"]
+
+        self.assertEqual(_sanitize_reasoning_meta_keys(payload), payload)
+
     def test_build_validation_log_returns_structured_error_for_invalid_payload(self):
         log = build_validation_log(
             {
@@ -45,6 +52,24 @@ class RefinementValidationLogTest(SimpleTestCase):
 
         self.assertTrue(log["warnings"])
         self.assertEqual(log["warnings"][0]["severity"], "warning")
+
+    def test_build_validation_log_adds_warning_for_null_payload_value(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "Excel", "filename": None},
+                "summary": {"total_tables": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["item"],
+                        "rows": [{"item": "Pen"}],
+                    }
+                ],
+            },
+            iteration=1,
+        )
+
+        self.assertTrue(any("unresolved ambiguity" in issue["message"] for issue in log["warnings"]))
 
     def test_build_validation_log_marks_empty_rows_as_invalid_quality(self):
         log = build_validation_log(
@@ -150,6 +175,74 @@ class RefinementValidationLogTest(SimpleTestCase):
 
         self.assertIn("PREVIOUS_OUTPUT_JSON:", instruction)
         self.assertIn("[TRUNCATED]", instruction)
+
+    @patch("llm.services.refinement_service.validate_output_llm")
+    def test_build_validation_log_uses_root_path_when_error_has_no_extractable_path(
+        self,
+        mock_validate_output_llm,
+    ):
+        mock_validate_output_llm.side_effect = OutputLLMValidationError("Generic schema failure")
+
+        log = build_validation_log(
+            {"document_info": {}, "summary": {}, "content_data": []},
+            iteration=1,
+        )
+
+        self.assertEqual(log["errors"][0]["path"], "$")
+
+    def test_build_refinement_instruction_falls_back_to_string_for_non_serializable_payload(self):
+        class NonSerializable:
+            def __str__(self):
+                return "non-serializable-value"
+
+        instruction = build_refinement_instruction(
+            previous_output_json=NonSerializable(),
+            validation_log={
+                "iteration": 1,
+                "verdict": "invalid",
+                "errors": [],
+                "warnings": [],
+                "summary": "invalid",
+            },
+        )
+
+        self.assertIn("non-serializable-value", instruction)
+
+    def test_build_validation_log_handles_non_dict_table_entries(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
+                "summary": {"total_items": 0},
+                "content_data": ["unexpected-item"],
+            },
+            iteration=1,
+            input_json={"headers": ["id"]},
+        )
+
+        self.assertEqual(log["verdict"], "invalid")
+
+    def test_build_validation_log_covers_source_header_and_summary_non_dict_branches(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
+                "summary": "not-an-object",
+                "content_data": [
+                    {
+                        "table_name": "result",
+                        "headers": ["unrelated"],
+                        "rows": "not-a-list",
+                    }
+                ],
+            },
+            iteration=1,
+            input_json={
+                "headers": [None, "   ", "ID"],
+                "rows": ["not-dict", {1: "value"}, {"name": "A"}],
+            },
+        )
+
+        self.assertEqual(log["iteration"], 1)
+        self.assertEqual(log["verdict"], "invalid")
 
 
 class RefinementOrchestratorTest(SimpleTestCase):
@@ -427,3 +520,21 @@ class RefinementOrchestratorTest(SimpleTestCase):
 
         self.assertEqual(result["refinement_meta"]["iterations_run"], 1)
         self.assertEqual(generation_service.generate.call_count, 1)
+
+    def test_orchestrator_returns_failed_status_when_iterations_are_skipped(self):
+        generation_service = Mock()
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+
+        result = orchestrator.run(
+            input_json={"filename": "skip.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=-1,
+                early_exit_on_valid=True,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 1)
+        self.assertIn(result["refinement_meta"]["final_status"], {"valid", "best_effort"})

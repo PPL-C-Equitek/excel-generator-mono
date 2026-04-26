@@ -501,6 +501,36 @@ class LlmGenerationServiceTest(SimpleTestCase):
         )
 
     @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_passes_refinement_instruction_when_provided(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "Base prompt.",
+        )
+
+        result = service.generate(
+            {"sheet": "Sheet1"},
+            custom_schema_id=None,
+            refinement_instruction="Fix validation errors",
+        )
+
+        self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint=None,
+            refinement_instruction="Fix validation errors",
+        )
+        json_generator.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            system_prompt="Base prompt.\n\nExtraction prompt.",
+        )
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_appends_custom_schema_to_extraction_prompt(
         self, mock_build_extraction_prompt
     ):
