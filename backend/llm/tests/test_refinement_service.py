@@ -1,0 +1,321 @@
+from django.test import SimpleTestCase
+from unittest.mock import Mock
+
+from llm.services.refinement_service import (
+    RefinementConfig,
+    RefinementOrchestrator,
+    build_validation_log,
+)
+
+
+class RefinementValidationLogTest(SimpleTestCase):
+    def test_build_validation_log_returns_structured_error_for_invalid_payload(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "Excel"},
+                "summary": {"total_tables": 1},
+                "content_data": [],
+            },
+            iteration=1,
+        )
+
+        self.assertEqual(log["verdict"], "invalid")
+        self.assertEqual(log["iteration"], 1)
+        self.assertTrue(log["errors"])
+        self.assertEqual(log["errors"][0]["severity"], "error")
+        self.assertIn("path", log["errors"][0])
+
+    def test_build_validation_log_adds_warning_for_ambiguous_values(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "Excel", "filename": "unknown"},
+                "summary": {"total_tables": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["item"],
+                        "rows": [{"item": "unknown"}],
+                    }
+                ],
+            },
+            iteration=1,
+        )
+
+        self.assertTrue(log["warnings"])
+        self.assertEqual(log["warnings"][0]["severity"], "warning")
+
+    def test_build_validation_log_marks_empty_rows_as_invalid_quality(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
+                "summary": {"total_items": 0},
+                "content_data": [
+                    {
+                        "table_name": "result",
+                        "headers": ["No", "Rumah", "Luas"],
+                        "rows": [],
+                    }
+                ],
+            },
+            iteration=1,
+            input_json={
+                "content_data": [
+                    {
+                        "headers": ["ID", "Barang", "Harga"],
+                        "rows": [{"ID": "1", "Barang": "A", "Harga": 1000}],
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(log["verdict"], "invalid")
+        self.assertTrue(log["errors"])
+        self.assertIn("quality checks", log["summary"].lower())
+
+    def test_build_validation_log_marks_header_mismatch_as_invalid_quality(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
+                "summary": {"total_items": 1},
+                "content_data": [
+                    {
+                        "table_name": "result",
+                        "headers": ["No", "Rumah", "Luas"],
+                        "rows": [{"No": "1", "Rumah": "A", "Luas": "100"}],
+                    }
+                ],
+            },
+            iteration=1,
+            input_json={
+                "content_data": [
+                    {
+                        "headers": ["ID", "Barang", "Harga"],
+                        "rows": [{"ID": "1", "Barang": "A", "Harga": 1000}],
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(log["verdict"], "invalid")
+        self.assertTrue(
+            any("semantic mismatch" in issue["message"] for issue in log["errors"])
+        )
+
+
+class RefinementOrchestratorTest(SimpleTestCase):
+    def _build_reasoning_service(self):
+        return Mock()
+
+    def test_orchestrator_stops_early_when_first_iteration_is_valid(self):
+        generation_service = Mock()
+        generation_service.generate.return_value = {
+            "document_info": {"source_type": "Excel", "filename": "report.xlsx"},
+            "summary": {"total_tables": 1},
+            "content_data": [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["item"],
+                    "rows": [{"item": "Pen"}],
+                }
+            ],
+        }
+        reasoning_service = self._build_reasoning_service()
+        reasoning_service.generate.return_value = {
+            "final_answer": "valid",
+            "reasoning_steps": ["validated"],
+            "thinking_log": "iteration 1",
+        }
+
+        orchestrator = RefinementOrchestrator(
+            generation_service=generation_service,
+            reasoning_service=reasoning_service,
+        )
+        result = orchestrator.run(
+            input_json={"filename": "report.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=True,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=3,
+                early_exit_on_valid=True,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 1)
+        self.assertTrue(result["refinement_meta"]["early_exit_triggered"])
+        self.assertEqual(result["refinement_meta"]["final_status"], "valid")
+        self.assertEqual(generation_service.generate.call_count, 1)
+
+    def test_orchestrator_runs_until_max_iterations_when_always_invalid(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid-1"},
+            {"status": "invalid-2"},
+            {"status": "invalid-3"},
+        ]
+
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+        result = orchestrator.run(
+            input_json={"filename": "report.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=3,
+                early_exit_on_valid=True,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 3)
+        self.assertFalse(result["refinement_meta"]["early_exit_triggered"])
+        self.assertEqual(result["refinement_meta"]["final_status"], "best_effort")
+        self.assertEqual(generation_service.generate.call_count, 3)
+
+    def test_orchestrator_selects_best_candidate_after_partial_improvement(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid"},
+            {
+                "document_info": {"source_type": "Excel", "filename": "report.xlsx"},
+                "summary": {"total_tables": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["item"],
+                        "rows": [{"item": "Pen"}],
+                    }
+                ],
+            },
+            {"status": "invalid-again"},
+        ]
+
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+        result = orchestrator.run(
+            input_json={"filename": "report.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=3,
+                early_exit_on_valid=False,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["final_status"], "valid")
+        self.assertEqual(result["validated_json"]["document_info"]["filename"], "report.xlsx")
+
+    def test_orchestrator_calls_reasoning_service_each_iteration_when_enabled(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid-1"},
+            {"status": "invalid-2"},
+            {"status": "invalid-3"},
+        ]
+        reasoning_service = self._build_reasoning_service()
+        reasoning_service.generate.return_value = {
+            "final_answer": "iterative",
+            "reasoning_steps": ["step"],
+            "thinking_log": "log",
+        }
+
+        orchestrator = RefinementOrchestrator(
+            generation_service=generation_service,
+            reasoning_service=reasoning_service,
+        )
+        orchestrator.run(
+            input_json={"filename": "report.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=True,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=3,
+                early_exit_on_valid=False,
+            ),
+        )
+
+        self.assertEqual(reasoning_service.generate.call_count, 3)
+
+    # Positive
+    def test_positive_valid_payload_has_valid_verdict_on_first_iteration(self):
+        generation_service = Mock()
+        generation_service.generate.return_value = {
+            "document_info": {"source_type": "Excel", "filename": "ok.xlsx"},
+            "summary": {"total_tables": 1},
+            "content_data": [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["item"],
+                    "rows": [{"item": "Pen"}],
+                }
+            ],
+        }
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+
+        result = orchestrator.run(
+            input_json={"filename": "ok.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=3,
+                early_exit_on_valid=True,
+            ),
+        )
+
+        self.assertEqual(result["validation_log"]["verdict"], "valid")
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 1)
+
+    # Negative
+    def test_negative_invalid_payload_remains_best_effort_after_max_iterations(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"document_info": {}},
+            {"document_info": {}},
+            {"document_info": {}},
+        ]
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+
+        result = orchestrator.run(
+            input_json={"filename": "bad.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=3,
+                early_exit_on_valid=True,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 3)
+        self.assertEqual(result["refinement_meta"]["final_status"], "best_effort")
+        self.assertEqual(result["validation_log"]["verdict"], "invalid")
+
+    # Edge
+    def test_edge_non_positive_max_iterations_is_normalized_to_single_iteration(self):
+        generation_service = Mock()
+        generation_service.generate.return_value = {
+            "document_info": {"source_type": "Excel", "filename": "ok.xlsx"},
+            "summary": {"total_tables": 1},
+            "content_data": [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["item"],
+                    "rows": [{"item": "Pen"}],
+                }
+            ],
+        }
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+
+        result = orchestrator.run(
+            input_json={"filename": "ok.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=0,
+                early_exit_on_valid=True,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 1)
+        self.assertEqual(generation_service.generate.call_count, 1)

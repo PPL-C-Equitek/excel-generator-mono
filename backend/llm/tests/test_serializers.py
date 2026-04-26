@@ -78,6 +78,45 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertFalse(serializer.validated_data["include_reasoning"])
 
+    def test_generate_request_serializer_defaults_refinement_enabled_true(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertTrue(serializer.validated_data["refinement"]["enabled"])
+
+    def test_generate_request_serializer_accepts_refinement_payload(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {
+                    "enabled": True,
+                    "max_iterations": 2,
+                    "early_exit_on_valid": False,
+                },
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertTrue(serializer.validated_data["refinement"]["enabled"])
+        self.assertEqual(serializer.validated_data["refinement"]["max_iterations"], 2)
+        self.assertFalse(serializer.validated_data["refinement"]["early_exit_on_valid"])
+
+    def test_generate_request_serializer_rejects_refinement_max_iterations_above_cap(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {
+                    "enabled": True,
+                    "max_iterations": 4,
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement", serializer.errors)
+
     def test_generate_response_serializer_allows_null_reasoning(self):
         serializer = LlmGenerateResponseSerializer(
             data={"output_json": {"status": "ok"}, "reasoning": None}
@@ -106,6 +145,83 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         )
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_generate_response_serializer_accepts_refinement_fields(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {
+                    "document_info": {"source_type": "Excel", "filename": "test.xlsx"},
+                    "summary": {"total_tables": 1},
+                    "content_data": [
+                        {
+                            "table_name": "Sheet1",
+                            "headers": ["name"],
+                            "rows": [{"name": "A"}],
+                        }
+                    ],
+                },
+                "reasoning": {
+                    "final_answer": "Done",
+                    "reasoning_steps": ["Validated schema."],
+                    "thinking_log": "Refined output.",
+                },
+                "raw_json": {"status": "draft"},
+                "validated_json": {"status": "valid"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "valid",
+                    "errors": [],
+                    "warnings": [],
+                    "summary": "Output passed strict export schema validation.",
+                },
+                "refinement_meta": {
+                    "iterations_run": 1,
+                    "max_iterations": 3,
+                    "early_exit_triggered": True,
+                    "final_status": "valid",
+                },
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    # Positive
+    def test_positive_generate_response_serializer_accepts_minimal_refinement_visible_payload(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validated_json": {"status": "ok"},
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    # Negative
+    def test_negative_generate_response_serializer_rejects_invalid_refinement_meta_final_status(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": {
+                    "iterations_run": 1,
+                    "max_iterations": 3,
+                    "early_exit_triggered": True,
+                    "final_status": "unknown-status",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    # Edge
+    def test_edge_generate_request_serializer_defaults_refinement_payload_when_omitted(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertIn("refinement", serializer.validated_data)
+        self.assertIn("max_iterations", serializer.validated_data["refinement"])
 
 
 class ThinkingLogSerializerTest(SimpleTestCase):
