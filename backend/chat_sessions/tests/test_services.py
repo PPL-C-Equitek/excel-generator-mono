@@ -9,6 +9,7 @@ from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
     build_history_with_summary,
+    build_resume_context_for_user,
     create_generated_output,
     create_session_for_user,
     delete_session,
@@ -296,6 +297,96 @@ class ChatSessionServiceTest(TestCase):
         result = get_paginated_session_detail_for_user(self.owner, session.id)
 
         self.assertIsNone(result)
+
+    def test_build_resume_context_for_user_returns_owned_session_history_in_chronological_order(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+        user_message = ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="Please continue this conversation.",
+            created_at=timezone.now() + timezone.timedelta(minutes=1),
+        )
+        assistant_message = ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="Here is the previous answer.",
+            thinking_log="Summarized totals before answering.",
+            created_at=timezone.now() + timezone.timedelta(minutes=2),
+        )
+        generated_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"source_type": "Excel", "filename": "resume.xlsx"},
+                "summary": {"total_sheets": 1, "total_rows": 1, "total_columns": 2},
+                "content_data": [],
+            },
+            thinking_log="Normalized columns and preserved totals.",
+            created_at=timezone.now() + timezone.timedelta(minutes=3),
+        )
+
+        result = build_resume_context_for_user(self.owner, session.id)
+
+        self.assertEqual(result.id, session.id)
+        self.assertEqual(result.title, "Owned Session")
+        self.assertEqual([item.type for item in result.history], ["message", "message", "output"])
+        self.assertEqual(result.history[0].id, user_message.id)
+        self.assertEqual(result.history[1].id, assistant_message.id)
+        self.assertEqual(
+            result.history[1].thinking_log,
+            "Summarized totals before answering.",
+        )
+        self.assertEqual(result.history[2].id, generated_output.id)
+        self.assertEqual(
+            result.history[2].thinking_log,
+            "Normalized columns and preserved totals.",
+        )
+
+    def test_build_resume_context_for_user_returns_none_for_missing_session(self):
+        result = build_resume_context_for_user(
+            self.owner,
+            "3208d1c1-e26f-4565-a2d8-b756b7f364c7",
+        )
+
+        self.assertIsNone(result)
+
+    def test_build_resume_context_for_user_returns_none_for_non_owned_session(self):
+        session = Session.objects.create(
+            owner=self.other_user,
+            title="Foreign Session",
+        )
+
+        result = build_resume_context_for_user(self.owner, session.id)
+
+        self.assertIsNone(result)
+
+    def test_build_resume_context_for_user_supports_minimal_or_partial_history(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Minimal Session",
+        )
+        GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"source_type": "Excel", "filename": "minimal.xlsx"},
+                "summary": {"total_sheets": 1, "total_rows": 0, "total_columns": 0},
+                "content_data": [],
+            },
+            thinking_log="Only thinking log metadata is available.",
+            created_at=timezone.now() + timezone.timedelta(minutes=1),
+        )
+
+        result = build_resume_context_for_user(self.owner, session.id)
+
+        self.assertEqual(result.id, session.id)
+        self.assertEqual(len(result.history), 1)
+        self.assertEqual(result.history[0].type, "output")
+        self.assertEqual(
+            result.history[0].thinking_log,
+            "Only thinking log metadata is available.",
+        )
 
     def test_get_paginated_session_detail_for_user_rejects_invalid_limits(self):
         session = Session.objects.create(
