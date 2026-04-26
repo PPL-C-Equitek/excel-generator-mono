@@ -477,34 +477,24 @@ class CreateGeneratedOutputServiceTest(TestCase):
             "rows": [["1"]],
             "final_answer": "Raw output",
         }
-        self.valid_export_output_json = {
-            "document_info": {"filename": "test.xlsx"},
-            "summary": {"total_sheets": 1},
-            "content_data": [
-                {
-                    "table_name": "Sheet1",
-                    "headers": ["A"],
-                    "rows": [["1"]],
-                }
-            ],
-        }
+        self.valid_thinking_log = "Checked totals and aligned categories."
 
     def test_create_generated_output_creates_output_with_correct_data(self):
         output = create_generated_output(
             self.session,
             self.valid_output_json,
-            self.valid_export_output_json,
+            self.valid_thinking_log,
         )
 
         self.assertEqual(output.output_json, self.valid_output_json)
-        self.assertEqual(output.export_output_json, self.valid_export_output_json)
+        self.assertEqual(output.thinking_log, self.valid_thinking_log)
         self.assertEqual(output.session, self.session)
 
     def test_create_generated_output_persists_to_db(self):
         output = create_generated_output(
             self.session,
             self.valid_output_json,
-            self.valid_export_output_json,
+            self.valid_thinking_log,
         )
 
         self.assertTrue(GeneratedOutput.objects.filter(id=output.id).exists())
@@ -515,26 +505,26 @@ class CreateGeneratedOutputServiceTest(TestCase):
         create_generated_output(
             self.session,
             self.valid_output_json,
-            self.valid_export_output_json,
+            self.valid_thinking_log,
         )
 
         self.session.refresh_from_db()
         self.assertIsNotNone(self.session.last_output_at)
+
+    def test_create_generated_output_defaults_thinking_log_to_empty_string(self):
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+        )
+
+        self.assertEqual(output.thinking_log, "")
 
     def test_create_generated_output_rejects_non_dict_output_json(self):
         with self.assertRaises(ValidationError):
             create_generated_output(
                 self.session,
                 ["bukan", "dict"],
-                self.valid_export_output_json,
-            )
-
-    def test_create_generated_output_rejects_non_dict_export_output_json(self):
-        with self.assertRaises(ValidationError):
-            create_generated_output(
-                self.session,
-                self.valid_output_json,
-                ["bukan", "dict"],
+                self.valid_thinking_log,
             )
 
 

@@ -215,3 +215,24 @@ class ChatSessionModelTest(TestCase):
 
         with self.assertRaises(ValidationError):
             generated_output.save()
+
+    def test_generated_output_can_store_thinking_log(self):
+        session = Session.objects.create(
+            owner=self.user,
+            title="Transformasi Excel April",
+        )
+
+        generated_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"filename": "invoice.pdf"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+            thinking_log="Normalized categories and preserved totals.",
+        )
+
+        self.assertEqual(
+            generated_output.thinking_log,
+            "Normalized categories and preserved totals.",
+        )
