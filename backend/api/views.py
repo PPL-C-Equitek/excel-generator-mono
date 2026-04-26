@@ -928,7 +928,7 @@ def _build_session_output_download_response(
 
     try:
         artifact = export_callable(
-            output_json=output.output_json,
+            output_json=output.export_output_json,
             storage_dir=storage_dir,
         )
     except Exception as exc:
