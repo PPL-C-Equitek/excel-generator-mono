@@ -120,6 +120,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "monitoring.interfaces.http.middleware.MonitoringRequestMetricsMiddleware",
 ]
 
 raw_cors = os.environ.get("DJANGO_CORS_ALLOWED_ORIGINS", "http://localhost:3000")

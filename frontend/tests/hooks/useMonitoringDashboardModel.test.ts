@@ -309,6 +309,51 @@ describe('useMonitoringDashboardModel', () => {
         ])
     })
 
+    it('limits realtime latency series to the latest six buckets', async () => {
+        const service = createMonitoringService({
+            getMonitoringStats: vi.fn().mockResolvedValue({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 36, errors: 0, error_rate: 0 },
+                routes: [],
+                events: {},
+                timeseries: {
+                    window_seconds: 300,
+                    bucket_seconds: 10,
+                    points: [
+                        { timestamp: '2026-04-24T10:00:00Z', requests: 1, errors: 0, error_rate: 0, avg_latency_ms: 10 },
+                        { timestamp: '2026-04-24T10:00:10Z', requests: 2, errors: 0, error_rate: 0, avg_latency_ms: 20 },
+                        { timestamp: '2026-04-24T10:00:20Z', requests: 3, errors: 0, error_rate: 0, avg_latency_ms: 30 },
+                        { timestamp: '2026-04-24T10:00:30Z', requests: 4, errors: 0, error_rate: 0, avg_latency_ms: 40 },
+                        { timestamp: '2026-04-24T10:00:40Z', requests: 5, errors: 0, error_rate: 0, avg_latency_ms: 50 },
+                        { timestamp: '2026-04-24T10:00:50Z', requests: 6, errors: 0, error_rate: 0, avg_latency_ms: 60 },
+                        { timestamp: '2026-04-24T10:01:00Z', requests: 7, errors: 0, error_rate: 0, avg_latency_ms: 70 },
+                        { timestamp: '2026-04-24T10:01:10Z', requests: 8, errors: 0, error_rate: 0, avg_latency_ms: 80 },
+                    ],
+                },
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.latencySeries.map((item) => item.value)).toEqual([30, 40, 50, 60, 70, 80])
+        expect(result.current.realtimeTotals).toEqual({
+            requests: 33,
+            errors: 0,
+            errorRate: 0,
+        })
+        expect(result.current.realtimeWindowSeconds).toBe(60)
+    })
+
     it('tracks retry backoff state and clears it after successful retry', async () => {
         vi.useFakeTimers()
         vi.setSystemTime(new Date('2026-04-24T10:00:00Z'))

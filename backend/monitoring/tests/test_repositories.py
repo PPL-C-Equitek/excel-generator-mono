@@ -214,6 +214,17 @@ class InMemoryMetricsRepositoryTest(SimpleTestCase):
             1,
         )
 
+    def test_record_request_counts_client_errors_in_route_totals(self):
+        self.repo.record_request(self._event(status_code=401, duration_ms=100.0))
+
+        snapshot = self.repo.get_snapshot()
+        self.assertEqual(snapshot.total_errors, 1)
+        self.assertEqual(snapshot.routes[0].total_errors, 1)
+        self.assertEqual(
+            sum(point.errors for point in snapshot.timeseries),
+            1,
+        )
+
     def test_record_request_normalizes_empty_route_and_method(self):
         self.repo.record_request(self._event(route=" ", method=" ", duration_ms=10.0))
 
@@ -1233,6 +1244,17 @@ class RedisMetricsRepositoryTest(SimpleTestCase):
             2,
         )
         self.assertTrue(any(key.startswith("monitoring_test:v2:") for key in self.redis_client._expirations))
+
+    def test_record_request_counts_client_errors_in_route_totals(self):
+        self.repo.record_request(self._event(status_code=401, duration_ms=90.0))
+
+        snapshot = self.repo.get_snapshot()
+        self.assertEqual(snapshot.total_errors, 1)
+        self.assertEqual(snapshot.routes[0].total_errors, 1)
+        self.assertEqual(
+            sum(point.errors for point in snapshot.timeseries),
+            1,
+        )
 
     def test_normalization_and_reset(self):
         self.repo.record_request(self._event(route=" ", method=" ", duration_ms=-1.0))

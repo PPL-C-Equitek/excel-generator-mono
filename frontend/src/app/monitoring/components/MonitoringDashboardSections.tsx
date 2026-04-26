@@ -5,7 +5,13 @@ import type {
     MonitoringReadyPayload,
     MonitoringStatsPayload,
 } from '@/services/monitoring'
-import { formatPercent, formatTimestamp, resolveAccessMessage } from '../monitoringUi'
+import {
+    formatPercent,
+    formatReadinessCheckName,
+    formatStatusLabel,
+    formatTimestamp,
+    resolveAccessMessage,
+} from '../monitoringUi'
 import type {
     ErrorRateMeter,
     EventRow,
@@ -15,6 +21,13 @@ import type {
     RealtimeTotals,
 } from '../monitoringViewModelTypes'
 import { GaugeMeter, MetricCard, StatusBadge } from './primitives/MonitoringPrimitives'
+
+const MONITORING_ROUTE_PREFIX = 'monitoring/'
+
+function isMonitoringRoute(route: string): boolean {
+    const normalizedRoute = route.trim().replace(/^\/+/, '').toLowerCase()
+    return normalizedRoute.startsWith(MONITORING_ROUTE_PREFIX)
+}
 
 type MonitoringHeroSectionProps = Readonly<{
     lastSync: string
@@ -43,7 +56,7 @@ export function MonitoringHeroSection({
                     <div>
                         <h1 className="text-2xl font-bold tracking-tight text-white">System Monitoring</h1>
                         <p className="mt-2 max-w-2xl text-sm text-gray-300">
-                            Grafana-inspired live health, readiness, traffic, and auth activity for your backend.
+                            Live health, readiness, traffic, and auth activity for your backend.
                         </p>
                     </div>
                 </div>
@@ -56,11 +69,7 @@ export function MonitoringHeroSection({
                                 <span className="inline-flex rounded-full border border-red-300/40 bg-red-700/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-red-200">
                                     Stale Data
                                 </span>
-                            ) : (
-                                <span className="inline-flex rounded-full border border-blue-300/40 bg-blue-600/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-blue-100">
-                                    Live
-                                </span>
-                            )}
+                            ) : null}
                             {retryInSeconds > 0 ? (
                                 <span className="text-xs text-gray-300">Retry in {retryInSeconds}s</span>
                             ) : null}
@@ -111,14 +120,14 @@ export function MonitoringTrafficSummarySection({
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <MetricCard
                     title="Live Status"
-                    value={<StatusBadge status={livePayload.status} label={livePayload.status} />}
+                    value={<StatusBadge status={livePayload.status} label={formatStatusLabel(livePayload.status)} />}
                     valueClassName="text-base"
                     subtitle={formatTimestamp(livePayload.timestamp)}
                 />
 
                 <MetricCard
                     title="Access"
-                    value={<StatusBadge status={accessDecision.allowed ? 'success' : 'error'} label={accessDecision.allowed ? 'allowed' : 'denied'} />}
+                    value={<StatusBadge status={accessDecision.allowed ? 'success' : 'error'} label={accessDecision.allowed ? 'Allowed' : 'Denied'} />}
                     valueClassName="text-base"
                     subtitle={resolveAccessMessage(accessDecision.reason)}
                 />
@@ -195,7 +204,7 @@ export function MonitoringReadinessAlertSection({
                             key={`${check.name}:${check.status}`}
                             className="rounded-lg border border-amber-200 bg-amber-100/50 px-3 py-2"
                         >
-                            <span className="font-semibold">{check.name}</span>: {check.status}
+                            <span className="font-semibold">{formatReadinessCheckName(check.name)}</span>: {formatStatusLabel(check.status)}
                             {check.message ? <span className="text-amber-900"> - {check.message}</span> : null}
                         </li>
                     ))
@@ -231,6 +240,11 @@ export function MonitoringLatencyAndMetersSection({
         : 'Latency trend for the top monitored routes from the latest snapshot.'
     const latestLatencyPoint = latencySeries.at(-1)
     const lastLatencyEntry = latestLatencyPoint
+    const maxRequestsInSeries = Math.max(0, ...latencySeries.map((entry) => entry.requests ?? 0))
+    const yAxisTopMs = Math.max(1, latencyChart.maxLatency)
+    const yAxisMidMs = yAxisTopMs / 2
+    const yAxisTopLabel = yAxisTopMs < 10 ? `${yAxisTopMs.toFixed(1)}ms` : `${yAxisTopMs.toFixed(0)}ms`
+    const yAxisMidLabel = yAxisMidMs < 10 ? `${yAxisMidMs.toFixed(1)}ms` : `${yAxisMidMs.toFixed(0)}ms`
 
     return (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
@@ -247,6 +261,9 @@ export function MonitoringLatencyAndMetersSection({
                 ) : (
                     <>
                         <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200 bg-gray-50 p-3">
+                            <p className="mb-2 text-xs text-gray-500">
+                                Y-axis: Avg latency (ms). Max requests in series: {maxRequestsInSeries}
+                            </p>
                             <svg
                                 viewBox="0 0 520 220"
                                 className="h-52 w-full min-w-[520px]"
@@ -257,6 +274,15 @@ export function MonitoringLatencyAndMetersSection({
                                 <desc id={lineChartDescId}>{lineChartDescription}</desc>
                                 <line x1="26" y1="190" x2="494" y2="190" stroke="#d1d5db" strokeWidth="1" />
                                 <line x1="26" y1="16" x2="26" y2="190" stroke="#d1d5db" strokeWidth="1" />
+                                <text x="4" y="20" fontSize="11" fill="#6b7280">
+                                    {yAxisTopLabel}
+                                </text>
+                                <text x="4" y="104" fontSize="11" fill="#6b7280">
+                                    {yAxisMidLabel}
+                                </text>
+                                <text x="16" y="194" fontSize="11" fill="#6b7280">
+                                    0
+                                </text>
                                 {latencyChart.areaPath ? (
                                     <path
                                         d={latencyChart.areaPath}
@@ -381,15 +407,17 @@ export function MonitoringRoutesAndReadinessSection({
     maxRouteRequests,
     readyPayload,
 }: MonitoringRoutesAndReadinessSectionProps) {
+    const visibleRoutes = statsPayload.routes.filter((routeRow) => !isMonitoringRoute(routeRow.route))
+
     return (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
             <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-8">
                 <h3 className="text-base font-semibold text-gray-900">Top Routes</h3>
-                {statsPayload.routes.length === 0 ? (
+                {visibleRoutes.length === 0 ? (
                     <p className="mt-3 text-sm text-gray-600">No route metrics available yet.</p>
                 ) : (
                     <div className="mt-4 space-y-3">
-                        {statsPayload.routes.slice(0, 6).map((routeRow) => {
+                        {visibleRoutes.slice(0, 6).map((routeRow) => {
                             const requestWidth = `${Math.max(
                                 8,
                                 Math.round((routeRow.total_requests / maxRouteRequests) * 100)
@@ -426,7 +454,7 @@ export function MonitoringRoutesAndReadinessSection({
                 <h3 className="text-base font-semibold text-gray-900">Readiness Checks</h3>
                 {readyPayload ? (
                     <div className="mt-4 space-y-3">
-                        <StatusBadge status={readyPayload.status} label={readyPayload.status} />
+                        <StatusBadge status={readyPayload.status} label={formatStatusLabel(readyPayload.status)} />
                         <p className="text-sm text-gray-500">
                             Timestamp: {formatTimestamp(readyPayload.timestamp)}
                         </p>
@@ -437,10 +465,10 @@ export function MonitoringRoutesAndReadinessSection({
                                     className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
                                 >
                                     <div className="flex items-center justify-between text-sm">
-                                        <span className="font-semibold text-gray-900">{check.name}</span>
+                                        <span className="font-semibold text-gray-900">{formatReadinessCheckName(check.name)}</span>
                                         <StatusBadge
                                             status={check.status}
-                                            label={check.status}
+                                            label={formatStatusLabel(check.status)}
                                             className="px-2 py-0.5 text-xs"
                                         />
                                     </div>

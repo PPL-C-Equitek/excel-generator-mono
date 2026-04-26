@@ -106,6 +106,61 @@ describe('monitoring service', () => {
         expect(fetchAPI).not.toHaveBeenCalled()
     })
 
+    it('maps readiness payload when endpoint responds with 503 degraded status', async () => {
+        const { fetchAPI } = await import('@/lib/api')
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringReady } = await import('@/services/monitoring')
+
+        vi.mocked(getValidAccessToken).mockResolvedValue('token-ready-503')
+        const readinessUnavailableError = new Error('Service Unavailable') as Error & { status?: number }
+        readinessUnavailableError.status = 503
+        vi.mocked(fetchAPI).mockRejectedValueOnce(readinessUnavailableError)
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                new Response(
+                    JSON.stringify({
+                        status: 'degraded',
+                        timestamp: '2026-04-26T09:50:00Z',
+                        checks: [
+                            { name: 'openai_config', status: 'error', latency_ms: 1, is_critical: false },
+                        ],
+                    }),
+                    {
+                        status: 503,
+                        headers: { 'Content-Type': 'application/json' },
+                    }
+                )
+            )
+        )
+
+        const result = await getMonitoringReady()
+
+        expect(fetchAPI).toHaveBeenCalledWith('monitoring/ready/', {
+            method: 'GET',
+            headers: {
+                Authorization: 'Bearer token-ready-503',
+            },
+        })
+        expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+            'http://localhost:8000/monitoring/ready/',
+            expect.objectContaining({
+                method: 'GET',
+                headers: {
+                    Authorization: 'Bearer token-ready-503',
+                },
+            })
+        )
+        expect(result).toEqual({
+            status: 'degraded',
+            timestamp: '2026-04-26T09:50:00Z',
+            checks: [
+                { name: 'openai_config', status: 'error', latency_ms: 1, is_critical: false },
+            ],
+        })
+    })
+
     it('calls stats endpoint with bearer token', async () => {
         const { fetchAPI } = await import('@/lib/api')
         const { getValidAccessToken } = await import('@/lib/auth')
@@ -464,7 +519,7 @@ describe('monitoring service', () => {
 
         await waitFor(() => expect(onPayload).toHaveBeenCalledTimes(1))
         const streamUrl = streamURLs.at(0)
-        expect(streamUrl).toBe('monitoring/stream/?interval_seconds=1')
+        expect(streamUrl).toBe('http://localhost:8000/monitoring/stream/?interval_seconds=1')
         expect(onError).toHaveBeenCalledWith(
             expect.objectContaining({ message: 'Monitoring stream closed unexpectedly.' })
         )
@@ -498,7 +553,7 @@ describe('monitoring service', () => {
 
         await waitFor(() => expect(onPayload).toHaveBeenCalledTimes(1))
         const streamUrl = streamURLs.at(0)
-        expect(streamUrl).toBe('monitoring/stream/?interval_seconds=1')
+        expect(streamUrl).toBe('http://localhost:8000/monitoring/stream/?interval_seconds=1')
         expect(streamURLs.at(0)).not.toContain('max_events=')
         expect(onError).toHaveBeenCalledWith(
             expect.objectContaining({ message: 'Monitoring stream closed unexpectedly.' })
