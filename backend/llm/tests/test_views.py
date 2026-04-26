@@ -1460,12 +1460,11 @@ class ThinkingLogEndpointTest(TestCase):
             status="verified",
         )
 
-    def _create_chat_message(self, owner, *, session=None, thinking_log, role="assistant"):
+    def _create_generated_output(self, owner, *, session=None, thinking_log):
         session = session or Session.objects.create(owner=owner, title="Thinking Log Session")
-        return ChatMessage.objects.create(
+        return GeneratedOutput.objects.create(
             session=session,
-            role=role,
-            content="Thinking log message.",
+            output_json={"source": "thinking-log-test"},
             thinking_log=thinking_log,
             created_at=timezone.now(),
         )
@@ -1474,17 +1473,17 @@ class ThinkingLogEndpointTest(TestCase):
         owned_session = Session.objects.create(owner=self.verified_user, title="Owned Session")
         other_session = Session.objects.create(owner=self.other_user, title="Other Session")
 
-        owned_match = self._create_chat_message(
+        owned_match = self._create_generated_output(
             self.verified_user,
             session=owned_session,
             thinking_log="Mapped invoice total to total_amount.",
         )
-        self._create_chat_message(
+        self._create_generated_output(
             self.verified_user,
             session=Session.objects.create(owner=self.verified_user, title="Owned Session 2"),
             thinking_log="Validated header consistency.",
         )
-        self._create_chat_message(
+        self._create_generated_output(
             self.other_user,
             session=other_session,
             thinking_log="Other user log.",
@@ -1501,21 +1500,21 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.data["results"][0]["id"], str(owned_match.id))
         self.assertEqual(response.data["results"][0]["session_id"], str(owned_session.id))
         self.assertEqual(response.data["results"][0]["chat_id"], str(owned_match.id))
-        self.assertIsNone(response.data["results"][0]["request_id"])
+        self.assertNotIn("request_id", response.data["results"][0])
 
     def test_thinking_log_list_filters_by_chat_id_without_session_filter(self):
         matched_session = Session.objects.create(owner=self.verified_user, title="Matched Session")
-        matched = self._create_chat_message(
+        matched = self._create_generated_output(
             self.verified_user,
             session=matched_session,
             thinking_log="Request filtered record.",
         )
-        self._create_chat_message(
+        self._create_generated_output(
             self.verified_user,
             session=Session.objects.create(owner=self.verified_user, title="Other Owned Session"),
             thinking_log="Non matching request.",
         )
-        self._create_chat_message(
+        self._create_generated_output(
             self.other_user,
             session=Session.objects.create(owner=self.other_user, title="Other User Session"),
             thinking_log="Other owner record.",
@@ -1532,17 +1531,17 @@ class ThinkingLogEndpointTest(TestCase):
 
     def test_thinking_log_list_filters_by_request_id_for_backward_compatibility(self):
         matched_session = Session.objects.create(owner=self.verified_user, title="Matched Session")
-        matched = self._create_chat_message(
+        matched = self._create_generated_output(
             self.verified_user,
             session=matched_session,
             thinking_log="Request ID filtered record.",
         )
-        self._create_chat_message(
+        self._create_generated_output(
             self.verified_user,
             session=Session.objects.create(owner=self.verified_user, title="Other Owned Session"),
             thinking_log="Non matching request.",
         )
-        self._create_chat_message(
+        self._create_generated_output(
             self.other_user,
             session=Session.objects.create(owner=self.other_user, title="Other User Session"),
             thinking_log="Other owner record.",
@@ -1561,17 +1560,17 @@ class ThinkingLogEndpointTest(TestCase):
         owned_session_2 = Session.objects.create(owner=self.verified_user, title="Owned B")
         other_session = Session.objects.create(owner=self.other_user, title="Other C")
 
-        self._create_chat_message(
+        self._create_generated_output(
             self.verified_user,
             session=owned_session_1,
             thinking_log="Owned record A.",
         )
-        self._create_chat_message(
+        self._create_generated_output(
             self.verified_user,
             session=owned_session_2,
             thinking_log="Owned record B.",
         )
-        self._create_chat_message(
+        self._create_generated_output(
             self.other_user,
             session=other_session,
             thinking_log="Other owner record.",
@@ -1586,7 +1585,7 @@ class ThinkingLogEndpointTest(TestCase):
 
     def test_thinking_log_detail_returns_record_for_owner(self):
         session = Session.objects.create(owner=self.verified_user, title="Detail Session")
-        record = self._create_chat_message(
+        record = self._create_generated_output(
             self.verified_user,
             session=session,
             thinking_log="Normalization notes for numeric columns.",
@@ -1599,7 +1598,7 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.data["id"], str(record.id))
         self.assertEqual(response.data["session_id"], str(session.id))
         self.assertEqual(response.data["chat_id"], str(record.id))
-        self.assertIsNone(response.data["request_id"])
+        self.assertNotIn("request_id", response.data)
         self.assertEqual(
             response.data["thinking_log"],
             "Normalization notes for numeric columns.",
@@ -1615,7 +1614,7 @@ class ThinkingLogEndpointTest(TestCase):
 
     def test_thinking_log_detail_blocks_access_to_other_user_record(self):
         foreign_session = Session.objects.create(owner=self.other_user, title="Foreign Session")
-        foreign_record = self._create_chat_message(
+        foreign_record = self._create_generated_output(
             self.other_user,
             session=foreign_session,
             thinking_log="Foreign record.",
@@ -1629,7 +1628,7 @@ class ThinkingLogEndpointTest(TestCase):
 
     def test_thinking_log_detail_returns_404_for_empty_thinking_log_record(self):
         session = Session.objects.create(owner=self.verified_user, title="Empty Log Session")
-        empty_log_record = self._create_chat_message(
+        empty_log_record = self._create_generated_output(
             self.verified_user,
             session=session,
             thinking_log="",
@@ -1644,7 +1643,7 @@ class ThinkingLogEndpointTest(TestCase):
     def test_thinking_log_list_supports_large_dataset_pagination(self):
         bulk_session = Session.objects.create(owner=self.verified_user, title="Bulk Session")
         for index in range(25):
-            self._create_chat_message(
+            self._create_generated_output(
                 self.verified_user,
                 session=bulk_session,
                 thinking_log=f"Summary item {index}",
