@@ -16,8 +16,8 @@ from chat_sessions.services import (
     summarize_old_messages,
     SUMMARY_RECENT_MESSAGES_KEEP,
     SUMMARY_REFRESH_THRESHOLD,
-    SUMMARY_THRESHOLD,
     update_session_title,
+    get_summary_threshold,
 )
 
 
@@ -330,7 +330,7 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
 
 
     def test_returns_history_unchanged_when_at_or_below_threshold(self):
-        history = self._make_history(SUMMARY_THRESHOLD)
+        history = self._make_history(get_summary_threshold())
 
         result = build_history_with_summary(self.session, history)
 
@@ -338,7 +338,7 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
 
 
     def test_does_not_call_llm_when_history_is_short(self):
-        history = self._make_history(SUMMARY_THRESHOLD - 1)
+        history = self._make_history(get_summary_threshold() - 1)
 
         with patch("chat_sessions.services.summarize_old_messages") as mock_sum:
             build_history_with_summary(self.session, history)
@@ -350,7 +350,7 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
         self, mock_sum
     ):
         mock_sum.return_value = "First summary."
-        history = self._make_history(SUMMARY_THRESHOLD + 1)
+        history = self._make_history(get_summary_threshold() + 1)
 
         build_history_with_summary(self.session, history)
 
@@ -359,7 +359,7 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
     @patch("chat_sessions.services.summarize_old_messages")
     def test_persists_summary_to_session_on_first_creation(self, mock_sum):
         mock_sum.return_value = "Persisted summary."
-        history = self._make_history(SUMMARY_THRESHOLD + 1)
+        history = self._make_history(get_summary_threshold() + 1)
 
         build_history_with_summary(self.session, history)
 
@@ -369,7 +369,7 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
     @patch("chat_sessions.services.summarize_old_messages")
     def test_result_starts_with_summary_system_message(self, mock_sum):
         mock_sum.return_value = "My summary."
-        history = self._make_history(SUMMARY_THRESHOLD + 1)
+        history = self._make_history(get_summary_threshold() + 1)
 
         result = build_history_with_summary(self.session, history)
 
@@ -379,7 +379,7 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
     @patch("chat_sessions.services.summarize_old_messages")
     def test_result_contains_recent_messages_verbatim(self, mock_sum):
         mock_sum.return_value = "summary"
-        history = self._make_history(SUMMARY_THRESHOLD + 5)
+        history = self._make_history(get_summary_threshold() + 5)
 
         result = build_history_with_summary(self.session, history)
 
@@ -391,10 +391,10 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
     def test_reuses_cached_summary_without_calling_llm_again(self, mock_sum):
         self.session.history_summary = "Cached summary."
         self.session.save(update_fields=["history_summary"])
-        old_count = SUMMARY_THRESHOLD + 1 - SUMMARY_RECENT_MESSAGES_KEEP
+        old_count = get_summary_threshold() + 1 - SUMMARY_RECENT_MESSAGES_KEEP
         self.session.history_summary_watermark = old_count
         self.session.save(update_fields=["history_summary", "history_summary_watermark"])
-        history = self._make_history(SUMMARY_THRESHOLD + 1)
+        history = self._make_history(get_summary_threshold() + 1)
 
         result = build_history_with_summary(self.session, history)
 
@@ -408,7 +408,7 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
     ):
         mock_sum.return_value = "Refreshed summary."
         self.session.history_summary = "Old summary."
-        history = self._make_history(SUMMARY_THRESHOLD + SUMMARY_REFRESH_THRESHOLD + 1)
+        history = self._make_history(get_summary_threshold() + SUMMARY_REFRESH_THRESHOLD + 1)
         old_count = len(history) - SUMMARY_RECENT_MESSAGES_KEEP
         self.session.history_summary_watermark = old_count - SUMMARY_REFRESH_THRESHOLD
         self.session.save(update_fields=["history_summary", "history_summary_watermark"])
@@ -422,7 +422,7 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
     def test_persists_refreshed_summary_to_db(self, mock_sum):
         mock_sum.return_value = "New rolled summary."
         self.session.history_summary = "Old summary."
-        history = self._make_history(SUMMARY_THRESHOLD + SUMMARY_REFRESH_THRESHOLD + 1)
+        history = self._make_history(get_summary_threshold() + SUMMARY_REFRESH_THRESHOLD + 1)
         old_count = len(history) - SUMMARY_RECENT_MESSAGES_KEEP
         self.session.history_summary_watermark = old_count - SUMMARY_REFRESH_THRESHOLD
         self.session.save(update_fields=["history_summary", "history_summary_watermark"])
@@ -438,7 +438,7 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
     ):
         self.session.history_summary = "Still valid summary."
         self.session.save(update_fields=["history_summary"])
-        history = self._make_history(SUMMARY_THRESHOLD + 1)
+        history = self._make_history(get_summary_threshold() + 1)
         old_count = len(history) - SUMMARY_RECENT_MESSAGES_KEEP
         self.session.history_summary_watermark = old_count - 1
         self.session.save(update_fields=["history_summary", "history_summary_watermark"])

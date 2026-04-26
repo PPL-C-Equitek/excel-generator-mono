@@ -250,10 +250,9 @@ def send_message(request):
 
     history.append({"role": "user", "content": message})
 
-    if session is not None:
-        history = build_history_with_summary(session, history)
-
     try:
+        if session is not None:
+            history = build_history_with_summary(session, history)
         reply = generate_chat_response(history)
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)

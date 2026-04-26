@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.utils import timezone
 
 from chat_sessions.models import ChatMessage, GeneratedOutput, Session
@@ -90,9 +91,11 @@ def create_generated_output(session, output_json):
 
 SUMMARY_RECENT_MESSAGES_KEEP = 10
 
-SUMMARY_THRESHOLD = 20
-
 SUMMARY_REFRESH_THRESHOLD = 10
+
+
+def get_summary_threshold() -> int:
+    return getattr(settings, "CHAT_HISTORY_MAX_MESSAGES", 20)
 
 
 def summarize_old_messages(messages: list[dict]) -> str:
@@ -113,7 +116,7 @@ def summarize_old_messages(messages: list[dict]) -> str:
 
 
 def build_history_with_summary(session, full_history: list[dict]) -> list[dict]:
-    if len(full_history) <= SUMMARY_THRESHOLD:
+    if len(full_history) <= get_summary_threshold():
         return full_history
 
     old_messages = full_history[:-SUMMARY_RECENT_MESSAGES_KEEP]
@@ -133,6 +136,13 @@ def build_history_with_summary(session, full_history: list[dict]) -> list[dict]:
         session.history_summary = cached_summary
         session.history_summary_watermark = old_count
         session.save(update_fields=["history_summary", "history_summary_watermark", "updated_at"])
+    elif summarized_watermark < old_count:
+        gap_messages = old_messages[summarized_watermark:]
+        summary_message = {
+            "role": "system",
+            "content": f"[Summary of earlier conversation]: {cached_summary}",
+        }
+        return [summary_message] + gap_messages + recent_messages
 
     summary_message = {
         "role": "system",
