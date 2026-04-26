@@ -681,6 +681,70 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self.assertFalse(ArtifactHistory.objects.exists())
 
     @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_updates_session_last_output_at(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = self.output_json
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        session = Session.objects.get(owner=self.user)
+        self.assertIsNotNone(session.last_output_at)
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_creates_multiple_outputs_for_same_session(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = self.output_json
+        session = Session.objects.create(owner=self.user, title="Existing Session")
+        self.client.force_authenticate(user=self.user)
+
+        first_response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "session_id": str(session.id),
+            },
+            format="json",
+        )
+        second_response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"filename": "invoice-2.pdf", "extracted": "raw upload text 2"},
+                "session_id": str(session.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(GeneratedOutput.objects.filter(session=session).count(), 2)
+
+    @patch("llm.views.create_generated_output")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_500_and_rolls_back_when_output_persistence_fails(
+        self, mock_build_service, mock_create_generated_output
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = self.output_json
+        mock_create_generated_output.side_effect = RuntimeError("db write failed")
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(Session.objects.exists())
+        self.assertFalse(GeneratedOutput.objects.exists())
+
+    @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_404_for_unknown_owned_session_id(self, mock_build_service):
         self.client.force_authenticate(user=self.user)
 
