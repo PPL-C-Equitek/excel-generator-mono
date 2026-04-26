@@ -68,6 +68,14 @@ export interface CsvMetadata {
     file_id: string;
 }
 
+function canUseSessionOutputDownload(
+    sessionId: string | null,
+    outputId: string | null,
+    downloadFn: unknown
+): downloadFn is (...args: unknown[]) => Promise<void> {
+    return Boolean(sessionId && outputId && downloadFn)
+}
+
 type ScalarCell = string | number | boolean | null
 
 const DEFAULT_EXCEL_TABLE_NAME = 'Sheet1'
@@ -493,12 +501,6 @@ export function useConvertFlow(
             return
         }
 
-        const canUseSessionDownload = Boolean(
-            generatedSessionId &&
-            generatedOutputId &&
-            llmService.downloadSessionOutputCsvFile
-        )
-
         if (isExportOutputEmpty(generatedOutput)) {
             setError("The converted data is empty or invalid, so it can't be exported.")
             return
@@ -507,20 +509,15 @@ export function useConvertFlow(
         const nonEmptyOutput = generatedOutput as JsonValue
 
         const requestId = conversionRequestIdRef.current
-        const csvOutput = buildTabularExportPayload(
-            nonEmptyOutput,
-            uploadResultForExport,
-            outputFile
-        )
         const csvFilename = outputFile.filename.replace(/\.[^/.]+$/, '') + '.csv'
+        const canUseSessionDownload = canUseSessionOutputDownload(
+            generatedSessionId,
+            generatedOutputId,
+            llmService.downloadSessionOutputCsvFile
+        )
 
         try {
-            if (
-                canUseSessionDownload &&
-                generatedSessionId &&
-                generatedOutputId &&
-                llmService.downloadSessionOutputCsvFile
-            ) {
+            if (canUseSessionDownload) {
                 await llmService.downloadSessionOutputCsvFile(
                     generatedSessionId,
                     generatedOutputId,
@@ -535,6 +532,11 @@ export function useConvertFlow(
                 if (!llmService.exportToCsv) {
                     return
                 }
+                const csvOutput = buildTabularExportPayload(
+                    nonEmptyOutput,
+                    uploadResultForExport,
+                    outputFile
+                )
                 const sanitizedJSON = sanitizeCSVCell(csvOutput) as JsonValue
                 csvResult = await llmService.exportToCsv(
                     sanitizedJSON,
@@ -579,15 +581,10 @@ export function useConvertFlow(
         }
 
         const requestId = conversionRequestIdRef.current
-        const excelOutput = buildTabularExportPayload(
-            generatedOutput,
-            uploadResultForExport,
-            outputFile
-        )
         const excelFilename = getExcelDownloadFilename(outputFile.filename)
-        const canUseSessionDownload = Boolean(
-            generatedSessionId &&
-            generatedOutputId &&
+        const canUseSessionDownload = canUseSessionOutputDownload(
+            generatedSessionId,
+            generatedOutputId,
             llmService.downloadSessionOutputExcelFile
         )
 
@@ -596,12 +593,7 @@ export function useConvertFlow(
         setIsExcelDownloading(true)
 
         try {
-            if (
-                canUseSessionDownload &&
-                generatedSessionId &&
-                generatedOutputId &&
-                llmService.downloadSessionOutputExcelFile
-            ) {
+            if (canUseSessionDownload) {
                 await llmService.downloadSessionOutputExcelFile(
                     generatedSessionId,
                     generatedOutputId,
@@ -611,6 +603,11 @@ export function useConvertFlow(
                 if (!generatedOutput || !llmService.exportToExcel || !llmService.downloadExcelFile) {
                     return
                 }
+                const excelOutput = buildTabularExportPayload(
+                    generatedOutput,
+                    uploadResultForExport,
+                    outputFile
+                )
                 const excelResult = await llmService.exportToExcel(
                     excelOutput,
                     getActiveSignal()
