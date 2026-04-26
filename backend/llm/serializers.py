@@ -158,19 +158,17 @@ class ThinkingLogItemSerializer(serializers.Serializer):
     def to_representation(self, instance):
         output_json = instance.output_json if isinstance(getattr(instance, "output_json", None), dict) else {}
 
-        session_id = getattr(instance, "session_id", None) or output_json.get("session_id")
+        session_id = getattr(instance, "session_id", None)
         is_chat_message_record = session_id is not None
         chat_id = (
             getattr(instance, "chat_id", None)
-            or output_json.get("chat_id")
-            or output_json.get("request_id")
         )
         if chat_id is None and is_chat_message_record:
             chat_id = getattr(instance, "id", None)
+        if chat_id is None:
+            chat_id = output_json.get("chat_id")
 
         request_id = output_json.get("request_id")
-        if chat_id is not None and is_chat_message_record:
-            request_id = str(chat_id)
 
         thinking_log = getattr(instance, "thinking_log", None)
         if thinking_log is None:
