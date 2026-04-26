@@ -24,6 +24,8 @@ from chat_sessions.services import (
     update_session_title,
     get_summary_threshold,
     validate_session_detail_pagination_params,
+    sanitize_session_title,
+    resolve_session_title,
 )
 
 
@@ -817,3 +819,41 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
         build_history_with_summary(self.session, history)
 
         mock_sum.assert_not_called()
+
+class SessionTitleHelperServiceTest(SimpleTestCase):
+    
+    def test_sanitize_session_title_trims_whitespace(self):
+        result = sanitize_session_title("   My Title   ")
+        self.assertEqual(result, "My Title")
+
+    def test_sanitize_session_title_normalizes_newlines_and_controls_to_space(self):
+        result = sanitize_session_title("Line 1\nLine 2\r\tEnd")
+        self.assertEqual(result, "Line 1 Line 2  End")
+
+    def test_sanitize_session_title_truncates_to_max_length(self):
+        long_title = "A" * 200
+        result = sanitize_session_title(long_title)
+        self.assertEqual(len(result), 120)
+        self.assertEqual(result, "A" * 120)
+
+    def test_sanitize_session_title_returns_empty_string_for_none(self):
+        self.assertEqual(sanitize_session_title(None), "")
+
+    def test_sanitize_session_title_returns_empty_string_for_whitespace_only(self):
+        self.assertEqual(sanitize_session_title("   \n \t "), "")
+
+    def test_resolve_session_title_returns_sanitized_title_when_valid(self):
+        result = resolve_session_title("   Good Title \n ", fallback="New Chat")
+        self.assertEqual(result, "Good Title")
+
+    def test_resolve_session_title_returns_fallback_when_sanitized_is_empty(self):
+        result = resolve_session_title("   ", fallback="New Chat")
+        self.assertEqual(result, "New Chat")
+
+    def test_resolve_session_title_returns_fallback_when_input_is_none(self):
+        result = resolve_session_title(None, fallback="New Chat")
+        self.assertEqual(result, "New Chat")
+
+    def test_resolve_session_title_uses_default_fallback_if_not_specified(self):
+        result = resolve_session_title("")
+        self.assertEqual(result, "New Chat")
