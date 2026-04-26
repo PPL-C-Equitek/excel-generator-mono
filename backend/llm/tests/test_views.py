@@ -99,6 +99,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_json"], {"status": "ok"})
+        self.assertIsNone(response.data["output_id"])
         self.assertEqual(mock_build_service.call_count, 1)
         self.assertFalse(mock_build_service.call_args[0][0].is_authenticated)
         mock_service.generate.assert_called_once_with(
@@ -313,7 +314,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
         mock_response_serializer_class.assert_called_once_with(
-            data={"output_json": {"status": "ok"}, "session_id": None}
+            data={"output_json": {"status": "ok"}, "session_id": None, "output_id": None}
         )
 
     @patch("llm.views.logger")
@@ -627,11 +628,13 @@ class LlmGenerateSessionIntegrationTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("session_id", response.data)
+        self.assertIn("output_id", response.data)
         self.assertEqual(Session.objects.count(), 1)
         session = Session.objects.get(owner=self.user)
         self.assertEqual(str(session.id), response.data["session_id"])
         self.assertEqual(GeneratedOutput.objects.count(), 1)
         generated_output = GeneratedOutput.objects.get(session=session)
+        self.assertEqual(str(generated_output.id), response.data["output_id"])
         self.assertEqual(generated_output.output_json, self.output_json)
         self.assertEqual(ArtifactHistory.objects.count(), 0)
 
@@ -678,6 +681,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self.assertEqual(GeneratedOutput.objects.count(), 1)
         generated_output = GeneratedOutput.objects.get()
         self.assertEqual(generated_output.session, session)
+        self.assertEqual(response.data["output_id"], str(generated_output.id))
         self.assertFalse(ArtifactHistory.objects.exists())
 
     @patch("llm.views.build_llm_generation_service")

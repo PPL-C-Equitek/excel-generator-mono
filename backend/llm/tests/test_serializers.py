@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from llm.serializers import (
     LlmGenerateRequestSerializer,
+    LlmGenerateResponseSerializer,
     LlmReasoningRequestSerializer,
     LlmReasoningResponseSerializer,
     ThinkingLogItemSerializer,
@@ -93,6 +94,17 @@ class LlmGenerateSerializerTest(SimpleTestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("session_id", serializer.errors)
+
+    def test_generate_response_serializer_accepts_session_and_output_ids(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"sheet": "Sheet1"},
+                "session_id": str(uuid4()),
+                "output_id": str(uuid4()),
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
 
 
 class ThinkingLogSerializerTest(SimpleTestCase):
