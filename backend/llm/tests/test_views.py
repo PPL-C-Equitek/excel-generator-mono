@@ -2093,3 +2093,91 @@ class SendMessageEdgeCaseTest(TestCase):
 
         mock_build_summary.assert_called_once()
         mock_generate.assert_called_once_with(summarized_history)
+
+class SendMessageSessionTitleGenerationTest(TestCase):
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="title-gen-send@example.com",
+            name="Title Gen Send User",
+            password="secret",
+            status="verified",
+        )
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_generates_session_title_when_no_session_id_given(self, mock_generate):
+        mock_generate.side_effect = [
+            "Halo! Ada yang bisa saya bantu?",
+            "Diskusi Bantuan Excel"
+        ]
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Halo tolong bantu saya excel"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        session_id = response.data["session_id"]
+        
+        session = Session.objects.get(id=session_id)
+        self.assertEqual(session.title, "Diskusi Bantuan Excel")
+        self.assertEqual(mock_generate.call_count, 2)
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_falls_back_to_new_chat_if_title_generation_fails(self, mock_generate):
+        mock_generate.side_effect = [
+            "Balasan aman",
+            Exception("Timeout error on LLM Title Generator")
+        ]
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Halo"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["reply"], "Balasan aman")
+        
+        session_id = response.data["session_id"]
+        session = Session.objects.get(id=session_id)
+        self.assertEqual(session.title, "New Chat")
+
+
+class LlmGenerateSessionTitleGenerationTest(TestCase):
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="title-gen-convert@example.com",
+            name="Title Gen Convert User",
+            password="secret",
+            status="verified",
+        )
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_skips_llm_and_uses_filename_fallback_for_new_session(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {"headers": ["A"], "rows": [["1"]]}
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "document_info": {"filename": "laporan_keuangan.pdf"}
+                },
+                "include_reasoning": False
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        session_id = response.data["session_id"]
+        
+        session = Session.objects.get(id=session_id)
+        self.assertEqual(session.title, "Convert laporan_keuangan.pdf")
