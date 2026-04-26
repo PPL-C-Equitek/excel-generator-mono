@@ -1818,3 +1818,24 @@ class ReasoningCaptureStoreCompatibilityTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_json"], {"headers": ["A"], "rows": [["1"]]})
         self.assertIn("reasoning", response.data)
+        
+    @patch("llm.views.build_history_with_summary")
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_passes_summary_history_to_llm(self, mock_generate, mock_build_summary):
+        mock_generate.return_value = "reply"
+        summarized_history = [
+            {"role": "system", "content": "[Summary of earlier conversation]: Old context."},
+            {"role": "user", "content": "new msg"},
+        ]
+        mock_build_summary.return_value = summarized_history
+        session = Session.objects.create(owner=self.user)
+        self.client.force_authenticate(user=self.user)
+
+        self.client.post(
+            "/llm/send-message/",
+            {"session_id": str(session.id), "message": "new msg"},
+            format="json",
+        )
+
+        mock_build_summary.assert_called_once()
+        mock_generate.assert_called_once_with(summarized_history)

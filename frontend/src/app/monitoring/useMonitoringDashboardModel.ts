@@ -5,6 +5,8 @@ import type {
     MonitoringLivePayload,
     MonitoringReadyPayload,
     MonitoringStatsPayload,
+    MonitoringStatsStreamHandle,
+    MonitoringStatsStreamOptions,
 } from '@/services/monitoring'
 import { clamp, formatTimeLabel } from './monitoringUi'
 import type {
@@ -15,6 +17,7 @@ import type {
     ReadinessMeter,
     RealtimeTotals,
 } from './monitoringViewModelTypes'
+import { getMonitoringAuthToken } from '@/services/monitoring'
 
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 5000
 const STALE_THRESHOLD_MULTIPLIER = 3
@@ -25,9 +28,10 @@ const RETRY_TICK_INTERVAL_MS = 1000
 
 export type MonitoringDashboardService = {
     getMonitoringLive: () => Promise<MonitoringLivePayload>
-    getMonitoringAccess: () => Promise<MonitoringAccessDecision>
-    getMonitoringReady: () => Promise<MonitoringReadyPayload>
-    getMonitoringStats: () => Promise<MonitoringStatsPayload>
+    getMonitoringAccess: (accessToken?: string) => Promise<MonitoringAccessDecision>
+    getMonitoringReady: (accessToken?: string) => Promise<MonitoringReadyPayload>
+    getMonitoringStats: (accessToken?: string) => Promise<MonitoringStatsPayload>
+    getMonitoringStatsStream?: (options: MonitoringStatsStreamOptions) => Promise<MonitoringStatsStreamHandle>
     getMonitoringAuthenticatedSnapshot?: () => Promise<MonitoringAuthenticatedSnapshot>
 }
 
@@ -58,10 +62,10 @@ export type MonitoringDashboardViewModel = {
     refreshDashboard: () => void
 }
 
-type UseMonitoringDashboardModelParams = {
+type UseMonitoringDashboardModelParams = Readonly<{
     monitoringService: MonitoringDashboardService
     autoRefreshIntervalMs?: number
-}
+}>
 
 function calculateRetryDelayMs(consecutiveFailures: number): number {
     return Math.min(
@@ -71,10 +75,11 @@ function calculateRetryDelayMs(consecutiveFailures: number): number {
 }
 
 export function getIsPageVisible(): boolean {
-    if (typeof document === 'undefined') {
+    const pageDocument = globalThis.document
+    if (!pageDocument) {
         return true
     }
-    return document.visibilityState === 'visible'
+    return pageDocument.visibilityState === 'visible'
 }
 
 export function useMonitoringDashboardModel({
@@ -82,7 +87,10 @@ export function useMonitoringDashboardModel({
     autoRefreshIntervalMs = DEFAULT_AUTO_REFRESH_INTERVAL_MS,
 }: UseMonitoringDashboardModelParams): MonitoringDashboardViewModel {
     const isDashboardRequestInFlightRef = useRef(false)
+    const monitoringStreamRef = useRef<MonitoringStatsStreamHandle | null>(null)
     const consecutiveFailuresRef = useRef(0)
+    const isMountedRef = useRef(true)
+    const hasBootstrappedSnapshotRef = useRef(false)
 
     const [livePayload, setLivePayload] = useState<MonitoringLivePayload | null>(null)
     const [accessDecision, setAccessDecision] = useState<MonitoringAccessDecision | null>(null)
@@ -97,6 +105,7 @@ export function useMonitoringDashboardModel({
     const [retryClockNowMs, setRetryClockNowMs] = useState(() => Date.now())
     const [isDataStale, setIsDataStale] = useState(false)
     const [isPageVisible, setIsPageVisible] = useState(getIsPageVisible)
+    const [hasActiveStatsStream, setHasActiveStatsStream] = useState(false)
 
     const markSuccessfulLoad = useCallback((completedAtMs: number) => {
         consecutiveFailuresRef.current = 0
@@ -107,6 +116,14 @@ export function useMonitoringDashboardModel({
         setIsDataStale(false)
     }, [])
 
+    const stopMonitoringStatsStream = useCallback(() => {
+        if (monitoringStreamRef.current) {
+            monitoringStreamRef.current.close()
+            monitoringStreamRef.current = null
+        }
+        setHasActiveStatsStream(false)
+    }, [])
+
     const scheduleRetry = useCallback((failedAtMs: number) => {
         consecutiveFailuresRef.current += 1
         const nextFailures = consecutiveFailuresRef.current
@@ -115,6 +132,127 @@ export function useMonitoringDashboardModel({
         setRetryClockNowMs(failedAtMs)
     }, [])
 
+    const loadWithAuthenticatedSnapshot = useCallback(async (
+        getMonitoringAuthenticatedSnapshot: NonNullable<MonitoringDashboardService['getMonitoringAuthenticatedSnapshot']>,
+    ): Promise<MonitoringAccessDecision> => {
+        const [liveResponse, snapshot] = await Promise.all([
+            monitoringService.getMonitoringLive(),
+            getMonitoringAuthenticatedSnapshot(),
+        ])
+
+        setLivePayload(liveResponse)
+        setAccessDecision(snapshot.accessDecision)
+        setReadyPayload(snapshot.readyPayload)
+        setStatsPayload(snapshot.statsPayload)
+        stopMonitoringStatsStream()
+        markSuccessfulLoad(Date.now())
+        return snapshot.accessDecision
+    }, [markSuccessfulLoad, monitoringService, stopMonitoringStatsStream])
+
+    const loadWithoutSnapshot = useCallback(async () => {
+        const monitoringAuthToken = await getMonitoringAuthToken()
+        const [liveResponse, accessResponse] = await Promise.all([
+            monitoringService.getMonitoringLive(),
+            monitoringService.getMonitoringAccess(monitoringAuthToken),
+        ])
+
+        setLivePayload(liveResponse)
+        setAccessDecision(accessResponse)
+
+        if (!accessResponse.allowed) {
+            setReadyPayload(null)
+            setStatsPayload(null)
+            stopMonitoringStatsStream()
+            markSuccessfulLoad(Date.now())
+            return ''
+        }
+
+        const readyResponse = await monitoringService.getMonitoringReady(monitoringAuthToken)
+        setReadyPayload(readyResponse)
+
+        return monitoringAuthToken
+    }, [markSuccessfulLoad, monitoringService, stopMonitoringStatsStream])
+
+    const startMonitoringStatsStream = useCallback(async (
+        monitoringAuthToken: string,
+        getMonitoringStatsStream: NonNullable<MonitoringDashboardService['getMonitoringStatsStream']>,
+    ) => {
+        const streamPayloads = await getMonitoringStatsStream({
+            accessToken: monitoringAuthToken,
+            intervalSeconds: autoRefreshIntervalMs / 1000,
+            onPayload: (payload) => {
+                setStatsPayload(payload)
+                markSuccessfulLoad(Date.now())
+            },
+            onError: (error) => {
+                if (!isMountedRef.current) {
+                    return
+                }
+                setErrorMessage(error.message)
+                stopMonitoringStatsStream()
+                scheduleRetry(Date.now())
+            },
+        })
+        monitoringStreamRef.current = streamPayloads
+        setHasActiveStatsStream(true)
+    }, [autoRefreshIntervalMs, markSuccessfulLoad, scheduleRetry, stopMonitoringStatsStream])
+
+    const loadMonitoringStatsSnapshot = useCallback(async (monitoringAuthToken: string) => {
+        const statsResponse = await monitoringService.getMonitoringStats(monitoringAuthToken)
+        setStatsPayload(statsResponse)
+    }, [monitoringService])
+
+    const setLoadingStateForRequest = useCallback((isBackgroundRefresh: boolean) => {
+        if (isBackgroundRefresh) {
+            setIsRefreshing(true)
+            return
+        }
+        setIsLoading(true)
+    }, [])
+
+    const tryBootstrapWithSnapshot = useCallback(async (isBackgroundRefresh: boolean): Promise<boolean> => {
+        const getMonitoringAuthenticatedSnapshot = monitoringService.getMonitoringAuthenticatedSnapshot
+        const shouldBootstrapWithSnapshot = !isBackgroundRefresh
+            && !hasBootstrappedSnapshotRef.current
+            && getMonitoringAuthenticatedSnapshot !== undefined
+        if (!shouldBootstrapWithSnapshot) {
+            return false
+        }
+
+        const accessFromSnapshot = await loadWithAuthenticatedSnapshot(getMonitoringAuthenticatedSnapshot)
+        hasBootstrappedSnapshotRef.current = true
+        if (!accessFromSnapshot.allowed) {
+            return true
+        }
+
+        const getMonitoringStatsStream = monitoringService.getMonitoringStatsStream
+        if (getMonitoringStatsStream !== undefined && monitoringStreamRef.current === null) {
+            const monitoringAuthToken = await getMonitoringAuthToken()
+            await startMonitoringStatsStream(
+                monitoringAuthToken,
+                getMonitoringStatsStream
+            )
+        }
+        return true
+    }, [loadWithAuthenticatedSnapshot, monitoringService, startMonitoringStatsStream])
+
+    const loadStatsForAuthorizedRequest = useCallback(async (monitoringAuthToken: string) => {
+        const getMonitoringStatsStream = monitoringService.getMonitoringStatsStream
+        const shouldUseStream = getMonitoringStatsStream !== undefined
+            && monitoringStreamRef.current === null
+        if (shouldUseStream) {
+            await startMonitoringStatsStream(
+                monitoringAuthToken,
+                getMonitoringStatsStream
+            )
+            return
+        }
+
+        if (monitoringStreamRef.current === null) {
+            await loadMonitoringStatsSnapshot(monitoringAuthToken)
+        }
+    }, [loadMonitoringStatsSnapshot, monitoringService, startMonitoringStatsStream])
+
     const loadDashboard = useCallback(
         async (isBackgroundRefresh: boolean) => {
             if (isDashboardRequestInFlightRef.current) {
@@ -122,53 +260,26 @@ export function useMonitoringDashboardModel({
             }
             isDashboardRequestInFlightRef.current = true
             setErrorMessage(null)
+            setLoadingStateForRequest(isBackgroundRefresh)
 
-            if (isBackgroundRefresh) {
-                setIsRefreshing(true)
-            } else {
-                setIsLoading(true)
-            }
-
-            try {
-                if (monitoringService.getMonitoringAuthenticatedSnapshot) {
-                    const [liveResponse, snapshot] = await Promise.all([
-                        monitoringService.getMonitoringLive(),
-                        monitoringService.getMonitoringAuthenticatedSnapshot(),
-                    ])
-                    setLivePayload(liveResponse)
-                    setAccessDecision(snapshot.accessDecision)
-                    setReadyPayload(snapshot.readyPayload)
-                    setStatsPayload(snapshot.statsPayload)
-                    markSuccessfulLoad(Date.now())
+        try {
+                const bootstrappedWithSnapshot = await tryBootstrapWithSnapshot(isBackgroundRefresh)
+                if (bootstrappedWithSnapshot) {
                     return
                 }
 
-                const [liveResponse, accessResponse] = await Promise.all([
-                    monitoringService.getMonitoringLive(),
-                    monitoringService.getMonitoringAccess(),
-                ])
-
-                setLivePayload(liveResponse)
-                setAccessDecision(accessResponse)
-
-                if (!accessResponse.allowed) {
-                    setReadyPayload(null)
-                    setStatsPayload(null)
-                    markSuccessfulLoad(Date.now())
+                const monitoringAuthToken = await loadWithoutSnapshot()
+                if (!monitoringAuthToken) {
                     return
                 }
+                await loadStatsForAuthorizedRequest(monitoringAuthToken)
 
-                const [readyResponse, statsResponse] = await Promise.all([
-                    monitoringService.getMonitoringReady(),
-                    monitoringService.getMonitoringStats(),
-                ])
-                setReadyPayload(readyResponse)
-                setStatsPayload(statsResponse)
                 markSuccessfulLoad(Date.now())
             } catch (error) {
                 const failedAtMs = Date.now()
                 setReadyPayload(null)
                 setStatsPayload(null)
+                stopMonitoringStatsStream()
                 setErrorMessage(error instanceof Error ? error.message : 'Failed to load monitoring data.')
                 scheduleRetry(failedAtMs)
             } finally {
@@ -177,7 +288,15 @@ export function useMonitoringDashboardModel({
                 isDashboardRequestInFlightRef.current = false
             }
         },
-        [markSuccessfulLoad, monitoringService, scheduleRetry]
+        [
+            loadWithoutSnapshot,
+            loadStatsForAuthorizedRequest,
+            markSuccessfulLoad,
+            setLoadingStateForRequest,
+            stopMonitoringStatsStream,
+            scheduleRetry,
+            tryBootstrapWithSnapshot,
+        ]
     )
 
     useEffect(() => {
@@ -185,14 +304,17 @@ export function useMonitoringDashboardModel({
     }, [loadDashboard])
 
     useEffect(() => {
-        if (typeof document === 'undefined') {
+        if (!globalThis.document) {
             return
         }
-        const visibilityDocument = document
+        const visibilityDocument = globalThis.document
 
         const handleVisibilityChange = () => {
             const nextVisible = getIsPageVisible()
             setIsPageVisible(nextVisible)
+            if (!nextVisible) {
+                stopMonitoringStatsStream()
+            }
 
             if (nextVisible) {
                 void loadDashboard(true)
@@ -203,10 +325,10 @@ export function useMonitoringDashboardModel({
         return () => {
             visibilityDocument.removeEventListener('visibilitychange', handleVisibilityChange)
         }
-    }, [loadDashboard])
+    }, [loadDashboard, stopMonitoringStatsStream])
 
     useEffect(() => {
-        if (!isPageVisible) {
+        if (!isPageVisible || hasActiveStatsStream) {
             return
         }
 
@@ -220,7 +342,7 @@ export function useMonitoringDashboardModel({
         return () => {
             globalThis.clearInterval(intervalId)
         }
-    }, [autoRefreshIntervalMs, isPageVisible, loadDashboard, nextRetryAtMs])
+    }, [autoRefreshIntervalMs, hasActiveStatsStream, isPageVisible, loadDashboard, nextRetryAtMs])
 
     useEffect(() => {
         if (nextRetryAtMs === null || !isPageVisible) {
@@ -253,6 +375,14 @@ export function useMonitoringDashboardModel({
             globalThis.clearInterval(clockId)
         }
     }, [nextRetryAtMs])
+
+    useEffect(() => {
+        isMountedRef.current = true
+        return () => {
+            isMountedRef.current = false
+            stopMonitoringStatsStream()
+        }
+    }, [stopMonitoringStatsStream])
 
     const eventRows = useMemo<EventRow[]>(() => {
         if (!statsPayload) {
@@ -291,7 +421,8 @@ export function useMonitoringDashboardModel({
     }, [eventRows])
 
     const timeseriesPoints = useMemo(() => {
-        return statsPayload?.timeseries?.points ?? []
+        const points = statsPayload?.timeseries?.points ?? []
+        return points.filter((point) => point !== null && point !== undefined)
     }, [statsPayload])
 
     const realtimeWindowSeconds = statsPayload?.timeseries?.window_seconds ?? 0
@@ -363,11 +494,10 @@ export function useMonitoringDashboardModel({
         })
 
         const linePoints = points.map((point) => `${point.x},${point.y}`).join(' ')
-        const first = points[0]
-        const last = points.at(-1) ?? points[0]
-        const areaPath = `M ${first.x} ${height - bottomPadding} L ${points
-            .map((point) => `${point.x} ${point.y}`)
-            .join(' L ')} L ${last.x} ${height - bottomPadding} Z`
+        const firstPoint = points.at(0)!
+        const lastPoint = points.at(-1)!
+        const polylinePoints = points.map((point) => `${point.x} ${point.y}`).join(' L ')
+        const areaPath = `M ${firstPoint.x} ${height - bottomPadding} L ${polylinePoints} L ${lastPoint.x} ${height - bottomPadding} Z`
 
         return {
             linePoints,

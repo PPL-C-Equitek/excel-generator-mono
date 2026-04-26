@@ -20,3 +20,8 @@ class MetricsRepository(Protocol):
 
     def get_snapshot(self) -> MetricsSnapshot:
         ...
+
+
+class MonitoringAlertNotifier(Protocol):
+    def notify(self, *, event_name: str, payload: dict[str, object]) -> None:
+        ...

@@ -13,6 +13,7 @@ from artifact_history.services import create_artifact_history
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
+    build_history_with_summary,
     create_session_for_user,
     get_session_for_user,
 )
@@ -430,6 +431,8 @@ def send_message(request):
     history.append({"role": "user", "content": message})
 
     try:
+        if session is not None:
+            history = build_history_with_summary(session, history)
         reply = generate_chat_response(history)
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
