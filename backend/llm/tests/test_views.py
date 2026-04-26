@@ -760,6 +760,32 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.data["results"][0]["id"], str(matched.id))
         self.assertEqual(response.data["results"][0]["chat_id"], str(matched.id))
 
+    def test_thinking_log_list_filters_by_request_id_for_backward_compatibility(self):
+        matched_session = Session.objects.create(owner=self.verified_user, title="Matched Session")
+        matched = self._create_chat_message(
+            self.verified_user,
+            session=matched_session,
+            thinking_log="Request ID filtered record.",
+        )
+        self._create_chat_message(
+            self.verified_user,
+            session=Session.objects.create(owner=self.verified_user, title="Other Owned Session"),
+            thinking_log="Non matching request.",
+        )
+        self._create_chat_message(
+            self.other_user,
+            session=Session.objects.create(owner=self.other_user, title="Other User Session"),
+            thinking_log="Other owner record.",
+        )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get(f"/llm/thinking-logs/?request_id={matched.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["id"], str(matched.id))
+
     def test_thinking_log_list_without_filters_returns_all_owned_records(self):
         owned_session_1 = Session.objects.create(owner=self.verified_user, title="Owned A")
         owned_session_2 = Session.objects.create(owner=self.verified_user, title="Owned B")
