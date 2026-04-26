@@ -81,3 +81,33 @@ class MonitoringRequestMetricsMiddlewareTest(SimpleTestCase):
 
         self.assertEqual(route, "/fallback/")
 
+    @patch("monitoring.interfaces.http.middleware.get_monitoring_service")
+    def test_middleware_skips_recording_for_monitoring_route(self, mocked_get_service):
+        monitoring_service = Mock()
+        mocked_get_service.return_value = monitoring_service
+
+        middleware = MonitoringRequestMetricsMiddleware(
+            lambda request: HttpResponse(status=200)
+        )
+        request = self.factory.get("/monitoring/stats/")
+        request.resolver_match = SimpleNamespace(route="monitoring/stats/")
+
+        response = middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        monitoring_service.record_request.assert_not_called()
+
+    @patch("monitoring.interfaces.http.middleware.get_monitoring_service")
+    def test_middleware_skips_recording_for_monitoring_path_fallback(self, mocked_get_service):
+        monitoring_service = Mock()
+        mocked_get_service.return_value = monitoring_service
+
+        middleware = MonitoringRequestMetricsMiddleware(
+            lambda request: HttpResponse(status=200)
+        )
+        request = self.factory.get("/monitoring/ready/")
+
+        response = middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        monitoring_service.record_request.assert_not_called()

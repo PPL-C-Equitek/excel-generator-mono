@@ -130,4 +130,8 @@ class DiscordWebhookNotifierTest(SimpleTestCase):
             request_headers.get("Content-Type", request_headers.get("Content-type")),
             "application/json",
         )
+        self.assertEqual(
+            request_headers.get("User-Agent", request_headers.get("User-agent")),
+            "excel-generator-mono-monitoring/1.0",
+        )
         self.assertEqual(json.loads(request_capture.data.decode("utf-8")), payload)

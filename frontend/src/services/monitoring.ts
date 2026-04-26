@@ -38,6 +38,19 @@ export type MonitoringStatsStreamOptions = {
 }
 
 const MONITORING_AUTH_REQUIRED_MESSAGE = 'Authentication credentials were not provided.'
+const MONITORING_API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/+$/, '')
+const MONITORING_DEFAULT_ERROR_MESSAGE = 'Request failed. Please try again.'
+const READY_NON_OK_STATUS_CODES = [503]
+export const MONITORING_STREAM_UNEXPECTED_CLOSE_MESSAGE = 'Monitoring stream closed unexpectedly.'
+
+type MonitoringHttpError = Error & {
+    status?: number
+}
+
+type FetchMonitoringWithAuthAllowStatusesOptions = Readonly<{
+    accessToken?: string
+    allowedStatuses?: number[]
+}>
 
 export async function getMonitoringAuthToken(): Promise<string> {
     const accessToken = await getValidAccessToken()
@@ -55,6 +68,62 @@ async function fetchMonitoringWithAuth(endpoint: string, accessToken?: string): 
             Authorization: `Bearer ${token}`,
         },
     })
+}
+
+async function fetchMonitoringWithAuthAllowStatuses(
+    endpoint: string,
+    options: FetchMonitoringWithAuthAllowStatusesOptions = {},
+): Promise<unknown> {
+    const { accessToken, allowedStatuses = [] } = options
+    const token = accessToken ?? await getMonitoringAuthToken()
+    const normalizedEndpoint = endpoint.replace(/^\/+/, '')
+    const response = await fetch(`${MONITORING_API_URL}/${normalizedEndpoint}`, {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    })
+
+    const payload = await parseMonitoringJson(response)
+    if (response.ok || allowedStatuses.includes(response.status)) {
+        return payload
+    }
+
+    throw buildMonitoringHttpError(response.status, payload)
+}
+
+async function parseMonitoringJson(response: Response): Promise<unknown> {
+    try {
+        return await response.json()
+    } catch {
+        return {}
+    }
+}
+
+function buildMonitoringHttpError(status: number, payload: unknown): MonitoringHttpError {
+    const message = resolveMonitoringErrorMessage(payload)
+    const error = new Error(message) as MonitoringHttpError
+    error.status = status
+    return error
+}
+
+function resolveMonitoringErrorMessage(payload: unknown): string {
+    if (!isMonitoringRecord(payload)) {
+        return MONITORING_DEFAULT_ERROR_MESSAGE
+    }
+    const message = payload.message
+    if (typeof message === 'string' && message.trim()) {
+        return message
+    }
+    const detail = payload.detail
+    if (typeof detail === 'string' && detail.trim()) {
+        return detail
+    }
+    return MONITORING_DEFAULT_ERROR_MESSAGE
+}
+
+function isMonitoringRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null
 }
 
 function parseMonitoringSseEventBlock(rawEvent: string): string | null {
@@ -175,7 +244,7 @@ function buildMonitoringStreamUrl({
     const normalizedMaxEvents = getValidatedPositiveInteger(maxEvents)
     const maxEventsQuery = normalizedMaxEvents === undefined ? '' : `&max_events=${normalizedMaxEvents}`
 
-    return `monitoring/stream/?interval_seconds=${interval}${maxEventsQuery}`
+    return `${MONITORING_API_URL}/monitoring/stream/?interval_seconds=${interval}${maxEventsQuery}`
 }
 
 function buildMonitoringStreamInterval(intervalSeconds?: number): number {
@@ -212,7 +281,6 @@ async function fetchMonitoringStreamResponse({
         method: 'GET',
         headers: {
             Authorization: `Bearer ${safeAccessToken}`,
-            Accept: 'text/event-stream',
         },
         signal: controller.signal,
     })
@@ -294,7 +362,7 @@ function reportUnexpectedStreamClosure({
         return
     }
 
-    onError?.(new Error('Monitoring stream closed unexpectedly.'))
+    onError?.(new Error(MONITORING_STREAM_UNEXPECTED_CLOSE_MESSAGE))
 }
 
 function onStreamParseError({
@@ -341,9 +409,22 @@ export async function getMonitoringAccess(accessToken?: string): Promise<Monitor
 }
 
 export async function getMonitoringReady(accessToken?: string): Promise<MonitoringReadyPayload> {
-    return mapMonitoringReadyResponse(
-        await fetchMonitoringWithAuth('monitoring/ready/', accessToken)
-    )
+    try {
+        return mapMonitoringReadyResponse(
+            await fetchMonitoringWithAuth('monitoring/ready/', accessToken)
+        )
+    } catch (error) {
+        if ((error as MonitoringHttpError)?.status !== 503) {
+            throw error
+        }
+
+        return mapMonitoringReadyResponse(
+            await fetchMonitoringWithAuthAllowStatuses('monitoring/ready/', {
+                accessToken,
+                allowedStatuses: READY_NON_OK_STATUS_CODES,
+            })
+        )
+    }
 }
 
 export async function getMonitoringStats(accessToken?: string): Promise<MonitoringStatsPayload> {
