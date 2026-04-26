@@ -838,76 +838,22 @@ def download_csv(request, file_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_output_download_csv(request, session_id, output_id):
-    output = get_generated_output_for_session_user(
-        request.user,
-        session_id,
-        output_id,
-    )
-    if output is None:
-        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
-
-    try:
-        artifact = export_csv_to_filesystem(
-            output_json=output.output_json,
-            storage_dir=settings.CSV_EXPORT_DIR,
-        )
-    except Exception as exc:
-        return _build_export_error_response(
-            error=exc,
-            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
-            generation_error_types=(OutputCSVGenerationError,),
-            invalid_request_message="Invalid CSV export request.",
-            internal_error_message="Failed to download CSV due to internal error.",
-            validation_log_message="Validation or mapping error during session CSV download.",
-            generation_log_message="CSV generation error during session CSV download.",
-            unexpected_log_message="Unexpected error during session CSV download.",
-        )
-
-    try:
-        safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
-        file_handle = open(safe_file_path, "rb")
-    except (KeyError, SuspiciousFileOperation, ValueError):
-        logger.warning(
-            "Session CSV download resolved unsafe artifact metadata.",
-            exc_info=True,
-        )
-        return Response(
-            {
-                "status": "error",
-                "message": "CSV file not found.",
-            },
-            status=status.HTTP_404_NOT_FOUND,
-        )
-    except OSError:
-        logger.exception("Session CSV download failed while reading generated artifact.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to download CSV due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-    except Exception:
-        logger.exception("Unexpected error while preparing session CSV download.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to download CSV due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-
-    download_name = _resolve_download_filename(
-        requested_name=request.query_params.get("filename"),
-        default_name=artifact["file_name"],
-        artifact_type=artifact["artifact_type"],
-    )
-
-    return FileResponse(
-        file_handle,
-        as_attachment=True,
-        filename=download_name,
-        content_type="text/csv",
+    return _build_session_output_download_response(
+        request=request,
+        session_id=session_id,
+        output_id=output_id,
+        export_callable=export_csv_to_filesystem,
+        storage_dir=settings.CSV_EXPORT_DIR,
+        artifact_type="csv",
+        validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
+        generation_error_types=(OutputCSVGenerationError,),
+        invalid_request_message="Invalid CSV export request.",
+        internal_error_message="Failed to download CSV due to internal error.",
+        validation_log_message="Validation or mapping error during session CSV download.",
+        generation_log_message="CSV generation error during session CSV download.",
+        unexpected_log_message="Unexpected error during session CSV download.",
+        not_found_response_builder=_session_csv_download_not_found_response,
+        internal_error_response_builder=_session_csv_download_internal_error_response,
     )
 
 
@@ -915,6 +861,63 @@ def session_output_download_csv(request, session_id, output_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_output_download_excel(request, session_id, output_id):
+    return _build_session_output_download_response(
+        request=request,
+        session_id=session_id,
+        output_id=output_id,
+        export_callable=export_excel_to_filesystem,
+        storage_dir=settings.EXCEL_EXPORT_DIR,
+        artifact_type="xlsx",
+        validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
+        generation_error_types=(OutputExcelGenerationError,),
+        invalid_request_message="Invalid Excel export request.",
+        internal_error_message="Failed to download Excel due to internal error.",
+        validation_log_message="Validation or mapping error during session Excel download.",
+        generation_log_message="Excel generation error during session Excel download.",
+        unexpected_log_message="Unexpected error during session Excel download.",
+        not_found_response_builder=_excel_download_not_found_response,
+        internal_error_response_builder=_excel_download_internal_error_response,
+    )
+
+
+def _session_csv_download_not_found_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "CSV file not found.",
+        },
+        status=status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _session_csv_download_internal_error_response():
+    return Response(
+        {
+            "status": "error",
+            "message": "Failed to download CSV due to internal error.",
+        },
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
+
+def _build_session_output_download_response(
+    *,
+    request,
+    session_id,
+    output_id,
+    export_callable,
+    storage_dir,
+    artifact_type,
+    validation_error_types,
+    generation_error_types,
+    invalid_request_message,
+    internal_error_message,
+    validation_log_message,
+    generation_log_message,
+    unexpected_log_message,
+    not_found_response_builder,
+    internal_error_response_builder,
+):
     output = get_generated_output_for_session_user(
         request.user,
         session_id,
@@ -924,37 +927,44 @@ def session_output_download_excel(request, session_id, output_id):
         return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
 
     try:
-        artifact = export_excel_to_filesystem(
+        artifact = export_callable(
             output_json=output.output_json,
-            storage_dir=settings.EXCEL_EXPORT_DIR,
+            storage_dir=storage_dir,
         )
     except Exception as exc:
         return _build_export_error_response(
             error=exc,
-            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
-            generation_error_types=(OutputExcelGenerationError,),
-            invalid_request_message="Invalid Excel export request.",
-            internal_error_message="Failed to download Excel due to internal error.",
-            validation_log_message="Validation or mapping error during session Excel download.",
-            generation_log_message="Excel generation error during session Excel download.",
-            unexpected_log_message="Unexpected error during session Excel download.",
+            validation_error_types=validation_error_types,
+            generation_error_types=generation_error_types,
+            invalid_request_message=invalid_request_message,
+            internal_error_message=internal_error_message,
+            validation_log_message=validation_log_message,
+            generation_log_message=generation_log_message,
+            unexpected_log_message=unexpected_log_message,
         )
 
     try:
-        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+        safe_file_path = safe_join(storage_dir, artifact["file_name"])
         file_handle = open(safe_file_path, "rb")
     except (KeyError, SuspiciousFileOperation, ValueError):
         logger.warning(
-            "Session Excel download resolved unsafe artifact metadata.",
+            "Session %s download resolved unsafe artifact metadata.",
+            artifact_type.upper(),
             exc_info=True,
         )
-        return _excel_download_not_found_response()
+        return not_found_response_builder()
     except OSError:
-        logger.exception("Session Excel download failed while reading generated artifact.")
-        return _excel_download_internal_error_response()
+        logger.exception(
+            "Session %s download failed while reading generated artifact.",
+            artifact_type.upper(),
+        )
+        return internal_error_response_builder()
     except Exception:
-        logger.exception("Unexpected error while preparing session Excel download.")
-        return _excel_download_internal_error_response()
+        logger.exception(
+            "Unexpected error while preparing session %s download.",
+            artifact_type.upper(),
+        )
+        return internal_error_response_builder()
 
     download_name = _resolve_download_filename(
         requested_name=request.query_params.get("filename"),
@@ -966,7 +976,7 @@ def session_output_download_excel(request, session_id, output_id):
         file_handle,
         as_attachment=True,
         filename=download_name,
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_type=_get_history_download_content_type(artifact["artifact_type"]),
     )
 
 
