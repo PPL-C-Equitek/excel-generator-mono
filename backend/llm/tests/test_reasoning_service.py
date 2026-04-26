@@ -8,15 +8,19 @@ from llm.services.reasoning_service import (
     FALLBACK_REASONING_STEP,
     FALLBACK_THINKING_LOG,
     LlmReasoningService,
+    TextGenerationProvider,
     _collect_steps_from_lines,
     _extract_braced_json_candidate,
     _extract_json_from_fenced_blocks,
     _parse_structured_reasoning_object,
     _extract_step_text,
     _fallback_narrative_steps,
+    get_base_system_prompt,
     _get_positive_int_setting,
     _split_labeled_line,
     _try_parse_json_candidate,
+    generate_conversion_reasoning_response,
+    generate_reasoning_response,
     parse_reasoning_response,
     validate_reasoning_response,
 )
@@ -24,6 +28,12 @@ from llm.services.openai_client import OpenAIServiceError
 
 
 class LlmReasoningServiceTest(SimpleTestCase):
+    @override_settings(OPENAI_SYSTEM_PROMPT=None)
+    def test_get_base_system_prompt_returns_empty_string_for_non_string_setting(self):
+        result = get_base_system_prompt()
+
+        self.assertEqual(result, "")
+
     # Positive
     def test_reasoning_service_returns_valid_reasoning_payload(self):
         text_provider = Mock()
@@ -629,3 +639,52 @@ class ReasoningParserCoverageTest(SimpleTestCase):
                     "thinking_log": "Summary",
                 }
             )
+
+    def test_generate_reasoning_response_delegates_to_reasoning_service(self):
+        reasoning_service = Mock(spec=LlmReasoningService)
+        reasoning_service.generate.return_value = {
+            "final_answer": "Answer",
+            "reasoning_steps": ["Step one"],
+            "thinking_log": "Summary",
+        }
+
+        result = generate_reasoning_response(
+            reasoning_service=reasoning_service,
+            prompt="Summarize conversion",
+        )
+
+        self.assertEqual(result["final_answer"], "Answer")
+        reasoning_service.generate.assert_called_once_with(prompt="Summarize conversion")
+
+    @patch("llm.services.reasoning_service.build_conversion_reasoning_prompt")
+    def test_generate_conversion_reasoning_response_builds_prompt_and_delegates(
+        self,
+        mock_build_prompt,
+    ):
+        mock_build_prompt.return_value = "compiled conversion prompt"
+        reasoning_service = Mock(spec=LlmReasoningService)
+        reasoning_service.generate.return_value = {
+            "final_answer": "Answer",
+            "reasoning_steps": ["Step one"],
+            "thinking_log": "Summary",
+        }
+
+        result = generate_conversion_reasoning_response(
+            reasoning_service=reasoning_service,
+            input_json={"document_info": {"filename": "input.xlsx"}},
+            output_json={"status": "ok"},
+        )
+
+        self.assertEqual(result["thinking_log"], "Summary")
+        mock_build_prompt.assert_called_once_with(
+            input_json={"document_info": {"filename": "input.xlsx"}},
+            output_json={"status": "ok"},
+            file_name="unknown",
+            document_type="unknown",
+        )
+        reasoning_service.generate.assert_called_once_with(prompt="compiled conversion prompt")
+
+    def test_text_generation_provider_protocol_method_returns_ellipsis(self):
+        result = TextGenerationProvider.generate_text(object(), "prompt")
+
+        self.assertIsNone(result)

@@ -7,13 +7,13 @@ You treat headers and data types seriously—consistency across rows matters.
 
 TASK_SECTION = """## TASK
 Transform unstructured text that may represent tabular data into a clean tabular extraction.
-Always provide step-by-step reasoning in a stable structure for similar inputs.
+Return extraction data only; do not include reasoning or narrative fields.
 """
 
 QUALITY_SECTION = """## QUALITY_RULES
 - detect tabular structure and identify likely headers
 - extract rows accurately and map messy values into columns
-- handle ambiguity with explicit reasoning
+- handle ambiguity conservatively without inventing values
 - keep results relevant to the input
 """
 
