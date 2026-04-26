@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import MonitoringPage from '../../../src/app/monitoring/MonitoringPage'
+vi.mock('@/lib/auth', () => ({
+    getValidAccessToken: vi.fn().mockResolvedValue('page-access-token'),
+}))
 
 vi.mock('../../../src/components/Sidebar', () => ({
     default: ({ activeMenu }: { activeMenu: string }) => (

@@ -20,6 +20,9 @@ vi.mock('../../../src/app/monitoring/components/MonitoringDashboardSections', ()
     MonitoringLatencyAndMetersSection: () => <div data-testid="latency-section" />,
     MonitoringRoutesAndReadinessSection: () => <div data-testid="routes-section" />,
     MonitoringAuthEventsSection: () => <div data-testid="events-section" />,
+    MonitoringReadinessAlertSection: ({ readyPayload }: { readyPayload: { status: string } | null }) => (
+        <div data-testid="readiness-alert">readiness-{readyPayload?.status ?? 'none'}</div>
+    ),
     MonitoringTrafficSummarySkeleton: () => <div data-testid="summary-skeleton" />,
     MonitoringPanelsSkeleton: () => <div data-testid="panels-skeleton" />,
     MonitoringRoutesAndReadinessSkeleton: () => <div data-testid="routes-skeleton" />,
@@ -169,6 +172,30 @@ describe('MonitoringPage state announcements and branch rendering', () => {
         expect(screen.queryByTestId('latency-section')).not.toBeInTheDocument()
         expect(screen.queryByTestId('routes-section')).not.toBeInTheDocument()
         expect(screen.queryByTestId('events-section')).not.toBeInTheDocument()
+    })
+
+    it('shows degraded readiness alert when readiness status is not ok', () => {
+        mockUseMonitoringDashboardModel.mockReturnValue(
+            buildViewModel({
+                readyPayload: {
+                    status: 'degraded',
+                    timestamp: '2026-04-24T10:11:00Z',
+                    checks: [
+                        {
+                            name: 'database',
+                            status: 'error',
+                            latency_ms: 80,
+                            is_critical: true,
+                            message: 'connection timeout',
+                        },
+                    ],
+                },
+            })
+        )
+
+        render(<MonitoringPage />)
+
+        expect(screen.getByTestId('readiness-alert')).toHaveTextContent('readiness-degraded')
     })
 
     it('announces generic dashboard ready state when no other status applies', () => {

@@ -5,7 +5,13 @@ import type {
     MonitoringReadyPayload,
     MonitoringStatsPayload,
 } from '@/services/monitoring'
-import { formatPercent, formatTimestamp, resolveAccessMessage } from '../monitoringUi'
+import {
+    formatPercent,
+    formatReadinessCheckName,
+    formatStatusLabel,
+    formatTimestamp,
+    resolveAccessMessage,
+} from '../monitoringUi'
 import type {
     ErrorRateMeter,
     EventRow,
@@ -15,6 +21,13 @@ import type {
     RealtimeTotals,
 } from '../monitoringViewModelTypes'
 import { GaugeMeter, MetricCard, StatusBadge } from './primitives/MonitoringPrimitives'
+
+const MONITORING_ROUTE_PREFIX = 'monitoring/'
+
+function isMonitoringRoute(route: string): boolean {
+    const normalizedRoute = route.trim().replace(/^\/+/, '').toLowerCase()
+    return normalizedRoute.startsWith(MONITORING_ROUTE_PREFIX)
+}
 
 type MonitoringHeroSectionProps = Readonly<{
     lastSync: string
@@ -43,7 +56,7 @@ export function MonitoringHeroSection({
                     <div>
                         <h1 className="text-2xl font-bold tracking-tight text-white">System Monitoring</h1>
                         <p className="mt-2 max-w-2xl text-sm text-gray-300">
-                            Grafana-inspired live health, readiness, traffic, and auth activity for your backend.
+                            Live health, readiness, traffic, and auth activity for your backend.
                         </p>
                     </div>
                 </div>
@@ -56,11 +69,7 @@ export function MonitoringHeroSection({
                                 <span className="inline-flex rounded-full border border-red-300/40 bg-red-700/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-red-200">
                                     Stale Data
                                 </span>
-                            ) : (
-                                <span className="inline-flex rounded-full border border-blue-300/40 bg-blue-600/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-blue-100">
-                                    Live
-                                </span>
-                            )}
+                            ) : null}
                             {retryInSeconds > 0 ? (
                                 <span className="text-xs text-gray-300">Retry in {retryInSeconds}s</span>
                             ) : null}
@@ -111,14 +120,14 @@ export function MonitoringTrafficSummarySection({
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <MetricCard
                     title="Live Status"
-                    value={<StatusBadge status={livePayload.status} label={livePayload.status} />}
+                    value={<StatusBadge status={livePayload.status} label={formatStatusLabel(livePayload.status)} />}
                     valueClassName="text-base"
                     subtitle={formatTimestamp(livePayload.timestamp)}
                 />
 
                 <MetricCard
                     title="Access"
-                    value={<StatusBadge status={accessDecision.allowed ? 'success' : 'error'} label={accessDecision.allowed ? 'allowed' : 'denied'} />}
+                    value={<StatusBadge status={accessDecision.allowed ? 'success' : 'error'} label={accessDecision.allowed ? 'Allowed' : 'Denied'} />}
                     valueClassName="text-base"
                     subtitle={resolveAccessMessage(accessDecision.reason)}
                 />
@@ -161,6 +170,50 @@ export function MonitoringAccessRequiredSection({ reason }: MonitoringAccessRequ
     )
 }
 
+type MonitoringReadinessAlertSectionProps = Readonly<{
+    readyPayload: MonitoringReadyPayload | null
+}>
+
+export function MonitoringReadinessAlertSection({
+    readyPayload,
+}: MonitoringReadinessAlertSectionProps) {
+    if (!readyPayload) {
+        return null
+    }
+
+    const status = readyPayload.status.toLowerCase()
+    const isHealthy = status === 'ok' || status === 'healthy'
+    if (isHealthy) {
+        return null
+    }
+
+    const degradedChecks = readyPayload.checks.filter((check) => check.status.toLowerCase() !== 'ok')
+
+    return (
+        <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 shadow-md">
+            <h3 className="text-base font-semibold text-amber-800">Readiness Degraded</h3>
+            <p className="mt-1 text-sm text-amber-700">
+                Monitoring readiness is not fully green.
+            </p>
+            <ul className="mt-3 space-y-2 text-sm text-amber-800">
+                {degradedChecks.length === 0 ? (
+                    <li>Overall readiness is in degraded state.</li>
+                ) : (
+                    degradedChecks.map((check) => (
+                        <li
+                            key={`${check.name}:${check.status}`}
+                            className="rounded-lg border border-amber-200 bg-amber-100/50 px-3 py-2"
+                        >
+                            <span className="font-semibold">{formatReadinessCheckName(check.name)}</span>: {formatStatusLabel(check.status)}
+                            {check.message ? <span className="text-amber-900"> - {check.message}</span> : null}
+                        </li>
+                    ))
+                )}
+            </ul>
+        </section>
+    )
+}
+
 type MonitoringLatencyAndMetersSectionProps = Readonly<{
     latencySeries: LatencySeriesPoint[]
     latencyChart: LatencyChartModel
@@ -171,6 +224,186 @@ type MonitoringLatencyAndMetersSectionProps = Readonly<{
     readinessMeter: ReadinessMeter
 }>
 
+type LatencyChartPanelProps = Readonly<{
+    latencySeries: LatencySeriesPoint[]
+    latencyChart: LatencyChartModel
+    hasRealtimeSeries: boolean
+    realtimeWindowSeconds: number
+    realtimeBucketSeconds: number
+}>
+
+function formatLatencyAxisLabel(value: number): string {
+    return value < 10 ? `${value.toFixed(1)}ms` : `${value.toFixed(0)}ms`
+}
+
+function resolveLatencyChartDescription(
+    hasRealtimeSeries: boolean,
+    realtimeWindowSeconds: number,
+    realtimeBucketSeconds: number,
+): string {
+    if (!hasRealtimeSeries || realtimeWindowSeconds <= 0) {
+        return 'Latency trend for the top monitored routes from the latest snapshot.'
+    }
+
+    return `Latency trend over ${realtimeWindowSeconds} seconds, grouped every ${realtimeBucketSeconds} seconds.`
+}
+
+function shouldShowLatencyPointLabel(
+    seriesLength: number,
+    index: number,
+    isLastEntry: boolean,
+): boolean {
+    if (seriesLength <= 6) {
+        return true
+    }
+    if (isLastEntry) {
+        return true
+    }
+    return index % 2 === 0
+}
+
+function LatencyChartPanel({
+    latencySeries,
+    latencyChart,
+    hasRealtimeSeries,
+    realtimeWindowSeconds,
+    realtimeBucketSeconds,
+}: LatencyChartPanelProps) {
+    const lineChartTitleId = useId()
+    const lineChartDescId = useId()
+    const lineChartDescription = resolveLatencyChartDescription(
+        hasRealtimeSeries,
+        realtimeWindowSeconds,
+        realtimeBucketSeconds,
+    )
+    const latestLatencyPoint = latencySeries.at(-1)
+    const maxRequestsInSeries = Math.max(0, ...latencySeries.map((entry) => entry.requests ?? 0))
+    const yAxisTopMs = Math.max(1, latencyChart.maxLatency)
+    const yAxisMidMs = yAxisTopMs / 2
+    const yAxisTopLabel = formatLatencyAxisLabel(yAxisTopMs)
+    const yAxisMidLabel = formatLatencyAxisLabel(yAxisMidMs)
+    const latencyModeLabel = hasRealtimeSeries ? `Realtime ${realtimeBucketSeconds}s Buckets` : 'Avg Route Latency'
+    const peakLatencyContextLabel = hasRealtimeSeries && realtimeWindowSeconds > 0
+        ? `Peak latency in last ${realtimeWindowSeconds}s:`
+        : 'Peak observed latency in this snapshot:'
+
+    return (
+        <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-8">
+            <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-semibold text-gray-900">Latency Line Chart</h3>
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">
+                    {latencyModeLabel}
+                </span>
+            </div>
+
+            {latencySeries.length === 0 ? (
+                <p className="mt-4 text-sm text-gray-600">No latency data available yet.</p>
+            ) : (
+                <>
+                    <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200 bg-gray-50 p-3">
+                        <p className="mb-2 text-xs text-gray-500">
+                            Y-axis: Avg latency (ms). Max requests in series: {maxRequestsInSeries}
+                        </p>
+                        <svg
+                            viewBox="0 0 520 220"
+                            className="h-52 w-full min-w-[520px]"
+                            aria-labelledby={`${lineChartTitleId} ${lineChartDescId}`}
+                            tabIndex={0}
+                        >
+                            <title id={lineChartTitleId}>Latency trend line chart</title>
+                            <desc id={lineChartDescId}>{lineChartDescription}</desc>
+                            <line x1="26" y1="190" x2="494" y2="190" stroke="#d1d5db" strokeWidth="1" />
+                            <line x1="26" y1="16" x2="26" y2="190" stroke="#d1d5db" strokeWidth="1" />
+                            <text x="4" y="20" fontSize="11" fill="#6b7280">
+                                {yAxisTopLabel}
+                            </text>
+                            <text x="4" y="104" fontSize="11" fill="#6b7280">
+                                {yAxisMidLabel}
+                            </text>
+                            <text x="16" y="194" fontSize="11" fill="#6b7280">
+                                0
+                            </text>
+                            {latencyChart.areaPath ? (
+                                <path
+                                    d={latencyChart.areaPath}
+                                    fill="#dbeafe"
+                                    fillOpacity="0.6"
+                                />
+                            ) : null}
+                            {latencyChart.linePoints ? (
+                                <polyline
+                                    points={latencyChart.linePoints}
+                                    fill="none"
+                                    stroke="#2563eb"
+                                    strokeWidth="3"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                />
+                            ) : null}
+                            {latencySeries.map((entry, index) => {
+                                const normalizedX = latencySeries.length === 1 ? 0.5 : index / (latencySeries.length - 1)
+                                const normalizedY = Math.min(
+                                    1,
+                                    Math.max(0, entry.value / Math.max(1, latencyChart.maxLatency))
+                                )
+                                const x = 26 + normalizedX * (520 - 52)
+                                const y = 16 + (1 - normalizedY) * (220 - 46)
+                                const showLabel = shouldShowLatencyPointLabel(
+                                    latencySeries.length,
+                                    index,
+                                    entry === latestLatencyPoint,
+                                )
+                                const xLabel = hasRealtimeSeries ? entry.label : String(entry.id)
+
+                                return (
+                                    <g key={entry.id}>
+                                        <circle cx={x} cy={y} r="4" fill="#2563eb" />
+                                        <text
+                                            x={x}
+                                            y="208"
+                                            textAnchor="middle"
+                                            fontSize="11"
+                                            fill="#6b7280"
+                                        >
+                                            {showLabel ? xLabel : ''}
+                                        </text>
+                                    </g>
+                                )
+                            })}
+                        </svg>
+                    </div>
+
+                    <p className="mt-3 text-sm text-gray-600">
+                        {peakLatencyContextLabel}{' '}
+                        <span className="font-semibold text-gray-900">{latencyChart.maxLatency.toFixed(2)} ms</span>
+                    </p>
+                    {hasRealtimeSeries ? (
+                        <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                            Latest bucket {latestLatencyPoint?.label}: avg latency{' '}
+                            <span className="font-semibold text-gray-900">
+                                {latestLatencyPoint?.value.toFixed(2)} ms
+                            </span>{' '}
+                            across{' '}
+                            <span className="font-semibold text-gray-900">
+                                {latestLatencyPoint?.requests ?? 0}
+                            </span>{' '}
+                            requests.
+                        </div>
+                    ) : (
+                        <ul className="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 sm:grid-cols-2">
+                            {latencySeries.map((entry) => (
+                                <li key={entry.id} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                                    <span className="font-semibold text-gray-900">[{entry.id}]</span> {entry.label}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </>
+            )}
+        </article>
+    )
+}
+
 export function MonitoringLatencyAndMetersSection({
     latencySeries,
     latencyChart,
@@ -180,121 +413,15 @@ export function MonitoringLatencyAndMetersSection({
     errorRateMeter,
     readinessMeter,
 }: MonitoringLatencyAndMetersSectionProps) {
-    const lineChartTitleId = useId()
-    const lineChartDescId = useId()
-    const lineChartDescription = hasRealtimeSeries && realtimeWindowSeconds > 0
-        ? `Latency trend over ${realtimeWindowSeconds} seconds, grouped every ${realtimeBucketSeconds} seconds.`
-        : 'Latency trend for the top monitored routes from the latest snapshot.'
-    const latestLatencyPoint = latencySeries.at(-1)
-
     return (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-            <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-8">
-                <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-base font-semibold text-gray-900">Latency Line Chart</h3>
-                    <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">
-                        {hasRealtimeSeries ? `Realtime ${realtimeBucketSeconds}s Buckets` : 'Avg Route Latency'}
-                    </span>
-                </div>
-
-                {latencySeries.length === 0 ? (
-                    <p className="mt-4 text-sm text-gray-600">No latency data available yet.</p>
-                ) : (
-                    <>
-                        <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200 bg-gray-50 p-3">
-                            <svg
-                                viewBox="0 0 520 220"
-                                className="h-52 w-full min-w-[520px]"
-                                aria-labelledby={`${lineChartTitleId} ${lineChartDescId}`}
-                                tabIndex={0}
-                            >
-                                <title id={lineChartTitleId}>Latency trend line chart</title>
-                                <desc id={lineChartDescId}>{lineChartDescription}</desc>
-                                <line x1="26" y1="190" x2="494" y2="190" stroke="#d1d5db" strokeWidth="1" />
-                                <line x1="26" y1="16" x2="26" y2="190" stroke="#d1d5db" strokeWidth="1" />
-                                {latencyChart.areaPath ? (
-                                    <path
-                                        d={latencyChart.areaPath}
-                                        fill="#dbeafe"
-                                        fillOpacity="0.6"
-                                    />
-                                ) : null}
-                                {latencyChart.linePoints ? (
-                                    <polyline
-                                        points={latencyChart.linePoints}
-                                        fill="none"
-                                        stroke="#2563eb"
-                                        strokeWidth="3"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    />
-                                ) : null}
-                                {latencySeries.map((entry, index) => {
-                                    const normalizedX = latencySeries.length === 1 ? 0.5 : index / (latencySeries.length - 1)
-                                    const normalizedY = Math.min(
-                                        1,
-                                        Math.max(0, entry.value / Math.max(1, latencyChart.maxLatency))
-                                    )
-                                    const x = 26 + normalizedX * (520 - 52)
-                                    const y = 16 + (1 - normalizedY) * (220 - 46)
-                                    const showLabel = latencySeries.length <= 6 || index % 2 === 0 || index === latencySeries.length - 1
-                                    const xLabel = hasRealtimeSeries ? entry.label : String(entry.id)
-
-                                    return (
-                                        <g key={entry.id}>
-                                            <circle cx={x} cy={y} r="4" fill="#2563eb" />
-                                            <text
-                                                x={x}
-                                                y="208"
-                                                textAnchor="middle"
-                                                fontSize="11"
-                                                fill="#6b7280"
-                                            >
-                                                {showLabel ? xLabel : ''}
-                                            </text>
-                                        </g>
-                                    )
-                                })}
-                            </svg>
-                        </div>
-
-                        <p className="mt-3 text-sm text-gray-600">
-                            {hasRealtimeSeries && realtimeWindowSeconds > 0 ? (
-                                <>
-                                    Peak latency in last {realtimeWindowSeconds}s:{' '}
-                                    <span className="font-semibold text-gray-900">{latencyChart.maxLatency.toFixed(2)} ms</span>
-                                </>
-                            ) : (
-                                <>
-                                    Peak observed latency in this snapshot:{' '}
-                                    <span className="font-semibold text-gray-900">{latencyChart.maxLatency.toFixed(2)} ms</span>
-                                </>
-                            )}
-                        </p>
-                        {hasRealtimeSeries ? (
-                            <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                                Latest bucket {latestLatencyPoint?.label}: avg latency{' '}
-                                <span className="font-semibold text-gray-900">
-                                    {latestLatencyPoint?.value.toFixed(2)} ms
-                                </span>{' '}
-                                across{' '}
-                                <span className="font-semibold text-gray-900">
-                                    {latestLatencyPoint?.requests ?? 0}
-                                </span>{' '}
-                                requests.
-                            </div>
-                        ) : (
-                            <ul className="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 sm:grid-cols-2">
-                                {latencySeries.map((entry) => (
-                                    <li key={entry.id} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                                        <span className="font-semibold text-gray-900">[{entry.id}]</span> {entry.label}
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
-                    </>
-                )}
-            </article>
+            <LatencyChartPanel
+                latencySeries={latencySeries}
+                latencyChart={latencyChart}
+                hasRealtimeSeries={hasRealtimeSeries}
+                realtimeWindowSeconds={realtimeWindowSeconds}
+                realtimeBucketSeconds={realtimeBucketSeconds}
+            />
 
             <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-4">
                 <h3 className="text-base font-semibold text-gray-900">Meter Panels</h3>
@@ -336,15 +463,17 @@ export function MonitoringRoutesAndReadinessSection({
     maxRouteRequests,
     readyPayload,
 }: MonitoringRoutesAndReadinessSectionProps) {
+    const visibleRoutes = statsPayload.routes.filter((routeRow) => !isMonitoringRoute(routeRow.route))
+
     return (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
             <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-8">
                 <h3 className="text-base font-semibold text-gray-900">Top Routes</h3>
-                {statsPayload.routes.length === 0 ? (
+                {visibleRoutes.length === 0 ? (
                     <p className="mt-3 text-sm text-gray-600">No route metrics available yet.</p>
                 ) : (
                     <div className="mt-4 space-y-3">
-                        {statsPayload.routes.slice(0, 6).map((routeRow) => {
+                        {visibleRoutes.slice(0, 6).map((routeRow) => {
                             const requestWidth = `${Math.max(
                                 8,
                                 Math.round((routeRow.total_requests / maxRouteRequests) * 100)
@@ -381,7 +510,7 @@ export function MonitoringRoutesAndReadinessSection({
                 <h3 className="text-base font-semibold text-gray-900">Readiness Checks</h3>
                 {readyPayload ? (
                     <div className="mt-4 space-y-3">
-                        <StatusBadge status={readyPayload.status} label={readyPayload.status} />
+                        <StatusBadge status={readyPayload.status} label={formatStatusLabel(readyPayload.status)} />
                         <p className="text-sm text-gray-500">
                             Timestamp: {formatTimestamp(readyPayload.timestamp)}
                         </p>
@@ -392,10 +521,10 @@ export function MonitoringRoutesAndReadinessSection({
                                     className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
                                 >
                                     <div className="flex items-center justify-between text-sm">
-                                        <span className="font-semibold text-gray-900">{check.name}</span>
+                                        <span className="font-semibold text-gray-900">{formatReadinessCheckName(check.name)}</span>
                                         <StatusBadge
                                             status={check.status}
-                                            label={check.status}
+                                            label={formatStatusLabel(check.status)}
                                             className="px-2 py-0.5 text-xs"
                                         />
                                     </div>

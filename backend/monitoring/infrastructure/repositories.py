@@ -73,7 +73,7 @@ class _RouteAccumulator:
             self.latency_samples.popleft()
         self.precomputed_p95_latency_ms = None
         self.precomputed_p99_latency_ms = None
-        if event.status_code >= 500:
+        if event.status_code >= 400:
             self.total_errors += 1
 
     def to_snapshot(self, route: str, method: str) -> RouteMetricSnapshot:
@@ -120,6 +120,19 @@ class _RouteAccumulator:
         rank = int(math.ceil(percentile * len(sorted_samples))) - 1
         rank = max(0, min(rank, len(sorted_samples) - 1))
         return max(0.0, float(sorted_samples[rank]))
+
+
+@dataclass(frozen=True)
+class RedisConnectionSettings:
+    redis_url: str = REDIS_DEFAULT_URL
+    socket_timeout_seconds: float = 1.0
+    connect_timeout_seconds: float = 1.0
+
+
+@dataclass(frozen=True)
+class RedisNamespaceSettings:
+    key_prefix: str = REDIS_DEFAULT_KEY_PREFIX
+    key_namespace_version: str = REDIS_DEFAULT_KEY_NAMESPACE_VERSION
 
 
 @dataclass(frozen=True)
@@ -187,12 +200,19 @@ def _normalize_max_latency_samples(value: int) -> int:
 class _MetricKeyNormalizerMixin:
     @staticmethod
     def _normalize_text(
-        value: str | None,
+        value: str | bytes | None,
         *,
         default: str,
         transform: Callable[[str], str] | None = None,
     ) -> str:
-        normalized = (value or "").strip()
+        if value is None:
+            normalized = ""
+        elif isinstance(value, bytes):
+            normalized = value.decode("utf-8", errors="ignore").strip()
+        elif isinstance(value, str):
+            normalized = value.strip()
+        else:
+            normalized = str(value).strip()
         if not normalized:
             return default
         if transform is None:
@@ -518,7 +538,7 @@ class InMemoryMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMi
         self._recent_requests.append(
             _RealtimeRequestRecord(
                 created_at=event.created_at,
-                is_error=event.status_code >= 500,
+                is_error=event.status_code >= 400,
                 duration_ms=max(0.0, float(event.duration_ms)),
             )
         )
@@ -597,55 +617,86 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
     def __init__(
         self,
         *,
-        redis_url: str = REDIS_DEFAULT_URL,
-        key_prefix: str = REDIS_DEFAULT_KEY_PREFIX,
+        key_namespace_settings: RedisNamespaceSettings | None = None,
         now: Callable[[], datetime] | None = None,
         realtime_window_seconds: int = REALTIME_DEFAULT_WINDOW_SECONDS,
         realtime_bucket_seconds: int = REALTIME_DEFAULT_BUCKET_SECONDS,
         max_realtime_records: int = REALTIME_DEFAULT_MAX_RECORDS,
         max_route_latency_samples: int = ROUTE_DEFAULT_MAX_LATENCY_SAMPLES,
-        key_namespace_version: str = REDIS_DEFAULT_KEY_NAMESPACE_VERSION,
         key_ttl_seconds: int | None = REDIS_DEFAULT_KEY_TTL_SECONDS,
-        socket_timeout_seconds: float = 1.0,
-        connect_timeout_seconds: float = 1.0,
+        connection_settings: RedisConnectionSettings | None = None,
         max_routes_per_snapshot: int | None = None,
         redis_client=None,
+        snapshot_cache_ttl_seconds: float | None = None,
     ):
+        resolved_connection_settings = connection_settings or RedisConnectionSettings()
         self._now = now or datetime.utcnow
+        self._snapshot_cache_ttl_seconds = self._resolve_snapshot_cache_ttl_seconds(
+            snapshot_cache_ttl_seconds
+        )
         self._apply_realtime_state(
             realtime_window_seconds=realtime_window_seconds,
             realtime_bucket_seconds=realtime_bucket_seconds,
             max_realtime_records=max_realtime_records,
             max_route_latency_samples=max_route_latency_samples,
         )
-        base_prefix = (key_prefix or REDIS_DEFAULT_KEY_PREFIX).strip() or REDIS_DEFAULT_KEY_PREFIX
+        namespace_settings = key_namespace_settings or RedisNamespaceSettings()
+        self._key_prefix = self._build_key_prefix(namespace_settings)
+        self._key_ttl_seconds = self._resolve_optional_positive_int(key_ttl_seconds)
+        self._redis = self._create_redis_client(
+            redis_client=redis_client,
+            connection_settings=resolved_connection_settings,
+        )
+        self._redis.ping()
+        self._max_routes_per_snapshot = self._resolve_optional_positive_int(
+            max_routes_per_snapshot
+        )
+        self._snapshot_cache_expires_at_ms: float | None = None
+        self._snapshot_cache: MetricsSnapshot | None = None
+
+    @staticmethod
+    def _resolve_snapshot_cache_ttl_seconds(
+        snapshot_cache_ttl_seconds: float | None,
+    ) -> float:
+        parsed_snapshot_cache_ttl_seconds = (
+            0.0 if snapshot_cache_ttl_seconds is None else float(snapshot_cache_ttl_seconds)
+        )
+        return max(0.0, parsed_snapshot_cache_ttl_seconds)
+
+    @staticmethod
+    def _build_key_prefix(namespace_settings: RedisNamespaceSettings) -> str:
+        base_prefix = (
+            str(namespace_settings.key_prefix or REDIS_DEFAULT_KEY_PREFIX).strip()
+            or REDIS_DEFAULT_KEY_PREFIX
+        )
         namespace_version = (
-            str(key_namespace_version or REDIS_DEFAULT_KEY_NAMESPACE_VERSION).strip()
+            str(namespace_settings.key_namespace_version or REDIS_DEFAULT_KEY_NAMESPACE_VERSION).strip()
             or REDIS_DEFAULT_KEY_NAMESPACE_VERSION
         )
-        self._key_prefix = f"{base_prefix}:{namespace_version}"
-        parsed_ttl = None if key_ttl_seconds is None else int(key_ttl_seconds)
-        self._key_ttl_seconds = parsed_ttl if parsed_ttl and parsed_ttl > 0 else None
+        return f"{base_prefix}:{namespace_version}"
 
-        if redis_client is None:
-            if redis is None:
-                raise RuntimeError(
-                    "Redis dependency is missing. Install with `pip install redis`."
-                )
-            redis_client = redis.Redis.from_url(
-                redis_url,
-                decode_responses=True,
-                socket_timeout=socket_timeout_seconds,
-                socket_connect_timeout=connect_timeout_seconds,
+    @staticmethod
+    def _resolve_optional_positive_int(value: int | None) -> int | None:
+        parsed_value = None if value is None else int(value)
+        return parsed_value if parsed_value and parsed_value > 0 else None
+
+    @staticmethod
+    def _create_redis_client(
+        *,
+        redis_client,
+        connection_settings: RedisConnectionSettings,
+    ):
+        if redis_client is not None:
+            return redis_client
+        if redis is None:
+            raise RuntimeError(
+                "Redis dependency is missing. Install with `pip install redis`."
             )
-
-        self._redis = redis_client
-        self._redis.ping()
-        parsed_max_routes = (
-            None if max_routes_per_snapshot is None else int(max_routes_per_snapshot)
-        )
-        self._max_routes_per_snapshot = (
-            parsed_max_routes if (parsed_max_routes and parsed_max_routes > 0) else None
+        return redis.Redis.from_url(
+            connection_settings.redis_url,
+            decode_responses=True,
+            socket_timeout=connection_settings.socket_timeout_seconds,
+            socket_connect_timeout=connection_settings.connect_timeout_seconds,
         )
 
     @property
@@ -660,6 +711,10 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
     def _realtime_key(self) -> str:
         return f"{self._key_prefix}:realtime"
 
+    @property
+    def _route_rankings_key(self) -> str:
+        return f"{self._key_prefix}:routes_by_volume"
+
     def _route_latency_samples_key(self, route_hash_key: str) -> str:
         return f"{route_hash_key}:latency_samples"
 
@@ -670,11 +725,12 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         return f"{self._key_prefix}:route:{digest}"
 
     def record_request(self, event: RequestMetricEvent) -> None:
+        self._invalidate_snapshot_cache()
         route, method = self._route_key_from_event(event)
         route_hash_key = self._route_hash_key(route=route, method=method)
         route_latency_samples_key = self._route_latency_samples_key(route_hash_key)
         duration_ms = max(0.0, float(event.duration_ms))
-        is_error = 1 if event.status_code >= 500 else 0
+        is_error = 1 if event.status_code >= 400 else 0
         now_epoch = self._realtime_series_builder.to_epoch_seconds(self._now())
         created_epoch = self._realtime_series_builder.to_epoch_seconds(event.created_at)
 
@@ -692,6 +748,8 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             self._realtime_key,
             {self._encode_realtime_member(is_error=bool(is_error), duration_ms=duration_ms): created_epoch},
         )
+        if self._max_routes_per_snapshot is not None:
+            pipeline.zincrby(self._route_rankings_key, 1, route_hash_key)
         pipeline.zremrangebyscore(
             self._realtime_key,
             "-inf",
@@ -712,9 +770,12 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         self._queue_expire(pipeline, route_hash_key)
         self._queue_expire(pipeline, route_latency_samples_key)
         self._queue_expire(pipeline, self._realtime_key)
+        if self._max_routes_per_snapshot is not None:
+            self._queue_expire(pipeline, self._route_rankings_key)
         pipeline.execute()
 
     def record_event(self, event: AuthMetricEvent) -> None:
+        self._invalidate_snapshot_cache()
         event_name, outcome = self._event_key_from_event(event)
         field = self._event_hash_field(event_name=event_name, outcome=outcome)
         pipeline = self._redis.pipeline()
@@ -725,29 +786,89 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
     def get_snapshot(self) -> MetricsSnapshot:
         now_value = self._now()
         now_epoch = self._realtime_series_builder.to_epoch_seconds(now_value)
+        if (
+            self._snapshot_cache is not None
+            and self._snapshot_cache_expires_at_ms is not None
+            and now_epoch <= self._snapshot_cache_expires_at_ms
+        ):
+            return self._snapshot_cache
+
         min_epoch = now_epoch - self._realtime_window_seconds
 
         pipeline = self._redis.pipeline()
-        pipeline.smembers(self._routes_index_key)
+        if self._max_routes_per_snapshot is None:
+            pipeline.smembers(self._routes_index_key)
+        else:
+            pipeline.zrevrange(
+                self._route_rankings_key,
+                0,
+                self._max_routes_per_snapshot - 1,
+            )
         pipeline.hgetall(self._events_key)
         pipeline.zremrangebyscore(self._realtime_key, "-inf", f"({min_epoch}")
         pipeline.zrangebyscore(self._realtime_key, min_epoch, "+inf", withscores=True)
         route_hash_keys, raw_events, _, raw_realtime = pipeline.execute()
 
-        route_hash_keys = self._limit_route_hash_keys(route_hash_keys)
+        if self._max_routes_per_snapshot is None:
+            route_hash_keys = self._limit_route_hash_keys(route_hash_keys)
+        elif not route_hash_keys:
+            route_hash_keys = self._limit_route_hash_keys_from_index()
         route_items = self._build_route_items(route_hash_keys)
         event_items = self._build_event_items(raw_events)
         realtime_records = self._build_realtime_records(raw_realtime)
-        return self._build_snapshot_response(
+        snapshot = self._build_snapshot_response(
             now_value=now_value,
             route_items=route_items,
             event_items=event_items,
             realtime_records=realtime_records,
         )
+        if self._snapshot_cache_ttl_seconds > 0:
+            self._snapshot_cache = snapshot
+            self._snapshot_cache_expires_at_ms = (
+                now_epoch + self._snapshot_cache_ttl_seconds
+            )
+        else:
+            self._snapshot_cache = None
+            self._snapshot_cache_expires_at_ms = None
+        return snapshot
+
+    def _limit_route_hash_keys_from_index(self) -> list[str]:
+        route_hash_keys = self._redis.smembers(self._routes_index_key)
+        route_hash_keys = list(route_hash_keys)
+        if not route_hash_keys or self._max_routes_per_snapshot is None:
+            return route_hash_keys
+
+        pipeline = self._redis.pipeline()
+        for route_hash_key in route_hash_keys:
+            pipeline.hmget(route_hash_key, REDIS_FIELD_ROUTE, REDIS_FIELD_METHOD)
+        route_metadata = pipeline.execute()
+
+        parsed: list[tuple[str, str, str]] = []
+        for route_hash_key, raw_metadata in zip(route_hash_keys, route_metadata):
+            if isinstance(raw_metadata, (list, tuple)) and len(raw_metadata) >= 2:
+                raw_route, raw_method = raw_metadata[0], raw_metadata[1]
+            else:
+                raw_route, raw_method = None, None
+            route = self._normalize_text(raw_route, default=UNKNOWN_ROUTE)
+            method = self._normalize_text(
+                raw_method,
+                default=UNKNOWN_METHOD,
+                transform=str.upper,
+            )
+            parsed.append((route, method, route_hash_key))
+
+        parsed.sort(key=lambda item: (item[0], item[1], item[2]))
+        return [item[2] for item in parsed][: self._max_routes_per_snapshot]
 
     def reset(self) -> None:
+        self._invalidate_snapshot_cache()
         route_hash_keys = self._redis.smembers(self._routes_index_key)
-        keys_to_delete = [self._routes_index_key, self._events_key, self._realtime_key]
+        keys_to_delete = [
+            self._routes_index_key,
+            self._events_key,
+            self._realtime_key,
+            self._route_rankings_key,
+        ]
         for route_hash_key in route_hash_keys:
             keys_to_delete.append(route_hash_key)
             keys_to_delete.append(self._route_latency_samples_key(route_hash_key))
@@ -773,6 +894,10 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             return 0
         """
         pipeline.eval(script, 1, route_hash_key, REDIS_FIELD_MAX_LATENCY_MS, duration_ms)
+
+    def _invalidate_snapshot_cache(self) -> None:
+        self._snapshot_cache = None
+        self._snapshot_cache_expires_at_ms = None
 
     def _trim_realtime_records(self) -> None:
         current_size = self._to_int(self._redis.zcard(self._realtime_key))

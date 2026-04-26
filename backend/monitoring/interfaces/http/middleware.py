@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_ERROR_STATUS = 500
 DEFAULT_UNKNOWN_METHOD = "UNKNOWN"
 DEFAULT_UNKNOWN_PATH = "unknown"
+MONITORING_ROUTE_PREFIX = "monitoring/"
 
 
 class MonitoringRequestMetricsMiddleware:
@@ -30,6 +31,8 @@ class MonitoringRequestMetricsMiddleware:
 
     def _record_request_metrics(self, *, request, status_code: int, duration_ms: float) -> None:
         route = self._resolve_route(request)
+        if self._is_monitoring_route(route):
+            return
         method = self._resolve_method(request)
         try:
             get_monitoring_service().record_request(
@@ -51,6 +54,11 @@ class MonitoringRequestMetricsMiddleware:
     @staticmethod
     def _resolve_method(request) -> str:
         return str(getattr(request, "method", DEFAULT_UNKNOWN_METHOD))
+
+    @staticmethod
+    def _is_monitoring_route(route: str) -> bool:
+        normalized_route = route.strip().lstrip("/").lower()
+        return normalized_route.startswith(MONITORING_ROUTE_PREFIX)
 
     @staticmethod
     def _resolve_status_code(response) -> int:

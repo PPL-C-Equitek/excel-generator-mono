@@ -330,7 +330,7 @@ describe('ConvertPage', () => {
             const user = userEvent.setup()
             const mockService = {
                 generate: vi.fn().mockImplementationOnce(
-                    () => new Promise(() => {})
+                    () => new Promise(() => { })
                 ),
                 exportToCsv: vi.fn(),
                 downloadCsvFile: vi.fn(),
@@ -389,7 +389,24 @@ describe('ConvertPage', () => {
 
             expect(mockService.exportToCsv).toHaveBeenCalledTimes(1)
             expect(mockService.exportToCsv).toHaveBeenCalledWith(
-                { status: 'ok' },
+                {
+                    document_info: {
+                        source_type: 'Excel',
+                        filename: 'test.xlsx',
+                    },
+                    summary: {
+                        total_tables: 1,
+                        total_rows: 1,
+                        total_columns: 1,
+                    },
+                    content_data: [
+                        {
+                            table_name: 'Sheet1',
+                            headers: ['status'],
+                            rows: [{ status: 'ok' }],
+                        },
+                    ],
+                },
                 expect.any(AbortSignal)
             )
             expect(mockService.getDownloadUrl).not.toHaveBeenCalled()

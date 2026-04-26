@@ -8,12 +8,14 @@ import {
     getMonitoringLive,
     getMonitoringReady,
     getMonitoringStats,
+    getMonitoringStatsStream,
 } from '@/services/monitoring'
 import {
     MonitoringAccessRequiredSection,
     MonitoringAuthEventsSection,
     MonitoringAuthEventsSkeleton,
     MonitoringHeroSection,
+    MonitoringReadinessAlertSection,
     MonitoringLatencyAndMetersSection,
     MonitoringPanelsSkeleton,
     MonitoringRoutesAndReadinessSection,
@@ -26,15 +28,16 @@ import {
     useMonitoringDashboardModel,
 } from './useMonitoringDashboardModel'
 
-type MonitoringPageProps = {
+type MonitoringPageProps = Readonly<{
     readonly monitoringService?: MonitoringDashboardService
-}
+}>
 
 const defaultMonitoringService: MonitoringDashboardService = {
     getMonitoringLive,
     getMonitoringAccess,
     getMonitoringReady,
     getMonitoringStats,
+    getMonitoringStatsStream,
     getMonitoringAuthenticatedSnapshot,
 }
 
@@ -65,6 +68,7 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
         refreshDashboard,
     } = useMonitoringDashboardModel({ monitoringService })
     const hasMonitoringAccess = Boolean(accessDecision?.allowed)
+    const hasLoadedSnapshot = !isLoading && livePayload !== null && accessDecision !== null
     let monitoringDetailsSection: ReactNode = null
 
     if (hasMonitoringAccess) {
@@ -141,9 +145,8 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
                     {errorMessage ? (
                         <div
                             role="alert"
-                            className="flex items-start gap-2 rounded-lg border border-red-400 bg-red-50 p-3 text-sm text-red-700"
+                            className="rounded-lg border border-red-400 bg-red-50 p-3 text-sm text-red-700"
                         >
-                            <span aria-hidden>!</span>
                             <div className="space-y-1">
                                 <p>{errorMessage}</p>
                                 {retryInSeconds > 0 ? (
@@ -171,7 +174,7 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
                         </>
                     ) : null}
 
-                    {!isLoading && livePayload && accessDecision ? (
+                    {hasLoadedSnapshot && livePayload && accessDecision ? (
                         <>
                             <MonitoringTrafficSummarySection
                                 livePayload={livePayload}
@@ -181,6 +184,7 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
                                 hasRealtimeSeries={hasRealtimeSeries}
                                 realtimeWindowSeconds={realtimeWindowSeconds}
                             />
+                            <MonitoringReadinessAlertSection readyPayload={readyPayload} />
 
                             {monitoringDetailsSection}
                         </>

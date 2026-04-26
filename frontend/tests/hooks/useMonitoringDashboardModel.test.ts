@@ -1,5 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('@/lib/auth', () => ({
+    getValidAccessToken: vi.fn(),
+}))
+import { getValidAccessToken } from '@/lib/auth'
 import type {
     MonitoringAccessDecision,
     MonitoringLivePayload,
@@ -94,8 +98,46 @@ function createDeferred<T>() {
     }
 }
 
+function makeStreamStatsPayload(): MonitoringStatsPayload {
+    return {
+        status: 'ok',
+        generated_at: '2026-04-24T10:00:05Z',
+        totals: { requests: 200, errors: 2, error_rate: 0.01 },
+        routes: [
+            {
+                route: '/monitoring/stream/',
+                method: 'GET',
+                total_requests: 100,
+                total_errors: 1,
+                error_rate: 0.01,
+                avg_latency_ms: 12,
+                max_latency_ms: 25,
+            },
+        ],
+        events: {
+            'monitoring.stream': {
+                ok: 2,
+            },
+        },
+        timeseries: {
+            window_seconds: 10,
+            bucket_seconds: 5,
+            points: [
+                {
+                    timestamp: '2026-04-24T10:00:03Z',
+                    requests: 5,
+                    errors: 0,
+                    error_rate: 0,
+                    avg_latency_ms: 12,
+                },
+            ],
+        },
+    }
+}
+
 describe('useMonitoringDashboardModel', () => {
     beforeEach(() => {
+        vi.mocked(getValidAccessToken).mockResolvedValue('test-access-token')
         vi.clearAllMocks()
     })
 
@@ -134,6 +176,51 @@ describe('useMonitoringDashboardModel', () => {
         expect(service.getMonitoringStats).not.toHaveBeenCalled()
     })
 
+    it('reuses one auth token for non-snapshot access/ready/stats flow', async () => {
+        const service = createMonitoringService()
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(vi.mocked(getValidAccessToken)).toHaveBeenCalledTimes(1)
+        expect(service.getMonitoringAccess).toHaveBeenCalledWith('test-access-token')
+        expect(service.getMonitoringReady).toHaveBeenCalledWith('test-access-token')
+        expect(service.getMonitoringStats).toHaveBeenCalledWith('test-access-token')
+    })
+
+    it('fails when auth token is unavailable for non-snapshot monitoring flow', async () => {
+        vi.mocked(getValidAccessToken).mockResolvedValueOnce(null)
+        const service = createMonitoringService({
+            getMonitoringAccess: vi.fn(),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.errorMessage).toBe('Authentication credentials were not provided.')
+        expect(service.getMonitoringAccess).not.toHaveBeenCalled()
+        expect(service.getMonitoringReady).not.toHaveBeenCalled()
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+    })
+
     it('polls monitoring endpoints on the configured interval', async () => {
         const service = createMonitoringService()
 
@@ -145,7 +232,7 @@ describe('useMonitoringDashboardModel', () => {
         )
 
         await waitFor(() => {
-            expect(service.getMonitoringLive).toHaveBeenCalledTimes(1)
+            expect(service.getMonitoringLive).toHaveBeenCalled()
         })
 
         await waitFor(() => {
@@ -220,6 +307,84 @@ describe('useMonitoringDashboardModel', () => {
             'event_a',
             'event_b',
         ])
+    })
+
+    it('limits realtime latency series to the latest six buckets', async () => {
+        const service = createMonitoringService({
+            getMonitoringStats: vi.fn().mockResolvedValue({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 36, errors: 0, error_rate: 0 },
+                routes: [],
+                events: {},
+                timeseries: {
+                    window_seconds: 300,
+                    bucket_seconds: 10,
+                    points: [
+                        { timestamp: '2026-04-24T10:00:00Z', requests: 1, errors: 0, error_rate: 0, avg_latency_ms: 10 },
+                        { timestamp: '2026-04-24T10:00:10Z', requests: 2, errors: 0, error_rate: 0, avg_latency_ms: 20 },
+                        { timestamp: '2026-04-24T10:00:20Z', requests: 3, errors: 0, error_rate: 0, avg_latency_ms: 30 },
+                        { timestamp: '2026-04-24T10:00:30Z', requests: 4, errors: 0, error_rate: 0, avg_latency_ms: 40 },
+                        { timestamp: '2026-04-24T10:00:40Z', requests: 5, errors: 0, error_rate: 0, avg_latency_ms: 50 },
+                        { timestamp: '2026-04-24T10:00:50Z', requests: 6, errors: 0, error_rate: 0, avg_latency_ms: 60 },
+                        { timestamp: '2026-04-24T10:01:00Z', requests: 7, errors: 0, error_rate: 0, avg_latency_ms: 70 },
+                        { timestamp: '2026-04-24T10:01:10Z', requests: 8, errors: 0, error_rate: 0, avg_latency_ms: 80 },
+                    ],
+                },
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.latencySeries.map((item) => item.value)).toEqual([30, 40, 50, 60, 70, 80])
+        expect(result.current.realtimeTotals).toEqual({
+            requests: 33,
+            errors: 0,
+            errorRate: 0,
+        })
+        expect(result.current.realtimeWindowSeconds).toBe(60)
+    })
+
+    it('derives realtime window from rendered buckets when source window is zero', async () => {
+        const service = createMonitoringService({
+            getMonitoringStats: vi.fn().mockResolvedValue({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 3, errors: 0, error_rate: 0 },
+                routes: [],
+                events: {},
+                timeseries: {
+                    window_seconds: 0,
+                    bucket_seconds: 10,
+                    points: [
+                        { timestamp: '2026-04-24T10:00:00Z', requests: 1, errors: 0, error_rate: 0, avg_latency_ms: 10 },
+                        { timestamp: '2026-04-24T10:00:10Z', requests: 2, errors: 0, error_rate: 0, avg_latency_ms: 20 },
+                    ],
+                },
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.realtimeWindowSeconds).toBe(20)
     })
 
     it('tracks retry backoff state and clears it after successful retry', async () => {
@@ -422,13 +587,7 @@ describe('useMonitoringDashboardModel', () => {
     })
 
     it('keeps latency chart generation stable when sparse series has no last point value', async () => {
-        const sparsePoints: Array<{
-            timestamp: string
-            requests: number
-            errors: number
-            error_rate: number
-            avg_latency_ms: number
-        }> = [
+        const sparsePoints = [
             {
                 timestamp: '2026-04-24T10:00:00Z',
                 requests: 1,
@@ -436,8 +595,8 @@ describe('useMonitoringDashboardModel', () => {
                 error_rate: 0,
                 avg_latency_ms: 20,
             },
-        ]
-        sparsePoints.length = 2
+            null,
+        ] as unknown as MonitoringStatsPayload['timeseries']['points']
 
         const service = createMonitoringService({
             getMonitoringStats: vi.fn().mockResolvedValue({
@@ -467,6 +626,63 @@ describe('useMonitoringDashboardModel', () => {
 
         expect(result.current.latencyChart.linePoints).toContain(',')
         expect(result.current.latencyChart.areaPath).toContain('Z')
+    })
+
+    it('falls back to route-level latency data when timeseries points are unavailable', async () => {
+        const service = createMonitoringService({
+            getMonitoringStats: vi.fn().mockResolvedValue({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 10, errors: 0, error_rate: 0 },
+                routes: [
+                    {
+                        route: '/history/',
+                        method: 'GET',
+                        total_requests: 15,
+                        total_errors: 1,
+                        error_rate: 0.066,
+                        avg_latency_ms: 120,
+                        max_latency_ms: 200,
+                    },
+                    {
+                        route: '/health',
+                        method: 'GET',
+                        total_requests: 5,
+                        total_errors: 0,
+                        error_rate: 0,
+                        avg_latency_ms: 60,
+                        max_latency_ms: 90,
+                    },
+                ],
+                events: {
+                    'auth.login': {
+                        success: 1,
+                    },
+                },
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.hasRealtimeSeries).toBe(false)
+        expect(result.current.latencySeries).toHaveLength(2)
+        expect(result.current.latencySeries[0]?.label).toBe('/history/')
+        expect(result.current.latencySeries[0]?.id).toBe(1)
+        expect(result.current.latencySeries).toMatchObject([
+            { id: 1, label: '/history/', value: 120, requests: 15 },
+            { id: 2, label: '/health', value: 60, requests: 5 },
+        ])
+        expect(result.current.latencyChart.maxLatency).toBe(120)
+        expect(result.current.latencyChart.linePoints).toContain(',')
     })
 
     it('uses authenticated snapshot service when available to avoid extra per-endpoint orchestration', async () => {
@@ -516,6 +732,237 @@ describe('useMonitoringDashboardModel', () => {
         expect(service.getMonitoringStats).not.toHaveBeenCalled()
     })
 
+    it('stops bootstrap flow when snapshot denies access and does not start stream', async () => {
+        const getMonitoringLive = vi.fn().mockResolvedValue({
+            status: 'ok',
+            timestamp: '2026-04-24T10:00:00Z',
+        })
+        const getMonitoringAuthenticatedSnapshot = vi.fn().mockResolvedValue({
+            accessDecision: { allowed: false, reason: 'inactive' },
+            readyPayload: null,
+            statsPayload: null,
+        })
+        const getMonitoringStatsStream = vi.fn()
+        const service: MonitoringDashboardService = {
+            getMonitoringLive,
+            getMonitoringAccess: vi.fn(),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+            getMonitoringAuthenticatedSnapshot,
+            getMonitoringStatsStream,
+        }
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(getMonitoringLive).toHaveBeenCalledTimes(1)
+        expect(getMonitoringAuthenticatedSnapshot).toHaveBeenCalledTimes(1)
+        expect(getMonitoringStatsStream).not.toHaveBeenCalled()
+        expect(service.getMonitoringAccess).not.toHaveBeenCalled()
+        expect(service.getMonitoringReady).not.toHaveBeenCalled()
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+    })
+
+    it('bootstraps with snapshot once and keeps interval polling paused while stream is active', async () => {
+        vi.useFakeTimers()
+        const streamClose = vi.fn()
+        const getMonitoringLive = vi.fn().mockResolvedValue({
+            status: 'ok',
+            timestamp: '2026-04-24T10:00:00Z',
+        })
+        const getMonitoringAuthenticatedSnapshot = vi.fn().mockResolvedValue({
+            accessDecision: { allowed: true, reason: 'ok' },
+            readyPayload: {
+                status: 'ok',
+                timestamp: '2026-04-24T10:00:01Z',
+                checks: [{ name: 'database', status: 'ok', latency_ms: 3, is_critical: true }],
+            },
+            statsPayload: {
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 1, errors: 0, error_rate: 0 },
+                routes: [],
+                events: {},
+            },
+        })
+        const getMonitoringStatsStream = vi.fn().mockResolvedValue({ close: streamClose })
+        const service: MonitoringDashboardService = {
+            getMonitoringLive,
+            getMonitoringAccess: vi.fn(),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+            getMonitoringAuthenticatedSnapshot,
+            getMonitoringStatsStream,
+        }
+
+        const { result, unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 1000,
+            })
+        )
+
+        await act(async () => {
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(result.current.isLoading).toBe(false)
+        expect(getMonitoringAuthenticatedSnapshot).toHaveBeenCalledTimes(1)
+        expect(getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        expect(getMonitoringLive).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+            vi.advanceTimersByTime(3000)
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(getMonitoringAuthenticatedSnapshot).toHaveBeenCalledTimes(1)
+        expect(getMonitoringLive).toHaveBeenCalledTimes(1)
+
+        unmount()
+        expect(streamClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps using active stream on refresh and skips stats snapshot fallback', async () => {
+        const streamClose = vi.fn()
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockResolvedValue({ close: streamClose }),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { result, unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        })
+
+        act(() => {
+            result.current.refreshDashboard()
+        })
+
+        await waitFor(() => {
+            expect(service.getMonitoringAccess).toHaveBeenCalledTimes(2)
+        })
+
+        expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+
+        unmount()
+        expect(streamClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('subscribes to realtime stream for stats when service supports it', async () => {
+        const streamClose = vi.fn()
+        const streamPayload = makeStreamStatsPayload()
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockImplementation(async ({ onPayload }) => {
+                onPayload(streamPayload)
+                return { close: streamClose }
+            }),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { result, unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+        expect(result.current.statsPayload?.totals.requests).toBe(200)
+
+        unmount()
+        expect(streamClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('ignores stream errors after the hook is unmounted', async () => {
+        const streamClose = vi.fn()
+        let capturedError: ((error: Error) => void) | undefined
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockImplementation(async ({ onError }) => {
+                capturedError = onError
+                return { close: streamClose }
+            }),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        })
+
+        unmount()
+
+        act(() => {
+            capturedError?.(new Error('stream error after unmount'))
+        })
+
+        expect(streamClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('marks data as stale immediately when stale threshold is already exceeded', async () => {
+        const now = vi.spyOn(Date, 'now')
+
+        const service = createMonitoringService()
+        now.mockReturnValue(new Date('2026-04-24T10:00:00Z').getTime())
+
+        try {
+            const { result, rerender } = renderHook(
+                ({ autoRefreshIntervalMs }) =>
+                    useMonitoringDashboardModel({
+                        monitoringService: service,
+                        autoRefreshIntervalMs,
+                    }),
+                {
+                    initialProps: {
+                        autoRefreshIntervalMs: 60000,
+                    },
+                }
+            )
+
+            await waitFor(() => {
+                expect(result.current.isLoading).toBe(false)
+            })
+            expect(result.current.isDataStale).toBe(false)
+
+            now.mockReturnValue(new Date('2026-04-24T10:00:20Z').getTime())
+            rerender({ autoRefreshIntervalMs: 1000 })
+
+            await waitFor(() => {
+                expect(result.current.isDataStale).toBe(true)
+            })
+        } finally {
+            now.mockRestore()
+        }
+    })
+
     it('defaults visibility to true when document is unavailable', () => {
         const originalDocument = globalThis.document
 
@@ -524,6 +971,31 @@ describe('useMonitoringDashboardModel', () => {
             expect(getIsPageVisible()).toBe(true)
         } finally {
             vi.stubGlobal('document', originalDocument)
+        }
+    })
+
+    it('derives visibility from document visibilityState', () => {
+        const originalVisibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+        Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            get: () => 'hidden',
+        })
+
+        try {
+            expect(getIsPageVisible()).toBe(false)
+
+            Object.defineProperty(document, 'visibilityState', {
+                configurable: true,
+                get: () => 'visible',
+            })
+
+            expect(getIsPageVisible()).toBe(true)
+        } finally {
+            if (originalVisibilityDescriptor) {
+                Object.defineProperty(document, 'visibilityState', originalVisibilityDescriptor)
+            } else {
+                Reflect.deleteProperty(document, 'visibilityState')
+            }
         }
     })
 
@@ -623,56 +1095,6 @@ describe('useMonitoringDashboardModel', () => {
         }
     })
 
-    it('marks data stale immediately when effect reruns after threshold has already passed', async () => {
-        vi.useFakeTimers()
-        vi.setSystemTime(new Date('2026-04-24T10:00:00Z'))
-
-        const originalVisibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
-        Object.defineProperty(document, 'visibilityState', {
-            configurable: true,
-            get: () => 'hidden',
-        })
-
-        try {
-            const service = createMonitoringService()
-            const { result, rerender } = renderHook(
-                ({ intervalMs }) =>
-                    useMonitoringDashboardModel({
-                        monitoringService: service,
-                        autoRefreshIntervalMs: intervalMs,
-                    }),
-                {
-                    initialProps: {
-                        intervalMs: 1000,
-                    },
-                }
-            )
-
-            await act(async () => {
-                await Promise.resolve()
-                await Promise.resolve()
-            })
-            expect(result.current.isLoading).toBe(false)
-            expect(result.current.isDataStale).toBe(false)
-
-            act(() => {
-                vi.setSystemTime(new Date('2026-04-24T10:00:20Z'))
-            })
-
-            rerender({
-                intervalMs: 2000,
-            })
-
-            expect(result.current.isDataStale).toBe(true)
-        } finally {
-            if (originalVisibilityDescriptor) {
-                Object.defineProperty(document, 'visibilityState', originalVisibilityDescriptor)
-            } else {
-                Reflect.deleteProperty(document, 'visibilityState')
-            }
-        }
-    })
-
     it('marks data stale when stale timeout fires', async () => {
         vi.useFakeTimers()
         vi.setSystemTime(new Date('2026-04-24T10:00:00Z'))
@@ -712,5 +1134,73 @@ describe('useMonitoringDashboardModel', () => {
                 Reflect.deleteProperty(document, 'visibilityState')
             }
         }
+    })
+
+    it('retries stream connection after stream-level error and resumes periodic loading', async () => {
+        const streamClose = vi.fn()
+        let capturedError: ((error: Error) => void) | undefined
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockImplementation(async ({ onError }) => {
+                capturedError = onError
+                return { close: streamClose }
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 1000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        })
+
+        act(() => {
+            capturedError?.(new Error('stream interrupted'))
+        })
+        expect(streamClose).toHaveBeenCalledTimes(1)
+        expect(result.current.consecutiveFailures).toBe(1)
+
+        act(() => {
+            result.current.refreshDashboard()
+        })
+
+        await waitFor(() => {
+            expect(
+                (service.getMonitoringStatsStream as ReturnType<typeof vi.fn>).mock.calls.length
+            ).toBe(2)
+        })
+    })
+
+    it('suppresses error banner message when stream closes unexpectedly', async () => {
+        const streamClose = vi.fn()
+        let capturedError: ((error: Error) => void) | undefined
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockImplementation(async ({ onError }) => {
+                capturedError = onError
+                return { close: streamClose }
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        })
+
+        act(() => {
+            capturedError?.(new Error('Monitoring stream closed unexpectedly.'))
+        })
+
+        expect(result.current.errorMessage).toBeNull()
+        expect(streamClose).toHaveBeenCalledTimes(1)
+        expect(result.current.consecutiveFailures).toBe(1)
     })
 })

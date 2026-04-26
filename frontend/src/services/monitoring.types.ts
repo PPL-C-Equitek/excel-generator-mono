@@ -57,3 +57,8 @@ export type MonitoringStatsPayload = {
     }
 }
 
+export type MonitoringAuthenticatedSnapshot = {
+    accessDecision: MonitoringAccessDecision
+    readyPayload: MonitoringReadyPayload | null
+    statsPayload: MonitoringStatsPayload | null
+}
