@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase, TestCase
@@ -1604,3 +1605,216 @@ class SendMessageEdgeCaseTest(TestCase):
         self.assertEqual(response.data["detail"], "Invalid request payload.")
         self.assertIn("message", response.data["errors"])
         mock_generate.assert_not_called()
+
+
+class ReasoningCaptureStoreCompatibilityTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="reasoning-capture@example.com",
+            name="Reasoning Capture User",
+            password="secret",
+            status="verified",
+        )
+        self.client.force_authenticate(user=self.user)
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_stores_reasoning_thinking_log_and_links_to_session_user(
+        self,
+        mock_generate,
+    ):
+        mock_generate.return_value = json.dumps(
+            {
+                "final_answer": "Header berhasil dipetakan.",
+                "reasoning_steps": [
+                    "Detected likely headers",
+                    "Validated row lengths",
+                ],
+                "thinking_log": "Sistem memetakan header dan memvalidasi jumlah kolom.",
+            }
+        )
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Tolong proses file ini"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        session_id = response.data["session_id"]
+
+        assistant_message = ChatMessage.objects.filter(
+            session_id=session_id,
+            role=ChatMessage.ROLE_ASSISTANT,
+        ).latest("created_at")
+
+        self.assertEqual(assistant_message.session.owner_id, self.user.id)
+        self.assertEqual(
+            assistant_message.thinking_log,
+            "Sistem memetakan header dan memvalidasi jumlah kolom.",
+        )
+
+    @patch("llm.views._save_thinking_log_for_message")
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_keeps_main_flow_when_thinking_log_save_fails(
+        self,
+        mock_generate,
+        mock_save_thinking_log,
+    ):
+        mock_generate.return_value = json.dumps(
+            {
+                "final_answer": "OK",
+                "reasoning_steps": ["Detected likely headers"],
+                "thinking_log": "Sistem mendeteksi header.",
+            }
+        )
+        mock_save_thinking_log.side_effect = RuntimeError("db write failed")
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Halo"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("reply", response.data)
+        self.assertIn("session_id", response.data)
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_captured_logs_visible_in_thinking_log_list_and_detail(
+        self,
+        mock_generate,
+    ):
+        mock_generate.return_value = json.dumps(
+            {
+                "final_answer": "OK",
+                "reasoning_steps": [
+                    "Detected likely headers",
+                    "Normalized values",
+                ],
+                "thinking_log": "Sistem mendeteksi header lalu menormalkan nilai.",
+            }
+        )
+
+        send_response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Proses data"},
+            format="json",
+        )
+        self.assertEqual(send_response.status_code, 200)
+        session_id = send_response.data["session_id"]
+
+        list_response = self.client.get(f"/llm/thinking-logs/?session_id={session_id}")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data["count"], 1)
+        self.assertEqual(len(list_response.data["results"]), 1)
+        self.assertEqual(
+            list_response.data["results"][0]["thinking_log"],
+            "Sistem mendeteksi header lalu menormalkan nilai.",
+        )
+
+        chat_id = list_response.data["results"][0]["chat_id"]
+        detail_response = self.client.get(f"/llm/thinking-logs/{chat_id}/")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(
+            detail_response.data["thinking_log"],
+            "Sistem mendeteksi header lalu menormalkan nilai.",
+        )
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_multiple_requests_store_reasoning_each_time(self, mock_generate):
+        mock_generate.return_value = json.dumps(
+            {
+                "final_answer": "OK",
+                "reasoning_steps": ["Validated row lengths"],
+                "thinking_log": "Sistem memvalidasi konsistensi jumlah kolom.",
+            }
+        )
+
+        for index in range(5):
+            response = self.client.post(
+                "/llm/send-message/",
+                {"message": f"request-{index}"},
+                format="json",
+            )
+            self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(
+            ChatMessage.objects.filter(
+                session__owner=self.user,
+                role=ChatMessage.ROLE_ASSISTANT,
+            )
+            .exclude(thinking_log="")
+            .count(),
+            5,
+        )
+
+    @patch("llm.views.build_llm_reasoning_service")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_response_contract_remains_valid_while_storing_reasoning(
+        self,
+        mock_build_generation_service,
+        mock_build_reasoning_service,
+    ):
+        mock_generation_service = mock_build_generation_service.return_value
+        mock_generation_service.generate.return_value = {
+            "headers": ["A"],
+            "rows": [["1"]],
+        }
+        mock_reasoning_service = mock_build_reasoning_service.return_value
+        mock_reasoning_service.generate.return_value = {
+            "final_answer": "Data berhasil diproses.",
+            "reasoning_steps": [
+                "Detected likely headers",
+                "Validated row lengths",
+            ],
+            "thinking_log": "Sistem memetakan header dan memvalidasi baris.",
+        }
+
+        response = self.client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("output_json", response.data)
+        self.assertIn("reasoning", response.data)
+        self.assertEqual(response.data["output_json"], {"headers": ["A"], "rows": [["1"]]})
+
+        stored_logs_count = ChatMessage.objects.filter(session__owner=self.user).exclude(
+            thinking_log=""
+        ).count()
+        self.assertGreaterEqual(stored_logs_count, 1)
+
+    @patch("llm.views._capture_generate_reasoning_thinking_log")
+    @patch("llm.views.build_llm_reasoning_service")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_keeps_response_when_reasoning_storage_fails(
+        self,
+        mock_build_generation_service,
+        mock_build_reasoning_service,
+        mock_capture_reasoning,
+    ):
+        mock_generation_service = mock_build_generation_service.return_value
+        mock_generation_service.generate.return_value = {
+            "headers": ["A"],
+            "rows": [["1"]],
+        }
+        mock_reasoning_service = mock_build_reasoning_service.return_value
+        mock_reasoning_service.generate.return_value = {
+            "final_answer": "Data berhasil diproses.",
+            "reasoning_steps": ["Detected likely headers"],
+            "thinking_log": "Sistem mendeteksi header.",
+        }
+        mock_capture_reasoning.side_effect = RuntimeError("storage failure")
+
+        response = self.client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["output_json"], {"headers": ["A"], "rows": [["1"]]})
+        self.assertIn("reasoning", response.data)

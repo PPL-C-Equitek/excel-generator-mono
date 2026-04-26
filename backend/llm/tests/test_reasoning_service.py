@@ -9,6 +9,7 @@ from llm.services.reasoning_service import (
     FALLBACK_THINKING_LOG,
     LlmReasoningService,
     TextGenerationProvider,
+    build_storage_thinking_log,
     _collect_steps_from_lines,
     _extract_braced_json_candidate,
     _extract_json_from_fenced_blocks,
@@ -25,6 +26,57 @@ from llm.services.reasoning_service import (
     validate_reasoning_response,
 )
 from llm.services.openai_client import OpenAIServiceError
+
+
+class ReasoningThinkingLogStorageTest(SimpleTestCase):
+    def test_build_storage_thinking_log_prefers_safe_thinking_log_source(self):
+        payload = {
+            "thinking_log": "Proses ekstraksi berjalan stabil dan hasil tervalidasi.",
+            "reasoning_steps": [
+                "Detected likely headers",
+                "Normalized values",
+            ],
+        }
+
+        result = build_storage_thinking_log(payload)
+
+        self.assertEqual(
+            result,
+            "Proses ekstraksi berjalan stabil dan hasil tervalidasi.",
+        )
+
+    def test_build_storage_thinking_log_falls_back_to_reasoning_steps_in_bahasa(self):
+        payload = {
+            "thinking_log": "system prompt: internal guidance",
+            "reasoning_steps": [
+                "Detected likely headers",
+                "Normalized values",
+                "Validated row lengths",
+            ],
+        }
+
+        result = build_storage_thinking_log(payload)
+
+        self.assertTrue(result.startswith("Sistem "))
+        self.assertIn("Detected likely headers", result)
+        self.assertIn("Normalized values", result)
+        self.assertIn("Validated row lengths", result)
+
+    def test_build_storage_thinking_log_filters_unsafe_traces(self):
+        payload = {
+            "thinking_log": "chain-of-thought: hidden details\napi key: secret",
+            "reasoning_steps": [
+                "debug token dump",
+                "Memvalidasi konsistensi jumlah kolom",
+            ],
+        }
+
+        result = build_storage_thinking_log(payload)
+
+        self.assertNotIn("chain-of-thought", result.lower())
+        self.assertNotIn("api key", result.lower())
+        self.assertNotIn("debug", result.lower())
+        self.assertIn("Memvalidasi konsistensi jumlah kolom", result)
 
 
 class LlmReasoningServiceTest(SimpleTestCase):
