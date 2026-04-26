@@ -12,6 +12,7 @@ class ChatMessageSerializer(serializers.Serializer):
 class GeneratedOutputSerializer(serializers.Serializer):
     id = serializers.UUIDField()
     output_json = serializers.JSONField()
+    thinking_log = serializers.CharField(allow_blank=True)
     created_at = serializers.DateTimeField()
 
 
