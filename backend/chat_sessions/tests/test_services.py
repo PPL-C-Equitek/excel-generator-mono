@@ -6,6 +6,9 @@ from unittest.mock import patch
 from authentication.models import User
 from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from chat_sessions.services import (
+    _build_fallback_thinking_log,
+    _normalize_fallback_lines,
+    _select_thinking_log_confidence,
     append_assistant_message,
     append_user_message,
     build_frontend_thinking_log_response,
@@ -667,6 +670,117 @@ class BuildFrontendThinkingLogResponseTest(SimpleTestCase):
                     "Confidence: Low",
                 ]
             },
+        )
+
+    def test_returns_fail_safe_when_payload_is_non_dict(self):
+        response = build_frontend_thinking_log_response(["not", "a", "dict"])
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Processed available response data.",
+                    "Unable to extract detailed reasoning.",
+                    "Prepared safest structured output.",
+                    "Confidence: Low",
+                ]
+            },
+        )
+
+    def test_generates_fallback_when_existing_thinking_log_contains_non_string_item(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Extraction result prepared.",
+                "reasoning_steps": ["Detected headers"],
+                "thinking_log": [123],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(response["thinking_log"][-1], "Confidence: High")
+
+    def test_generates_fallback_when_existing_thinking_log_contains_blank_item(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Extraction result prepared.",
+                "reasoning_steps": ["Detected headers"],
+                "thinking_log": ["   \n\t  "],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(response["thinking_log"][-1], "Confidence: High")
+
+    def test_fallback_includes_only_final_answer_path_and_sets_medium_confidence(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Only final answer is available.",
+                "reasoning_steps": [],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Identified available response reasoning fields.",
+                    "Aligned summary details with the final answer content.",
+                    "Validated thinking log consistency for frontend parsing.",
+                    "Prepared parser-safe thinking log output.",
+                    "Confidence: Medium",
+                ]
+            },
+        )
+
+    def test_fallback_normalizes_blank_reasoning_steps_and_sets_medium_confidence(self):
+        payload = {
+            "reasoning": {
+                "final_answer": None,
+                "reasoning_steps": ["", "  ", "Mapped rows"],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Identified available response reasoning fields.",
+                    "Summarized key transformation steps from response data.",
+                    "Validated thinking log consistency for frontend parsing.",
+                    "Prepared parser-safe thinking log output.",
+                    "Confidence: Medium",
+                ]
+            },
+        )
+
+    def test_private_helpers_cover_unreachable_branches(self):
+        self.assertEqual(
+            _build_fallback_thinking_log("not-a-dict"),
+            [
+                "Processed available response data.",
+                "Unable to extract detailed reasoning.",
+                "Prepared safest structured output.",
+                "Confidence: Low",
+            ],
+        )
+        self.assertEqual(_select_thinking_log_confidence([], ""), "Low")
+        self.assertEqual(
+            _normalize_fallback_lines(
+                [
+                    "line-a",
+                    "line-a",
+                    "   ",
+                    "line-b",
+                ],
+                "Low",
+            ),
+            ["line-a", "line-b", "Confidence: Low"],
         )
 
 
