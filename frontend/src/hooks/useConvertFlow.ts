@@ -313,8 +313,8 @@ function buildTabularExportPayload(
     const contentData = buildContentDataFromOutput(generatedOutput)
     const { totalRows, totalColumns } = contentData.reduce<{ totalRows: number; totalColumns: number }>(
         (acc, table) => {
-            const rowCount = Array.isArray(table.rows) ? table.rows.length : 0
-            const columnCount = Array.isArray(table.headers) ? table.headers.length : 0
+            const rowCount = (table.rows as unknown[]).length
+            const columnCount = (table.headers as unknown[]).length
 
             return {
                 totalRows: acc.totalRows + rowCount,
