@@ -3,7 +3,7 @@ import logging
 from typing import Any, cast
 from uuid import UUID
 
-from chat_sessions.models import ChatMessage
+from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
 from django.db import transaction
 from django.views.decorators.http import require_http_methods
@@ -414,7 +414,7 @@ def _parse_thinking_log_identifier(value, field_name: str):
 
 
 def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, request_id=None):
-    queryset = ChatMessage.objects.filter(session__owner=user).exclude(thinking_log="")
+    queryset = GeneratedOutput.objects.filter(session__owner=user).exclude(thinking_log="")
 
     normalized_session_id = session_id.strip() if isinstance(session_id, str) else ""
     if normalized_session_id:
