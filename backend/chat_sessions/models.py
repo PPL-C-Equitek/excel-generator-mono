@@ -67,6 +67,7 @@ class GeneratedOutput(models.Model):
         related_name="generated_outputs",
     )
     output_json = models.JSONField()
+    thinking_log = models.TextField(blank=True, default="")
     export_output_json = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
