@@ -2998,11 +2998,10 @@ class SessionEndpointTests(TestCase):
         stub_output = SimpleNamespace(
             id=self.output_id,
             output_json={
-                "headers": ["unit", "value"],
-                "rows": [["ICU", 1000]],
-            },
-            export_output_json={
-                "document_info": {"filename": "invoice.pdf"},
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
                 "summary": {"table_count": 1},
                 "content_data": [],
             },
@@ -3017,7 +3016,7 @@ class SessionEndpointTests(TestCase):
         }
         mock_open_file.return_value = BytesIO(b"col\n1\n")
         request = self.factory.get(
-            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/?filename=report.csv"
         )
         force_authenticate(request, user=self.user)
 
@@ -3030,7 +3029,7 @@ class SessionEndpointTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "text/csv")
         self.assertIn(
-            'attachment; filename="export_token.csv"',
+            'attachment; filename="report.csv"',
             response["Content-Disposition"],
         )
         mock_get_output.assert_called_once_with(
@@ -3085,11 +3084,10 @@ class SessionEndpointTests(TestCase):
         mock_get_output.return_value = SimpleNamespace(
             id=self.output_id,
             output_json={
-                "headers": ["unit", "value"],
-                "rows": [["ICU", 1000]],
-            },
-            export_output_json={
-                "document_info": {"filename": "invoice.pdf"},
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
                 "summary": {"table_count": 1},
                 "content_data": [],
             },
@@ -3163,11 +3161,10 @@ class SessionEndpointTests(TestCase):
         stub_output = SimpleNamespace(
             id=self.output_id,
             output_json={
-                "headers": ["unit", "value"],
-                "rows": [["ICU", 1000]],
-            },
-            export_output_json={
-                "document_info": {"filename": "invoice.pdf"},
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
                 "summary": {"table_count": 1},
                 "content_data": [],
             },
@@ -3182,7 +3179,7 @@ class SessionEndpointTests(TestCase):
         }
         mock_open_file.return_value = BytesIO(b"excel-bytes")
         request = self.factory.get(
-            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/?filename=report.xlsx"
         )
         force_authenticate(request, user=self.user)
 
@@ -3198,7 +3195,7 @@ class SessionEndpointTests(TestCase):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         self.assertIn(
-            'attachment; filename="export_token.xlsx"',
+            'attachment; filename="report.xlsx"',
             response["Content-Disposition"],
         )
         mock_get_output.assert_called_once_with(
@@ -3230,10 +3227,6 @@ class SessionEndpointTests(TestCase):
         stub_output = SimpleNamespace(
             id=self.output_id,
             output_json={
-                "headers": ["unit", "value"],
-                "rows": [["ICU", 1000]],
-            },
-            export_output_json={
                 "document_info": {
                     "source_type": "unknown",
                     "filename": "invoice.pdf",
@@ -3310,11 +3303,10 @@ class SessionEndpointTests(TestCase):
         mock_get_output.return_value = SimpleNamespace(
             id=self.output_id,
             output_json={
-                "headers": ["unit", "value"],
-                "rows": [["ICU", 1000]],
-            },
-            export_output_json={
-                "document_info": {"filename": "invoice.pdf"},
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
                 "summary": {"table_count": 1},
                 "content_data": [],
             },

@@ -373,8 +373,9 @@ export async function downloadSessionOutputCsvFile(
   outputId: string,
   filename = "export.csv"
 ): Promise<void> {
+  const requestUrl = `${getApiBaseOrigin()}/sessions/${sessionId}/outputs/${outputId}/download/csv/?filename=${encodeURIComponent(filename)}`;
   await downloadBlobFileFromUrl(
-    `${getApiBaseOrigin()}/sessions/${sessionId}/outputs/${outputId}/download/csv/`,
+    requestUrl,
     filename,
     {
       requestErrorMessage: CSV_DOWNLOAD_ERROR_MESSAGE,
@@ -387,8 +388,9 @@ export async function downloadSessionOutputExcelFile(
   outputId: string,
   filename = "export.xlsx"
 ): Promise<void> {
+  const requestUrl = `${getApiBaseOrigin()}/sessions/${sessionId}/outputs/${outputId}/download/excel/?filename=${encodeURIComponent(filename)}`;
   await downloadBlobFileFromUrl(
-    `${getApiBaseOrigin()}/sessions/${sessionId}/outputs/${outputId}/download/excel/`,
+    requestUrl,
     filename,
     {
       requestErrorMessage: EXCEL_DOWNLOAD_ERROR_MESSAGE,

@@ -797,7 +797,7 @@ describe("session output downloads", () => {
     );
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `${API_BASE}/sessions/11111111-1111-1111-1111-111111111111/outputs/22222222-2222-2222-2222-222222222222/download/csv/`,
+      `${API_BASE}/sessions/11111111-1111-1111-1111-111111111111/outputs/22222222-2222-2222-2222-222222222222/download/csv/?filename=report.csv`,
       expect.objectContaining({
         method: "GET",
         headers: {
@@ -815,7 +815,7 @@ describe("session output downloads", () => {
     );
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `${API_BASE}/sessions/11111111-1111-1111-1111-111111111111/outputs/22222222-2222-2222-2222-222222222222/download/excel/`,
+      `${API_BASE}/sessions/11111111-1111-1111-1111-111111111111/outputs/22222222-2222-2222-2222-222222222222/download/excel/?filename=report.xlsx`,
       expect.objectContaining({
         method: "GET",
         headers: {
