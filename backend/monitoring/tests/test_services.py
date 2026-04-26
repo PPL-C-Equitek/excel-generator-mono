@@ -442,3 +442,34 @@ class MonitoringServiceTest(SimpleTestCase):
         self.assertEqual(payload["totals"]["errors"], 1)
         self.assertEqual(payload["routes"][0]["route"], "/upload")
         self.assertEqual(payload["events"]["login"]["success"], 2)
+
+    def test_stats_returns_cached_payload_without_copying(self):
+        clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
+        service = MonitoringService(
+            readiness_service=self.readiness,
+            metrics_repository=self.repo,
+            now=clock,
+            stats_cache_ttl_seconds=30,
+        )
+
+        first_payload = service.stats()
+        second_payload = service.stats()
+
+        self.assertIs(first_payload, second_payload)
+        self.assertEqual(self.repo.get_snapshot_calls, 1)
+
+    def test_stats_json_reuses_cached_payload(self):
+        clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
+        service = MonitoringService(
+            readiness_service=self.readiness,
+            metrics_repository=self.repo,
+            now=clock,
+            stats_cache_ttl_seconds=30,
+        )
+
+        first_payload = service.stats_json()
+        second_payload = service.stats_json()
+
+        self.assertEqual(first_payload, second_payload)
+        self.assertIn('"status":"ok"', first_payload)
+        self.assertEqual(self.repo.get_snapshot_calls, 1)

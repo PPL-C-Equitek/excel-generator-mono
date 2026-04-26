@@ -654,6 +654,68 @@ describe('useMonitoringDashboardModel', () => {
         expect(service.getMonitoringStats).not.toHaveBeenCalled()
     })
 
+    it('bootstraps with snapshot once and keeps interval polling paused while stream is active', async () => {
+        vi.useFakeTimers()
+        const streamClose = vi.fn()
+        const getMonitoringLive = vi.fn().mockResolvedValue({
+            status: 'ok',
+            timestamp: '2026-04-24T10:00:00Z',
+        })
+        const getMonitoringAuthenticatedSnapshot = vi.fn().mockResolvedValue({
+            accessDecision: { allowed: true, reason: 'ok' },
+            readyPayload: {
+                status: 'ok',
+                timestamp: '2026-04-24T10:00:01Z',
+                checks: [{ name: 'database', status: 'ok', latency_ms: 3, is_critical: true }],
+            },
+            statsPayload: {
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 1, errors: 0, error_rate: 0 },
+                routes: [],
+                events: {},
+            },
+        })
+        const getMonitoringStatsStream = vi.fn().mockResolvedValue({ close: streamClose })
+        const service: MonitoringDashboardService = {
+            getMonitoringLive,
+            getMonitoringAccess: vi.fn(),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+            getMonitoringAuthenticatedSnapshot,
+            getMonitoringStatsStream,
+        }
+
+        const { result, unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 1000,
+            })
+        )
+
+        await act(async () => {
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(result.current.isLoading).toBe(false)
+        expect(getMonitoringAuthenticatedSnapshot).toHaveBeenCalledTimes(1)
+        expect(getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        expect(getMonitoringLive).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+            vi.advanceTimersByTime(3000)
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(getMonitoringAuthenticatedSnapshot).toHaveBeenCalledTimes(1)
+        expect(getMonitoringLive).toHaveBeenCalledTimes(1)
+
+        unmount()
+        expect(streamClose).toHaveBeenCalledTimes(1)
+    })
+
     it('subscribes to realtime stream for stats when service supports it', async () => {
         const streamClose = vi.fn()
         const streamPayload = makeStreamStatsPayload()

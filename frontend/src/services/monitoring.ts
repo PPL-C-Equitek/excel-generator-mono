@@ -99,8 +99,7 @@ async function collectMonitoringStreamPayloads({
     intervalSeconds,
     maxEvents,
 }: MonitoringStatsStreamOptions): Promise<MonitoringStatsStreamHandle> {
-    const token = await getMonitoringAuthToken()
-    const safeAccessToken = accessToken ?? token
+    const safeAccessToken = accessToken ?? await getMonitoringAuthToken()
     const controller = new AbortController()
     const streamURL = buildMonitoringStreamUrl({ intervalSeconds, maxEvents })
     const response = await fetchMonitoringStreamResponse({

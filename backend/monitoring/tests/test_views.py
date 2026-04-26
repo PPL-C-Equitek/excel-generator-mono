@@ -145,6 +145,38 @@ class MonitoringViewsTest(APITestCase):
         with self.assertRaises(StopIteration):
             next(stream)
 
+    @patch("monitoring.interfaces.http.views.sleep", return_value=None)
+    def test_stats_stream_prefers_stats_json_when_service_supports_it(self, mocked_sleep):
+        class _ServiceWithStatsJson:
+            def __init__(self):
+                self.stats_json_calls = 0
+                self.stats_calls = 0
+
+            def stats_json(self):
+                self.stats_json_calls += 1
+                return '{"status":"ok"}'
+
+            def stats(self):
+                self.stats_calls += 1
+                return {"status": "ok"}
+
+        service = _ServiceWithStatsJson()
+
+        stream = _stats_stream(
+            service=service,
+            interval_seconds=1.0,
+            max_events=1,
+        )
+        first_payload = next(stream)
+
+        self.assertIn('data: {"status":"ok"}', first_payload)
+        self.assertEqual(service.stats_json_calls, 1)
+        self.assertEqual(service.stats_calls, 0)
+        mocked_sleep.assert_not_called()
+
+        with self.assertRaises(StopIteration):
+            next(stream)
+
     def test_stream_endpoint_with_invalid_query_values_still_returns_stream(self):
         user = User.objects.create_user(
             email="stream-invalid-query@example.com",

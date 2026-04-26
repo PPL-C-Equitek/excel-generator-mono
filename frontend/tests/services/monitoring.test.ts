@@ -367,6 +367,45 @@ describe('monitoring service', () => {
         streamHandle.close()
     })
 
+    it('uses provided access token for stream without fetching auth token again', async () => {
+        const { getValidAccessToken } = await import('@/lib/auth')
+        const { getMonitoringStatsStream } = await import('@/services/monitoring')
+        const onPayload = vi.fn()
+        const onError = vi.fn()
+        vi.mocked(getValidAccessToken).mockResolvedValue('unused-token')
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                createStreamResponse([
+                    `data: ${createMonitoringStatsStreamPayload('2026-04-24T10:00:00Z', 1)}\n\n`,
+                ])
+            )
+        )
+
+        const streamHandle = await getMonitoringStatsStream({
+            accessToken: 'provided-token',
+            onPayload,
+            onError,
+            intervalSeconds: 2,
+        })
+
+        await waitFor(() => {
+            expect(onPayload).toHaveBeenCalledTimes(1)
+        })
+        expect(getValidAccessToken).not.toHaveBeenCalled()
+        expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+            expect.stringContaining('monitoring/stream/?interval_seconds=2'),
+            expect.objectContaining({
+                headers: expect.objectContaining({
+                    Authorization: 'Bearer provided-token',
+                }),
+            })
+        )
+
+        streamHandle.close()
+    })
+
     it('passes max_events when a valid positive value is provided', async () => {
         const { getValidAccessToken } = await import('@/lib/auth')
         const { getMonitoringStatsStream } = await import('@/services/monitoring')

@@ -1,5 +1,5 @@
 import logging
-from copy import deepcopy
+import json
 from datetime import datetime
 from typing import Callable, Iterable
 
@@ -76,6 +76,7 @@ class MonitoringService:
         self._last_readiness_status: str | None = None
         self._last_readiness_alert_time: datetime | None = None
         self._cached_stats_payload: dict[str, object] | None = None
+        self._cached_stats_payload_json: str | None = None
         self._cached_stats_at: datetime | None = None
 
     def live(self) -> dict[str, object]:
@@ -126,17 +127,37 @@ class MonitoringService:
 
     def stats(self) -> dict[str, object]:
         now = self._now()
-        if self._is_stats_cache_fresh(now=now):
-            return deepcopy(self._cached_stats_payload)
+        payload, _ = self._resolve_stats_payload(now=now)
+        return payload
 
+    def stats_json(self) -> str:
+        now = self._now()
+        _, serialized_payload = self._resolve_stats_payload(now=now)
+        return serialized_payload
+
+    def _resolve_stats_payload(self, *, now: datetime) -> tuple[dict[str, object], str]:
+        if self._is_stats_cache_fresh(now=now):
+            assert self._cached_stats_payload is not None
+            assert self._cached_stats_payload_json is not None
+            return (
+                self._cached_stats_payload,
+                self._cached_stats_payload_json,
+            )
+
+        payload, serialized_payload = self._build_stats_payload()
+        self._cached_stats_payload = payload
+        self._cached_stats_payload_json = serialized_payload
+        self._cached_stats_at = now
+        return payload, serialized_payload
+
+    def _build_stats_payload(self) -> tuple[dict[str, object], str]:
         snapshot = self._metrics_repository.get_snapshot()
         payload = {
             "status": STATUS_OK,
             **snapshot.to_dict(),
         }
-        self._cached_stats_payload = payload
-        self._cached_stats_at = now
-        return deepcopy(payload)
+        serialized_payload = json.dumps(payload, separators=(",", ":"))
+        return payload, serialized_payload
 
     def _is_stats_cache_fresh(self, *, now: datetime) -> bool:
         if self._cached_stats_payload is None or self._cached_stats_at is None:
@@ -148,6 +169,7 @@ class MonitoringService:
 
     def _invalidate_stats_cache(self) -> None:
         self._cached_stats_payload = None
+        self._cached_stats_payload_json = None
         self._cached_stats_at = None
 
     def _iso_now(self) -> str:

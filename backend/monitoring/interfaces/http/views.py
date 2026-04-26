@@ -82,9 +82,13 @@ def _monitoring_rate_limit():
 
 def _stats_stream(*, service, interval_seconds: float, max_events: int | None):
     emitted = 0
+    stats_json_method = getattr(type(service), "stats_json", None)
     while True:
-        payload = service.stats()
-        serialized_payload = json.dumps(payload, separators=(",", ":"))
+        if callable(stats_json_method):
+            serialized_payload = service.stats_json()
+        else:
+            payload = service.stats()
+            serialized_payload = json.dumps(payload, separators=(",", ":"))
         yield f"event: {STREAM_EVENT_NAME}\ndata: {serialized_payload}\n\n"
         emitted += 1
         if max_events is not None and emitted >= max_events:
