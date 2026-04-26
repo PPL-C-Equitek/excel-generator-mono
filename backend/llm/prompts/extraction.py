@@ -33,9 +33,34 @@ def _build_schema_hint_section(schema_hint: str | None) -> str | None:
     )
 
 
-def build_extraction_prompt(schema_hint: str | None = None) -> str:
+def _build_refinement_section(refinement_instruction: str | None) -> str | None:
+    normalized_instruction = (
+        refinement_instruction.strip() if isinstance(refinement_instruction, str) else ""
+    )
+    if not normalized_instruction:
+        return None
+
+    return (
+        "## REFINEMENT\n"
+        "This is a refinement attempt based on validation feedback.\n"
+        "Fix only schema or validation violations while preserving extracted meaning.\n"
+        "Do not include explanations in output.\n"
+        f"{normalized_instruction}"
+    )
+
+
+def build_extraction_prompt(
+    schema_hint: str | None = None,
+    refinement_instruction: str | None = None,
+) -> str:
     schema_hint_section = _build_schema_hint_section(schema_hint)
-    if not schema_hint_section:
+    refinement_section = _build_refinement_section(refinement_instruction)
+    if not schema_hint_section and not refinement_section:
         return BASE_EXTRACTION_PROMPT
 
-    return f"{BASE_EXTRACTION_PROMPT}\n\n{schema_hint_section.strip()}"
+    prompt_sections = [BASE_EXTRACTION_PROMPT]
+    if schema_hint_section:
+        prompt_sections.append(schema_hint_section.strip())
+    if refinement_section:
+        prompt_sections.append(refinement_section.strip())
+    return "\n\n".join(prompt_sections)

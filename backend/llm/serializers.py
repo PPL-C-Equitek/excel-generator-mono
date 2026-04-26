@@ -1,16 +1,66 @@
 from io import StringIO
 
 from rest_framework import serializers
+from django.conf import settings
 
 MAX_MESSAGE_LENGTH = 4096
 
 REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
+REFINEMENT_FINAL_STATUS_CHOICES = ("valid", "best_effort", "failed")
+
+
+def _resolved_refinement_default_max_iterations() -> int:
+    raw_value = getattr(settings, "LLM_REFINEMENT_DEFAULT_MAX_ITER", 3)
+    return raw_value if isinstance(raw_value, int) and raw_value > 0 else 3
+
+
+def _resolved_refinement_max_iterations_cap() -> int:
+    raw_value = getattr(settings, "LLM_REFINEMENT_MAX_ITER_CAP", 3)
+    return raw_value if isinstance(raw_value, int) and raw_value > 0 else 3
+
+
+def _resolved_refinement_default_payload() -> dict[str, object]:
+    default_max_iterations = _resolved_refinement_default_max_iterations()
+    return {
+        "enabled": True,
+        "max_iterations": default_max_iterations,
+        "early_exit_on_valid": True,
+    }
+
+
+class LlmGenerateRefinementRequestSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField(required=False, default=True)
+    max_iterations = serializers.IntegerField(
+        required=False,
+        min_value=1,
+    )
+    early_exit_on_valid = serializers.BooleanField(required=False, default=True)
+
+    def validate_max_iterations(self, value):
+        max_cap = _resolved_refinement_max_iterations_cap()
+        if value > max_cap:
+            raise serializers.ValidationError(
+                f"max_iterations must be less than or equal to {max_cap}."
+            )
+        return value
+
+    def validate(self, attrs):
+        normalized = {
+            "enabled": attrs.get("enabled", True),
+            "max_iterations": attrs.get(
+                "max_iterations",
+                _resolved_refinement_default_max_iterations(),
+            ),
+            "early_exit_on_valid": attrs.get("early_exit_on_valid", True),
+        }
+        return normalized
 
 
 class LlmGenerateRequestSerializer(serializers.Serializer):
     input_json = serializers.JSONField()
     custom_schema_id = serializers.UUIDField(required=False, allow_null=True)
     include_reasoning = serializers.BooleanField(required=False, default=True)
+    refinement = LlmGenerateRefinementRequestSerializer(required=False)
 
     def validate_input_json(self, value):
         if not isinstance(value, (dict, list)):
@@ -24,6 +74,7 @@ class LlmGenerateRequestSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"model": "Field 'model' is not allowed. Model is configured by server."}
             )
+        attrs["refinement"] = attrs.get("refinement", _resolved_refinement_default_payload())
         return attrs
 
 
@@ -39,6 +90,10 @@ class ReasoningPayloadSerializer(serializers.Serializer):
 class LlmGenerateResponseSerializer(serializers.Serializer):
     output_json = serializers.JSONField()
     reasoning = ReasoningPayloadSerializer(required=False, allow_null=True)
+    raw_json = serializers.JSONField(required=False)
+    validated_json = serializers.JSONField(required=False)
+    validation_log = serializers.JSONField(required=False)
+    refinement_meta = serializers.JSONField(required=False)
 
     def validate_output_json(self, value):
         if isinstance(value, dict):
@@ -48,6 +103,88 @@ class LlmGenerateResponseSerializer(serializers.Serializer):
                     "output_json must not include reasoning fields: "
                     + ", ".join(conflicting_keys)
                 )
+
+        return value
+
+    def validate_validation_log(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("validation_log must be an object.")
+
+        required_keys = {"iteration", "verdict", "errors", "warnings", "summary"}
+        missing_keys = sorted(required_keys.difference(value.keys()))
+        if missing_keys:
+            raise serializers.ValidationError(
+                "validation_log is missing required keys: " + ", ".join(missing_keys)
+            )
+
+        for issues_key in ("errors", "warnings"):
+            issues = value.get(issues_key)
+            if not isinstance(issues, list):
+                raise serializers.ValidationError(f"validation_log.{issues_key} must be a list.")
+            for issue in issues:
+                if not isinstance(issue, dict):
+                    raise serializers.ValidationError(
+                        f"validation_log.{issues_key} items must be objects."
+                    )
+                for required_field in ("path", "message", "severity"):
+                    issue_value = issue.get(required_field)
+                    if not isinstance(issue_value, str) or not issue_value.strip():
+                        raise serializers.ValidationError(
+                            f"validation_log.{issues_key} items must include non-empty {required_field}."
+                        )
+
+        verdict = value.get("verdict")
+        if verdict not in {"valid", "invalid"}:
+            raise serializers.ValidationError(
+                "validation_log.verdict must be either 'valid' or 'invalid'."
+            )
+
+        if not isinstance(value.get("iteration"), int) or value["iteration"] < 1:
+            raise serializers.ValidationError(
+                "validation_log.iteration must be a positive integer."
+            )
+
+        summary = value.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            raise serializers.ValidationError("validation_log.summary must be a non-empty string.")
+
+        return value
+
+    def validate_refinement_meta(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("refinement_meta must be an object.")
+
+        required_keys = {
+            "iterations_run",
+            "max_iterations",
+            "early_exit_triggered",
+            "final_status",
+        }
+        missing_keys = sorted(required_keys.difference(value.keys()))
+        if missing_keys:
+            raise serializers.ValidationError(
+                "refinement_meta is missing required keys: " + ", ".join(missing_keys)
+            )
+
+        if not isinstance(value.get("iterations_run"), int) or value["iterations_run"] < 1:
+            raise serializers.ValidationError(
+                "refinement_meta.iterations_run must be a positive integer."
+            )
+        if not isinstance(value.get("max_iterations"), int) or value["max_iterations"] < 1:
+            raise serializers.ValidationError(
+                "refinement_meta.max_iterations must be a positive integer."
+            )
+        if not isinstance(value.get("early_exit_triggered"), bool):
+            raise serializers.ValidationError(
+                "refinement_meta.early_exit_triggered must be a boolean."
+            )
+
+        final_status = value.get("final_status")
+        if final_status not in REFINEMENT_FINAL_STATUS_CHOICES:
+            raise serializers.ValidationError(
+                "refinement_meta.final_status must be one of: "
+                + ", ".join(REFINEMENT_FINAL_STATUS_CHOICES)
+            )
 
         return value
 
@@ -185,4 +322,3 @@ class ThinkingLogItemSerializer(serializers.Serializer):
             "status_processing": instance.status_processing,
             "created_at": instance.created_at,
         }
-

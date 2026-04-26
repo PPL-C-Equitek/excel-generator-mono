@@ -86,6 +86,7 @@ class LlmGenerationService:
         self,
         input_json: dict[str, Any] | list[Any],
         custom_schema_id=None,
+        refinement_instruction: str | None = None,
     ) -> dict[str, Any] | list[Any]:
         schema_prompt_fragment = None
         if custom_schema_id is not None:
@@ -93,9 +94,15 @@ class LlmGenerationService:
                 custom_schema_id
             )
 
-        extraction_prompt = build_extraction_prompt(
-            schema_hint=schema_prompt_fragment,
-        )
+        if refinement_instruction is None:
+            extraction_prompt = build_extraction_prompt(
+                schema_hint=schema_prompt_fragment,
+            )
+        else:
+            extraction_prompt = build_extraction_prompt(
+                schema_hint=schema_prompt_fragment,
+                refinement_instruction=refinement_instruction,
+            )
 
         effective_system_prompt = compose_system_prompt(
             self.base_system_prompt_provider(),
@@ -105,5 +112,4 @@ class LlmGenerationService:
             input_json=input_json,
             system_prompt=effective_system_prompt,
         )
-
 
