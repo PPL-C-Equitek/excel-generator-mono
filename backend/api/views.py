@@ -914,6 +914,65 @@ def session_output_download_csv(request, session_id, output_id):
 @require_GET
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_output_download_excel(request, session_id, output_id):
+    output = get_generated_output_for_session_user(
+        request.user,
+        session_id,
+        output_id,
+    )
+    if output is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        artifact = export_excel_to_filesystem(
+            output_json=output.output_json,
+            storage_dir=settings.EXCEL_EXPORT_DIR,
+        )
+    except Exception as exc:
+        return _build_export_error_response(
+            error=exc,
+            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
+            generation_error_types=(OutputExcelGenerationError,),
+            invalid_request_message="Invalid Excel export request.",
+            internal_error_message="Failed to download Excel due to internal error.",
+            validation_log_message="Validation or mapping error during session Excel download.",
+            generation_log_message="Excel generation error during session Excel download.",
+            unexpected_log_message="Unexpected error during session Excel download.",
+        )
+
+    try:
+        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
+        file_handle = open(safe_file_path, "rb")
+    except (KeyError, SuspiciousFileOperation, ValueError):
+        logger.warning(
+            "Session Excel download resolved unsafe artifact metadata.",
+            exc_info=True,
+        )
+        return _excel_download_not_found_response()
+    except OSError:
+        logger.exception("Session Excel download failed while reading generated artifact.")
+        return _excel_download_internal_error_response()
+    except Exception:
+        logger.exception("Unexpected error while preparing session Excel download.")
+        return _excel_download_internal_error_response()
+
+    download_name = _resolve_download_filename(
+        requested_name=request.query_params.get("filename"),
+        default_name=artifact["file_name"],
+        artifact_type=artifact["artifact_type"],
+    )
+
+    return FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=download_name,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@require_GET
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_list(request):
     try:
         limit, offset = _parse_session_list_pagination(request)
