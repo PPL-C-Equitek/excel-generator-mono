@@ -418,7 +418,7 @@ def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, r
 
     normalized_session_id = session_id.strip() if isinstance(session_id, str) else ""
     if normalized_session_id:
-        queryset = queryset.filter(output_json__session_id=normalized_session_id)
+        queryset = queryset.filter(session_id=normalized_session_id)
 
     identifier = chat_id or request_id
     if identifier:
