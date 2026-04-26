@@ -2998,6 +2998,10 @@ class SessionEndpointTests(TestCase):
         stub_output = SimpleNamespace(
             id=self.output_id,
             output_json={
+                "headers": ["unit", "value"],
+                "rows": [["ICU", 1000]],
+            },
+            export_output_json={
                 "document_info": {"filename": "invoice.pdf"},
                 "summary": {"table_count": 1},
                 "content_data": [],
@@ -3036,7 +3040,7 @@ class SessionEndpointTests(TestCase):
         )
         self.assertEqual(
             mock_export_csv.call_args.kwargs["output_json"],
-            stub_output.output_json,
+            stub_output.export_output_json,
         )
 
     @patch("api.views.get_generated_output_for_session_user")
@@ -3074,6 +3078,10 @@ class SessionEndpointTests(TestCase):
         mock_get_output.return_value = SimpleNamespace(
             id=self.output_id,
             output_json={
+                "headers": ["unit", "value"],
+                "rows": [["ICU", 1000]],
+            },
+            export_output_json={
                 "document_info": {"filename": "invoice.pdf"},
                 "summary": {"table_count": 1},
                 "content_data": [],
@@ -3148,6 +3156,10 @@ class SessionEndpointTests(TestCase):
         stub_output = SimpleNamespace(
             id=self.output_id,
             output_json={
+                "headers": ["unit", "value"],
+                "rows": [["ICU", 1000]],
+            },
+            export_output_json={
                 "document_info": {"filename": "invoice.pdf"},
                 "summary": {"table_count": 1},
                 "content_data": [],
@@ -3189,7 +3201,7 @@ class SessionEndpointTests(TestCase):
         )
         self.assertEqual(
             mock_export_excel.call_args.kwargs["output_json"],
-            stub_output.output_json,
+            stub_output.export_output_json,
         )
 
     @patch("api.views.get_generated_output_for_session_user")
@@ -3227,6 +3239,10 @@ class SessionEndpointTests(TestCase):
         mock_get_output.return_value = SimpleNamespace(
             id=self.output_id,
             output_json={
+                "headers": ["unit", "value"],
+                "rows": [["ICU", 1000]],
+            },
+            export_output_json={
                 "document_info": {"filename": "invoice.pdf"},
                 "summary": {"table_count": 1},
                 "content_data": [],
