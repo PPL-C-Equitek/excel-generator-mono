@@ -447,6 +447,7 @@ def _persist_generate_output_for_authenticated_user(
     user,
     session,
     output_json,
+    thinking_log,
     export_output_json,
 ):
     if not getattr(user, "is_authenticated", False):
@@ -459,7 +460,8 @@ def _persist_generate_output_for_authenticated_user(
             generated_output = create_generated_output(
                 session,
                 output_json,
-                export_output_json,
+                thinking_log=thinking_log,
+                export_output_json=export_output_json,
             )
         return session.id, generated_output.id, None
     except Exception:
@@ -524,11 +526,17 @@ def llm_generate(request):
         input_json=input_json,
         output_json=output_json,
     )
+    thinking_log = ""
+    if isinstance(reasoning_response, dict):
+        raw_thinking_log = reasoning_response.get("thinking_log")
+        if isinstance(raw_thinking_log, str):
+            thinking_log = raw_thinking_log
 
     response_session_id, response_output_id, error_response = _persist_generate_output_for_authenticated_user(
         request.user,
         session,
         output_json,
+        thinking_log,
         export_output_json,
     )
     if error_response is not None:
