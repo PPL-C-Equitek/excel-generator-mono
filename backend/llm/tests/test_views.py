@@ -17,6 +17,7 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
 )
 from llm.views import (
+    build_export_output_json,
     _extract_document_type,
     _sanitize_output_json,
     build_llm_generation_service,
@@ -126,6 +127,105 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         sanitized = _sanitize_output_json(payload)
 
         self.assertEqual(sanitized, payload)
+
+    def test_build_export_output_json_normalizes_headers_and_rows_payload(self):
+        raw_output_json = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000], ["ER", 1500]],
+            "final_answer": "ignored for export payload",
+        }
+        input_json = {
+            "filename": "hospital-report.xlsx",
+            "document_info": {"source_type": "Excel"},
+        }
+
+        export_output_json = build_export_output_json(
+            input_json=input_json,
+            output_json=raw_output_json,
+        )
+
+        self.assertEqual(
+            export_output_json,
+            {
+                "document_info": {
+                    "source_type": "Excel",
+                    "filename": "hospital-report.xlsx",
+                },
+                "summary": {
+                    "total_tables": 1,
+                    "total_rows": 2,
+                    "total_columns": 2,
+                },
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["unit", "value"],
+                        "rows": [
+                            {"unit": "ICU", "value": 1000},
+                            {"unit": "ER", "value": 1500},
+                        ],
+                    }
+                ],
+            },
+        )
+
+    def test_build_export_output_json_normalizes_sheet_like_mapping_payload(self):
+        raw_output_json = {
+            "Rawat Jalan": [
+                {"unit": "Rawat Jalan", "value": 1000},
+                {"unit": "Rawat Jalan", "value": 1200},
+            ],
+            "ICU": [
+                {"unit": "ICU", "value": 3000},
+            ],
+        }
+        input_json = {
+            "document_info": {
+                "filename": "finance.pdf",
+                "source_type": "PDF",
+            }
+        }
+
+        export_output_json = build_export_output_json(
+            input_json=input_json,
+            output_json=raw_output_json,
+        )
+
+        self.assertEqual(
+            export_output_json["document_info"],
+            {
+                "source_type": "PDF",
+                "filename": "finance.pdf",
+            },
+        )
+        self.assertEqual(
+            export_output_json["summary"],
+            {
+                "total_tables": 2,
+                "total_rows": 3,
+                "total_columns": 2,
+            },
+        )
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Rawat Jalan",
+                    "headers": ["unit", "value"],
+                    "rows": [
+                        {"unit": "Rawat Jalan", "value": 1000},
+                        {"unit": "Rawat Jalan", "value": 1200},
+                    ],
+                },
+                {
+                    "table_name": "ICU",
+                    "headers": ["unit", "value"],
+                    "rows": [
+                        {"unit": "ICU", "value": 3000},
+                    ],
+                },
+            ],
+        )
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):
