@@ -2000,4 +2000,90 @@ describe('useConvertFlow', () => {
             expect(getExcelState(result).excelSuccessMessage).toBe('Successfully downloaded')
         })
     })
+
+    describe('download guard branches', () => {
+        it('returns early when session CSV download is available but fallback exportToCsv is missing', async () => {
+            const service = makeMockService({
+                exportToCsv: undefined,
+                downloadSessionOutputCsvFile: vi.fn().mockResolvedValue(undefined),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.downloadSessionOutputCsvFile).not.toHaveBeenCalled()
+            expect(service.downloadCsvFile).not.toHaveBeenCalled()
+        })
+
+        it('returns early after CSV export when browser download helper is unavailable', async () => {
+            const service = makeMockService({
+                downloadSessionOutputCsvFile: vi.fn().mockResolvedValue(undefined),
+                downloadCsvFile: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleCsvDownload()
+            })
+
+            expect(service.exportToCsv).toHaveBeenCalledTimes(1)
+            expect(result.current.csvMetadata).toEqual({ file_id: 'csv_12345' })
+        })
+
+        it('returns early for excel download when no file has been selected', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).not.toHaveBeenCalled()
+            expect(service.downloadExcelFile).not.toHaveBeenCalled()
+        })
+
+        it('returns early when session Excel download exists but legacy fallback dependencies are missing', async () => {
+            const service = makeMockService({
+                exportToExcel: undefined,
+                downloadSessionOutputExcelFile: vi.fn().mockResolvedValue(undefined),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getExcelState(result).handleExcelDownload()
+            })
+
+            expect(service.downloadSessionOutputExcelFile).not.toHaveBeenCalled()
+            expect(service.downloadExcelFile).not.toHaveBeenCalled()
+        })
+
+        it('keeps canDownloadExcel false when generated output exists but no excel download path is available', async () => {
+            const service = makeMockService({
+                exportToExcel: undefined,
+                downloadExcelFile: undefined,
+                downloadSessionOutputExcelFile: undefined,
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(getExcelState(result).canDownloadExcel).toBe(false)
+        })
+    })
 })

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
+from rest_framework.response import Response
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -332,6 +333,46 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(
             export_output_json["summary"],
             {"total_tables": 1, "total_rows": 1, "total_columns": 1},
+        )
+
+    def test_build_export_output_json_uses_default_value_header_for_empty_headers(self):
+        export_output_json = build_export_output_json(
+            input_json={"filename": "summary.xlsx"},
+            output_json={
+                "headers": [],
+                "rows": [[{"bad"}]],
+            },
+        )
+
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["value"],
+                    "rows": [{"value": "[Unserializable Value]"}],
+                }
+            ],
+        )
+
+    def test_build_export_output_json_infers_headers_from_list_of_lists_payload(self):
+        export_output_json = build_export_output_json(
+            input_json={"filename": "summary.xlsx"},
+            output_json=[["ICU", 10], ["ER", 20]],
+        )
+
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["column_1", "column_2"],
+                    "rows": [
+                        {"column_1": "ICU", "column_2": 10},
+                        {"column_1": "ER", "column_2": 20},
+                    ],
+                }
+            ],
         )
 
     @patch("llm.views.build_llm_generation_service")
@@ -1130,6 +1171,42 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             "rows": [["ICU", 1000]],
         }
         mock_generate_reasoning.return_value = None
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        generated_output = GeneratedOutput.objects.get()
+        self.assertEqual(generated_output.thinking_log, "")
+
+    @patch("llm.views._build_generate_success_response")
+    @patch("llm.views._generate_optional_reasoning")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_defaults_thinking_log_to_empty_when_reasoning_log_is_not_string(
+        self,
+        mock_build_service,
+        mock_generate_reasoning,
+        mock_build_success_response,
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        mock_generate_reasoning.return_value = {
+            "final_answer": "Done.",
+            "thinking_log": ["not", "a", "string"],
+        }
+        mock_build_success_response.return_value = Response({"status": "ok"})
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(

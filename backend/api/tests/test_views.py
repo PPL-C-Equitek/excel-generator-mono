@@ -3444,3 +3444,91 @@ class SessionEndpointTests(TestCase):
         )
 
         self.assertEqual(normalized, payload)
+
+    def test_normalize_session_output_export_payload_defaults_to_excel_when_source_type_invalid_without_pdf_filename(self):
+        payload = {
+            "document_info": {
+                "source_type": "unknown",
+                "filename": "invoice.xlsx",
+            },
+            "summary": {"table_count": 1},
+            "content_data": [],
+        }
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(output_json=payload)
+        )
+
+        self.assertEqual(
+            normalized["document_info"],
+            {
+                "source_type": "Excel",
+                "filename": "invoice.xlsx",
+            },
+        )
+
+    def test_session_csv_download_helper_responses_use_expected_messages(self):
+        not_found_response = views._session_csv_download_not_found_response()
+        internal_error_response = views._session_csv_download_internal_error_response()
+
+        self.assertEqual(not_found_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            not_found_response.data,
+            {"status": "error", "message": "CSV file not found."},
+        )
+        self.assertEqual(
+            internal_error_response.status_code,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+        self.assertEqual(
+            internal_error_response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+
+    @patch("api.views.open", side_effect=RuntimeError("unexpected read failure"))
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_internal_error_when_file_open_raises_unexpected_exception(
+        self,
+        mock_get_output,
+        mock_export_csv,
+        mock_open_file,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf", "source_type": "PDF"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+        mock_open_file.assert_called_once()
