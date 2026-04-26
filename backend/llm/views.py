@@ -157,6 +157,72 @@ def _build_thinking_log_queryset_for_user(user, session_id=None, request_id=None
     return queryset
 
 
+def _resolve_generate_session(user, session_id):
+    if session_id is None or not getattr(user, "is_authenticated", False):
+        return None, None
+
+    session = get_session_for_user(user, session_id)
+    if session is None:
+        return None, Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+
+    return session, None
+
+
+def _generate_output_json(llm_generation_service, input_json, custom_schema_id):
+    try:
+        return llm_generation_service.generate(
+            input_json=input_json,
+            custom_schema_id=custom_schema_id,
+        ), None
+    except CustomSchemaNotFoundError:
+        return None, Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
+    except OpenAIConfigurationError:
+        return None, Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
+    except OpenAIUpstreamError as exc:
+        logger.exception("Upstream LLM provider error while handling llm_generate request.")
+        return None, Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
+    except OpenAIServiceError:
+        return None, Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    except ValueError:
+        logger.exception("Invalid input_json payload.")
+        return None, Response(
+            {
+                "detail": INVALID_REQUEST_DETAIL,
+                "errors": {"input_json": [INVALID_INPUT_JSON_DETAIL]},
+            },
+            status=400,
+        )
+    except Exception:
+        logger.exception("Unexpected error while handling llm_generate request.")
+        return None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+
+
+def _persist_generate_output_for_authenticated_user(user, session, output_json):
+    if not getattr(user, "is_authenticated", False):
+        return None, None
+
+    try:
+        with transaction.atomic():
+            if session is None:
+                session = create_session_for_user(user)
+            create_generated_output(session, output_json)
+        return session.id, None
+    except Exception:
+        logger.exception(
+            "Unexpected error while persisting session-aware llm_generate output."
+        )
+        return None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+
+
+def _build_generate_success_response(output_json, session_id):
+    response_serializer = LlmGenerateResponseSerializer(
+        data={"output_json": output_json, "session_id": session_id}
+    )
+    if not response_serializer.is_valid():
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    return Response(response_serializer.data)
+
+
 @api_view(["POST"])
 @require_http_methods(["POST"])
 def llm_generate(request):
@@ -175,61 +241,28 @@ def llm_generate(request):
     input_json = validated_data["input_json"]
     session_id = validated_data.get("session_id")
     custom_schema_id = validated_data.get("custom_schema_id")
-    session = None
-    if session_id is not None and getattr(request.user, "is_authenticated", False):
-        session = get_session_for_user(request.user, session_id)
-        if session is None:
-            return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+    session, error_response = _resolve_generate_session(request.user, session_id)
+    if error_response is not None:
+        return error_response
+
     llm_generation_service = build_llm_generation_service(request.user)
-
-    try:
-        output_json = llm_generation_service.generate(
-            input_json=input_json,
-            custom_schema_id=custom_schema_id,
-        )
-    except CustomSchemaNotFoundError:
-        return Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
-    except OpenAIConfigurationError:
-        return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
-    except OpenAIUpstreamError as exc:
-        logger.exception("Upstream LLM provider error while handling llm_generate request.")
-        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
-    except OpenAIServiceError:
-        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
-    except ValueError:
-        logger.exception("Invalid input_json payload.")
-        return Response(
-            {
-                "detail": INVALID_REQUEST_DETAIL,
-                "errors": {"input_json": [INVALID_INPUT_JSON_DETAIL]},
-            },
-            status=400,
-        )
-    except Exception:
-        logger.exception("Unexpected error while handling llm_generate request.")
-        return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
-
-    response_session_id = None
-    if getattr(request.user, "is_authenticated", False):
-        try:
-            with transaction.atomic():
-                if session is None:
-                    session = create_session_for_user(request.user)
-                create_generated_output(session, output_json)
-            response_session_id = session.id
-        except Exception:
-            logger.exception(
-                "Unexpected error while persisting session-aware llm_generate output."
-            )
-            return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
-
-    response_serializer = LlmGenerateResponseSerializer(
-        data={"output_json": output_json, "session_id": response_session_id}
+    output_json, error_response = _generate_output_json(
+        llm_generation_service,
+        input_json,
+        custom_schema_id,
     )
-    if not response_serializer.is_valid():
-        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    if error_response is not None:
+        return error_response
 
-    return Response(response_serializer.data)
+    response_session_id, error_response = _persist_generate_output_for_authenticated_user(
+        request.user,
+        session,
+        output_json,
+    )
+    if error_response is not None:
+        return error_response
+
+    return _build_generate_success_response(output_json, response_session_id)
 
 @require_http_methods(["POST"])
 @api_view(["POST"])
