@@ -63,6 +63,30 @@ describe("generateJson positive", () => {
     });
   });
 
+  it("accepts optional validated_json refinement output", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      validated_json: { summary: "Validated", rows: [{ id: 1, value: "ok" }] },
+      validation_log: {
+        iteration: 2,
+        verdict: "valid",
+        errors: [],
+        warnings: [],
+        summary: "Output passed strict export schema validation.",
+      },
+      refinement_meta: {
+        iterations_run: 2,
+        max_iterations: 3,
+        early_exit_triggered: true,
+        final_status: "valid",
+      },
+    });
+
+    const result = await generateJson({ key: "value" });
+    expect(result.validated_json).toMatchObject({ summary: "Validated" });
+    fetchSpy.mockRestore();
+  });
+
   it("sends custom_schema_id when one is selected", async () => {
     const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
       output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
@@ -236,6 +260,14 @@ describe("generateJson edge cases", () => {
 
   it("throws schema error when output_json is missing", async () => {
     server.use(handlerInvalidSchema);
+    await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
+  });
+
+  it("throws schema error when validated_json is present but not an object", async () => {
+    vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      validated_json: "invalid",
+    });
     await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
   });
 

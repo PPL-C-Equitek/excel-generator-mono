@@ -14,6 +14,7 @@ import { isJsonObject } from '@/utils/schemaValidator'
 import { sanitizeCSVCell } from '@/utils/csvSanitizer'
 import type { ILLMService } from '@/lib/ILLMService'
 import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
+import type { RefinementMeta, ValidationLog, ReasoningPayload } from '@/services/llm'
 import { FILE_TOO_LARGE_MESSAGE, MAX_UPLOAD_SIZE_BYTES } from '@/constants/upload'
 
 const defaultService: ILLMService = {
@@ -357,6 +358,9 @@ export interface UseConvertFlowReturn {
     error: string | null
     excelError: string | null
     excelSuccessMessage: string | null
+    reasoning: ReasoningPayload | null
+    validationLog: ValidationLog | null
+    refinementMeta: RefinementMeta | null
     outputFile: OutputFile | null
     csvMetadata: CsvMetadata | null
     handleFileSelect: (file: File, customSchemaId?: string | null) => Promise<void>
@@ -377,6 +381,9 @@ export function useConvertFlow(
     const [uploadResultForExport, setUploadResultForExport] = useState<JsonObject | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
     const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
+    const [reasoning, setReasoning] = useState<ReasoningPayload | null>(null)
+    const [validationLog, setValidationLog] = useState<ValidationLog | null>(null)
+    const [refinementMeta, setRefinementMeta] = useState<RefinementMeta | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
     const conversionRequestIdRef = useRef(0)
 
@@ -423,6 +430,9 @@ export function useConvertFlow(
         setUploadResultForExport(null)
         setCsvMetadata(null)
         setGeneratedOutput(null)
+        setReasoning(null)
+        setValidationLog(null)
+        setRefinementMeta(null)
         setIsExcelDownloading(false)
     }
 
@@ -439,7 +449,10 @@ export function useConvertFlow(
                     : await llmService.generate(uploadResult, undefined, signal)
             if (signal.aborted) return
 
-            setGeneratedOutput(llmResult.output_json)
+            setGeneratedOutput(llmResult.validated_json ?? llmResult.output_json)
+            setReasoning(llmResult.reasoning ?? null)
+            setValidationLog(llmResult.validation_log ?? null)
+            setRefinementMeta(llmResult.refinement_meta ?? null)
             setUploadResultForExport(uploadResult)
             setOutputFile(parseOutputFile(uploadResult, file))
         } catch (err: unknown) {
@@ -601,6 +614,9 @@ export function useConvertFlow(
         error,
         excelError,
         excelSuccessMessage,
+        reasoning,
+        validationLog,
+        refinementMeta,
         outputFile,
         csvMetadata,
         handleFileSelect,

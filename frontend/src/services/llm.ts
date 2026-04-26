@@ -12,8 +12,40 @@ export interface LLMRequest {
   custom_schema_id?: string;
 }
 
+export interface ValidationLogIssue {
+  path: string;
+  message: string;
+  severity: "error" | "warning";
+}
+
+export interface ValidationLog {
+  iteration: number;
+  verdict: "valid" | "invalid";
+  errors: ValidationLogIssue[];
+  warnings: ValidationLogIssue[];
+  summary: string;
+}
+
+export interface RefinementMeta {
+  iterations_run: number;
+  max_iterations: number;
+  early_exit_triggered: boolean;
+  final_status: "valid" | "best_effort" | "failed";
+}
+
+export interface ReasoningPayload {
+  final_answer: string;
+  reasoning_steps: string[];
+  thinking_log: string;
+}
+
 export interface LLMResponse {
   output_json: JsonValue;
+  raw_json?: JsonValue;
+  validated_json?: JsonValue;
+  validation_log?: ValidationLog;
+  refinement_meta?: RefinementMeta;
+  reasoning?: ReasoningPayload | null;
 }
 
 export interface ExcelExportResponse {
@@ -164,11 +196,21 @@ export async function generateJson(
     errorMode: "mapped-or-default",
   });
 
+  const responseRecord = data as Record<string, unknown>;
   if (
     typeof data !== "object" ||
     data === null ||
     !("output_json" in data) ||
-    !isJsonObject((data as Record<string, unknown>)["output_json"])
+    !isJsonObject(responseRecord["output_json"])
+  ) {
+    throw new Error("The server returned an invalid response.");
+  }
+
+  if (
+    "validated_json" in responseRecord &&
+    responseRecord["validated_json"] !== undefined &&
+    responseRecord["validated_json"] !== null &&
+    !isJsonObject(responseRecord["validated_json"])
   ) {
     throw new Error("The server returned an invalid response.");
   }

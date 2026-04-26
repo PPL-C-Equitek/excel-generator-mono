@@ -190,6 +190,63 @@ describe('useConvertFlow', () => {
             )
         })
 
+        it('uses validated_json for export when server returns refinement result', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: { status: 'raw' },
+                    validated_json: {
+                        document_info: {
+                            source_type: 'PDF',
+                            filename: 'report.pdf',
+                        },
+                        summary: {
+                            total_tables: 1,
+                            total_rows: 1,
+                            total_columns: 1,
+                        },
+                        content_data: [
+                            {
+                                table_name: 'Sheet1',
+                                headers: ['status'],
+                                rows: [{ status: 'validated' }],
+                            },
+                        ],
+                    },
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await getDownloadState(result).handleExcelDownload()
+            })
+
+            expect(service.exportToExcel).toHaveBeenCalledWith(
+                {
+                    document_info: {
+                        source_type: 'PDF',
+                        filename: 'report.pdf',
+                    },
+                    summary: {
+                        total_tables: 1,
+                        total_rows: 1,
+                        total_columns: 1,
+                    },
+                    content_data: [
+                        {
+                            table_name: 'Sheet1',
+                            headers: ['status'],
+                            rows: [{ status: 'validated' }],
+                        },
+                    ],
+                },
+                expect.any(AbortSignal)
+            )
+        })
+
         it('passes the selected custom schema id into llmService.generate when provided', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
