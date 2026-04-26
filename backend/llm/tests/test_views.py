@@ -982,6 +982,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                 "rows": [["ICU", 1000]],
             },
         )
+        self.assertIsInstance(generated_output.thinking_log, str)
         self.assertEqual(
             generated_output.export_output_json,
             {
@@ -1004,6 +1005,73 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             },
         )
         self.assertEqual(ArtifactHistory.objects.count(), 1)
+
+    @patch("llm.views._generate_optional_reasoning")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_persists_thinking_log_from_reasoning_response(
+        self,
+        mock_build_service,
+        mock_generate_reasoning,
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        mock_generate_reasoning.return_value = {
+            "final_answer": "Done.",
+            "reasoning_steps": ["Mapped rows."],
+            "thinking_log": "Normalized columns and preserved totals.",
+        }
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        generated_output = GeneratedOutput.objects.get()
+        self.assertEqual(
+            generated_output.thinking_log,
+            "Normalized columns and preserved totals.",
+        )
+
+    @patch("llm.views._generate_optional_reasoning")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_defaults_thinking_log_to_empty_when_reasoning_missing(
+        self,
+        mock_build_service,
+        mock_generate_reasoning,
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        mock_generate_reasoning.return_value = None
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        generated_output = GeneratedOutput.objects.get()
+        self.assertEqual(generated_output.thinking_log, "")
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_does_not_create_session_or_generated_output_when_generation_fails(
