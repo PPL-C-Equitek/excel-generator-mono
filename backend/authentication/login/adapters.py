@@ -55,8 +55,8 @@ class DjangoLoginFailureTracker(LoginAttemptTrackerPort):
 
 
 class DjangoLoginTokenGenerator(LoginTokenGeneratorPort):
-    def generate(self, user_id: object, email: str) -> dict[str, str]:
-        return generate_tokens(user_id, email)
+    def generate(self, user_id: object, email: str, session_version: int) -> dict[str, str]:
+        return generate_tokens(user_id, email, session_version=session_version)
 
 
 def build_login_use_case() -> LoginUserUseCase:

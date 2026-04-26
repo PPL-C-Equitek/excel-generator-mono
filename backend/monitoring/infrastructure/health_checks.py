@@ -7,6 +7,11 @@ from django.db import connections
 
 from monitoring.domain.entities import CheckResult
 
+try:
+    import redis
+except ImportError:  # pragma: no cover
+    redis = None
+
 
 class BaseHealthCheck(ABC):
     name = "base"
@@ -74,3 +79,34 @@ class OpenAIConfigHealthCheck(BaseHealthCheck):
         if not isinstance(api_key, str) or not api_key.strip():
             raise RuntimeError("OPENAI_API_KEY is not configured.")
 
+
+class RedisHealthCheck(BaseHealthCheck):
+    name = "redis"
+    is_critical = False
+
+    def __init__(
+        self,
+        *,
+        redis_url: str,
+        socket_timeout_seconds: float = 1.0,
+        connect_timeout_seconds: float = 1.0,
+        is_critical: bool = False,
+        redis_client=None,
+    ):
+        self._redis_url = redis_url
+        self._socket_timeout_seconds = float(socket_timeout_seconds)
+        self._connect_timeout_seconds = float(connect_timeout_seconds)
+        self.is_critical = bool(is_critical)
+        self._redis_client = redis_client
+
+    def perform_check(self) -> None:
+        if self._redis_client is None:
+            if redis is None:
+                raise RuntimeError("Redis dependency is missing.")
+            self._redis_client = redis.Redis.from_url(
+                self._redis_url,
+                decode_responses=True,
+                socket_timeout=self._socket_timeout_seconds,
+                socket_connect_timeout=self._connect_timeout_seconds,
+            )
+        self._redis_client.ping()

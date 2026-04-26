@@ -30,9 +30,17 @@ from chat_sessions.serializers import (
 )
 from chat_sessions.services import (
     delete_session,
+    get_default_session_detail_pagination,
+    get_paginated_session_detail_for_user,
     get_session_for_user,
     list_sessions_for_user,
+    SESSION_DETAIL_MAX_LIMIT,
+    SESSION_DETAIL_LIMIT_FIELDS,
+    SESSION_DETAIL_OFFSET_FIELDS,
+    SESSION_LIST_DEFAULT_LIMIT,
+    SESSION_LIST_MAX_LIMIT,
     update_session_title,
+    validate_session_detail_pagination_params as validate_session_detail_pagination_params_service,
 )
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
@@ -62,18 +70,35 @@ from file_processing.services.export_service import (
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
 NOT_FOUND_DETAIL = "Not found."
-SESSION_LIST_DEFAULT_LIMIT = 10
 INVALID_SESSION_LIST_PAGINATION_DETAIL = "Invalid session list pagination."
+INVALID_SESSION_DETAIL_PAGINATION_DETAIL = "Invalid session detail pagination."
 SESSION_LIST_PAGINATION_ERROR_DETAILS = {
     "limit must be an integer.",
     "offset must be an integer.",
     "offset must be greater than or equal to 0.",
     "limit must be greater than 0.",
-    "limit must be less than or equal to 50.",
+    f"limit must be less than or equal to {SESSION_LIST_MAX_LIMIT}.",
+}
+SESSION_DETAIL_PAGINATION_ERROR_DETAILS = {
+    f"{field} must be an integer."
+    for field in (*SESSION_DETAIL_LIMIT_FIELDS, *SESSION_DETAIL_OFFSET_FIELDS)
+} | {
+    "messages_limit must be greater than 0.",
+    f"messages_limit must be less than or equal to {SESSION_DETAIL_MAX_LIMIT}.",
+    "messages_offset must be greater than or equal to 0.",
+    "outputs_limit must be greater than 0.",
+    f"outputs_limit must be less than or equal to {SESSION_DETAIL_MAX_LIMIT}.",
+    "outputs_offset must be greater than or equal to 0.",
 }
 
 
 class SessionListPaginationError(Exception):
+    def __init__(self, detail):
+        super().__init__(detail)
+        self.detail = detail
+
+
+class SessionDetailPaginationError(Exception):
     def __init__(self, detail):
         super().__init__(detail)
         self.detail = detail
@@ -110,6 +135,44 @@ def _build_session_list_pagination_error_response(detail):
         detail
         if detail in SESSION_LIST_PAGINATION_ERROR_DETAILS
         else INVALID_SESSION_LIST_PAGINATION_DETAIL
+    )
+    return Response({"detail": safe_detail}, status=status.HTTP_400_BAD_REQUEST)
+
+
+def _parse_session_detail_pagination(request):
+    pagination = get_default_session_detail_pagination()
+    for name, default in pagination.items():
+        pagination[name] = _parse_session_detail_int_param(
+            request,
+            name,
+            default=default,
+        )
+    _validate_session_detail_pagination_params(pagination)
+    return pagination
+
+
+def _parse_session_detail_int_param(request, name, default):
+    value = request.query_params.get(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise SessionDetailPaginationError(f"{name} must be an integer.")
+
+def _validate_session_detail_pagination_params(pagination):
+    try:
+        validate_session_detail_pagination_params_service(pagination)
+    except ValueError as exc:
+        detail = exc.args[0] if exc.args else INVALID_SESSION_DETAIL_PAGINATION_DETAIL
+        raise SessionDetailPaginationError(detail) from exc
+
+
+def _build_session_detail_pagination_error_response(detail):
+    safe_detail = (
+        detail
+        if detail in SESSION_DETAIL_PAGINATION_ERROR_DETAILS
+        else INVALID_SESSION_DETAIL_PAGINATION_DETAIL
     )
     return Response({"detail": safe_detail}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -798,11 +861,23 @@ def session_list(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def session_detail(request, session_id):
-    return _build_session_detail_response(request.user, session_id)
+    return _build_session_detail_response(request, session_id)
 
 
-def _build_session_detail_response(user, session_id):
-    session = get_session_for_user(user, session_id)
+def _build_session_detail_response(request, session_id):
+    try:
+        pagination = _parse_session_detail_pagination(request)
+        session = get_paginated_session_detail_for_user(
+            request.user,
+            session_id,
+            **pagination,
+        )
+    except SessionDetailPaginationError as exc:
+        return _build_session_detail_pagination_error_response(exc.detail)
+    except ValueError as exc:
+        detail = exc.args[0] if exc.args else None
+        return _build_session_detail_pagination_error_response(detail)
+
     if session is None:
         return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
 
@@ -850,7 +925,7 @@ class SessionResourceView(APIView):
     permission_classes = [IsAuthenticated, IsVerifiedUser]
 
     def get(self, request, session_id):
-        return _build_session_detail_response(request.user, session_id)
+        return _build_session_detail_response(request, session_id)
 
     def patch(self, request, session_id):
         return _build_session_update_response(request.user, request.data, session_id)

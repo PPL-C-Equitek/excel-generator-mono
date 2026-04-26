@@ -28,7 +28,7 @@ class LoginAttemptTrackerPort(ABC):
 
 class LoginTokenGeneratorPort(ABC):
     @abstractmethod
-    def generate(self, user_id: object, email: str) -> dict[str, str]:
+    def generate(self, user_id: object, email: str, session_version: int) -> dict[str, str]:
         raise NotImplementedError
 
 

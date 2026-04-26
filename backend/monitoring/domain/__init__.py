@@ -4,6 +4,7 @@ from .entities import (
     CheckResult,
     EventMetricSnapshot,
     MetricsSnapshot,
+    RealtimeMetricPoint,
     RequestMetricEvent,
     RouteMetricSnapshot,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "CheckResult",
     "EventMetricSnapshot",
     "MetricsSnapshot",
+    "RealtimeMetricPoint",
     "RequestMetricEvent",
     "RouteMetricSnapshot",
 ]

@@ -7,8 +7,15 @@ from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from django.db import transaction
 
 from artifact_history.services import create_artifact_history
+from chat_sessions.services import (
+    append_assistant_message,
+    append_user_message,
+    create_session_for_user,
+    get_session_for_user,
+)
 from authentication.permissions import IsVerifiedUser
 from .serializers import (
     LlmGenerateRequestSerializer,
@@ -31,7 +38,7 @@ from .services.openai_client import (
     OpenAIConfigurationError,
     OpenAIServiceError,
     OpenAIUpstreamError,
-    generate_text,
+    generate_chat_response,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +53,7 @@ INTERNAL_FAILURE_DETAIL = "Internal server error."
 INVALID_INPUT_JSON_DETAIL = "Invalid input_json payload."
 INVALID_PROMPT_DETAIL = "Invalid prompt payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
+SESSION_NOT_FOUND_DETAIL = "Session not found."
 THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
 INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."
@@ -233,8 +241,9 @@ def llm_generate(request):
         )
     return Response(response_serializer.data)
 
-@api_view(["POST"])
 @require_http_methods(["POST"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def send_message(request):
     content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
     if content_type != _JSON_CONTENT_TYPE:
@@ -248,9 +257,24 @@ def send_message(request):
         )
 
     message = serializer.validated_data["message"]
+    session_id = serializer.validated_data.get("session_id")
+
+    session = None
+    if session_id:
+        session = get_session_for_user(request.user, session_id)
+        if session is None:
+            return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+        history = [
+            {"role": msg.role, "content": msg.content}
+            for msg in session.messages.order_by("created_at")
+        ]
+    else:
+        history = []
+
+    history.append({"role": "user", "content": message})
 
     try:
-        reply = generate_text(message)
+        reply = generate_chat_response(history)
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     except OpenAIUpstreamError as exc:
@@ -262,7 +286,15 @@ def send_message(request):
         logger.exception("Unexpected error while handling send_message request.")
         return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
-    response_serializer = SendMessageResponseSerializer(data={"reply": reply})
+    with transaction.atomic():
+        if session is None:
+            session = create_session_for_user(request.user)
+        append_user_message(session, message)
+        append_assistant_message(session, reply)
+
+    response_serializer = SendMessageResponseSerializer(
+        data={"session_id": session.id, "reply": reply}
+    )
     if not response_serializer.is_valid():
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
     return Response(response_serializer.data)
