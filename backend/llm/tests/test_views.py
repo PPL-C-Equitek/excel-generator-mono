@@ -914,7 +914,12 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self, mock_build_service
     ):
         mock_service = mock_build_service.return_value
-        mock_service.generate.return_value = self.output_json
+        raw_output_json = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+            "final_answer": "Raw output for FE",
+        }
+        mock_service.generate.return_value = raw_output_json
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
@@ -937,7 +942,34 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self.assertEqual(GeneratedOutput.objects.count(), 1)
         generated_output = GeneratedOutput.objects.get(session=session)
         self.assertEqual(str(generated_output.id), response.data["output_id"])
-        self.assertEqual(generated_output.output_json, self.output_json)
+        self.assertEqual(
+            generated_output.output_json,
+            {
+                "headers": ["unit", "value"],
+                "rows": [["ICU", 1000]],
+            },
+        )
+        self.assertEqual(
+            generated_output.export_output_json,
+            {
+                "document_info": {
+                    "source_type": "unknown",
+                    "filename": "invoice.pdf",
+                },
+                "summary": {
+                    "total_tables": 1,
+                    "total_rows": 1,
+                    "total_columns": 2,
+                },
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["unit", "value"],
+                        "rows": [{"unit": "ICU", "value": 1000}],
+                    }
+                ],
+            },
+        )
         self.assertEqual(ArtifactHistory.objects.count(), 1)
 
     @patch("llm.views.build_llm_generation_service")
@@ -1007,7 +1039,12 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self, mock_build_service
     ):
         mock_service = mock_build_service.return_value
-        mock_service.generate.return_value = self.output_json
+        raw_output_json = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+            "reasoning_steps": ["remove me from persisted raw payload"],
+        }
+        mock_service.generate.return_value = raw_output_json
         session = Session.objects.create(owner=self.user, title="Existing Session")
         self.client.force_authenticate(user=self.user)
 
@@ -1027,6 +1064,17 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         generated_output = GeneratedOutput.objects.get()
         self.assertEqual(generated_output.session, session)
         self.assertEqual(response.data["output_id"], str(generated_output.id))
+        self.assertEqual(
+            generated_output.output_json,
+            {
+                "headers": ["unit", "value"],
+                "rows": [["ICU", 1000]],
+            },
+        )
+        self.assertEqual(
+            generated_output.export_output_json["content_data"][0]["rows"],
+            [{"unit": "ICU", "value": 1000}],
+        )
         self.assertTrue(ArtifactHistory.objects.exists())
 
     @patch("llm.views.build_llm_generation_service")
