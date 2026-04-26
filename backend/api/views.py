@@ -30,6 +30,7 @@ from chat_sessions.serializers import (
 )
 from chat_sessions.services import (
     delete_session,
+    get_generated_output_for_session_user,
     get_default_session_detail_pagination,
     get_paginated_session_detail_for_user,
     get_session_for_user,
@@ -830,6 +831,83 @@ def download_csv(request, file_id):
         as_attachment=True,
         filename=download_name,
         content_type=artifact["content_type"],
+    )
+
+
+@require_GET
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_output_download_csv(request, session_id, output_id):
+    output = get_generated_output_for_session_user(
+        request.user,
+        session_id,
+        output_id,
+    )
+    if output is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        artifact = export_csv_to_filesystem(
+            output_json=output.output_json,
+            storage_dir=settings.CSV_EXPORT_DIR,
+        )
+    except Exception as exc:
+        return _build_export_error_response(
+            error=exc,
+            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
+            generation_error_types=(OutputCSVGenerationError,),
+            invalid_request_message="Invalid CSV export request.",
+            internal_error_message="Failed to download CSV due to internal error.",
+            validation_log_message="Validation or mapping error during session CSV download.",
+            generation_log_message="CSV generation error during session CSV download.",
+            unexpected_log_message="Unexpected error during session CSV download.",
+        )
+
+    try:
+        safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
+        file_handle = open(safe_file_path, "rb")
+    except (KeyError, SuspiciousFileOperation, ValueError):
+        logger.warning(
+            "Session CSV download resolved unsafe artifact metadata.",
+            exc_info=True,
+        )
+        return Response(
+            {
+                "status": "error",
+                "message": "CSV file not found.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    except OSError:
+        logger.exception("Session CSV download failed while reading generated artifact.")
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    except Exception:
+        logger.exception("Unexpected error while preparing session CSV download.")
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    download_name = _resolve_download_filename(
+        requested_name=request.query_params.get("filename"),
+        default_name=artifact["file_name"],
+        artifact_type=artifact["artifact_type"],
+    )
+
+    return FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=download_name,
+        content_type="text/csv",
     )
 
 

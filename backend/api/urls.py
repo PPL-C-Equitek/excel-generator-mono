@@ -7,6 +7,10 @@ urlpatterns = [
     path("members/", views.members),
     path("sessions/", views.session_list),
     path("sessions/<uuid:session_id>/", views.SessionResourceView.as_view()),
+    path(
+        "sessions/<uuid:session_id>/outputs/<uuid:output_id>/download/csv/",
+        views.session_output_download_csv,
+    ),
     path("history/", views.history_list),
     path("history/<uuid:history_id>/rename/", views.history_rename),
     path("history/<uuid:history_id>/delete/", views.history_delete),
