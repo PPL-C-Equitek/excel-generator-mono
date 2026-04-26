@@ -473,33 +473,69 @@ class CreateGeneratedOutputServiceTest(TestCase):
         )
         self.session = Session.objects.create(owner=owner)
         self.valid_output_json = {
+            "headers": ["A"],
+            "rows": [["1"]],
+            "final_answer": "Raw output",
+        }
+        self.valid_export_output_json = {
             "document_info": {"filename": "test.xlsx"},
             "summary": {"total_sheets": 1},
-            "content_data": [],
+            "content_data": [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["A"],
+                    "rows": [["1"]],
+                }
+            ],
         }
 
     def test_create_generated_output_creates_output_with_correct_data(self):
-        output = create_generated_output(self.session, self.valid_output_json)
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_export_output_json,
+        )
 
         self.assertEqual(output.output_json, self.valid_output_json)
+        self.assertEqual(output.export_output_json, self.valid_export_output_json)
         self.assertEqual(output.session, self.session)
 
     def test_create_generated_output_persists_to_db(self):
-        output = create_generated_output(self.session, self.valid_output_json)
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_export_output_json,
+        )
 
         self.assertTrue(GeneratedOutput.objects.filter(id=output.id).exists())
 
     def test_create_generated_output_updates_session_last_output_at(self):
         self.assertIsNone(self.session.last_output_at)
 
-        create_generated_output(self.session, self.valid_output_json)
+        create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_export_output_json,
+        )
 
         self.session.refresh_from_db()
         self.assertIsNotNone(self.session.last_output_at)
 
     def test_create_generated_output_rejects_non_dict_output_json(self):
         with self.assertRaises(ValidationError):
-            create_generated_output(self.session, ["bukan", "dict"])
+            create_generated_output(
+                self.session,
+                ["bukan", "dict"],
+                self.valid_export_output_json,
+            )
+
+    def test_create_generated_output_rejects_non_dict_export_output_json(self):
+        with self.assertRaises(ValidationError):
+            create_generated_output(
+                self.session,
+                self.valid_output_json,
+                ["bukan", "dict"],
+            )
 
 
 class SummarizeOldMessagesServiceTest(SimpleTestCase):
