@@ -510,15 +510,16 @@ export function useConvertFlow(
 
         const requestId = conversionRequestIdRef.current
         const csvFilename = outputFile.filename.replace(/\.[^/.]+$/, '') + '.csv'
+        const sessionCsvDownload = llmService.downloadSessionOutputCsvFile
         const canUseSessionDownload = canUseSessionOutputDownload(
             generatedSessionId,
             generatedOutputId,
-            llmService.downloadSessionOutputCsvFile
+            sessionCsvDownload
         )
 
         try {
             if (canUseSessionDownload) {
-                await llmService.downloadSessionOutputCsvFile(
+                await sessionCsvDownload(
                     generatedSessionId,
                     generatedOutputId,
                     csvFilename
@@ -582,10 +583,11 @@ export function useConvertFlow(
 
         const requestId = conversionRequestIdRef.current
         const excelFilename = getExcelDownloadFilename(outputFile.filename)
+        const sessionExcelDownload = llmService.downloadSessionOutputExcelFile
         const canUseSessionDownload = canUseSessionOutputDownload(
             generatedSessionId,
             generatedOutputId,
-            llmService.downloadSessionOutputExcelFile
+            sessionExcelDownload
         )
 
         setExcelError(null)
@@ -594,7 +596,7 @@ export function useConvertFlow(
 
         try {
             if (canUseSessionDownload) {
-                await llmService.downloadSessionOutputExcelFile(
+                await sessionExcelDownload(
                     generatedSessionId,
                     generatedOutputId,
                     excelFilename

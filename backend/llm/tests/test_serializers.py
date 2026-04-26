@@ -103,6 +103,8 @@ class LlmGenerateSerializerTest(SimpleTestCase):
             }
         )
 
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
     def test_generate_request_serializer_accepts_include_reasoning(self):
         serializer = LlmGenerateRequestSerializer(
             data={"input_json": {"sheet": "Sheet1"}, "include_reasoning": False}
