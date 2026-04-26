@@ -112,6 +112,24 @@ def get_paginated_session_detail_for_user(
     )
 
 
+def build_resume_context_for_user(user, session_id):
+    session = get_session_for_user(user, session_id)
+    if session is None:
+        return None
+
+    history = _build_resume_history(session)
+
+    return SimpleNamespace(
+        id=session.id,
+        title=session.title,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        last_message_at=session.last_message_at,
+        last_output_at=session.last_output_at,
+        history=history,
+    )
+
+
 def get_default_session_detail_pagination():
     return dict(SESSION_DETAIL_PAGINATION_DEFAULTS)
 
@@ -142,6 +160,35 @@ def _build_paginated_collection(queryset, limit, offset):
         "offset": offset,
         "results": list(queryset[offset : offset + limit]),
     }
+
+
+def _build_resume_history(session):
+    message_items = [
+        SimpleNamespace(
+            type="message",
+            id=message.id,
+            role=message.role,
+            content=message.content,
+            thinking_log=message.thinking_log,
+            created_at=message.created_at,
+        )
+        for message in session.messages.order_by("created_at", "id")
+    ]
+    output_items = [
+        SimpleNamespace(
+            type="output",
+            id=output.id,
+            output_json=output.output_json,
+            thinking_log=output.thinking_log,
+            created_at=output.created_at,
+        )
+        for output in session.generated_outputs.order_by("created_at", "id")
+    ]
+
+    return sorted(
+        [*message_items, *output_items],
+        key=lambda item: (item.created_at, str(item.id)),
+    )
 
 
 def update_session_title(session, title):
