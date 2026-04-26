@@ -199,24 +199,28 @@ def _generate_output_json(llm_generation_service, input_json, custom_schema_id):
 
 def _persist_generate_output_for_authenticated_user(user, session, output_json):
     if not getattr(user, "is_authenticated", False):
-        return None, None
+        return None, None, None
 
     try:
         with transaction.atomic():
             if session is None:
                 session = create_session_for_user(user)
-            create_generated_output(session, output_json)
-        return session.id, None
+            generated_output = create_generated_output(session, output_json)
+        return session.id, generated_output.id, None
     except Exception:
         logger.exception(
             "Unexpected error while persisting session-aware llm_generate output."
         )
-        return None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+        return None, None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
 
-def _build_generate_success_response(output_json, session_id):
+def _build_generate_success_response(output_json, session_id, output_id):
     response_serializer = LlmGenerateResponseSerializer(
-        data={"output_json": output_json, "session_id": session_id}
+        data={
+            "output_json": output_json,
+            "session_id": session_id,
+            "output_id": output_id,
+        }
     )
     if not response_serializer.is_valid():
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
@@ -254,7 +258,7 @@ def llm_generate(request):
     if error_response is not None:
         return error_response
 
-    response_session_id, error_response = _persist_generate_output_for_authenticated_user(
+    response_session_id, response_output_id, error_response = _persist_generate_output_for_authenticated_user(
         request.user,
         session,
         output_json,
@@ -262,7 +266,11 @@ def llm_generate(request):
     if error_response is not None:
         return error_response
 
-    return _build_generate_success_response(output_json, response_session_id)
+    return _build_generate_success_response(
+        output_json,
+        response_session_id,
+        response_output_id,
+    )
 
 @require_http_methods(["POST"])
 @api_view(["POST"])

@@ -27,6 +27,7 @@ class LlmGenerateRequestSerializer(serializers.Serializer):
 class LlmGenerateResponseSerializer(serializers.Serializer):
     output_json = serializers.JSONField()
     session_id = serializers.UUIDField(required=False, allow_null=True)
+    output_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class SendMessageRequestSerializer(serializers.Serializer):
