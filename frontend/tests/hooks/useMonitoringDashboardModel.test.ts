@@ -654,6 +654,45 @@ describe('useMonitoringDashboardModel', () => {
         expect(service.getMonitoringStats).not.toHaveBeenCalled()
     })
 
+    it('stops bootstrap flow when snapshot denies access and does not start stream', async () => {
+        const getMonitoringLive = vi.fn().mockResolvedValue({
+            status: 'ok',
+            timestamp: '2026-04-24T10:00:00Z',
+        })
+        const getMonitoringAuthenticatedSnapshot = vi.fn().mockResolvedValue({
+            accessDecision: { allowed: false, reason: 'inactive' },
+            readyPayload: null,
+            statsPayload: null,
+        })
+        const getMonitoringStatsStream = vi.fn()
+        const service: MonitoringDashboardService = {
+            getMonitoringLive,
+            getMonitoringAccess: vi.fn(),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+            getMonitoringAuthenticatedSnapshot,
+            getMonitoringStatsStream,
+        }
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(getMonitoringLive).toHaveBeenCalledTimes(1)
+        expect(getMonitoringAuthenticatedSnapshot).toHaveBeenCalledTimes(1)
+        expect(getMonitoringStatsStream).not.toHaveBeenCalled()
+        expect(service.getMonitoringAccess).not.toHaveBeenCalled()
+        expect(service.getMonitoringReady).not.toHaveBeenCalled()
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+    })
+
     it('bootstraps with snapshot once and keeps interval polling paused while stream is active', async () => {
         vi.useFakeTimers()
         const streamClose = vi.fn()
@@ -711,6 +750,39 @@ describe('useMonitoringDashboardModel', () => {
 
         expect(getMonitoringAuthenticatedSnapshot).toHaveBeenCalledTimes(1)
         expect(getMonitoringLive).toHaveBeenCalledTimes(1)
+
+        unmount()
+        expect(streamClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps using active stream on refresh and skips stats snapshot fallback', async () => {
+        const streamClose = vi.fn()
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockResolvedValue({ close: streamClose }),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { result, unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        })
+
+        act(() => {
+            result.current.refreshDashboard()
+        })
+
+        await waitFor(() => {
+            expect(service.getMonitoringAccess).toHaveBeenCalledTimes(2)
+        })
+
+        expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
 
         unmount()
         expect(streamClose).toHaveBeenCalledTimes(1)

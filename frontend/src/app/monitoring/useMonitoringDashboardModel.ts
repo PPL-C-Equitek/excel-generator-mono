@@ -202,6 +202,57 @@ export function useMonitoringDashboardModel({
         setStatsPayload(statsResponse)
     }, [monitoringService])
 
+    const setLoadingStateForRequest = useCallback((isBackgroundRefresh: boolean) => {
+        if (isBackgroundRefresh) {
+            setIsRefreshing(true)
+            return
+        }
+        setIsLoading(true)
+    }, [])
+
+    const tryBootstrapWithSnapshot = useCallback(async (isBackgroundRefresh: boolean): Promise<boolean> => {
+        const getMonitoringAuthenticatedSnapshot = monitoringService.getMonitoringAuthenticatedSnapshot
+        const shouldBootstrapWithSnapshot = !isBackgroundRefresh
+            && !hasBootstrappedSnapshotRef.current
+            && getMonitoringAuthenticatedSnapshot !== undefined
+        if (!shouldBootstrapWithSnapshot) {
+            return false
+        }
+
+        const accessFromSnapshot = await loadWithAuthenticatedSnapshot(getMonitoringAuthenticatedSnapshot)
+        hasBootstrappedSnapshotRef.current = true
+        if (!accessFromSnapshot.allowed) {
+            return true
+        }
+
+        const getMonitoringStatsStream = monitoringService.getMonitoringStatsStream
+        if (getMonitoringStatsStream !== undefined && monitoringStreamRef.current === null) {
+            const monitoringAuthToken = await getMonitoringAuthToken()
+            await startMonitoringStatsStream(
+                monitoringAuthToken,
+                getMonitoringStatsStream
+            )
+        }
+        return true
+    }, [loadWithAuthenticatedSnapshot, monitoringService, startMonitoringStatsStream])
+
+    const loadStatsForAuthorizedRequest = useCallback(async (monitoringAuthToken: string) => {
+        const getMonitoringStatsStream = monitoringService.getMonitoringStatsStream
+        const shouldUseStream = getMonitoringStatsStream !== undefined
+            && monitoringStreamRef.current === null
+        if (shouldUseStream) {
+            await startMonitoringStatsStream(
+                monitoringAuthToken,
+                getMonitoringStatsStream
+            )
+            return
+        }
+
+        if (monitoringStreamRef.current === null) {
+            await loadMonitoringStatsSnapshot(monitoringAuthToken)
+        }
+    }, [loadMonitoringStatsSnapshot, monitoringService, startMonitoringStatsStream])
+
     const loadDashboard = useCallback(
         async (isBackgroundRefresh: boolean) => {
             if (isDashboardRequestInFlightRef.current) {
@@ -209,34 +260,11 @@ export function useMonitoringDashboardModel({
             }
             isDashboardRequestInFlightRef.current = true
             setErrorMessage(null)
-
-            if (isBackgroundRefresh) {
-                setIsRefreshing(true)
-            } else {
-                setIsLoading(true)
-        }
+            setLoadingStateForRequest(isBackgroundRefresh)
 
         try {
-                const getMonitoringAuthenticatedSnapshot = monitoringService.getMonitoringAuthenticatedSnapshot
-                const shouldBootstrapWithSnapshot = !isBackgroundRefresh
-                    && !hasBootstrappedSnapshotRef.current
-                    && getMonitoringAuthenticatedSnapshot !== undefined
-                if (shouldBootstrapWithSnapshot) {
-                    const accessFromSnapshot = await loadWithAuthenticatedSnapshot(getMonitoringAuthenticatedSnapshot)
-                    hasBootstrappedSnapshotRef.current = true
-
-                    if (!accessFromSnapshot.allowed) {
-                        return
-                    }
-
-                    const getMonitoringStatsStream = monitoringService.getMonitoringStatsStream
-                    if (getMonitoringStatsStream !== undefined && monitoringStreamRef.current === null) {
-                        const monitoringAuthToken = await getMonitoringAuthToken()
-                        await startMonitoringStatsStream(
-                            monitoringAuthToken,
-                            getMonitoringStatsStream
-                        )
-                    }
+                const bootstrappedWithSnapshot = await tryBootstrapWithSnapshot(isBackgroundRefresh)
+                if (bootstrappedWithSnapshot) {
                     return
                 }
 
@@ -244,18 +272,7 @@ export function useMonitoringDashboardModel({
                 if (!monitoringAuthToken) {
                     return
                 }
-
-                const getMonitoringStatsStream = monitoringService.getMonitoringStatsStream
-                const shouldUseStream = getMonitoringStatsStream !== undefined
-                    && monitoringStreamRef.current === null
-                if (shouldUseStream) {
-                    await startMonitoringStatsStream(
-                        monitoringAuthToken,
-                        getMonitoringStatsStream
-                    )
-                } else if (monitoringStreamRef.current === null) {
-                    await loadMonitoringStatsSnapshot(monitoringAuthToken)
-                }
+                await loadStatsForAuthorizedRequest(monitoringAuthToken)
 
                 markSuccessfulLoad(Date.now())
             } catch (error) {
@@ -272,14 +289,13 @@ export function useMonitoringDashboardModel({
             }
         },
         [
-            loadWithAuthenticatedSnapshot,
             loadWithoutSnapshot,
-            loadMonitoringStatsSnapshot,
+            loadStatsForAuthorizedRequest,
             markSuccessfulLoad,
-            monitoringService,
-            startMonitoringStatsStream,
+            setLoadingStateForRequest,
             stopMonitoringStatsStream,
             scheduleRetry,
+            tryBootstrapWithSnapshot,
         ]
     )
 
