@@ -831,6 +831,20 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data, {"detail": "Thinking log not found."})
 
+    def test_thinking_log_detail_returns_404_for_empty_thinking_log_record(self):
+        session = Session.objects.create(owner=self.verified_user, title="Empty Log Session")
+        empty_log_record = self._create_chat_message(
+            self.verified_user,
+            session=session,
+            thinking_log="",
+        )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get(f"/llm/thinking-logs/{empty_log_record.id}/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data, {"detail": "Thinking log not found."})
+
     def test_thinking_log_list_supports_large_dataset_pagination(self):
         bulk_session = Session.objects.create(owner=self.verified_user, title="Bulk Session")
         for index in range(25):
