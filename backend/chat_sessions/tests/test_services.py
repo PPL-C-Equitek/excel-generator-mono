@@ -1,9 +1,13 @@
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
 from authentication.models import User
 from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from chat_sessions.services import (
+    append_assistant_message,
+    append_user_message,
+    create_generated_output,
     create_session_for_user,
     delete_session,
     get_default_session_detail_pagination,
@@ -299,3 +303,121 @@ class ChatSessionServiceTest(TestCase):
         delete_session(session)
 
         self.assertFalse(Session.objects.filter(id=session.id).exists())
+
+
+class AppendUserMessageServiceTest(TestCase):
+    def setUp(self):
+        owner = User.objects.create_user(
+            email="append-user@example.com",
+            name="Append User",
+            password="secret",
+            status="verified",
+        )
+        self.session = Session.objects.create(owner=owner)
+
+    def test_append_user_message_creates_message_with_user_role(self):
+        msg = append_user_message(self.session, "Halo")
+
+        self.assertEqual(msg.role, ChatMessage.ROLE_USER)
+        self.assertEqual(msg.content, "Halo")
+        self.assertEqual(msg.session, self.session)
+
+    def test_append_user_message_persists_to_db(self):
+        msg = append_user_message(self.session, "Halo")
+
+        self.assertTrue(ChatMessage.objects.filter(id=msg.id).exists())
+
+    def test_append_user_message_thinking_log_is_empty_by_default(self):
+        msg = append_user_message(self.session, "Halo")
+
+        self.assertEqual(msg.thinking_log, "")
+
+    def test_append_user_message_updates_session_last_message_at(self):
+        self.assertIsNone(self.session.last_message_at)
+
+        append_user_message(self.session, "Halo")
+
+        self.session.refresh_from_db()
+        self.assertIsNotNone(self.session.last_message_at)
+
+
+class AppendAssistantMessageServiceTest(TestCase):
+    def setUp(self):
+        owner = User.objects.create_user(
+            email="append-assistant@example.com",
+            name="Append Assistant",
+            password="secret",
+            status="verified",
+        )
+        self.session = Session.objects.create(owner=owner)
+
+    def test_append_assistant_message_creates_message_with_assistant_role(self):
+        msg = append_assistant_message(self.session, "Berikut jawabannya.")
+
+        self.assertEqual(msg.role, ChatMessage.ROLE_ASSISTANT)
+        self.assertEqual(msg.content, "Berikut jawabannya.")
+        self.assertEqual(msg.session, self.session)
+
+    def test_append_assistant_message_persists_to_db(self):
+        msg = append_assistant_message(self.session, "Berikut jawabannya.")
+
+        self.assertTrue(ChatMessage.objects.filter(id=msg.id).exists())
+
+    def test_append_assistant_message_stores_thinking_log_when_provided(self):
+        msg = append_assistant_message(
+            self.session, "Jawaban.", thinking_log="langkah berpikir"
+        )
+
+        self.assertEqual(msg.thinking_log, "langkah berpikir")
+
+    def test_append_assistant_message_thinking_log_defaults_to_empty(self):
+        msg = append_assistant_message(self.session, "Jawaban.")
+
+        self.assertEqual(msg.thinking_log, "")
+
+    def test_append_assistant_message_updates_session_last_message_at(self):
+        self.assertIsNone(self.session.last_message_at)
+
+        append_assistant_message(self.session, "Berikut jawabannya.")
+
+        self.session.refresh_from_db()
+        self.assertIsNotNone(self.session.last_message_at)
+
+
+class CreateGeneratedOutputServiceTest(TestCase):
+    def setUp(self):
+        owner = User.objects.create_user(
+            email="gen-output@example.com",
+            name="Gen Output",
+            password="secret",
+            status="verified",
+        )
+        self.session = Session.objects.create(owner=owner)
+        self.valid_output_json = {
+            "document_info": {"filename": "test.xlsx"},
+            "summary": {"total_sheets": 1},
+            "content_data": [],
+        }
+
+    def test_create_generated_output_creates_output_with_correct_data(self):
+        output = create_generated_output(self.session, self.valid_output_json)
+
+        self.assertEqual(output.output_json, self.valid_output_json)
+        self.assertEqual(output.session, self.session)
+
+    def test_create_generated_output_persists_to_db(self):
+        output = create_generated_output(self.session, self.valid_output_json)
+
+        self.assertTrue(GeneratedOutput.objects.filter(id=output.id).exists())
+
+    def test_create_generated_output_updates_session_last_output_at(self):
+        self.assertIsNone(self.session.last_output_at)
+
+        create_generated_output(self.session, self.valid_output_json)
+
+        self.session.refresh_from_db()
+        self.assertIsNotNone(self.session.last_output_at)
+
+    def test_create_generated_output_rejects_non_dict_output_json(self):
+        with self.assertRaises(ValidationError):
+            create_generated_output(self.session, ["bukan", "dict"])

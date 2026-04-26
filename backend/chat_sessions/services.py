@@ -1,6 +1,7 @@
 from types import SimpleNamespace
+from django.utils import timezone
 
-from chat_sessions.models import Session
+from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 
 
 SESSION_LIST_MAX_LIMIT = 50
@@ -134,3 +135,39 @@ def update_session_title(session, title):
 
 def delete_session(session):
     session.delete()
+
+
+def append_user_message(session, content):
+    now = timezone.now()
+    msg = ChatMessage.objects.create(
+        session=session,
+        role=ChatMessage.ROLE_USER,
+        content=content,
+    )
+    session.last_message_at = now
+    session.save(update_fields=["last_message_at", "updated_at"])
+    return msg
+
+
+def append_assistant_message(session, content, thinking_log=None):
+    now = timezone.now()
+    msg = ChatMessage.objects.create(
+        session=session,
+        role=ChatMessage.ROLE_ASSISTANT,
+        content=content,
+        thinking_log=thinking_log or "",
+    )
+    session.last_message_at = now
+    session.save(update_fields=["last_message_at", "updated_at"])
+    return msg
+
+
+def create_generated_output(session, output_json):
+    now = timezone.now()
+    output = GeneratedOutput.objects.create(
+        session=session,
+        output_json=output_json,
+    )
+    session.last_output_at = now
+    session.save(update_fields=["last_output_at", "updated_at"])
+    return output

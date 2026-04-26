@@ -3,6 +3,7 @@ from monitoring.domain.entities import (
     CheckResult,
     EventMetricSnapshot,
     MetricsSnapshot,
+    RealtimeMetricPoint,
     RequestMetricEvent,
     RouteMetricSnapshot,
 )
@@ -14,4 +15,5 @@ __all__ = [
     "RouteMetricSnapshot",
     "EventMetricSnapshot",
     "MetricsSnapshot",
+    "RealtimeMetricPoint",
 ]

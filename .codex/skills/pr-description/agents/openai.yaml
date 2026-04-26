@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Description Writer"
+  short_description: "Generate PR descriptions from commits."
+  default_prompt: "Generate a PR description in English from this branch commit history using the repository pull request template."
