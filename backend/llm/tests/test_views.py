@@ -884,6 +884,30 @@ class ThinkingLogEndpointTest(TestCase):
             response.data["errors"],
             {"pagination": ["Invalid thinking log pagination request."]},
         )
+
+    def test_thinking_log_list_rejects_invalid_chat_id(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/llm/thinking-logs/?chat_id=not-a-uuid")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(
+            response.data["errors"],
+            {"chat_id": ["Invalid thinking log identifier."]},
+        )
+
+    def test_thinking_log_list_rejects_invalid_request_id(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/llm/thinking-logs/?request_id=not-a-uuid")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(
+            response.data["errors"],
+            {"request_id": ["Invalid thinking log identifier."]},
+        )
 class SendMessagePositiveTest(SimpleTestCase):
 
     def setUp(self):
