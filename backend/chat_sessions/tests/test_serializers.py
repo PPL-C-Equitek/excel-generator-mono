@@ -8,6 +8,7 @@ from chat_sessions.serializers import (
     PaginatedChatMessageCollectionSerializer,
     PaginatedCollectionSerializer,
     PaginatedGeneratedOutputCollectionSerializer,
+    ResumeHistoryItemSerializer,
     SessionResumeSerializer,
     SessionDetailSerializer,
     SessionListItemSerializer,
@@ -200,6 +201,18 @@ class ChatSessionSerializerTest(SimpleTestCase):
 
         self.assertEqual(serializer.data["id"], "session-1")
         self.assertEqual(serializer.data["history"], [])
+
+    def test_resume_history_item_serializer_rejects_unsupported_item_type(self):
+        serializer = ResumeHistoryItemSerializer()
+
+        with self.assertRaises(serializers.ValidationError):
+            serializer.to_representation(
+                SimpleNamespace(
+                    type="metadata",
+                    id="meta-1",
+                    created_at=datetime(2026, 4, 21, 10, 4, tzinfo=timezone.utc),
+                )
+            )
 
     def test_paginated_collection_serializer_defines_shared_pagination_fields(self):
         serializer = PaginatedCollectionSerializer(data={"count": 1, "limit": 10, "offset": 0})
