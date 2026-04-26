@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from artifact_history.models import ArtifactHistory
 from authentication.models import User
-from chat_sessions.models import ChatMessage, Session
+from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from llm.services.generation_service import CustomSchemaNotFoundError
 from llm.services.openai_client import OpenAITextGenerationProvider
 from llm.services.openai_client import (
@@ -589,25 +589,27 @@ class LlmReasoningEndpointTest(SimpleTestCase):
         self.assertEqual(response.data["detail"], "Content-Type must be application/json.")
 
 
-class LlmGenerateHistoryIntegrationTest(TestCase):
+class LlmGenerateSessionIntegrationTest(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(
-            email="history@example.com",
-            name="History User",
+            email="session-generate@example.com",
+            name="Session Generate User",
             password="secret",
             status="verified",
         )
-
-    @patch("llm.views.build_llm_generation_service")
-    def test_llm_generate_persists_history_for_authenticated_user(self, mock_build_service):
-        mock_service = mock_build_service.return_value
-        output_json = {
+        self.output_json = {
             "document_info": {"filename": "invoice.pdf"},
             "summary": {"table_count": 1},
             "content_data": [{"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}],
         }
-        mock_service.generate.return_value = output_json
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_creates_session_and_generated_output_for_authenticated_user(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = self.output_json
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
@@ -622,16 +624,17 @@ class LlmGenerateHistoryIntegrationTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(ArtifactHistory.objects.count(), 1)
-        history = ArtifactHistory.objects.get()
-        self.assertEqual(history.owner, self.user)
-        self.assertEqual(history.original_name, "invoice.pdf")
-        self.assertEqual(history.custom_name, "")
-        self.assertEqual(history.status_processing, "completed")
-        self.assertEqual(history.output_json, output_json)
+        self.assertIn("session_id", response.data)
+        self.assertEqual(Session.objects.count(), 1)
+        session = Session.objects.get(owner=self.user)
+        self.assertEqual(str(session.id), response.data["session_id"])
+        self.assertEqual(GeneratedOutput.objects.count(), 1)
+        generated_output = GeneratedOutput.objects.get(session=session)
+        self.assertEqual(generated_output.output_json, self.output_json)
+        self.assertEqual(ArtifactHistory.objects.count(), 0)
 
     @patch("llm.views.build_llm_generation_service")
-    def test_llm_generate_does_not_persist_history_when_generation_fails(
+    def test_llm_generate_does_not_create_session_or_generated_output_when_generation_fails(
         self, mock_build_service
     ):
         mock_service = mock_build_service.return_value
@@ -645,27 +648,80 @@ class LlmGenerateHistoryIntegrationTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 500)
+        self.assertFalse(Session.objects.exists())
+        self.assertFalse(GeneratedOutput.objects.exists())
         self.assertFalse(ArtifactHistory.objects.exists())
 
     @patch("llm.views.build_llm_generation_service")
-    def test_llm_generate_does_not_persist_history_for_anonymous_user(
+    def test_llm_generate_reuses_existing_owned_session_when_session_id_is_provided(
         self, mock_build_service
     ):
         mock_service = mock_build_service.return_value
-        mock_service.generate.return_value = {
-            "document_info": {"filename": "invoice.pdf"},
-            "summary": {"table_count": 1},
-            "content_data": [{"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}],
-        }
+        mock_service.generate.return_value = self.output_json
+        session = Session.objects.create(owner=self.user, title="Existing Session")
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/generate/",
-            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "session_id": str(session.id),
+            },
             format="json",
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["session_id"], str(session.id))
+        self.assertEqual(Session.objects.count(), 1)
+        self.assertEqual(GeneratedOutput.objects.count(), 1)
+        generated_output = GeneratedOutput.objects.get()
+        self.assertEqual(generated_output.session, session)
         self.assertFalse(ArtifactHistory.objects.exists())
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_404_for_unknown_owned_session_id(self, mock_build_service):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "session_id": str(uuid4()),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["detail"], "Session not found.")
+        mock_build_service.assert_not_called()
+        self.assertFalse(Session.objects.exists())
+        self.assertFalse(GeneratedOutput.objects.exists())
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_404_for_session_owned_by_other_user(self, mock_build_service):
+        other_user = User.objects.create_user(
+            email="other-session-owner@example.com",
+            name="Other Owner",
+            password="secret",
+            status="verified",
+        )
+        foreign_session = Session.objects.create(owner=other_user, title="Foreign Session")
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "session_id": str(foreign_session.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["detail"], "Session not found.")
+        mock_build_service.assert_not_called()
+        self.assertEqual(Session.objects.count(), 1)
+        self.assertFalse(GeneratedOutput.objects.exists())
 
 class ThinkingLogEndpointTest(TestCase):
     def setUp(self):
