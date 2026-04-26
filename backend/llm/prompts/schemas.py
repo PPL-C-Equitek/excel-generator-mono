@@ -5,27 +5,39 @@ from typing import Any
 MAX_REASONING_CONTEXT_CHARS = 12000
 
 EXTRACTION_OUTPUT_SCHEMA_KEYS = [
-  "headers",
-  "rows",
+  "document_info",
+  "summary",
+  "content_data",
 ]
 
 OUTPUT_FORMAT_SECTION = """## OUTPUT_FORMAT
 Return ONLY valid JSON object with exactly these keys:
-- "headers" (array of strings)
-- "rows" (array of arrays)
+- "document_info" (object)
+- "summary" (object)
+- "content_data" (non-empty array of table objects)
+
+Required structure:
+- document_info.source_type: "Excel" or "PDF" (case-sensitive)
+- document_info.filename: non-empty string
+- summary: object with non-empty string keys and scalar values only
+- content_data[*].table_name: non-empty unique string
+- content_data[*].headers: non-empty unique string array
+- content_data[*].rows: array of objects with keys matching headers exactly
+
 Rules:
 - no markdown
 - no code fences
 - no extra explanation outside JSON
-- no extra keys unless existing system requires them
+- no top-level keys besides: document_info, summary, content_data
+- no nested objects/arrays inside summary values or row cell values
 """
 
 AMBIGUOUS_CASE_SECTION = """## AMBIGUOUS_CASE
-If input is ambiguous or insufficient, return:
-{
-  "headers": [],
-  "rows": []
-}
+If extraction is ambiguous or insufficient:
+- keep the same required output contract
+- never switch to free-form text
+- do not invent values
+- use conservative scalar values and empty collections only when truly unsupported by the input
 """
 
 MESSY_RECOVERABLE_CASE_SECTION = """## MESSY_BUT_RECOVERABLE
@@ -33,6 +45,8 @@ If input is messy but recoverable:
 - infer likely headers
 - normalize values
 - preserve row consistency
+- map values into the correct table and column context
+- keep schema compliance while maximizing extracted signal from the input
 """
 
 
