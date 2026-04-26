@@ -1,5 +1,6 @@
 import logging
 from typing import Any, cast
+from uuid import UUID
 
 from chat_sessions.models import ChatMessage
 from django.views.decorators.http import require_http_methods
@@ -47,6 +48,7 @@ INVALID_PROMPT_DETAIL = "Invalid prompt payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
 THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
+INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."
 MAX_THINKING_LOG_PAGE_SIZE = 100
 
 
@@ -117,6 +119,18 @@ def _invalid_thinking_log_pagination_response():
     )
 
 
+def _invalid_thinking_log_identifier_response(field_name: str):
+    return Response(
+        {
+            "detail": INVALID_REQUEST_DETAIL,
+            "errors": {
+                field_name: [INVALID_THINKING_LOG_IDENTIFIER_DETAIL],
+            },
+        },
+        status=400,
+    )
+
+
 def _parse_thinking_log_positive_int(value, default, minimum=1):
     if value is None:
         return default
@@ -134,17 +148,25 @@ def _parse_thinking_log_page_size(value, default=10):
     return parsed
 
 
+def _parse_thinking_log_identifier(value, field_name: str):
+    normalized_value = value.strip() if isinstance(value, str) else ""
+    if not normalized_value:
+        return None
+
+    try:
+        return UUID(normalized_value)
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError(field_name) from exc
+
+
 def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, request_id=None):
     queryset = ChatMessage.objects.filter(session__owner=user).exclude(thinking_log="")
 
     normalized_session_id = session_id.strip() if isinstance(session_id, str) else ""
-    normalized_chat_id = chat_id.strip() if isinstance(chat_id, str) else ""
-    normalized_request_id = request_id.strip() if isinstance(request_id, str) else ""
-
     if normalized_session_id:
         queryset = queryset.filter(session_id=normalized_session_id)
 
-    identifier = normalized_chat_id or normalized_request_id
+    identifier = chat_id or request_id
     if identifier:
         queryset = queryset.filter(id=identifier)
 
@@ -310,11 +332,18 @@ def thinking_log_list(request):
     session_id = request.query_params.get("session_id")
     chat_id = request.query_params.get("chat_id")
     request_id = request.query_params.get("request_id")
+
+    try:
+        parsed_chat_id = _parse_thinking_log_identifier(chat_id, "chat_id")
+        parsed_request_id = _parse_thinking_log_identifier(request_id, "request_id")
+    except ValueError as exc:
+        return _invalid_thinking_log_identifier_response(str(exc))
+
     queryset = _build_thinking_log_queryset_for_user(
         user=request.user,
         session_id=session_id,
-        chat_id=chat_id,
-        request_id=request_id,
+        chat_id=parsed_chat_id,
+        request_id=parsed_request_id,
     )
 
     total_count = queryset.count()
