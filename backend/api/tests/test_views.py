@@ -2677,28 +2677,35 @@ class SessionEndpointTests(TestCase):
         )
         mock_list_sessions.assert_called_once_with(self.user, limit=10, offset=0)
 
-    @patch("api.views.get_session_for_user")
-    def test_session_detail_returns_not_found_when_missing(self, mock_get_session):
-        mock_get_session.return_value = None
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_returns_not_found_when_missing(self, mock_get_session_detail):
+        mock_get_session_detail.return_value = None
         request = self.factory.get("/sessions/session-1/")
         force_authenticate(request, user=self.user)
 
         response = views.session_detail(request, "session-1")
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        mock_get_session.assert_called_once_with(self.user, "session-1")
+        mock_get_session_detail.assert_called_once_with(
+            self.user,
+            "session-1",
+            messages_limit=20,
+            messages_offset=0,
+            outputs_limit=10,
+            outputs_offset=0,
+        )
 
-    @patch("api.views.get_session_for_user")
-    def test_session_detail_returns_serialized_session_when_found(self, mock_get_session):
-        mock_get_session.return_value = SimpleNamespace(
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_returns_serialized_session_when_found(self, mock_get_session_detail):
+        mock_get_session_detail.return_value = SimpleNamespace(
             id="123e4567-e89b-12d3-a456-426614174000",
             title="April report",
             created_at="2026-04-21T10:00:00Z",
             updated_at="2026-04-21T10:05:00Z",
             last_message_at=None,
             last_output_at=None,
-            messages=[],
-            generated_outputs=[],
+            messages={"count": 0, "limit": 20, "offset": 0, "results": []},
+            generated_outputs={"count": 0, "limit": 10, "offset": 0, "results": []},
         )
         request = self.factory.get("/sessions/session-1/")
         force_authenticate(request, user=self.user)
@@ -2707,7 +2714,113 @@ class SessionEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["title"], "April report")
-        mock_get_session.assert_called_once_with(self.user, "session-1")
+        self.assertEqual(response.data["messages"]["limit"], 20)
+        self.assertEqual(response.data["generated_outputs"]["limit"], 10)
+        mock_get_session_detail.assert_called_once_with(
+            self.user,
+            "session-1",
+            messages_limit=20,
+            messages_offset=0,
+            outputs_limit=10,
+            outputs_offset=0,
+        )
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_allows_explicit_messages_and_outputs_pagination(
+        self,
+        mock_get_session_detail,
+    ):
+        mock_get_session_detail.return_value = SimpleNamespace(
+            id="123e4567-e89b-12d3-a456-426614174000",
+            title="April report",
+            created_at="2026-04-21T10:00:00Z",
+            updated_at="2026-04-21T10:05:00Z",
+            last_message_at=None,
+            last_output_at=None,
+            messages={"count": 5, "limit": 2, "offset": 1, "results": []},
+            generated_outputs={"count": 3, "limit": 1, "offset": 2, "results": []},
+        )
+        request = self.factory.get(
+            "/sessions/session-1/?messages_limit=2&messages_offset=1&outputs_limit=1&outputs_offset=2"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["messages"]["limit"], 2)
+        self.assertEqual(response.data["messages"]["offset"], 1)
+        self.assertEqual(response.data["generated_outputs"]["limit"], 1)
+        self.assertEqual(response.data["generated_outputs"]["offset"], 2)
+        mock_get_session_detail.assert_called_once_with(
+            self.user,
+            "session-1",
+            messages_limit=2,
+            messages_offset=1,
+            outputs_limit=1,
+            outputs_offset=2,
+        )
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_rejects_non_numeric_messages_limit(self, mock_get_session_detail):
+        request = self.factory.get("/sessions/session-1/?messages_limit=abc")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "messages_limit must be an integer."})
+        mock_get_session_detail.assert_not_called()
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_rejects_negative_outputs_offset(self, mock_get_session_detail):
+        request = self.factory.get("/sessions/session-1/?outputs_offset=-1")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"detail": "outputs_offset must be greater than or equal to 0."},
+        )
+        mock_get_session_detail.assert_not_called()
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_rejects_zero_messages_limit(self, mock_get_session_detail):
+        request = self.factory.get("/sessions/session-1/?messages_limit=0")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "messages_limit must be greater than 0."})
+        mock_get_session_detail.assert_not_called()
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_rejects_outputs_limit_above_maximum(self, mock_get_session_detail):
+        request = self.factory.get("/sessions/session-1/?outputs_limit=51")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "outputs_limit must be less than or equal to 50."})
+        mock_get_session_detail.assert_not_called()
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_hides_non_whitelisted_service_validation_error(
+        self,
+        mock_get_session_detail,
+    ):
+        mock_get_session_detail.side_effect = ValueError("internal query detail")
+        request = self.factory.get("/sessions/session-1/?messages_limit=10")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "Invalid session detail pagination."})
 
     @patch("api.views.update_session_title")
     @patch("api.views.get_session_for_user")
@@ -2810,7 +2923,7 @@ class SessionEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_session_detail.assert_called_once()
-        self.assertEqual(mock_session_detail.call_args.args[0], self.user)
+        self.assertEqual(mock_session_detail.call_args.args[0].user, self.user)
         self.assertEqual(mock_session_detail.call_args.args[1], "session-1")
 
     @patch("api.views._build_session_update_response")
