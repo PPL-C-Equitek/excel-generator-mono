@@ -1,4 +1,5 @@
 from django.test import SimpleTestCase
+from django.test import override_settings
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -117,6 +118,18 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("refinement", serializer.errors)
 
+    @override_settings(
+        LLM_REFINEMENT_DEFAULT_MAX_ITER="invalid-default",
+        LLM_REFINEMENT_MAX_ITER_CAP=5,
+    )
+    def test_generate_request_serializer_uses_safe_default_when_setting_invalid(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["refinement"]["max_iterations"], 3)
+
     def test_generate_response_serializer_allows_null_reasoning(self):
         serializer = LlmGenerateResponseSerializer(
             data={"output_json": {"status": "ok"}, "reasoning": None}
@@ -184,6 +197,45 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         )
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_generate_response_serializer_rejects_non_object_validation_log(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": "invalid",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_issue_without_required_fields(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": [{"path": "$.x", "severity": "error"}],
+                    "warnings": [],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_non_object_refinement_meta(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": "invalid",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
 
     # Positive
     def test_positive_generate_response_serializer_accepts_minimal_refinement_visible_payload(self):

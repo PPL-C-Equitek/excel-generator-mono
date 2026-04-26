@@ -1,9 +1,11 @@
 from django.test import SimpleTestCase
 from unittest.mock import Mock
+from unittest.mock import patch
 
 from llm.services.refinement_service import (
     RefinementConfig,
     RefinementOrchestrator,
+    build_refinement_instruction,
     build_validation_log,
 )
 
@@ -100,6 +102,54 @@ class RefinementValidationLogTest(SimpleTestCase):
         self.assertTrue(
             any("semantic mismatch" in issue["message"] for issue in log["errors"])
         )
+
+    def test_build_validation_log_marks_total_items_mismatch_as_invalid_quality(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
+                "summary": {"total_items": 2},
+                "content_data": [
+                    {
+                        "table_name": "result",
+                        "headers": ["ID", "Barang"],
+                        "rows": [{"ID": "1", "Barang": "A"}],
+                    }
+                ],
+            },
+            iteration=1,
+            input_json={
+                "content_data": [
+                    {
+                        "headers": ["ID", "Barang"],
+                        "rows": [{"ID": "1", "Barang": "A"}],
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(log["verdict"], "invalid")
+        self.assertTrue(
+            any(
+                issue["path"] == "$.summary.total_items"
+                for issue in log["errors"]
+            )
+        )
+
+    def test_build_refinement_instruction_truncates_large_payload(self):
+        long_value = "a" * 13000
+        instruction = build_refinement_instruction(
+            previous_output_json={"value": long_value},
+            validation_log={
+                "iteration": 1,
+                "verdict": "invalid",
+                "errors": [{"path": "$.value", "message": "too long", "severity": "error"}],
+                "warnings": [],
+                "summary": "invalid",
+            },
+        )
+
+        self.assertIn("PREVIOUS_OUTPUT_JSON:", instruction)
+        self.assertIn("[TRUNCATED]", instruction)
 
 
 class RefinementOrchestratorTest(SimpleTestCase):
@@ -234,6 +284,64 @@ class RefinementOrchestratorTest(SimpleTestCase):
         )
 
         self.assertEqual(reasoning_service.generate.call_count, 3)
+
+    @patch("llm.services.refinement_service.generate_conversion_reasoning_response")
+    def test_orchestrator_continues_when_reasoning_generation_fails(
+        self,
+        mock_generate_reasoning,
+    ):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid-1"},
+            {"status": "invalid-2"},
+        ]
+        mock_generate_reasoning.side_effect = RuntimeError("reasoning failed")
+
+        orchestrator = RefinementOrchestrator(
+            generation_service=generation_service,
+            reasoning_service=self._build_reasoning_service(),
+        )
+        result = orchestrator.run(
+            input_json={"filename": "report.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=True,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=2,
+                early_exit_on_valid=False,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 2)
+        self.assertIsNone(result["reasoning"])
+
+    def test_orchestrator_builds_refinement_instruction_from_previous_iteration(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid-1"},
+            {"status": "invalid-2"},
+        ]
+
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+        orchestrator.run(
+            input_json={"filename": "report.xlsx", "headers": ["ID"]},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=2,
+                early_exit_on_valid=False,
+            ),
+        )
+
+        self.assertEqual(generation_service.generate.call_count, 2)
+        first_call_kwargs = generation_service.generate.call_args_list[0].kwargs
+        second_call_kwargs = generation_service.generate.call_args_list[1].kwargs
+
+        self.assertIsNone(first_call_kwargs["refinement_instruction"])
+        self.assertIsInstance(second_call_kwargs["input_json"], dict)
+        self.assertIn("previous_output_json", second_call_kwargs["input_json"])
+        self.assertIsInstance(second_call_kwargs["refinement_instruction"], str)
 
     # Positive
     def test_positive_valid_payload_has_valid_verdict_on_first_iteration(self):
