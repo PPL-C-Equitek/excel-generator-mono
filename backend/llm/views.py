@@ -33,8 +33,13 @@ from .services.generation_service import (
     LlmGenerationService,
 )
 from .services.reasoning_service import (
+    FALLBACK_FINAL_ANSWER,
+    FALLBACK_REASONING_STEP,
+    FALLBACK_THINKING_LOG,
     LlmReasoningService,
+    build_storage_thinking_log,
     generate_conversion_reasoning_response,
+    parse_reasoning_response,
     generate_reasoning_response,
 )
 from .services.openai_client import (
@@ -161,6 +166,83 @@ def _generate_optional_reasoning(include_reasoning, input_json, output_json):
     except Exception:
         logger.exception("Unexpected error while generating automatic reasoning.")
         return None
+
+
+def _is_fallback_reasoning_payload(reasoning_payload: Any) -> bool:
+    if not isinstance(reasoning_payload, dict):
+        return True
+
+    final_answer = reasoning_payload.get("final_answer")
+    thinking_log = reasoning_payload.get("thinking_log")
+    reasoning_steps = reasoning_payload.get("reasoning_steps")
+
+    return (
+        final_answer == FALLBACK_FINAL_ANSWER
+        and thinking_log == FALLBACK_THINKING_LOG
+        and reasoning_steps == [FALLBACK_REASONING_STEP]
+    )
+
+
+def _extract_reasoning_payload_from_chat_reply(reply: str) -> dict[str, Any] | None:
+    if not isinstance(reply, str) or not reply.strip():
+        return None
+
+    try:
+        parsed = parse_reasoning_response(reply)
+    except Exception:
+        logger.exception("Failed to parse chat reasoning payload from assistant reply.")
+        return None
+
+    if _is_fallback_reasoning_payload(parsed):
+        return None
+
+    return parsed
+
+
+def _save_thinking_log_for_message(message: ChatMessage, thinking_log: str) -> None:
+    normalized_log = thinking_log.strip() if isinstance(thinking_log, str) else ""
+    if not normalized_log:
+        return
+
+    try:
+        message.thinking_log = normalized_log
+        message.save(update_fields=["thinking_log"])
+    except Exception:
+        logger.exception("Failed to persist thinking_log for chat message.")
+
+
+def _capture_generate_reasoning_thinking_log(
+    *,
+    user,
+    input_json,
+    output_json,
+    reasoning_response,
+) -> None:
+    if not getattr(user, "is_authenticated", False):
+        return
+    if not isinstance(reasoning_response, dict):
+        return
+
+    thinking_log = build_storage_thinking_log(reasoning_response)
+    if not thinking_log:
+        return
+
+    try:
+        with transaction.atomic():
+            session = create_session_for_user(
+                user,
+                title=extract_original_name(input_json, output_json),
+            )
+            final_answer = reasoning_response.get("final_answer")
+            assistant_content = (
+                final_answer.strip()
+                if isinstance(final_answer, str) and final_answer.strip()
+                else "Output berhasil dihasilkan."
+            )
+            assistant_message = append_assistant_message(session, assistant_content)
+            _save_thinking_log_for_message(assistant_message, thinking_log)
+    except Exception:
+        logger.exception("Failed to capture reasoning thinking_log for llm_generate.")
 
 
 def _thinking_log_not_found_response():
@@ -304,6 +386,15 @@ def llm_generate(request):
             output_json=output_json,
             status_processing="completed",
         )
+        try:
+            _capture_generate_reasoning_thinking_log(
+                user=request.user,
+                input_json=input_json,
+                output_json=output_json,
+                reasoning_response=reasoning_response,
+            )
+        except Exception:
+            logger.exception("Unexpected failure while capturing llm_generate reasoning log.")
     return Response(response_serializer.data)
 
 @require_http_methods(["POST"])
@@ -351,11 +442,16 @@ def send_message(request):
         logger.exception("Unexpected error while handling send_message request.")
         return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
+    parsed_reasoning = _extract_reasoning_payload_from_chat_reply(reply)
+    thinking_log = build_storage_thinking_log(parsed_reasoning)
+
     with transaction.atomic():
         if session is None:
             session = create_session_for_user(request.user)
         append_user_message(session, message)
-        append_assistant_message(session, reply)
+        assistant_message = append_assistant_message(session, reply)
+
+    _save_thinking_log_for_message(assistant_message, thinking_log)
 
     response_serializer = SendMessageResponseSerializer(
         data={"session_id": session.id, "reply": reply}

@@ -19,6 +19,18 @@ FALLBACK_FINAL_ANSWER = "Unable to parse final answer from model output."
 FALLBACK_REASONING_STEP = "Unable to parse structured reasoning steps from model output."
 FALLBACK_THINKING_LOG = "Unable to parse thinking log from model output."
 
+THINKING_LOG_STORAGE_BLOCKED_MARKERS = (
+    "chain-of-thought",
+    "internal prompt",
+    "system prompt",
+    "api key",
+    "secret",
+    "token",
+    "debug",
+    "traceback",
+    "stack trace",
+)
+
 FINAL_ANSWER_LABELS = {"final answer", "answer", "conclusion"}
 THINKING_LOG_LABELS = {
     "thinking log",
@@ -98,6 +110,107 @@ def _normalize_reasoning_text(value: Any, field_name: str, max_chars: int) -> st
             f"OpenAI reasoning response must include {field_name} as a non-empty string."
         )
     return _truncate_text(value.strip(), max_chars)
+
+
+def _is_storage_safe_line(line: str) -> bool:
+    lowered_line = line.lower()
+    return not any(marker in lowered_line for marker in THINKING_LOG_STORAGE_BLOCKED_MARKERS)
+
+
+def _normalize_thinking_log_candidate(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _safe_storage_thinking_log_from_text(value: Any, max_chars: int) -> str:
+    normalized = _normalize_thinking_log_candidate(value)
+    if not normalized:
+        return ""
+
+    safe_lines: list[str] = []
+    current_length = 0
+    for raw_line in normalized.splitlines():
+        line = " ".join(raw_line.strip().split())
+        if not line or not _is_storage_safe_line(line):
+            continue
+
+        separator = "\n" if safe_lines else ""
+        chunk = f"{separator}{line}"
+        remaining = max_chars - current_length
+        if remaining <= 0:
+            break
+
+        if len(chunk) > remaining:
+            safe_lines.append(chunk[:remaining].lstrip("\n"))
+            break
+
+        safe_lines.append(line)
+        current_length += len(chunk)
+
+    if not safe_lines:
+        return ""
+    return "\n".join(safe_lines)
+
+
+def _normalize_storage_steps(reasoning_steps: Any, max_step_chars: int = 400) -> list[str]:
+    if isinstance(reasoning_steps, str):
+        reasoning_steps = [reasoning_steps]
+
+    if not isinstance(reasoning_steps, list):
+        return []
+
+    safe_steps: list[str] = []
+    for raw_step in reasoning_steps:
+        step = " ".join(str(raw_step).strip().split()) if isinstance(raw_step, str) else ""
+        if not step or not _is_storage_safe_line(step):
+            continue
+        safe_steps.append(_truncate_text(step, max_step_chars))
+        if len(safe_steps) >= 3:
+            break
+
+    return safe_steps
+
+
+def _compose_bahasa_thinking_log_from_steps(steps: list[str], max_chars: int) -> str:
+    if not steps:
+        return ""
+
+    if len(steps) == 1:
+        summary = f"Sistem melakukan analisis data: {steps[0]}."
+    elif len(steps) == 2:
+        summary = f"Sistem melakukan analisis data dengan {steps[0]}, lalu {steps[1]}."
+    else:
+        summary = (
+            f"Sistem melakukan analisis data dengan {steps[0]}, {steps[1]}, "
+            f"dan {steps[2]}."
+        )
+
+    return _truncate_text(summary, max_chars)
+
+
+def build_storage_thinking_log(
+    reasoning_payload: Any,
+    max_thinking_log_chars: int | None = None,
+) -> str:
+    if not isinstance(reasoning_payload, dict):
+        return ""
+
+    max_chars = max_thinking_log_chars or _get_positive_int_setting(
+        "LLM_REASONING_THINKING_LOG_MAX_CHARS",
+        DEFAULT_REASONING_THINKING_LOG_MAX_CHARS,
+    )
+
+    thinking_log = _safe_storage_thinking_log_from_text(
+        reasoning_payload.get("thinking_log"),
+        max_chars=max_chars,
+    )
+    if thinking_log:
+        return thinking_log
+
+    safe_steps = _normalize_storage_steps(reasoning_payload.get("reasoning_steps"))
+    if not safe_steps:
+        return ""
+
+    return _compose_bahasa_thinking_log_from_steps(safe_steps, max_chars=max_chars)
 
 
 def _try_parse_json_candidate(text: str) -> Any | None:
