@@ -26,6 +26,7 @@ from chat_sessions.services import (
     validate_session_detail_pagination_params,
     sanitize_session_title,
     resolve_session_title,
+    generate_session_title_from_message,
 )
 
 
@@ -864,4 +865,32 @@ class SessionTitleHelperServiceTest(SimpleTestCase):
 
     def test_resolve_session_title_uses_default_fallback_if_not_specified(self):
         result = resolve_session_title("")
+        self.assertEqual(result, "New Chat")
+
+
+class SessionTitleGenerationServiceTest(SimpleTestCase):
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_generate_session_title_from_message_returns_sanitized_llm_title(self, mock_generate):
+        mock_generate.return_value = '   "Diskusi Bantuan Excel"   '
+
+        result = generate_session_title_from_message("Halo tolong bantu saya excel")
+
+        self.assertEqual(result, "Diskusi Bantuan Excel")
+        mock_generate.assert_called_once()
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_generate_session_title_from_message_returns_fallback_when_llm_fails(self, mock_generate):
+        mock_generate.side_effect = RuntimeError("title generation timeout")
+
+        result = generate_session_title_from_message("Halo tolong bantu saya excel")
+
+        self.assertEqual(result, "New Chat")
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_generate_session_title_from_message_returns_fallback_when_llm_title_is_blank(self, mock_generate):
+        mock_generate.return_value = '   ""   '
+
+        result = generate_session_title_from_message("Halo")
+
         self.assertEqual(result, "New Chat")
