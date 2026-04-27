@@ -2,6 +2,11 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import * as auth from '@/lib/auth'
 import Sidebar from '../../../src/components/Sidebar'
+import { useHistoryFiles } from '@/hooks/useHistoryFiles'
+
+vi.mock('@/hooks/useHistoryFiles', () => ({
+    useHistoryFiles: vi.fn(),
+}))
 
 vi.mock('@/components/LogoutButton', () => ({
     default: () => <button type="button">Logout</button>,
@@ -11,7 +16,37 @@ vi.mock('@/components/HistorySidebarList', () => ({
     default: () => <div data-testid="history-sidebar-list">History Sidebar List</div>,
 }))
 
+const mockUseHistoryFiles = vi.mocked(useHistoryFiles)
+
+function makeHistoryHookState() {
+    return {
+        items: [],
+        count: 0,
+        limit: 50,
+        offset: 0,
+        isLoading: false,
+        renamingHistoryId: null,
+        deletingHistoryId: null,
+        isDownloading: vi.fn().mockReturnValue(false),
+        downloadError: null,
+        loadError: null,
+        mutationError: null,
+        error: null,
+        reloadHistory: vi.fn().mockResolvedValue(undefined),
+        goToNextPage: vi.fn().mockResolvedValue(undefined),
+        goToPreviousPage: vi.fn().mockResolvedValue(undefined),
+        downloadCsv: vi.fn().mockResolvedValue(undefined),
+        downloadExcel: vi.fn().mockResolvedValue(undefined),
+        renameHistory: vi.fn().mockResolvedValue(true),
+        deleteHistory: vi.fn().mockResolvedValue(true),
+    }
+}
+
 describe('Sidebar', () => {
+    beforeEach(() => {
+        mockUseHistoryFiles.mockReturnValue(makeHistoryHookState())
+    })
+
     it('renders brand name EQUITEK', () => {
         render(<Sidebar activeMenu="convert" />)
         expect(screen.getByText('EQUITEK')).toBeInTheDocument()

@@ -1,13 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import HistorySidebarList from "@/components/HistorySidebarList";
-import { useHistoryFiles } from "@/hooks/useHistoryFiles";
-
-vi.mock("@/hooks/useHistoryFiles", () => ({
-  useHistoryFiles: vi.fn(),
-}));
-
-const mockUseHistoryFiles = vi.mocked(useHistoryFiles);
 
 function isoDaysAgo(daysAgo: number) {
   const now = new Date();
@@ -33,25 +26,25 @@ const historyItems = [
   },
 ];
 
-function makeHookState(overrides?: Partial<ReturnType<typeof useHistoryFiles>>) {
+function makeListState(
+  overrides?: Partial<{
+    items: typeof historyItems;
+    isLoading: boolean;
+    loadError: string | null;
+    renamingHistoryId: string | null;
+    deletingHistoryId: string | null;
+    reloadHistory: () => Promise<void>;
+    renameHistory: (historyId: string, customName: string) => Promise<boolean>;
+    deleteHistory: (historyId: string) => Promise<boolean>;
+  }>
+) {
   return {
     items: historyItems,
-    count: 2,
-    limit: 50,
-    offset: 0,
     isLoading: false,
     renamingHistoryId: null,
     deletingHistoryId: null,
-    isDownloading: vi.fn().mockReturnValue(false),
-    downloadError: null,
     loadError: null,
-    mutationError: null,
-    error: null,
     reloadHistory: vi.fn().mockResolvedValue(undefined),
-    goToNextPage: vi.fn().mockResolvedValue(undefined),
-    goToPreviousPage: vi.fn().mockResolvedValue(undefined),
-    downloadCsv: vi.fn().mockResolvedValue(undefined),
-    downloadExcel: vi.fn().mockResolvedValue(undefined),
     renameHistory: vi.fn().mockResolvedValue(true),
     deleteHistory: vi.fn().mockResolvedValue(true),
     ...overrides,
@@ -59,13 +52,15 @@ function makeHookState(overrides?: Partial<ReturnType<typeof useHistoryFiles>>) 
 }
 
 describe("HistorySidebarList", () => {
+  let listState: ReturnType<typeof makeListState>;
+
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseHistoryFiles.mockReturnValue(makeHookState());
+    listState = makeListState();
   });
 
   it("renders search input and grouped history items", () => {
-    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} {...listState} />);
 
     expect(screen.getByText("History List")).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Search history" })).toBeInTheDocument();
@@ -74,7 +69,7 @@ describe("HistorySidebarList", () => {
   });
 
   it("shows one-line truncated title style for long history names", () => {
-    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} {...listState} />);
 
     const longNameLink = screen.getByTitle(historyItems[0].original_name);
     const titleElement = within(longNameLink).getByText(historyItems[0].original_name);
@@ -83,7 +78,7 @@ describe("HistorySidebarList", () => {
   });
 
   it("filters history items by search query", () => {
-    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} {...listState} />);
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search history" }), {
       target: { value: "budget" },
@@ -95,38 +90,34 @@ describe("HistorySidebarList", () => {
 
   it("shows loading, load error, empty and no matches states", async () => {
     const reloadHistory = vi.fn().mockResolvedValue(undefined);
-
-    mockUseHistoryFiles.mockReturnValue(
-      makeHookState({
-        isLoading: true,
-      })
+    const { rerender } = render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({ isLoading: true })}
+      />
     );
-    const { rerender } = render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
     expect(screen.getByText("Loading history...")).toBeInTheDocument();
 
-    mockUseHistoryFiles.mockReturnValue(
-      makeHookState({
-        loadError: "Failed to load history.",
-        reloadHistory,
-      })
+    rerender(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({
+          loadError: "Failed to load history.",
+          reloadHistory,
+        })}
+      />
     );
-    rerender(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => {
       expect(reloadHistory).toHaveBeenCalledTimes(1);
     });
 
-    mockUseHistoryFiles.mockReturnValue(
-      makeHookState({
-        items: [],
-        count: 0,
-      })
+    rerender(
+      <HistorySidebarList selectedHistoryId={null} {...makeListState({ items: [] })} />
     );
-    rerender(<HistorySidebarList selectedHistoryId={null} />);
     expect(screen.getByText("No history yet.")).toBeInTheDocument();
 
-    mockUseHistoryFiles.mockReturnValue(makeHookState());
-    rerender(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    rerender(<HistorySidebarList selectedHistoryId={historyItems[0].id} {...makeListState()} />);
     fireEvent.change(screen.getByRole("searchbox", { name: "Search history" }), {
       target: { value: "not-found-keyword" },
     });
@@ -134,9 +125,11 @@ describe("HistorySidebarList", () => {
   });
 
   it("renders Last 7 days, Last 30 days and Older groups", () => {
-    mockUseHistoryFiles.mockReturnValue(
-      makeHookState({
-        items: [
+    render(
+      <HistorySidebarList
+        selectedHistoryId={null}
+        {...makeListState({
+          items: [
           {
             ...historyItems[0],
             id: "33333333-3333-3333-3333-333333333333",
@@ -158,11 +151,9 @@ describe("HistorySidebarList", () => {
             created_at: isoDaysAgo(40),
           },
         ],
-        count: 4,
-      })
+        })}
+      />
     );
-
-    render(<HistorySidebarList selectedHistoryId={null} />);
 
     expect(screen.getByText("Last 7 days")).toBeInTheDocument();
     expect(screen.getByText("Last 30 days")).toBeInTheDocument();
@@ -170,20 +161,20 @@ describe("HistorySidebarList", () => {
   });
 
   it("places invalid created_at into Older group", () => {
-    mockUseHistoryFiles.mockReturnValue(
-      makeHookState({
-        items: [
+    render(
+      <HistorySidebarList
+        selectedHistoryId={null}
+        {...makeListState({
+          items: [
           {
             ...historyItems[0],
             id: "77777777-7777-7777-7777-777777777777",
             created_at: "invalid-date",
           },
         ],
-        count: 1,
-      })
+        })}
+      />
     );
-
-    render(<HistorySidebarList selectedHistoryId={null} />);
 
     expect(screen.getByText("Older")).toBeInTheDocument();
     expect(screen.getByText(historyItems[0].original_name)).toBeInTheDocument();
@@ -191,9 +182,12 @@ describe("HistorySidebarList", () => {
 
   it("opens rename popup from action menu and submits rename", async () => {
     const renameHistory = vi.fn().mockResolvedValue(true);
-    mockUseHistoryFiles.mockReturnValue(makeHookState({ renameHistory }));
-
-    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({ renameHistory })}
+      />
+    );
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -213,7 +207,7 @@ describe("HistorySidebarList", () => {
   });
 
   it("toggles action menu closed when actions button clicked twice", () => {
-    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} {...listState} />);
 
     const actionButton = screen.getByRole("button", {
       name: `Actions for ${historyItems[0].original_name}`,
@@ -228,9 +222,12 @@ describe("HistorySidebarList", () => {
 
   it("keeps rename dialog open when rename fails and closes on cancel", async () => {
     const renameHistory = vi.fn().mockResolvedValue(false);
-    mockUseHistoryFiles.mockReturnValue(makeHookState({ renameHistory }));
-
-    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({ renameHistory })}
+      />
+    );
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -250,7 +247,9 @@ describe("HistorySidebarList", () => {
   });
 
   it("shows rename dialog pending state when rename is in progress", () => {
-    const { rerender } = render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    const { rerender } = render(
+      <HistorySidebarList selectedHistoryId={historyItems[0].id} {...listState} />
+    );
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -259,21 +258,24 @@ describe("HistorySidebarList", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Rename" }));
 
-    mockUseHistoryFiles.mockReturnValue(
-      makeHookState({
-        renamingHistoryId: historyItems[0].id,
-      })
+    rerender(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({ renamingHistoryId: historyItems[0].id })}
+      />
     );
-    rerender(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
 
     expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
   });
 
   it("opens delete popup from action menu and confirms deletion", async () => {
     const deleteHistory = vi.fn().mockResolvedValue(true);
-    mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }));
-
-    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({ deleteHistory })}
+      />
+    );
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -290,9 +292,12 @@ describe("HistorySidebarList", () => {
 
   it("keeps delete dialog open when delete fails and closes on cancel", async () => {
     const deleteHistory = vi.fn().mockResolvedValue(false);
-    mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }));
-
-    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({ deleteHistory })}
+      />
+    );
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -312,7 +317,9 @@ describe("HistorySidebarList", () => {
   });
 
   it("shows delete dialog pending state when delete is in progress", () => {
-    const { rerender } = render(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
+    const { rerender } = render(
+      <HistorySidebarList selectedHistoryId={historyItems[0].id} {...listState} />
+    );
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -321,12 +328,12 @@ describe("HistorySidebarList", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
-    mockUseHistoryFiles.mockReturnValue(
-      makeHookState({
-        deletingHistoryId: historyItems[0].id,
-      })
+    rerender(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({ deletingHistoryId: historyItems[0].id })}
+      />
     );
-    rerender(<HistorySidebarList selectedHistoryId={historyItems[0].id} />);
 
     expect(screen.getByRole("button", { name: "Deleting..." })).toBeDisabled();
   });

@@ -53,6 +53,7 @@ export default function HistoryPage() {
         renamingHistoryId,
         deletingHistoryId,
         isDownloading,
+        reloadHistory,
         loadError,
         downloadError,
         mutationError,
@@ -112,7 +113,20 @@ export default function HistoryPage() {
 
     return (
         <div className="flex min-h-screen bg-gray-50">
-            <Sidebar activeMenu="history" selectedHistoryId={selectedHistoryId} />
+            <Sidebar
+                activeMenu="history"
+                selectedHistoryId={selectedHistoryId}
+                historyListState={{
+                    items,
+                    isLoading,
+                    loadError,
+                    renamingHistoryId,
+                    deletingHistoryId,
+                    reloadHistory,
+                    renameHistory,
+                    deleteHistory,
+                }}
+            />
             <main className="ml-56 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
                 <div className="mx-auto h-[calc(100vh-4rem)] max-w-6xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md shadow-slate-200/70">
                     <section className="h-full min-h-0 min-w-0 bg-white">

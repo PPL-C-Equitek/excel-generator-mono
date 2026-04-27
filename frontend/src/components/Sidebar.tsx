@@ -5,13 +5,28 @@ import { useState } from "react"
 import { getStoredUser } from "@/lib/auth"
 import LogoutButton from "@/components/LogoutButton"
 import HistorySidebarList from "@/components/HistorySidebarList"
+import { useHistoryFiles } from '@/hooks/useHistoryFiles'
+import type { HistoryItem } from '@/services/history'
+
+interface SidebarHistoryListState {
+    readonly items: HistoryItem[]
+    readonly isLoading: boolean
+    readonly loadError: string | null
+    readonly renamingHistoryId: string | null
+    readonly deletingHistoryId: string | null
+    readonly reloadHistory: () => Promise<void>
+    readonly renameHistory: (historyId: string, customName: string) => Promise<boolean>
+    readonly deleteHistory: (historyId: string) => Promise<boolean>
+}
+
 interface SidebarProps {
     readonly activeMenu: 'home' | 'convert' | 'schema' | 'history' | 'monitoring' | 'change-password'
     readonly onLogout?: () => void
     readonly selectedHistoryId?: string | null
+    readonly historyListState?: SidebarHistoryListState
 }
 
-export default function Sidebar({ activeMenu, onLogout, selectedHistoryId }: SidebarProps) {
+export default function Sidebar({ activeMenu, onLogout, selectedHistoryId, historyListState }: SidebarProps) {
     const menus = [
         { key: 'convert', label: 'Convert', href: '/convert' },
         { key: 'schema', label: 'Schema', href: '/schema' },
@@ -22,6 +37,23 @@ export default function Sidebar({ activeMenu, onLogout, selectedHistoryId }: Sid
     const [username] = useState<string>(() => {
         return getStoredUser()?.name ?? 'User'
     })
+
+    const localHistoryListState = useHistoryFiles({
+        loadAll: true,
+        pageSize: 50,
+        enabled: !historyListState,
+    })
+
+    const resolvedHistoryListState = historyListState ?? {
+        items: localHistoryListState.items,
+        isLoading: localHistoryListState.isLoading,
+        loadError: localHistoryListState.loadError,
+        renamingHistoryId: localHistoryListState.renamingHistoryId,
+        deletingHistoryId: localHistoryListState.deletingHistoryId,
+        reloadHistory: localHistoryListState.reloadHistory,
+        renameHistory: localHistoryListState.renameHistory,
+        deleteHistory: localHistoryListState.deleteHistory,
+    }
 
     return (
         <aside className="fixed inset-y-0 left-0 w-56 overflow-y-auto bg-red-700 flex flex-col">
@@ -50,7 +82,17 @@ export default function Sidebar({ activeMenu, onLogout, selectedHistoryId }: Sid
             </nav>
 
             <div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-white/20 px-3 pt-3">
-                <HistorySidebarList selectedHistoryId={selectedHistoryId} />
+                <HistorySidebarList
+                    selectedHistoryId={selectedHistoryId}
+                    items={resolvedHistoryListState.items}
+                    isLoading={resolvedHistoryListState.isLoading}
+                    loadError={resolvedHistoryListState.loadError}
+                    renamingHistoryId={resolvedHistoryListState.renamingHistoryId}
+                    deletingHistoryId={resolvedHistoryListState.deletingHistoryId}
+                    reloadHistory={resolvedHistoryListState.reloadHistory}
+                    renameHistory={resolvedHistoryListState.renameHistory}
+                    deleteHistory={resolvedHistoryListState.deleteHistory}
+                />
             </div>
 
             <div className="mt-auto border-t border-white/20 px-4 py-4">

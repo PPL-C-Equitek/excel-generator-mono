@@ -46,6 +46,7 @@ interface UseHistoryFilesReturn {
 interface UseHistoryFilesOptions {
     readonly loadAll?: boolean
     readonly pageSize?: number
+    readonly enabled?: boolean
 }
 
 const DEFAULT_LIMIT = 10
@@ -90,12 +91,13 @@ export function useHistoryFiles(
     const options = isHistoryService(serviceOrOptions) ? optionsArg : serviceOrOptions
 
     const loadAllHistory = options.loadAll ?? false
+    const isEnabled = options.enabled ?? true
     const initialLimit = options.pageSize ?? DEFAULT_LIMIT
     const [items, setItems] = useState<HistoryItem[]>([])
     const [count, setCount] = useState(0)
     const [limit, setLimit] = useState(initialLimit)
     const [offset, setOffset] = useState(0)
-    const [isLoading, setIsLoading] = useState(true)
+    const [isLoading, setIsLoading] = useState(isEnabled)
     const [renamingHistoryId, setRenamingHistoryId] = useState<string | null>(null)
     const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null)
     const [loadError, setLoadError] = useState<string | null>(null)
@@ -153,14 +155,27 @@ export function useHistoryFiles(
     )
 
     useEffect(() => {
+        if (!isEnabled) {
+            setIsLoading(false)
+            return
+        }
+
         void loadHistory(initialLimit, 0)
-    }, [initialLimit, loadHistory])
+    }, [initialLimit, isEnabled, loadHistory])
 
     const reloadHistory = async () => {
+        if (!isEnabled) {
+            return
+        }
+
         await loadHistory(loadAllHistory ? initialLimit : limit, offset)
     }
 
     const goToNextPage = async () => {
+        if (!isEnabled) {
+            return
+        }
+
         if (loadAllHistory) {
             return
         }
@@ -174,6 +189,10 @@ export function useHistoryFiles(
     }
 
     const goToPreviousPage = async () => {
+        if (!isEnabled) {
+            return
+        }
+
         if (loadAllHistory) {
             return
         }

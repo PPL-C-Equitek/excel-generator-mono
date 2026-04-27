@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { useHistoryFiles } from '@/hooks/useHistoryFiles'
 import type { HistoryItem } from '@/services/history'
 
 const HISTORY_FILE_NAME_MAX_LENGTH = 120
@@ -43,6 +42,14 @@ function getHistoryGroupLabel(value: string): string {
 
 interface HistorySidebarListProps {
     readonly selectedHistoryId?: string | null
+    readonly items: HistoryItem[]
+    readonly isLoading: boolean
+    readonly loadError: string | null
+    readonly renamingHistoryId: string | null
+    readonly deletingHistoryId: string | null
+    readonly reloadHistory: () => Promise<void>
+    readonly renameHistory: (historyId: string, customName: string) => Promise<boolean>
+    readonly deleteHistory: (historyId: string) => Promise<boolean>
 }
 
 interface HistoryGroup {
@@ -367,26 +374,20 @@ function DeleteHistoryDialog({
 
 export default function HistorySidebarList({
     selectedHistoryId = null,
+    items,
+    isLoading,
+    loadError,
+    renamingHistoryId,
+    deletingHistoryId,
+    reloadHistory,
+    renameHistory,
+    deleteHistory,
 }: HistorySidebarListProps) {
     const [searchQuery, setSearchQuery] = useState('')
     const [openMenuHistoryId, setOpenMenuHistoryId] = useState<string | null>(null)
     const [renameTarget, setRenameTarget] = useState<HistoryItem | null>(null)
     const [renameValue, setRenameValue] = useState('')
     const [deleteTarget, setDeleteTarget] = useState<HistoryItem | null>(null)
-    const {
-        items,
-        isLoading,
-        loadError,
-        renamingHistoryId,
-        deletingHistoryId,
-        reloadHistory,
-        renameHistory,
-        deleteHistory,
-    } = useHistoryFiles({
-        loadAll: true,
-        pageSize: 50,
-    })
-
     const filteredItems = useMemo(() => {
         const normalizedQuery = searchQuery.trim().toLowerCase()
         if (!normalizedQuery) {
