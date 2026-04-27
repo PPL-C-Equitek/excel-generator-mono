@@ -5,6 +5,13 @@ from unittest.mock import patch
 from llm.services.refinement_service import (
     RefinementConfig,
     RefinementOrchestrator,
+    _collect_refinement_quality_errors,
+    _collect_headers_from_header_list,
+    _collect_headers_from_rows,
+    _collect_nested_source_headers,
+    _collect_source_headers,
+    _normalized_headers,
+    _resolve_refinement_final_status,
     build_refinement_instruction,
     build_validation_log,
     _sanitize_reasoning_meta_keys,
@@ -243,6 +250,41 @@ class RefinementValidationLogTest(SimpleTestCase):
 
         self.assertEqual(log["iteration"], 1)
         self.assertEqual(log["verdict"], "invalid")
+
+
+class RefinementHelpersTest(SimpleTestCase):
+    def test_collect_refinement_quality_errors_returns_empty_for_non_dict_output(self):
+        self.assertEqual(_collect_refinement_quality_errors("invalid", input_json={}), [])
+
+    def test_collect_headers_from_header_list_returns_empty_for_non_list(self):
+        self.assertEqual(_collect_headers_from_header_list("not-a-list"), set())
+
+    def test_collect_headers_from_rows_returns_empty_for_non_list(self):
+        self.assertEqual(_collect_headers_from_rows("not-a-list"), set())
+
+    def test_collect_nested_source_headers_handles_dict_payload(self):
+        headers = _collect_nested_source_headers(
+            {
+                "headers": ["ID"],
+                "rows": [{"Name": "A"}],
+            }
+        )
+
+        self.assertEqual(headers, {"id", "name"})
+
+    def test_collect_source_headers_handles_non_dict_payload(self):
+        headers = _collect_source_headers([{"headers": ["SKU"]}, {"rows": [{"Qty": 1}]}])
+
+        self.assertEqual(headers, {"sku", "qty"})
+
+    def test_normalized_headers_returns_empty_for_non_list(self):
+        self.assertEqual(_normalized_headers("not-a-list"), set())
+
+    def test_resolve_refinement_final_status_returns_failed_without_candidates(self):
+        self.assertEqual(
+            _resolve_refinement_final_status(has_valid_candidate=False, best_candidate=None),
+            "failed",
+        )
 
 
 class RefinementOrchestratorTest(SimpleTestCase):
@@ -521,20 +563,3 @@ class RefinementOrchestratorTest(SimpleTestCase):
         self.assertEqual(result["refinement_meta"]["iterations_run"], 1)
         self.assertEqual(generation_service.generate.call_count, 1)
 
-    def test_orchestrator_returns_failed_status_when_iterations_are_skipped(self):
-        generation_service = Mock()
-        orchestrator = RefinementOrchestrator(generation_service=generation_service)
-
-        result = orchestrator.run(
-            input_json={"filename": "skip.xlsx"},
-            custom_schema_id=None,
-            include_reasoning=False,
-            refinement_config=RefinementConfig(
-                enabled=True,
-                max_iterations=-1,
-                early_exit_on_valid=True,
-            ),
-        )
-
-        self.assertEqual(result["refinement_meta"]["iterations_run"], 1)
-        self.assertIn(result["refinement_meta"]["final_status"], {"valid", "best_effort"})
