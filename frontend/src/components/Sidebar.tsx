@@ -15,7 +15,6 @@ export default function Sidebar({ activeMenu, onLogout, selectedHistoryId }: Sid
     const menus = [
         { key: 'convert', label: 'Convert', href: '/convert' },
         { key: 'schema', label: 'Schema', href: '/schema' },
-        { key: 'history', label: 'History', href: '/history' },
         { key: 'monitoring', label: 'Monitoring', href: '/monitoring' },
         { key: 'change-password', label: 'Change Password', href: '/change-password' },
     ]

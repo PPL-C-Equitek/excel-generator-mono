@@ -22,13 +22,17 @@ describe('Sidebar', () => {
         expect(screen.getByText('EQUITEK')).toHaveAttribute('href', '/')
     })
 
-    it('renders Convert, Schema, History, Monitoring, and Change Password menu', () => {
+    it('renders Convert, Schema, Monitoring, and Change Password menu', () => {
         render(<Sidebar activeMenu="convert" />)
         expect(screen.getByText('Convert')).toBeInTheDocument()
         expect(screen.getByText('Schema')).toBeInTheDocument()
-        expect(screen.getByText('History')).toBeInTheDocument()
         expect(screen.getByText('Monitoring')).toBeInTheDocument()
         expect(screen.getByText('Change Password')).toBeInTheDocument()
+    })
+
+    it('does not render History as a separate top menu label', () => {
+        render(<Sidebar activeMenu="history" />)
+        expect(screen.queryByRole('link', { name: 'History' })).not.toBeInTheDocument()
     })
 
     it('renders the history sidebar list block', () => {
