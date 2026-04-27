@@ -3,9 +3,9 @@ import logging
 from typing import Any, cast
 from uuid import UUID
 
+from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
 from django.db import transaction
-from chat_sessions.models import ChatMessage
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -523,17 +523,16 @@ def _parse_thinking_log_identifier(value, field_name: str):
 
 
 def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, request_id=None):
-    queryset = ChatMessage.objects.filter(session__owner=user).exclude(thinking_log="")
+    queryset = GeneratedOutput.objects.filter(session__owner=user).exclude(thinking_log="")
 
-    normalized_session_id = session_id.strip() if isinstance(session_id, str) else ""
-    if normalized_session_id:
-        queryset = queryset.filter(session_id=normalized_session_id)
+    if session_id:
+        queryset = queryset.filter(session_id=session_id)
 
     identifier = chat_id or request_id
     if identifier:
         queryset = queryset.filter(id=identifier)
 
-    return queryset.defer("content", "role").order_by("-created_at", "-id")
+    return queryset.defer("export_output_json").order_by("-created_at", "-id")
 
 
 def _resolve_generate_session(user, session_id):
@@ -821,6 +820,7 @@ def thinking_log_list(request):
     request_id = request.query_params.get("request_id")
 
     try:
+        parsed_session_id = _parse_thinking_log_identifier(session_id, "session_id")
         parsed_chat_id = _parse_thinking_log_identifier(chat_id, "chat_id")
         parsed_request_id = _parse_thinking_log_identifier(request_id, "request_id")
     except ValueError as exc:
@@ -828,7 +828,7 @@ def thinking_log_list(request):
 
     queryset = _build_thinking_log_queryset_for_user(
         user=request.user,
-        session_id=session_id,
+        session_id=parsed_session_id,
         chat_id=parsed_chat_id,
         request_id=parsed_request_id,
     )
