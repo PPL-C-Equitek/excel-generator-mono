@@ -200,8 +200,11 @@ def update_session_title(session, title):
 def sanitize_session_title(title):
     if not title or not title.strip():
         return ""
-    
+
     normalized = title.replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
+        normalized = normalized[1:-1].strip()
+
     return normalized[:120]
 
 
