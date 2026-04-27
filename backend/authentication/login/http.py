@@ -21,6 +21,7 @@ from authentication.login.exceptions import (
     LoginServiceError,
 )
 from authentication.serializers import LoginSerializer
+from monitoring.interfaces.http.decorators import track_auth_metric
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ class LoginView(APIView):
     def get_login_use_case(self):
         return build_login_use_case()
 
+    @track_auth_metric("auth.login")
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if not serializer.is_valid():

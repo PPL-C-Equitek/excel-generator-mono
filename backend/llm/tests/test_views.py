@@ -1526,46 +1526,38 @@ class ThinkingLogEndpointTest(TestCase):
             status="verified",
         )
 
-    def _create_history(self, owner, *, session_id, request_id, thinking_log):
-        return ArtifactHistory.objects.create(
-            owner=owner,
-            original_name="invoice.pdf",
-            custom_name=None,
-            output_json={
-                "session_id": session_id,
-                "request_id": request_id,
-                "thinking_log": thinking_log,
-                "summary": {"table_count": 1},
-                "content_data": [
-                    {"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}
-                ],
-            },
-            status_processing="completed",
+    def _create_chat_message(self, owner, *, session=None, thinking_log, role="assistant"):
+        session = session or Session.objects.create(owner=owner, title="Thinking Log Session")
+        return ChatMessage.objects.create(
+            session=session,
+            role=role,
+            content="Thinking log message.",
+            thinking_log=thinking_log,
             created_at=timezone.now(),
         )
 
     def test_thinking_log_list_returns_filtered_records_for_owner(self):
-        owned_match = self._create_history(
+        owned_session = Session.objects.create(owner=self.verified_user, title="Owned Session")
+        other_session = Session.objects.create(owner=self.other_user, title="Other Session")
+
+        owned_match = self._create_chat_message(
             self.verified_user,
-            session_id="session-1",
-            request_id="request-a",
+            session=owned_session,
             thinking_log="Mapped invoice total to total_amount.",
         )
-        self._create_history(
+        self._create_chat_message(
             self.verified_user,
-            session_id="session-2",
-            request_id="request-b",
+            session=Session.objects.create(owner=self.verified_user, title="Owned Session 2"),
             thinking_log="Validated header consistency.",
         )
-        self._create_history(
+        self._create_chat_message(
             self.other_user,
-            session_id="session-1",
-            request_id="request-c",
+            session=other_session,
             thinking_log="Other user log.",
         )
 
         self.client.force_authenticate(user=self.verified_user)
-        response = self.client.get("/llm/thinking-logs/?session_id=session-1")
+        response = self.client.get(f"/llm/thinking-logs/?session_id={owned_session.id}")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 1)
@@ -1573,55 +1565,81 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.data["page_size"], 10)
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(response.data["results"][0]["id"], str(owned_match.id))
-        self.assertEqual(response.data["results"][0]["session_id"], "session-1")
-        self.assertEqual(response.data["results"][0]["request_id"], "request-a")
+        self.assertEqual(response.data["results"][0]["session_id"], str(owned_session.id))
+        self.assertEqual(response.data["results"][0]["chat_id"], str(owned_match.id))
+        self.assertIsNone(response.data["results"][0]["request_id"])
 
-    def test_thinking_log_list_filters_by_request_id_without_session_filter(self):
-        matched = self._create_history(
+    def test_thinking_log_list_filters_by_chat_id_without_session_filter(self):
+        matched_session = Session.objects.create(owner=self.verified_user, title="Matched Session")
+        matched = self._create_chat_message(
             self.verified_user,
-            session_id="session-x",
-            request_id="request-target",
+            session=matched_session,
             thinking_log="Request filtered record.",
         )
-        self._create_history(
+        self._create_chat_message(
             self.verified_user,
-            session_id="session-y",
-            request_id="request-other",
+            session=Session.objects.create(owner=self.verified_user, title="Other Owned Session"),
             thinking_log="Non matching request.",
         )
-        self._create_history(
+        self._create_chat_message(
             self.other_user,
-            session_id="session-z",
-            request_id="request-target",
+            session=Session.objects.create(owner=self.other_user, title="Other User Session"),
             thinking_log="Other owner record.",
         )
 
         self.client.force_authenticate(user=self.verified_user)
-        response = self.client.get("/llm/thinking-logs/?request_id=request-target")
+        response = self.client.get(f"/llm/thinking-logs/?chat_id={matched.id}")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(response.data["results"][0]["id"], str(matched.id))
-        self.assertEqual(response.data["results"][0]["request_id"], "request-target")
+        self.assertEqual(response.data["results"][0]["chat_id"], str(matched.id))
+
+    def test_thinking_log_list_filters_by_request_id_for_backward_compatibility(self):
+        matched_session = Session.objects.create(owner=self.verified_user, title="Matched Session")
+        matched = self._create_chat_message(
+            self.verified_user,
+            session=matched_session,
+            thinking_log="Request ID filtered record.",
+        )
+        self._create_chat_message(
+            self.verified_user,
+            session=Session.objects.create(owner=self.verified_user, title="Other Owned Session"),
+            thinking_log="Non matching request.",
+        )
+        self._create_chat_message(
+            self.other_user,
+            session=Session.objects.create(owner=self.other_user, title="Other User Session"),
+            thinking_log="Other owner record.",
+        )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get(f"/llm/thinking-logs/?request_id={matched.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["id"], str(matched.id))
 
     def test_thinking_log_list_without_filters_returns_all_owned_records(self):
-        self._create_history(
+        owned_session_1 = Session.objects.create(owner=self.verified_user, title="Owned A")
+        owned_session_2 = Session.objects.create(owner=self.verified_user, title="Owned B")
+        other_session = Session.objects.create(owner=self.other_user, title="Other C")
+
+        self._create_chat_message(
             self.verified_user,
-            session_id="session-a",
-            request_id="request-a",
+            session=owned_session_1,
             thinking_log="Owned record A.",
         )
-        self._create_history(
+        self._create_chat_message(
             self.verified_user,
-            session_id="session-b",
-            request_id="request-b",
+            session=owned_session_2,
             thinking_log="Owned record B.",
         )
-        self._create_history(
+        self._create_chat_message(
             self.other_user,
-            session_id="session-c",
-            request_id="request-c",
+            session=other_session,
             thinking_log="Other owner record.",
         )
 
@@ -1633,10 +1651,10 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(len(response.data["results"]), 2)
 
     def test_thinking_log_detail_returns_record_for_owner(self):
-        record = self._create_history(
+        session = Session.objects.create(owner=self.verified_user, title="Detail Session")
+        record = self._create_chat_message(
             self.verified_user,
-            session_id="session-9",
-            request_id="request-z",
+            session=session,
             thinking_log="Normalization notes for numeric columns.",
         )
 
@@ -1645,8 +1663,9 @@ class ThinkingLogEndpointTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["id"], str(record.id))
-        self.assertEqual(response.data["session_id"], "session-9")
-        self.assertEqual(response.data["request_id"], "request-z")
+        self.assertEqual(response.data["session_id"], str(session.id))
+        self.assertEqual(response.data["chat_id"], str(record.id))
+        self.assertIsNone(response.data["request_id"])
         self.assertEqual(
             response.data["thinking_log"],
             "Normalization notes for numeric columns.",
@@ -1661,10 +1680,10 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.data, {"detail": "Thinking log not found."})
 
     def test_thinking_log_detail_blocks_access_to_other_user_record(self):
-        foreign_record = self._create_history(
+        foreign_session = Session.objects.create(owner=self.other_user, title="Foreign Session")
+        foreign_record = self._create_chat_message(
             self.other_user,
-            session_id="session-foreign",
-            request_id="request-foreign",
+            session=foreign_session,
             thinking_log="Foreign record.",
         )
         self.client.force_authenticate(user=self.verified_user)
@@ -1674,17 +1693,31 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data, {"detail": "Thinking log not found."})
 
+    def test_thinking_log_detail_returns_404_for_empty_thinking_log_record(self):
+        session = Session.objects.create(owner=self.verified_user, title="Empty Log Session")
+        empty_log_record = self._create_chat_message(
+            self.verified_user,
+            session=session,
+            thinking_log="",
+        )
+
+        self.client.force_authenticate(user=self.verified_user)
+        response = self.client.get(f"/llm/thinking-logs/{empty_log_record.id}/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data, {"detail": "Thinking log not found."})
+
     def test_thinking_log_list_supports_large_dataset_pagination(self):
+        bulk_session = Session.objects.create(owner=self.verified_user, title="Bulk Session")
         for index in range(25):
-            self._create_history(
+            self._create_chat_message(
                 self.verified_user,
-                session_id="session-bulk",
-                request_id=f"req-{index}",
+                session=bulk_session,
                 thinking_log=f"Summary item {index}",
             )
 
         self.client.force_authenticate(user=self.verified_user)
-        response = self.client.get("/llm/thinking-logs/?session_id=session-bulk&page=2&page_size=10")
+        response = self.client.get(f"/llm/thinking-logs/?session_id={bulk_session.id}&page=2&page_size=10")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 25)
@@ -1727,6 +1760,31 @@ class ThinkingLogEndpointTest(TestCase):
             response.data["errors"],
             {"pagination": ["Invalid thinking log pagination request."]},
         )
+
+    def test_thinking_log_list_rejects_invalid_chat_id(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/llm/thinking-logs/?chat_id=not-a-uuid")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(
+            response.data["errors"],
+            {"chat_id": ["Invalid thinking log identifier."]},
+        )
+
+    def test_thinking_log_list_rejects_invalid_request_id(self):
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get("/llm/thinking-logs/?request_id=not-a-uuid")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(
+            response.data["errors"],
+            {"request_id": ["Invalid thinking log identifier."]},
+        )
+
 class SendMessagePositiveTest(TestCase):
 
     def setUp(self):

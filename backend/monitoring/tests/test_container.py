@@ -45,6 +45,12 @@ class MonitoringContainerTest(SimpleTestCase):
             container._build_repository_kwargs()["max_routes_per_snapshot"]
         )
 
+    @override_settings(MONITORING_MAX_ROUTES_PER_SNAPSHOT="0")
+    def test_build_repository_kwargs_ignores_non_positive_routes_setting(self):
+        self.assertIsNone(
+            container._build_repository_kwargs()["max_routes_per_snapshot"]
+        )
+
     @override_settings(
         MONITORING_REDIS_SNAPSHOT_CACHE_TTL_SECONDS=0,
         MONITORING_STATS_CACHE_TTL_SECONDS=4.5,

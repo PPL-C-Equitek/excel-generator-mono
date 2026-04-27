@@ -87,7 +87,7 @@ describe('MonitoringDashboardSections', () => {
         )
 
         fireEvent.click(screen.getByRole('button', { name: 'Refresh Monitoring' }))
-        expect(screen.getByText('Live')).toBeInTheDocument()
+        expect(screen.queryByText('Live')).not.toBeInTheDocument()
         expect(onRefresh).toHaveBeenCalledTimes(1)
     })
 
@@ -298,6 +298,7 @@ describe('MonitoringDashboardSections', () => {
         )
 
         expect(screen.getByText('Peak latency in last 10s:')).toBeInTheDocument()
+        expect(screen.getByText('Y-axis: Avg latency (ms). Max requests in series: 3')).toBeInTheDocument()
         expect(screen.getByText(/Latest bucket\s*10:00:00:\s*avg latency/)).toBeInTheDocument()
     })
 
@@ -428,6 +429,33 @@ describe('MonitoringDashboardSections', () => {
         expect(screen.getByText('Readiness data is available only for monitoring-enabled accounts.')).toBeInTheDocument()
     })
 
+    it('excludes monitoring routes from top routes rendering', () => {
+        render(
+            <MonitoringRoutesAndReadinessSection
+                statsPayload={{
+                    ...baseStatsPayload,
+                    routes: [
+                        {
+                            route: '/monitoring/stats/',
+                            method: 'GET',
+                            total_requests: 99,
+                            total_errors: 0,
+                            error_rate: 0,
+                            avg_latency_ms: 11,
+                            max_latency_ms: 15,
+                        },
+                        ...baseStatsPayload.routes,
+                    ],
+                }}
+                maxRouteRequests={60}
+                readyPayload={null}
+            />
+        )
+
+        expect(screen.queryByText('/monitoring/stats/')).not.toBeInTheDocument()
+        expect(screen.getByText('/history/')).toBeInTheDocument()
+    })
+
     it('renders readiness checks with optional check messages', () => {
         render(
             <MonitoringRoutesAndReadinessSection
@@ -438,7 +466,29 @@ describe('MonitoringDashboardSections', () => {
         )
 
         expect(screen.getByText(/^Timestamp:/)).toBeInTheDocument()
+        expect(screen.getByText('Database')).toBeInTheDocument()
+        expect(screen.getAllByText('OK').length).toBeGreaterThan(0)
         expect(screen.getByText('latency 5 ms - healthy')).toBeInTheDocument()
+    })
+
+    it('maps configured readiness check names to friendly labels', () => {
+        render(
+            <MonitoringRoutesAndReadinessSection
+                statsPayload={baseStatsPayload}
+                maxRouteRequests={60}
+                readyPayload={{
+                    status: 'ok',
+                    timestamp: '2026-04-24T10:00:05Z',
+                    checks: [
+                        { name: 'storage', status: 'ok', latency_ms: 4, is_critical: true },
+                        { name: 'openai_config', status: 'ok', latency_ms: 6, is_critical: true },
+                    ],
+                }}
+            />
+        )
+
+        expect(screen.getByText('Storage')).toBeInTheDocument()
+        expect(screen.getByText('LLM Config')).toBeInTheDocument()
     })
 
     it('renders readiness checks when message is omitted', () => {
