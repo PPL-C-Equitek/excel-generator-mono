@@ -1064,6 +1064,9 @@ class SessionTitleHelperServiceTest(SimpleTestCase):
     def test_sanitize_session_title_returns_empty_string_for_none(self):
         self.assertEqual(sanitize_session_title(None), "")
 
+    def test_sanitize_session_title_returns_empty_string_for_empty_string(self):
+        self.assertEqual(sanitize_session_title(""), "")
+
     def test_sanitize_session_title_returns_empty_string_for_whitespace_only(self):
         self.assertEqual(sanitize_session_title("   \n \t "), "")
 
