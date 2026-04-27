@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 DiscordPayload: TypeAlias = dict[str, object]
 DiscordPostCallable: TypeAlias = Callable[..., None]
+DEFAULT_DISCORD_WEBHOOK_USER_AGENT = "excel-generator-mono-monitoring/1.0"
 
 
 def _post_to_discord_webhook(
@@ -21,7 +22,10 @@ def _post_to_discord_webhook(
     request = Request(
         webhook_url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": DEFAULT_DISCORD_WEBHOOK_USER_AGENT,
+        },
         method="POST",
     )
     with urlopen(request, timeout=timeout_seconds) as response:

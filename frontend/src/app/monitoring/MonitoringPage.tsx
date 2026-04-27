@@ -145,9 +145,8 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
                     {errorMessage ? (
                         <div
                             role="alert"
-                            className="flex items-start gap-2 rounded-lg border border-red-400 bg-red-50 p-3 text-sm text-red-700"
+                            className="rounded-lg border border-red-400 bg-red-50 p-3 text-sm text-red-700"
                         >
-                            <span aria-hidden>!</span>
                             <div className="space-y-1">
                                 <p>{errorMessage}</p>
                                 {retryInSeconds > 0 ? (

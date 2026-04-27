@@ -73,7 +73,7 @@ class _RouteAccumulator:
             self.latency_samples.popleft()
         self.precomputed_p95_latency_ms = None
         self.precomputed_p99_latency_ms = None
-        if event.status_code >= 500:
+        if event.status_code >= 400:
             self.total_errors += 1
 
     def to_snapshot(self, route: str, method: str) -> RouteMetricSnapshot:
@@ -538,7 +538,7 @@ class InMemoryMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMi
         self._recent_requests.append(
             _RealtimeRequestRecord(
                 created_at=event.created_at,
-                is_error=event.status_code >= 500,
+                is_error=event.status_code >= 400,
                 duration_ms=max(0.0, float(event.duration_ms)),
             )
         )
@@ -730,7 +730,7 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         route_hash_key = self._route_hash_key(route=route, method=method)
         route_latency_samples_key = self._route_latency_samples_key(route_hash_key)
         duration_ms = max(0.0, float(event.duration_ms))
-        is_error = 1 if event.status_code >= 500 else 0
+        is_error = 1 if event.status_code >= 400 else 0
         now_epoch = self._realtime_series_builder.to_epoch_seconds(self._now())
         created_epoch = self._realtime_series_builder.to_epoch_seconds(event.created_at)
 

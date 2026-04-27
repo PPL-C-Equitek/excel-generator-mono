@@ -17,7 +17,7 @@ import type {
     ReadinessMeter,
     RealtimeTotals,
 } from './monitoringViewModelTypes'
-import { getMonitoringAuthToken } from '@/services/monitoring'
+import { getMonitoringAuthToken, MONITORING_STREAM_UNEXPECTED_CLOSE_MESSAGE } from '@/services/monitoring'
 
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 5000
 const STALE_THRESHOLD_MULTIPLIER = 3
@@ -25,6 +25,8 @@ const MIN_STALE_THRESHOLD_MS = 15000
 const RETRY_BASE_DELAY_MS = 2000
 const RETRY_MAX_DELAY_MS = 30000
 const RETRY_TICK_INTERVAL_MS = 1000
+const MAX_REALTIME_LATENCY_TICKS = 6
+const MONITORING_ROUTE_PREFIX = 'monitoring/'
 
 export type MonitoringDashboardService = {
     getMonitoringLive: () => Promise<MonitoringLivePayload>
@@ -72,6 +74,11 @@ function calculateRetryDelayMs(consecutiveFailures: number): number {
         RETRY_MAX_DELAY_MS,
         RETRY_BASE_DELAY_MS * (2 ** Math.max(0, consecutiveFailures - 1))
     )
+}
+
+function isMonitoringRoute(route: string): boolean {
+    const normalizedRoute = route.trim().replace(/^\/+/, '').toLowerCase()
+    return normalizedRoute.startsWith(MONITORING_ROUTE_PREFIX)
 }
 
 export function getIsPageVisible(): boolean {
@@ -188,7 +195,8 @@ export function useMonitoringDashboardModel({
                 if (!isMountedRef.current) {
                     return
                 }
-                setErrorMessage(error.message)
+                const isUnexpectedStreamClose = error.message === MONITORING_STREAM_UNEXPECTED_CLOSE_MESSAGE
+                setErrorMessage(isUnexpectedStreamClose ? null : error.message)
                 stopMonitoringStatsStream()
                 scheduleRetry(Date.now())
             },
@@ -402,13 +410,14 @@ export function useMonitoringDashboardModel({
     }, [statsPayload])
 
     const maxRouteRequests = useMemo(() => {
-        if (!statsPayload || statsPayload.routes.length === 0) {
+        const visibleRoutes = statsPayload?.routes.filter((routeRow) => !isMonitoringRoute(routeRow.route)) ?? []
+        if (visibleRoutes.length === 0) {
             return 1
         }
 
         return Math.max(
             1,
-            ...statsPayload.routes.map((routeRow) => routeRow.total_requests)
+            ...visibleRoutes.map((routeRow) => routeRow.total_requests)
         )
     }, [statsPayload])
 
@@ -422,12 +431,25 @@ export function useMonitoringDashboardModel({
 
     const timeseriesPoints = useMemo(() => {
         const points = statsPayload?.timeseries?.points ?? []
-        return points.filter((point) => point !== null && point !== undefined)
+        const validPoints = points.filter((point) => point !== null && point !== undefined)
+        return validPoints.slice(-MAX_REALTIME_LATENCY_TICKS)
     }, [statsPayload])
 
-    const realtimeWindowSeconds = statsPayload?.timeseries?.window_seconds ?? 0
+    const rawRealtimeWindowSeconds = statsPayload?.timeseries?.window_seconds ?? 0
     const realtimeBucketSeconds = statsPayload?.timeseries?.bucket_seconds ?? 0
     const hasRealtimeSeries = timeseriesPoints.length > 0
+    const realtimeWindowSeconds = useMemo(() => {
+        if (!hasRealtimeSeries || realtimeBucketSeconds <= 0) {
+            return rawRealtimeWindowSeconds
+        }
+
+        const renderedWindowSeconds = realtimeBucketSeconds * timeseriesPoints.length
+        if (rawRealtimeWindowSeconds <= 0) {
+            return renderedWindowSeconds
+        }
+
+        return Math.min(rawRealtimeWindowSeconds, renderedWindowSeconds)
+    }, [hasRealtimeSeries, rawRealtimeWindowSeconds, realtimeBucketSeconds, timeseriesPoints.length])
 
     const realtimeTotals = useMemo<RealtimeTotals>(() => {
         if (timeseriesPoints.length === 0) {
@@ -457,6 +479,7 @@ export function useMonitoringDashboardModel({
         }
 
         return statsPayload.routes
+            .filter((routeRow) => !isMonitoringRoute(routeRow.route))
             .slice(0, 8)
             .map((routeRow, index) => ({
                 id: index + 1,
