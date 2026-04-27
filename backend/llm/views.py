@@ -20,6 +20,7 @@ from chat_sessions.services import (
     generate_session_title_from_message,
     get_session_for_user,
     resolve_session_title,
+    sanitize_session_title,
 )
 from authentication.permissions import IsVerifiedUser
 from .serializers import (

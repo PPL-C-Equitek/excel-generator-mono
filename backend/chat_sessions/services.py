@@ -354,9 +354,9 @@ def sanitize_session_title(title):
     if not stripped:
         return ""
 
-    normalized = re.sub(r"[\r\n\t]+", " ", stripped)
+    normalized = re.sub(r"[\r\n\t]", " ", stripped)
 
-    if len(normalized) > 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
         normalized = normalized[1:-1].strip()
 
     return normalized[:120]
