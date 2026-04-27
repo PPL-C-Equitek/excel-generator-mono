@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase, TestCase
@@ -374,6 +375,32 @@ class LlmGenerateEndpointTest(SimpleTestCase):
                 }
             ],
         )
+
+    def test_build_export_output_json_reuses_cached_serialization_for_repeated_nested_cell_values(self):
+        shared_value = {"unit": "ICU", "meta": {"active": True}}
+
+        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
+            export_output_json = build_export_output_json(
+                input_json={"filename": "summary.xlsx"},
+                output_json={
+                    "headers": ["payload"],
+                    "rows": [
+                        [shared_value],
+                        [shared_value],
+                        [shared_value],
+                    ],
+                },
+            )
+
+        self.assertEqual(
+            export_output_json["content_data"][0]["rows"],
+            [
+                {"payload": json.dumps(shared_value)},
+                {"payload": json.dumps(shared_value)},
+                {"payload": json.dumps(shared_value)},
+            ],
+        )
+        self.assertEqual(mock_json_dumps.call_count, 1)
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):
