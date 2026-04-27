@@ -162,6 +162,67 @@ def _resolve_export_source_type(input_json, output_json) -> str:
     return "Excel"
 
 
+def _build_session_message_history(session):
+    return [
+        {"role": msg.role, "content": msg.content}
+        for msg in session.messages.order_by("created_at")
+    ]
+
+
+def _build_new_session_title_prompt(history, message):
+    return history[:-1] + [
+        {
+            "role": "user",
+            "content": (
+                f"{message}\n\n"
+                "Reply to the message normally. "
+                "Also generate a short 3-5 word session title. "
+                'Return a valid JSON object with exactly two keys: "reply" and "title". '
+                "Do NOT wrap the output in markdown."
+            ),
+        }
+    ]
+
+
+def _parse_send_message_json_result(raw_result):
+    cleaned = raw_result.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:-3].strip()
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:-3].strip()
+    return json.loads(cleaned)
+
+
+def _generate_reply_and_title_for_new_session(history, message):
+    raw_result = generate_chat_response(_build_new_session_title_prompt(history, message))
+    try:
+        data = _parse_send_message_json_result(raw_result)
+        reply = data.get("reply", "")
+        title = sanitize_session_title(data.get("title", "")) or "New Chat"
+        return reply, title
+    except Exception:
+        return generate_chat_response(history), generate_session_title_from_message(message)
+
+
+def _resolve_send_message_session_context(user, session_id):
+    if not session_id:
+        return None, []
+
+    session = get_session_for_user(user, session_id)
+    if session is None:
+        return None, None
+    return session, _build_session_message_history(session)
+
+
+def _generate_send_message_reply_and_title(session, history, message):
+    prepared_history = (
+        build_history_with_summary(session, history) if session is not None else history
+    )
+    if session is None:
+        return _generate_reply_and_title_for_new_session(prepared_history, message)
+    return generate_chat_response(prepared_history), "New Chat"
+
+
 def _sanitize_output_json(payload: Any) -> Any:
     if not isinstance(payload, dict):
         return payload
@@ -712,57 +773,14 @@ def send_message(request):
 
     message = serializer.validated_data["message"]
     session_id = serializer.validated_data.get("session_id")
-
-    session = None
-    if session_id:
-        session = get_session_for_user(request.user, session_id)
-        if session is None:
-            return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
-        history = [
-            {"role": msg.role, "content": msg.content}
-            for msg in session.messages.order_by("created_at")
-        ]
-        is_new_session = False
-    else:
-        history = []
-        is_new_session = True
+    session, history = _resolve_send_message_session_context(request.user, session_id)
+    if session_id and session is None:
+        return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
 
     history.append({"role": "user", "content": message})
 
-    title = "New Chat"
-
     try:
-        if session is not None:
-            history = build_history_with_summary(session, history)
-
-        if is_new_session:
-            prompt = history[:-1] + [
-                {
-                    "role": "user",
-                    "content": (
-                        f"{message}\n\n"
-                        "Reply to the message normally. "
-                        "Also generate a short 3-5 word session title. "
-                        "Return a valid JSON object with exactly two keys: \"reply\" and \"title\". "
-                        "Do NOT wrap the output in markdown."
-                    ),
-                }
-            ]
-            raw_result = generate_chat_response(prompt)
-            try:
-                cleaned = raw_result.strip()
-                if cleaned.startswith("```json"):
-                    cleaned = cleaned[7:-3].strip()
-                elif cleaned.startswith("```"):
-                    cleaned = cleaned[3:-3].strip()
-                data = json.loads(cleaned)
-                reply = data.get("reply", "")
-                title = sanitize_session_title(data.get("title", "")) or "New Chat"
-            except Exception:
-                reply = generate_chat_response(history)
-                title = generate_session_title_from_message(message)
-        else:
-            reply = generate_chat_response(history)
+        reply, title = _generate_send_message_reply_and_title(session, history, message)
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     except OpenAIUpstreamError as exc:
