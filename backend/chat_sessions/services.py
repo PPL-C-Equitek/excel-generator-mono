@@ -1,6 +1,8 @@
+from heapq import merge
 from types import SimpleNamespace
 
 from django.conf import settings
+from django.db.models import Prefetch
 from django.utils import timezone
 
 from chat_sessions.models import ChatMessage, GeneratedOutput, Session
@@ -113,7 +115,20 @@ def get_paginated_session_detail_for_user(
 
 
 def build_resume_context_for_user(user, session_id):
-    session = get_session_for_user(user, session_id)
+    session = (
+        Session.objects.filter(owner=user, id=session_id)
+        .prefetch_related(
+            Prefetch(
+                "messages",
+                queryset=ChatMessage.objects.order_by("created_at", "id"),
+            ),
+            Prefetch(
+                "generated_outputs",
+                queryset=GeneratedOutput.objects.order_by("created_at", "id"),
+            ),
+        )
+        .first()
+    )
     if session is None:
         return None
 
@@ -163,7 +178,7 @@ def _build_paginated_collection(queryset, limit, offset):
 
 
 def _build_resume_history(session):
-    message_items = [
+    message_items = (
         SimpleNamespace(
             type="message",
             id=message.id,
@@ -172,9 +187,9 @@ def _build_resume_history(session):
             thinking_log=message.thinking_log,
             created_at=message.created_at,
         )
-        for message in session.messages.order_by("created_at", "id")
-    ]
-    output_items = [
+        for message in session.messages.all()
+    )
+    output_items = (
         SimpleNamespace(
             type="output",
             id=output.id,
@@ -182,12 +197,15 @@ def _build_resume_history(session):
             thinking_log=output.thinking_log,
             created_at=output.created_at,
         )
-        for output in session.generated_outputs.order_by("created_at", "id")
-    ]
+        for output in session.generated_outputs.all()
+    )
 
-    return sorted(
-        [*message_items, *output_items],
-        key=lambda item: (item.created_at, str(item.id)),
+    return list(
+        merge(
+            message_items,
+            output_items,
+            key=lambda item: (item.created_at, str(item.id)),
+        )
     )
 
 

@@ -388,6 +388,39 @@ class ChatSessionServiceTest(TestCase):
             "Only thinking log metadata is available.",
         )
 
+    def test_build_resume_context_for_user_prefetches_history_without_extra_queries_after_load(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Prefetched Session",
+        )
+        message_created_at = timezone.now() + timezone.timedelta(minutes=1)
+        output_created_at = timezone.now() + timezone.timedelta(minutes=2)
+        ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="Halo",
+            created_at=message_created_at,
+        )
+        GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"source_type": "Excel", "filename": "prefetched.xlsx"},
+                "summary": {"total_sheets": 1, "total_rows": 0, "total_columns": 0},
+                "content_data": [],
+            },
+            thinking_log="Only output context",
+            created_at=output_created_at,
+        )
+
+        with self.assertNumQueries(3):
+            result = build_resume_context_for_user(self.owner, session.id)
+
+        with self.assertNumQueries(0):
+            self.assertEqual(result.title, "Prefetched Session")
+            self.assertEqual(len(result.history), 2)
+            self.assertEqual(result.history[0].type, "message")
+            self.assertEqual(result.history[1].type, "output")
+
     def test_get_paginated_session_detail_for_user_rejects_invalid_limits(self):
         session = Session.objects.create(
             owner=self.owner,
