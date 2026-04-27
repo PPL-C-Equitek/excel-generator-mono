@@ -1121,3 +1121,11 @@ class SessionTitleGenerationServiceTest(SimpleTestCase):
         result = generate_session_title_from_message("Halo")
 
         self.assertEqual(result, "New Chat")
+
+    def test_generate_session_title_from_message_returns_fallback_when_message_is_none(self):
+        result = generate_session_title_from_message(None)
+        self.assertEqual(result, "New Chat")
+
+    def test_generate_session_title_from_message_returns_fallback_when_message_is_blank(self):
+        result = generate_session_title_from_message("   \n\t  ")
+        self.assertEqual(result, "New Chat")
