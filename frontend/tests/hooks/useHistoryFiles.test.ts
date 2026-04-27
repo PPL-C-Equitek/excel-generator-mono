@@ -790,4 +790,35 @@ describe('useHistoryFiles', () => {
         expect(result.current.items).toEqual([historyItems[1]])
         expect(result.current.count).toBe(1)
     })
+
+    it('does not load history on mount when hook is disabled', async () => {
+        const service = makeServiceMock()
+        const { result } = renderHook(() =>
+            useHistoryFiles(service, { enabled: false, pageSize: 10 })
+        )
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        expect(service.getHistoryFiles).not.toHaveBeenCalled()
+        expect(result.current.items).toEqual([])
+        expect(result.current.count).toBe(0)
+    })
+
+    it('keeps reload and pagination actions as no-op when hook is disabled', async () => {
+        const service = makeServiceMock()
+        const { result } = renderHook(() =>
+            useHistoryFiles(service, { enabled: false, pageSize: 10 })
+        )
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.reloadHistory()
+            await result.current.goToNextPage()
+            await result.current.goToPreviousPage()
+        })
+
+        expect(service.getHistoryFiles).not.toHaveBeenCalled()
+        expect(result.current.offset).toBe(0)
+    })
 })
