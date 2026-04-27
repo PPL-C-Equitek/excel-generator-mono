@@ -1,3 +1,4 @@
+import re
 from heapq import merge
 from types import SimpleNamespace
 
@@ -346,11 +347,16 @@ def update_session_title(session, title):
 
 
 def sanitize_session_title(title):
-    if not title or not title.strip():
+    if not title:
         return ""
 
-    normalized = title.replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
-    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
+    stripped = title.strip()
+    if not stripped:
+        return ""
+
+    normalized = re.sub(r"[\r\n\t]+", " ", stripped)
+
+    if len(normalized) > 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
         normalized = normalized[1:-1].strip()
 
     return normalized[:120]

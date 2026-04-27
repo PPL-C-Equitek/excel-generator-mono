@@ -733,10 +733,35 @@ def send_message(request):
     try:
         if session is not None:
             history = build_history_with_summary(session, history)
-        reply = generate_chat_response(history)
 
         if is_new_session:
-            title = generate_session_title_from_message(message)
+            prompt = history[:-1] + [
+                {
+                    "role": "user",
+                    "content": (
+                        f"{message}\n\n"
+                        "Reply to the message normally. "
+                        "Also generate a short 3-5 word session title. "
+                        "Return a valid JSON object with exactly two keys: \"reply\" and \"title\". "
+                        "Do NOT wrap the output in markdown."
+                    ),
+                }
+            ]
+            raw_result = generate_chat_response(prompt)
+            try:
+                cleaned = raw_result.strip()
+                if cleaned.startswith("```json"):
+                    cleaned = cleaned[7:-3].strip()
+                elif cleaned.startswith("```"):
+                    cleaned = cleaned[3:-3].strip()
+                data = json.loads(cleaned)
+                reply = data.get("reply", "")
+                title = sanitize_session_title(data.get("title", "")) or "New Chat"
+            except Exception:
+                reply = generate_chat_response(history)
+                title = generate_session_title_from_message(message)
+        else:
+            reply = generate_chat_response(history)
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     except OpenAIUpstreamError as exc:
