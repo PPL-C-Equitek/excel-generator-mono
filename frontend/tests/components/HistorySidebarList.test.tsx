@@ -9,29 +9,29 @@ vi.mock("@/hooks/useHistoryFiles", () => ({
 
 const mockUseHistoryFiles = vi.mocked(useHistoryFiles);
 
-const historyItems = [
-  {
-    id: "11111111-1111-1111-1111-111111111111",
-    original_name: "bahasa-indonesia-file-yang-sangat-panjang-sekali.pdf",
-    custom_name: "",
-    status_processing: "completed",
-    created_at: "2026-04-22T03:00:00Z",
-  },
-  {
-    id: "22222222-2222-2222-2222-222222222222",
-    original_name: "budget-2026.xlsx",
-    custom_name: "Budget Sheet",
-    status_processing: "completed",
-    created_at: "2026-04-21T03:00:00Z",
-  },
-];
-
 function isoDaysAgo(daysAgo: number) {
   const now = new Date();
   const date = new Date(now);
   date.setUTCDate(now.getUTCDate() - daysAgo);
   return date.toISOString();
 }
+
+const historyItems = [
+  {
+    id: "11111111-1111-1111-1111-111111111111",
+    original_name: "bahasa-indonesia-file-yang-sangat-panjang-sekali.pdf",
+    custom_name: "",
+    status_processing: "completed",
+    created_at: isoDaysAgo(0),
+  },
+  {
+    id: "22222222-2222-2222-2222-222222222222",
+    original_name: "budget-2026.xlsx",
+    custom_name: "Budget Sheet",
+    status_processing: "completed",
+    created_at: isoDaysAgo(1),
+  },
+];
 
 function makeHookState(overrides?: Partial<ReturnType<typeof useHistoryFiles>>) {
   return {
