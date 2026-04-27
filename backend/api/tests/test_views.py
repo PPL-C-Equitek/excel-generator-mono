@@ -1,4 +1,5 @@
 from PyPDF2 import PdfReader, PdfWriter
+import uuid
 from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
 from django.utils._os import safe_join
@@ -3532,3 +3533,122 @@ class SessionEndpointTests(TestCase):
             },
         )
         mock_open_file.assert_called_once()
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_requires_authentication(self, mock_build_resume_context):
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        mock_build_resume_context.assert_not_called()
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_requires_verified_user(self, mock_build_resume_context):
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.unverified_user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        mock_build_resume_context.assert_not_called()
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_returns_not_found_when_session_missing(
+        self,
+        mock_build_resume_context,
+    ):
+        mock_build_resume_context.return_value = None
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"detail": "Not found."})
+        mock_build_resume_context.assert_called_once_with(self.user, self.session_id)
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_returns_serialized_history_when_found(
+        self,
+        mock_build_resume_context,
+    ):
+        created_at = timezone.now()
+        mock_build_resume_context.return_value = SimpleNamespace(
+            id=self.session_id,
+            title="Resume Session",
+            created_at=created_at,
+            updated_at=created_at,
+            last_message_at=created_at,
+            last_output_at=created_at,
+            history=[
+                SimpleNamespace(
+                    type="message",
+                    id=uuid.uuid4(),
+                    role="assistant",
+                    content="Resume me",
+                    thinking_log="Reasoned reply",
+                    created_at=created_at,
+                ),
+                SimpleNamespace(
+                    type="output",
+                    id=uuid.uuid4(),
+                    output_json={"document_info": {}, "summary": {}, "content_data": []},
+                    thinking_log="Mapped workbook structure",
+                    created_at=created_at,
+                ),
+            ],
+        )
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["id"], str(self.session_id))
+        self.assertEqual(response.data["title"], "Resume Session")
+        self.assertEqual(len(response.data["history"]), 2)
+        self.assertEqual(response.data["history"][0]["type"], "message")
+        self.assertEqual(response.data["history"][0]["thinking_log"], "Reasoned reply")
+        self.assertEqual(response.data["history"][1]["type"], "output")
+        self.assertEqual(
+            response.data["history"][1]["thinking_log"],
+            "Mapped workbook structure",
+        )
+        mock_build_resume_context.assert_called_once_with(self.user, self.session_id)
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_supports_minimal_or_partial_history(
+        self,
+        mock_build_resume_context,
+    ):
+        created_at = timezone.now()
+        mock_build_resume_context.return_value = SimpleNamespace(
+            id=self.session_id,
+            title="Partial Session",
+            created_at=created_at,
+            updated_at=created_at,
+            last_message_at=None,
+            last_output_at=created_at,
+            history=[
+                SimpleNamespace(
+                    type="output",
+                    id=uuid.uuid4(),
+                    output_json={"document_info": {}, "summary": {}, "content_data": []},
+                    thinking_log="Only output context",
+                    created_at=created_at,
+                )
+            ],
+        )
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["history"]), 1)
+        self.assertEqual(response.data["history"][0]["type"], "output")
+        self.assertEqual(
+            response.data["history"][0]["thinking_log"],
+            "Only output context",
+        )

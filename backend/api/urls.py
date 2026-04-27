@@ -6,6 +6,7 @@ urlpatterns = [
     path("about/", views.about),
     path("members/", views.members),
     path("sessions/", views.session_list),
+    path("sessions/<uuid:session_id>/resume/", views.session_resume),
     path("sessions/<uuid:session_id>/", views.SessionResourceView.as_view()),
     path(
         "sessions/<uuid:session_id>/outputs/<uuid:output_id>/download/csv/",
