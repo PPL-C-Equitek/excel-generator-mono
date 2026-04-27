@@ -16,6 +16,7 @@ from chat_sessions.services import (
     build_history_with_summary,
     create_generated_output,
     create_session_for_user,
+    generate_session_title_from_message,
     get_session_for_user,
     resolve_session_title,
 )
@@ -603,12 +604,7 @@ def send_message(request):
         reply = generate_chat_response(history)
 
         if is_new_session:
-            try:
-                title_prompt = f"Berikan judul singkat maksimal 3-5 kata untuk chat berikut. Abaikan sapaan, ambil konteks utama. Jangan gunakan karakter newline, cukup 1 kalimat: {message}"
-                title_suggestion = generate_chat_response([{"role": "user", "content": title_prompt}])
-                title = resolve_session_title(title_suggestion)
-            except Exception:
-                title = "New Chat"
+            title = generate_session_title_from_message(message)
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     except OpenAIUpstreamError as exc:

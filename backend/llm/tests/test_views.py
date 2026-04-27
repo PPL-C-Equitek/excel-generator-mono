@@ -2105,12 +2105,15 @@ class SendMessageSessionTitleGenerationTest(TestCase):
             status="verified",
         )
 
+    @patch("llm.views.generate_session_title_from_message")
     @patch("llm.views.generate_chat_response")
-    def test_send_message_generates_session_title_when_no_session_id_given(self, mock_generate):
-        mock_generate.side_effect = [
-            "Halo! Ada yang bisa saya bantu?",
-            "Diskusi Bantuan Excel"
-        ]
+    def test_send_message_generates_session_title_when_no_session_id_given(
+        self,
+        mock_generate,
+        mock_generate_title,
+    ):
+        mock_generate.return_value = "Halo! Ada yang bisa saya bantu?"
+        mock_generate_title.return_value = "Diskusi Bantuan Excel"
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
@@ -2124,14 +2127,18 @@ class SendMessageSessionTitleGenerationTest(TestCase):
         
         session = Session.objects.get(id=session_id)
         self.assertEqual(session.title, "Diskusi Bantuan Excel")
-        self.assertEqual(mock_generate.call_count, 2)
+        mock_generate.assert_called_once()
+        mock_generate_title.assert_called_once_with("Halo tolong bantu saya excel")
 
+    @patch("llm.views.generate_session_title_from_message")
     @patch("llm.views.generate_chat_response")
-    def test_send_message_falls_back_to_new_chat_if_title_generation_fails(self, mock_generate):
-        mock_generate.side_effect = [
-            "Balasan aman",
-            Exception("Timeout error on LLM Title Generator")
-        ]
+    def test_send_message_falls_back_to_new_chat_if_title_generation_fails(
+        self,
+        mock_generate,
+        mock_generate_title,
+    ):
+        mock_generate.return_value = "Balasan aman"
+        mock_generate_title.return_value = "New Chat"
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
@@ -2146,6 +2153,8 @@ class SendMessageSessionTitleGenerationTest(TestCase):
         session_id = response.data["session_id"]
         session = Session.objects.get(id=session_id)
         self.assertEqual(session.title, "New Chat")
+        mock_generate.assert_called_once()
+        mock_generate_title.assert_called_once_with("Halo")
 
 
 class LlmGenerateSessionTitleGenerationTest(TestCase):
