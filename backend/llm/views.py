@@ -14,10 +14,13 @@ from rest_framework.response import Response
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
-    create_generated_output,
     build_history_with_summary,
+    create_generated_output,
     create_session_for_user,
+    generate_session_title_from_message,
     get_session_for_user,
+    resolve_session_title,
+    sanitize_session_title,
 )
 from authentication.permissions import IsVerifiedUser
 from .serializers import (
@@ -157,6 +160,67 @@ def _resolve_export_source_type(input_json, output_json) -> str:
         return "PDF"
 
     return "Excel"
+
+
+def _build_session_message_history(session):
+    return [
+        {"role": msg.role, "content": msg.content}
+        for msg in session.messages.order_by("created_at")
+    ]
+
+
+def _build_new_session_title_prompt(history, message):
+    return history[:-1] + [
+        {
+            "role": "user",
+            "content": (
+                f"{message}\n\n"
+                "Reply to the message normally. "
+                "Also generate a short 3-5 word session title. "
+                'Return a valid JSON object with exactly two keys: "reply" and "title". '
+                "Do NOT wrap the output in markdown."
+            ),
+        }
+    ]
+
+
+def _parse_send_message_json_result(raw_result):
+    cleaned = raw_result.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:-3].strip()
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:-3].strip()
+    return json.loads(cleaned)
+
+
+def _generate_reply_and_title_for_new_session(history, message):
+    raw_result = generate_chat_response(_build_new_session_title_prompt(history, message))
+    try:
+        data = _parse_send_message_json_result(raw_result)
+        reply = data.get("reply", "")
+        title = sanitize_session_title(data.get("title", "")) or "New Chat"
+        return reply, title
+    except Exception:
+        return generate_chat_response(history), generate_session_title_from_message(message)
+
+
+def _resolve_send_message_session_context(user, session_id):
+    if not session_id:
+        return None, []
+
+    session = get_session_for_user(user, session_id)
+    if session is None:
+        return None, None
+    return session, _build_session_message_history(session)
+
+
+def _generate_send_message_reply_and_title(session, history, message):
+    prepared_history = (
+        build_history_with_summary(session, history) if session is not None else history
+    )
+    if session is None:
+        return _generate_reply_and_title_for_new_session(prepared_history, message)
+    return generate_chat_response(prepared_history), "New Chat"
 
 
 def _sanitize_output_json(payload: Any) -> Any:
@@ -581,6 +645,7 @@ def _persist_generate_output_for_authenticated_user(
     output_json,
     thinking_log,
     export_output_json,
+    title="",
 ):
     if not getattr(user, "is_authenticated", False):
         return None, None, None
@@ -588,7 +653,7 @@ def _persist_generate_output_for_authenticated_user(
     try:
         with transaction.atomic():
             if session is None:
-                session = create_session_for_user(user)
+                session = create_session_for_user(user, title=title)
             generated_output = create_generated_output(
                 session,
                 output_json,
@@ -670,6 +735,7 @@ def llm_generate(request):
         output_json,
         thinking_log,
         export_output_json,
+        title=resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
     )
     if error_response is not None:
         return error_response
@@ -707,25 +773,14 @@ def send_message(request):
 
     message = serializer.validated_data["message"]
     session_id = serializer.validated_data.get("session_id")
-
-    session = None
-    if session_id:
-        session = get_session_for_user(request.user, session_id)
-        if session is None:
-            return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
-        history = [
-            {"role": msg.role, "content": msg.content}
-            for msg in session.messages.order_by("created_at")
-        ]
-    else:
-        history = []
+    session, history = _resolve_send_message_session_context(request.user, session_id)
+    if session_id and session is None:
+        return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
 
     history.append({"role": "user", "content": message})
 
     try:
-        if session is not None:
-            history = build_history_with_summary(session, history)
-        reply = generate_chat_response(history)
+        reply, title = _generate_send_message_reply_and_title(session, history, message)
     except OpenAIConfigurationError:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     except OpenAIUpstreamError as exc:
@@ -739,7 +794,7 @@ def send_message(request):
 
     with transaction.atomic():
         if session is None:
-            session = create_session_for_user(request.user)
+            session = create_session_for_user(request.user, title=title)
         append_user_message(session, message)
         append_assistant_message(session, reply)
 

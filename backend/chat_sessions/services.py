@@ -1,3 +1,4 @@
+import re
 from heapq import merge
 from types import SimpleNamespace
 
@@ -343,6 +344,49 @@ def update_session_title(session, title):
     session.title = (title or "").strip()
     session.save(update_fields=["title", "updated_at"])
     return session
+
+
+def sanitize_session_title(title):
+    if not title:
+        return ""
+
+    stripped = title.strip()
+    if not stripped:
+        return ""
+
+    normalized = re.sub(r"[\r\n\t]", " ", stripped)
+
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
+        normalized = normalized[1:-1].strip()
+
+    return normalized[:120]
+
+
+def resolve_session_title(candidate_title, fallback="New Chat"):
+    sanitized = sanitize_session_title(candidate_title)
+    if not sanitized:
+        return fallback
+    return sanitized
+
+
+def generate_session_title_from_message(message, fallback="New Chat"):
+    if not message or not message.strip():
+        return fallback
+
+    title_prompt = (
+        "Berikan judul singkat maksimal 3-5 kata untuk chat berikut. "
+        "Abaikan sapaan, ambil konteks utama. Jangan gunakan karakter newline, "
+        f"cukup 1 kalimat: {message}"
+    )
+
+    try:
+        title_suggestion = generate_chat_response(
+            [{"role": "user", "content": title_prompt}]
+        )
+    except Exception:
+        return fallback
+
+    return resolve_session_title(title_suggestion, fallback=fallback)
 
 
 def delete_session(session):

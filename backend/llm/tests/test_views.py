@@ -2216,3 +2216,147 @@ class SendMessageEdgeCaseTest(TestCase):
 
         mock_build_summary.assert_called_once()
         mock_generate.assert_called_once_with(summarized_history)
+
+class SendMessageSessionTitleGenerationTest(TestCase):
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="title-gen-send@example.com",
+            name="Title Gen Send User",
+            password="secret",
+            status="verified",
+        )
+
+    @patch("llm.views.generate_session_title_from_message")
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_generates_session_title_when_no_session_id_given(
+        self,
+        mock_generate,
+        mock_generate_title,
+    ):
+        mock_generate.return_value = '{"reply": "Halo! Ada yang bisa saya bantu?", "title": "Diskusi Bantuan Excel"}'
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Halo tolong bantu saya excel"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        session_id = response.data["session_id"]
+        
+        session = Session.objects.get(id=session_id)
+        self.assertEqual(session.title, "Diskusi Bantuan Excel")
+        mock_generate.assert_called_once()
+        mock_generate_title.assert_not_called()
+
+    @patch("llm.views.generate_session_title_from_message")
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_parses_json_with_markdown_blocks(
+        self,
+        mock_generate,
+        mock_generate_title,
+    ):
+        mock_generate.return_value = '```json\n{"reply": "Halo dengan markdown", "title": "Sesi Markdown"}\n```'
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Halo"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["reply"], "Halo dengan markdown")
+        session_id = response.data["session_id"]
+        session = Session.objects.get(id=session_id)
+        self.assertEqual(session.title, "Sesi Markdown")
+        mock_generate.assert_called_once()
+        mock_generate_title.assert_not_called()
+        
+    @patch("llm.views.generate_session_title_from_message")
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_parses_json_with_generic_markdown_blocks(
+        self,
+        mock_generate,
+        mock_generate_title,
+    ):
+        mock_generate.return_value = '```\n{"reply": "Halo dengan markdown generik", "title": "Sesi Generik"}\n```'
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Halo"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["reply"], "Halo dengan markdown generik")
+        session_id = response.data["session_id"]
+        session = Session.objects.get(id=session_id)
+        self.assertEqual(session.title, "Sesi Generik")
+        mock_generate.assert_called_once()
+        mock_generate_title.assert_not_called()
+
+    @patch("llm.views.generate_session_title_from_message")
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_falls_back_to_new_chat_if_title_generation_fails(
+        self,
+        mock_generate,
+        mock_generate_title,
+    ):
+        mock_generate.return_value = "Balasan aman"
+        mock_generate_title.return_value = "New Chat"
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {"message": "Halo"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["reply"], "Balasan aman")
+        
+        session_id = response.data["session_id"]
+        session = Session.objects.get(id=session_id)
+        self.assertEqual(session.title, "New Chat")
+        self.assertEqual(mock_generate.call_count, 2)
+        mock_generate_title.assert_called_once_with("Halo")
+
+
+class LlmGenerateSessionTitleGenerationTest(TestCase):
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="title-gen-convert@example.com",
+            name="Title Gen Convert User",
+            password="secret",
+            status="verified",
+        )
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_skips_llm_and_uses_filename_fallback_for_new_session(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {"headers": ["A"], "rows": [["1"]]}
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "document_info": {"filename": "laporan_keuangan.pdf"}
+                },
+                "include_reasoning": False
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        session_id = response.data["session_id"]
+        
+        session = Session.objects.get(id=session_id)
+        self.assertEqual(session.title, "Convert laporan_keuangan.pdf")

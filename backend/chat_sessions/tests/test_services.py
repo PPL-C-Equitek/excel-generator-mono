@@ -28,6 +28,9 @@ from chat_sessions.services import (
     update_session_title,
     get_summary_threshold,
     validate_session_detail_pagination_params,
+    sanitize_session_title,
+    resolve_session_title,
+    generate_session_title_from_message,
 )
 
 
@@ -1041,3 +1044,88 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
         build_history_with_summary(self.session, history)
 
         mock_sum.assert_not_called()
+
+class SessionTitleHelperServiceTest(SimpleTestCase):
+    
+    def test_sanitize_session_title_trims_whitespace(self):
+        result = sanitize_session_title("   My Title   ")
+        self.assertEqual(result, "My Title")
+
+    def test_sanitize_session_title_normalizes_newlines_and_controls_to_space(self):
+        result = sanitize_session_title("Line 1\nLine 2\r\tEnd")
+        self.assertEqual(result, "Line 1 Line 2  End")
+
+    def test_sanitize_session_title_truncates_to_max_length(self):
+        long_title = "A" * 200
+        result = sanitize_session_title(long_title)
+        self.assertEqual(len(result), 120)
+        self.assertEqual(result, "A" * 120)
+
+    def test_sanitize_session_title_returns_empty_string_for_none(self):
+        self.assertEqual(sanitize_session_title(None), "")
+
+    def test_sanitize_session_title_returns_empty_string_for_empty_string(self):
+        self.assertEqual(sanitize_session_title(""), "")
+
+    def test_sanitize_session_title_returns_empty_string_for_whitespace_only(self):
+        self.assertEqual(sanitize_session_title("   \n \t "), "")
+
+    def test_sanitize_session_title_strips_wrapping_quotes_from_llm_title(self):
+        result = sanitize_session_title('   "Diskusi Bantuan Excel"   ')
+        self.assertEqual(result, "Diskusi Bantuan Excel")
+
+    def test_resolve_session_title_returns_sanitized_title_when_valid(self):
+        result = resolve_session_title("   Good Title \n ", fallback="New Chat")
+        self.assertEqual(result, "Good Title")
+
+    def test_resolve_session_title_returns_fallback_when_title_only_contains_wrapping_quotes(self):
+        result = resolve_session_title('   ""   ', fallback="New Chat")
+        self.assertEqual(result, "New Chat")
+
+    def test_resolve_session_title_returns_fallback_when_sanitized_is_empty(self):
+        result = resolve_session_title("   ", fallback="New Chat")
+        self.assertEqual(result, "New Chat")
+
+    def test_resolve_session_title_returns_fallback_when_input_is_none(self):
+        result = resolve_session_title(None, fallback="New Chat")
+        self.assertEqual(result, "New Chat")
+
+    def test_resolve_session_title_uses_default_fallback_if_not_specified(self):
+        result = resolve_session_title("")
+        self.assertEqual(result, "New Chat")
+
+
+class SessionTitleGenerationServiceTest(SimpleTestCase):
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_generate_session_title_from_message_returns_sanitized_llm_title(self, mock_generate):
+        mock_generate.return_value = '   "Diskusi Bantuan Excel"   '
+
+        result = generate_session_title_from_message("Halo tolong bantu saya excel")
+
+        self.assertEqual(result, "Diskusi Bantuan Excel")
+        mock_generate.assert_called_once()
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_generate_session_title_from_message_returns_fallback_when_llm_fails(self, mock_generate):
+        mock_generate.side_effect = RuntimeError("title generation timeout")
+
+        result = generate_session_title_from_message("Halo tolong bantu saya excel")
+
+        self.assertEqual(result, "New Chat")
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_generate_session_title_from_message_returns_fallback_when_llm_title_is_blank(self, mock_generate):
+        mock_generate.return_value = '   ""   '
+
+        result = generate_session_title_from_message("Halo")
+
+        self.assertEqual(result, "New Chat")
+
+    def test_generate_session_title_from_message_returns_fallback_when_message_is_none(self):
+        result = generate_session_title_from_message(None)
+        self.assertEqual(result, "New Chat")
+
+    def test_generate_session_title_from_message_returns_fallback_when_message_is_blank(self):
+        result = generate_session_title_from_message("   \n\t  ")
+        self.assertEqual(result, "New Chat")
