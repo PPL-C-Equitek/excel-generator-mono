@@ -14,12 +14,18 @@ export interface LLMRequest {
 
 export interface LLMResponse {
   output_json: JsonValue;
+  session_id?: string | null;
+  output_id?: string | null;
 }
 
 export interface ExcelExportResponse {
   file_id: string;
   file_name: string;
   artifact_type: "xlsx";
+}
+
+function isOptionalUuidLike(value: unknown): value is string | null | undefined {
+  return value == null || typeof value === "string";
 }
 
 const EXCEL_EXPORT_ERROR_MESSAGE = "The Excel export response is invalid.";
@@ -168,7 +174,9 @@ export async function generateJson(
     typeof data !== "object" ||
     data === null ||
     !("output_json" in data) ||
-    !isJsonObject((data as Record<string, unknown>)["output_json"])
+    !isJsonObject((data as Record<string, unknown>)["output_json"]) ||
+    !isOptionalUuidLike((data as Record<string, unknown>)["session_id"]) ||
+    !isOptionalUuidLike((data as Record<string, unknown>)["output_id"])
   ) {
     throw new Error("The server returned an invalid response.");
   }
@@ -356,6 +364,36 @@ export async function downloadExcelFile(
     {
       requestErrorMessage: EXCEL_DOWNLOAD_ERROR_MESSAGE,
       passThroughInvalidFileIdError: true,
+    }
+  );
+}
+
+export async function downloadSessionOutputCsvFile(
+  sessionId: string,
+  outputId: string,
+  filename = "export.csv"
+): Promise<void> {
+  const requestUrl = `${getApiBaseOrigin()}/sessions/${sessionId}/outputs/${outputId}/download/csv/?filename=${encodeURIComponent(filename)}`;
+  await downloadBlobFileFromUrl(
+    requestUrl,
+    filename,
+    {
+      requestErrorMessage: CSV_DOWNLOAD_ERROR_MESSAGE,
+    }
+  );
+}
+
+export async function downloadSessionOutputExcelFile(
+  sessionId: string,
+  outputId: string,
+  filename = "export.xlsx"
+): Promise<void> {
+  const requestUrl = `${getApiBaseOrigin()}/sessions/${sessionId}/outputs/${outputId}/download/excel/?filename=${encodeURIComponent(filename)}`;
+  await downloadBlobFileFromUrl(
+    requestUrl,
+    filename,
+    {
+      requestErrorMessage: EXCEL_DOWNLOAD_ERROR_MESSAGE,
     }
   );
 }

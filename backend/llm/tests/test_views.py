@@ -1,14 +1,16 @@
+import json
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
+from rest_framework.response import Response
 from unittest.mock import patch
 from uuid import uuid4
 
 from artifact_history.models import ArtifactHistory
 from authentication.models import User
-from chat_sessions.models import ChatMessage, Session
+from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from llm.services.generation_service import CustomSchemaNotFoundError
 from llm.services.openai_client import OpenAITextGenerationProvider
 from llm.services.openai_client import (
@@ -17,8 +19,10 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
 )
 from llm.views import (
+    build_export_output_json,
     _extract_document_type,
     _sanitize_output_json,
+    _to_scalar_cell,
     build_llm_generation_service,
     build_llm_reasoning_service,
     extract_original_name,
@@ -127,6 +131,316 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(sanitized, payload)
 
+    def test_build_export_output_json_normalizes_headers_and_rows_payload(self):
+        raw_output_json = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000], ["ER", 1500]],
+            "final_answer": "ignored for export payload",
+        }
+        input_json = {
+            "filename": "hospital-report.xlsx",
+            "document_info": {"source_type": "Excel"},
+        }
+
+        export_output_json = build_export_output_json(
+            input_json=input_json,
+            output_json=raw_output_json,
+        )
+
+        self.assertEqual(
+            export_output_json,
+            {
+                "document_info": {
+                    "source_type": "Excel",
+                    "filename": "hospital-report.xlsx",
+                },
+                "summary": {
+                    "total_tables": 1,
+                    "total_rows": 2,
+                    "total_columns": 2,
+                },
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["unit", "value"],
+                        "rows": [
+                            {"unit": "ICU", "value": 1000},
+                            {"unit": "ER", "value": 1500},
+                        ],
+                    }
+                ],
+            },
+        )
+
+    def test_build_export_output_json_normalizes_sheet_like_mapping_payload(self):
+        raw_output_json = {
+            "Rawat Jalan": [
+                {"unit": "Rawat Jalan", "value": 1000},
+                {"unit": "Rawat Jalan", "value": 1200},
+            ],
+            "ICU": [
+                {"unit": "ICU", "value": 3000},
+            ],
+        }
+        input_json = {
+            "document_info": {
+                "filename": "finance.pdf",
+                "source_type": "PDF",
+            }
+        }
+
+        export_output_json = build_export_output_json(
+            input_json=input_json,
+            output_json=raw_output_json,
+        )
+
+        self.assertEqual(
+            export_output_json["document_info"],
+            {
+                "source_type": "PDF",
+                "filename": "finance.pdf",
+            },
+        )
+        self.assertEqual(
+            export_output_json["summary"],
+            {
+                "total_tables": 2,
+                "total_rows": 3,
+                "total_columns": 2,
+            },
+        )
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Rawat Jalan",
+                    "headers": ["unit", "value"],
+                    "rows": [
+                        {"unit": "Rawat Jalan", "value": 1000},
+                        {"unit": "Rawat Jalan", "value": 1200},
+                    ],
+                },
+                {
+                    "table_name": "ICU",
+                    "headers": ["unit", "value"],
+                    "rows": [
+                        {"unit": "ICU", "value": 3000},
+                    ],
+                },
+            ],
+        )
+
+    def test_build_export_output_json_infers_pdf_source_type_from_filename(self):
+        export_output_json = build_export_output_json(
+            input_json={"document_info": {"filename": "invoice.pdf"}},
+            output_json={"headers": ["unit"], "rows": [["ICU"]]},
+        )
+
+        self.assertEqual(
+            export_output_json["document_info"],
+            {
+                "source_type": "PDF",
+                "filename": "invoice.pdf",
+            },
+        )
+
+    def test_build_export_output_json_falls_back_to_excel_when_source_type_is_unrecognized(self):
+        export_output_json = build_export_output_json(
+            input_json={
+                "document_info": {
+                    "filename": "invoice.docx",
+                    "source_type": "word",
+                }
+            },
+            output_json={"headers": ["unit"], "rows": [["ICU"]]},
+        )
+
+        self.assertEqual(
+            export_output_json["document_info"],
+            {
+                "source_type": "Excel",
+                "filename": "invoice.docx",
+            },
+        )
+
+    def test_build_export_output_json_normalizes_duplicate_blank_headers_and_mixed_rows(self):
+        export_output_json = build_export_output_json(
+            input_json={"document_info": {"source_type": "xlsx"}},
+            output_json={
+                "headers": [" Unit ", "", "unit"],
+                "rows": [
+                    ["ICU", 10, 20],
+                    {"Unit": "ER", "column_2": 30, "unit_2": 40},
+                    "fallback",
+                ],
+            },
+        )
+
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["Unit", "column_2", "unit_2"],
+                    "rows": [
+                        {"Unit": "ICU", "column_2": 10, "unit_2": 20},
+                        {"Unit": "ER", "column_2": 30, "unit_2": 40},
+                        {"Unit": "fallback", "column_2": None, "unit_2": None},
+                    ],
+                }
+            ],
+        )
+
+    def test_build_export_output_json_uses_sheet_fallback_name_for_blank_sheet_key(self):
+        export_output_json = build_export_output_json(
+            input_json={"filename": "summary.xlsx"},
+            output_json={
+                "   ": [1, 2],
+                "Named": [{"value": 3, "other": "ok"}],
+            },
+        )
+
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["value"],
+                    "rows": [{"value": 1}, {"value": 2}],
+                },
+                {
+                    "table_name": "Named",
+                    "headers": ["value", "other"],
+                    "rows": [{"value": 3, "other": "ok"}],
+                },
+            ],
+        )
+
+    def test_build_export_output_json_wraps_scalar_payload_in_default_value_table(self):
+        export_output_json = build_export_output_json(
+            input_json={"filename": "summary.xlsx"},
+            output_json=123,
+        )
+
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["value"],
+                    "rows": [{"value": 123}],
+                }
+            ],
+        )
+        self.assertEqual(
+            export_output_json["summary"],
+            {"total_tables": 1, "total_rows": 1, "total_columns": 1},
+        )
+
+    def test_build_export_output_json_uses_default_value_header_for_empty_headers(self):
+        export_output_json = build_export_output_json(
+            input_json={"filename": "summary.xlsx"},
+            output_json={
+                "headers": [],
+                "rows": [[{"bad"}]],
+            },
+        )
+
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["value"],
+                    "rows": [{"value": "[Unserializable Value]"}],
+                }
+            ],
+        )
+
+    def test_build_export_output_json_infers_headers_from_list_of_lists_payload(self):
+        export_output_json = build_export_output_json(
+            input_json={"filename": "summary.xlsx"},
+            output_json=[["ICU", 10], ["ER", 20]],
+        )
+
+        self.assertEqual(
+            export_output_json["content_data"],
+            [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["column_1", "column_2"],
+                    "rows": [
+                        {"column_1": "ICU", "column_2": 10},
+                        {"column_1": "ER", "column_2": 20},
+                    ],
+                }
+            ],
+        )
+
+    def test_build_export_output_json_reuses_cached_serialization_for_repeated_nested_cell_values(self):
+        shared_value = {"unit": "ICU", "meta": {"active": True}}
+
+        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
+            export_output_json = build_export_output_json(
+                input_json={"filename": "summary.xlsx"},
+                output_json={
+                    "headers": ["payload"],
+                    "rows": [
+                        [shared_value],
+                        [shared_value],
+                        [shared_value],
+                    ],
+                },
+            )
+
+        self.assertEqual(
+            export_output_json["content_data"][0]["rows"],
+            [
+                {"payload": json.dumps(shared_value)},
+                {"payload": json.dumps(shared_value)},
+                {"payload": json.dumps(shared_value)},
+            ],
+        )
+        self.assertEqual(mock_json_dumps.call_count, 1)
+
+    def test_build_export_output_json_serializes_repeated_bytes_cells_once_with_cache(self):
+        shared_value = b"ICU"
+
+        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
+            export_output_json = build_export_output_json(
+                input_json={"filename": "summary.xlsx"},
+                output_json={
+                    "headers": ["payload"],
+                    "rows": [
+                        [shared_value],
+                        [shared_value],
+                    ],
+                },
+            )
+
+        self.assertEqual(
+            export_output_json["content_data"][0]["rows"],
+            [
+                {"payload": "b'ICU'"},
+                {"payload": "b'ICU'"},
+            ],
+        )
+        self.assertEqual(mock_json_dumps.call_count, 0)
+
+    def test_to_scalar_cell_serializes_nested_object_without_cache(self):
+        payload = {"unit": "ICU", "meta": {"active": True}}
+
+        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
+            result = _to_scalar_cell(payload)
+
+        self.assertEqual(result, json.dumps(payload))
+        self.assertEqual(mock_json_dumps.call_count, 1)
+
+    def test_to_scalar_cell_returns_bytes_as_string_without_cache(self):
+        result = _to_scalar_cell(b"ICU")
+
+        self.assertEqual(result, "b'ICU'")
+
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):
         mock_service = mock_build_service.return_value
@@ -138,6 +452,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_json"], {"status": "ok"})
+        self.assertIsNone(response.data["output_id"])
         self.assertEqual(mock_build_service.call_count, 1)
         self.assertFalse(mock_build_service.call_args[0][0].is_authenticated)
         mock_service.generate.assert_called_once_with(
@@ -508,6 +823,8 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_response_serializer_class.assert_called_once_with(
             data={
                 "output_json": {"status": "ok"},
+                "session_id": None,
+                "output_id": None,
                 "reasoning": {
                     "final_answer": "Answer",
                     "reasoning_steps": ["Step one"],
@@ -791,25 +1108,32 @@ class LlmReasoningEndpointTest(SimpleTestCase):
         self.assertEqual(response.data["detail"], "Content-Type must be application/json.")
 
 
-class LlmGenerateHistoryIntegrationTest(TestCase):
+class LlmGenerateSessionIntegrationTest(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(
-            email="history@example.com",
-            name="History User",
+            email="session-generate@example.com",
+            name="Session Generate User",
             password="secret",
             status="verified",
         )
-
-    @patch("llm.views.build_llm_generation_service")
-    def test_llm_generate_persists_history_for_authenticated_user(self, mock_build_service):
-        mock_service = mock_build_service.return_value
-        output_json = {
+        self.output_json = {
             "document_info": {"filename": "invoice.pdf"},
             "summary": {"table_count": 1},
             "content_data": [{"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}],
         }
-        mock_service.generate.return_value = output_json
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_creates_session_and_generated_output_for_authenticated_user(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        raw_output_json = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+            "final_answer": "Raw output for FE",
+        }
+        mock_service.generate.return_value = raw_output_json
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
@@ -824,13 +1148,166 @@ class LlmGenerateHistoryIntegrationTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertIn("session_id", response.data)
+        self.assertIn("output_id", response.data)
+        self.assertEqual(Session.objects.count(), 1)
+        session = Session.objects.get(owner=self.user)
+        self.assertEqual(str(session.id), response.data["session_id"])
+        self.assertEqual(GeneratedOutput.objects.count(), 1)
+        generated_output = GeneratedOutput.objects.get(session=session)
+        self.assertEqual(str(generated_output.id), response.data["output_id"])
+        self.assertEqual(
+            generated_output.output_json,
+            {
+                "headers": ["unit", "value"],
+                "rows": [["ICU", 1000]],
+            },
+        )
+        self.assertIsInstance(generated_output.thinking_log, str)
+        self.assertEqual(
+            generated_output.export_output_json,
+            {
+                "document_info": {
+                    "source_type": "PDF",
+                    "filename": "invoice.pdf",
+                },
+                "summary": {
+                    "total_tables": 1,
+                    "total_rows": 1,
+                    "total_columns": 2,
+                },
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["unit", "value"],
+                        "rows": [{"unit": "ICU", "value": 1000}],
+                    }
+                ],
+            },
+        )
         self.assertEqual(ArtifactHistory.objects.count(), 1)
-        history = ArtifactHistory.objects.get()
-        self.assertEqual(history.owner, self.user)
-        self.assertEqual(history.original_name, "invoice.pdf")
-        self.assertEqual(history.custom_name, "")
-        self.assertEqual(history.status_processing, "completed")
-        self.assertEqual(history.output_json, output_json)
+
+    @patch("llm.views._generate_optional_reasoning")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_persists_thinking_log_from_reasoning_response(
+        self,
+        mock_build_service,
+        mock_generate_reasoning,
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        mock_generate_reasoning.return_value = {
+            "final_answer": "Done.",
+            "reasoning_steps": ["Mapped rows."],
+            "thinking_log": "Normalized columns and preserved totals.",
+        }
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        generated_output = GeneratedOutput.objects.get()
+        self.assertEqual(
+            generated_output.thinking_log,
+            "Normalized columns and preserved totals.",
+        )
+
+    @patch("llm.views._generate_optional_reasoning")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_defaults_thinking_log_to_empty_when_reasoning_missing(
+        self,
+        mock_build_service,
+        mock_generate_reasoning,
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        mock_generate_reasoning.return_value = None
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        generated_output = GeneratedOutput.objects.get()
+        self.assertEqual(generated_output.thinking_log, "")
+
+    @patch("llm.views._build_generate_success_response")
+    @patch("llm.views._generate_optional_reasoning")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_defaults_thinking_log_to_empty_when_reasoning_log_is_not_string(
+        self,
+        mock_build_service,
+        mock_generate_reasoning,
+        mock_build_success_response,
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        mock_generate_reasoning.return_value = {
+            "final_answer": "Done.",
+            "thinking_log": ["not", "a", "string"],
+        }
+        mock_build_success_response.return_value = Response({"status": "ok"})
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        generated_output = GeneratedOutput.objects.get()
+        self.assertEqual(generated_output.thinking_log, "")
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_does_not_create_session_or_generated_output_when_generation_fails(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.side_effect = RuntimeError("upstream error")
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(Session.objects.exists())
+        self.assertFalse(GeneratedOutput.objects.exists())
+        self.assertFalse(ArtifactHistory.objects.exists())
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_persists_sanitized_output_json_without_reasoning_keys(
@@ -876,11 +1353,100 @@ class LlmGenerateHistoryIntegrationTest(TestCase):
         )
 
     @patch("llm.views.build_llm_generation_service")
-    def test_llm_generate_does_not_persist_history_when_generation_fails(
+    def test_llm_generate_reuses_existing_owned_session_when_session_id_is_provided(
         self, mock_build_service
     ):
         mock_service = mock_build_service.return_value
-        mock_service.generate.side_effect = RuntimeError("upstream error")
+        raw_output_json = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+            "reasoning_steps": ["remove me from persisted raw payload"],
+        }
+        mock_service.generate.return_value = raw_output_json
+        session = Session.objects.create(owner=self.user, title="Existing Session")
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "session_id": str(session.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["session_id"], str(session.id))
+        self.assertEqual(Session.objects.count(), 1)
+        self.assertEqual(GeneratedOutput.objects.count(), 1)
+        generated_output = GeneratedOutput.objects.get()
+        self.assertEqual(generated_output.session, session)
+        self.assertEqual(response.data["output_id"], str(generated_output.id))
+        self.assertEqual(
+            generated_output.output_json,
+            {
+                "headers": ["unit", "value"],
+                "rows": [["ICU", 1000]],
+            },
+        )
+        self.assertEqual(
+            generated_output.export_output_json["content_data"][0]["rows"],
+            [{"unit": "ICU", "value": 1000}],
+        )
+        self.assertTrue(ArtifactHistory.objects.exists())
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_updates_session_last_output_at(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = self.output_json
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        session = Session.objects.get(owner=self.user)
+        self.assertIsNotNone(session.last_output_at)
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_creates_multiple_outputs_for_same_session(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = self.output_json
+        session = Session.objects.create(owner=self.user, title="Existing Session")
+        self.client.force_authenticate(user=self.user)
+
+        first_response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "session_id": str(session.id),
+            },
+            format="json",
+        )
+        second_response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"filename": "invoice-2.pdf", "extracted": "raw upload text 2"},
+                "session_id": str(session.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(GeneratedOutput.objects.filter(session=session).count(), 2)
+
+    @patch("llm.views.create_generated_output")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_500_and_rolls_back_when_output_persistence_fails(
+        self, mock_build_service, mock_create_generated_output
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = self.output_json
+        mock_create_generated_output.side_effect = RuntimeError("db write failed")
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
@@ -890,27 +1456,53 @@ class LlmGenerateHistoryIntegrationTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 500)
-        self.assertFalse(ArtifactHistory.objects.exists())
+        self.assertFalse(Session.objects.exists())
+        self.assertFalse(GeneratedOutput.objects.exists())
 
     @patch("llm.views.build_llm_generation_service")
-    def test_llm_generate_does_not_persist_history_for_anonymous_user(
-        self, mock_build_service
-    ):
-        mock_service = mock_build_service.return_value
-        mock_service.generate.return_value = {
-            "document_info": {"filename": "invoice.pdf"},
-            "summary": {"table_count": 1},
-            "content_data": [{"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}],
-        }
+    def test_llm_generate_returns_404_for_unknown_owned_session_id(self, mock_build_service):
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.post(
             "/llm/generate/",
-            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "session_id": str(uuid4()),
+            },
             format="json",
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(ArtifactHistory.objects.exists())
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["detail"], "Session not found.")
+        mock_build_service.assert_not_called()
+        self.assertFalse(Session.objects.exists())
+        self.assertFalse(GeneratedOutput.objects.exists())
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_404_for_session_owned_by_other_user(self, mock_build_service):
+        other_user = User.objects.create_user(
+            email="other-session-owner@example.com",
+            name="Other Owner",
+            password="secret",
+            status="verified",
+        )
+        foreign_session = Session.objects.create(owner=other_user, title="Foreign Session")
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "session_id": str(foreign_session.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["detail"], "Session not found.")
+        mock_build_service.assert_not_called()
+        self.assertEqual(Session.objects.count(), 1)
+        self.assertFalse(GeneratedOutput.objects.exists())
 
 class ThinkingLogEndpointTest(TestCase):
     def setUp(self):

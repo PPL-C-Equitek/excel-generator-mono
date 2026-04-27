@@ -14,12 +14,14 @@ vi.mock('../../src/services/llm', () => ({
     generateJson: vi.fn().mockResolvedValue({ output_json: { status: 'ok' } }),
     exportToCsv: vi.fn().mockResolvedValue({ file_id: 'csv_integration' }),
     downloadCsvFile: vi.fn().mockResolvedValue(undefined),
+    downloadSessionOutputCsvFile: vi.fn().mockResolvedValue(undefined),
     exportToExcel: vi.fn().mockResolvedValue({
         file_id: 'xlsx_integration',
         file_name: 'export_integration.xlsx',
         artifact_type: 'xlsx',
     }),
     downloadExcelFile: vi.fn().mockResolvedValue(undefined),
+    downloadSessionOutputExcelFile: vi.fn().mockResolvedValue(undefined),
     getDownloadUrl: vi.fn().mockReturnValue('/mock/url'),
 }))
 vi.mock('../../src/components/Sidebar', () => ({

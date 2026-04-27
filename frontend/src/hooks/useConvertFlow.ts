@@ -5,6 +5,8 @@ import { uploadFile } from '@/lib/api'
 import {
     downloadCsvFile,
     downloadExcelFile,
+    downloadSessionOutputCsvFile,
+    downloadSessionOutputExcelFile,
     exportToCsv,
     exportToExcel,
     generateJson,
@@ -22,6 +24,8 @@ const defaultService: ILLMService = {
     downloadCsvFile,
     exportToExcel,
     downloadExcelFile,
+    downloadSessionOutputCsvFile,
+    downloadSessionOutputExcelFile,
     getDownloadUrl
 }
 
@@ -62,6 +66,36 @@ function parseOutputFile(uploadResult: JsonObject, fallbackFile: File): OutputFi
 
 export interface CsvMetadata {
     file_id: string;
+}
+
+function canUseSessionOutputDownload(
+    sessionId: string | null,
+    outputId: string | null,
+    downloadFn: unknown
+): downloadFn is (...args: unknown[]) => Promise<void> {
+    return Boolean(sessionId && outputId && downloadFn)
+}
+
+function isCsvDownloadUnavailable(
+    outputFile: OutputFile | null,
+    llmService: ILLMService
+): boolean {
+    return (
+        !outputFile ||
+        (!llmService.downloadSessionOutputCsvFile &&
+            (!llmService.exportToCsv || !llmService.downloadCsvFile))
+    )
+}
+
+function hasLegacyExcelDownloadDependencies(
+    generatedOutput: JsonValue | null,
+    llmService: ILLMService
+): generatedOutput is JsonValue {
+    return Boolean(
+        generatedOutput &&
+        llmService.exportToExcel &&
+        llmService.downloadExcelFile
+    )
 }
 
 type ScalarCell = string | number | boolean | null
@@ -377,6 +411,8 @@ export function useConvertFlow(
     const [uploadResultForExport, setUploadResultForExport] = useState<JsonObject | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
     const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
+    const [generatedSessionId, setGeneratedSessionId] = useState<string | null>(null)
+    const [generatedOutputId, setGeneratedOutputId] = useState<string | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
     const conversionRequestIdRef = useRef(0)
 
@@ -423,6 +459,8 @@ export function useConvertFlow(
         setUploadResultForExport(null)
         setCsvMetadata(null)
         setGeneratedOutput(null)
+        setGeneratedSessionId(null)
+        setGeneratedOutputId(null)
         setIsExcelDownloading(false)
     }
 
@@ -440,6 +478,8 @@ export function useConvertFlow(
             if (signal.aborted) return
 
             setGeneratedOutput(llmResult.output_json)
+            setGeneratedSessionId(llmResult.session_id ?? null)
+            setGeneratedOutputId(llmResult.output_id ?? null)
             setUploadResultForExport(uploadResult)
             setOutputFile(parseOutputFile(uploadResult, file))
         } catch (err: unknown) {
@@ -474,8 +514,44 @@ export function useConvertFlow(
         await processConversion(uploadResult, file, signal, customSchemaId)
     }
 
+    const exportCsvIfNeeded = async (
+        nonEmptyOutput: JsonValue,
+        requestId: number,
+        activeOutputFile: OutputFile
+    ): Promise<CsvMetadata | null> => {
+        if (csvMetadata) {
+            return csvMetadata
+        }
+
+        if (!llmService.exportToCsv) {
+            return null
+        }
+
+        const csvOutput = buildTabularExportPayload(
+            nonEmptyOutput,
+            uploadResultForExport,
+            activeOutputFile
+        )
+        const sanitizedJSON = sanitizeCSVCell(csvOutput) as JsonValue
+        const csvResult = await llmService.exportToCsv(
+            sanitizedJSON,
+            getActiveSignal()
+        )
+
+        if (requestId !== conversionRequestIdRef.current) {
+            return null
+        }
+
+        if (!csvResult.file_id?.startsWith('csv_')) {
+            throw new Error('The export result is invalid. Please try again.')
+        }
+
+        setCsvMetadata({ file_id: csvResult.file_id })
+        return csvResult
+    }
+
     const handleCsvDownload = async (): Promise<void> => {
-        if (!outputFile || !llmService.exportToCsv || !llmService.downloadCsvFile) {
+        if (isCsvDownloadUnavailable(outputFile, llmService)) {
             return
         }
 
@@ -487,34 +563,33 @@ export function useConvertFlow(
         const nonEmptyOutput = generatedOutput as JsonValue
 
         const requestId = conversionRequestIdRef.current
-        const csvOutput = buildTabularExportPayload(
-            nonEmptyOutput,
-            uploadResultForExport,
-            outputFile
+        const csvFilename = outputFile!.filename.replace(/\.[^/.]+$/, '') + '.csv'
+        const sessionCsvDownload = llmService.downloadSessionOutputCsvFile
+        const canUseSessionDownload = canUseSessionOutputDownload(
+            generatedSessionId,
+            generatedOutputId,
+            sessionCsvDownload
         )
-        const csvFilename = outputFile.filename.replace(/\.[^/.]+$/, '') + '.csv'
 
         try {
-            let csvResult = csvMetadata
-
-            if (!csvResult) {
-                const sanitizedJSON = sanitizeCSVCell(csvOutput) as JsonValue
-                csvResult = await llmService.exportToCsv(
-                    sanitizedJSON,
-                    getActiveSignal()
+            if (canUseSessionDownload) {
+                await sessionCsvDownload(
+                    generatedSessionId,
+                    generatedOutputId,
+                    csvFilename
                 )
-
-                if (requestId !== conversionRequestIdRef.current) {
-                    return
-                }
-
-                if (csvResult.file_id?.startsWith('csv_')) {
-                    setCsvMetadata({ file_id: csvResult.file_id })
-                } else {
-                    throw new Error('The export result is invalid. Please try again.')
-                }
+                return
             }
 
+            const csvResult = await exportCsvIfNeeded(
+                nonEmptyOutput,
+                requestId,
+                outputFile!
+            )
+
+            if (!csvResult || !llmService.downloadCsvFile) {
+                return
+            }
             await llmService.downloadCsvFile(csvResult.file_id, csvFilename)
         } catch (csvErr: unknown) {
             if (requestId !== conversionRequestIdRef.current) {
@@ -526,41 +601,61 @@ export function useConvertFlow(
 
     const handleExcelDownload = async (): Promise<void> => {
         if (
-            !generatedOutput ||
             !outputFile ||
             isExcelDownloading ||
-            !llmService.exportToExcel ||
-            !llmService.downloadExcelFile
+            (
+                !llmService.downloadSessionOutputExcelFile &&
+                (!generatedOutput ||
+                    !llmService.exportToExcel ||
+                    !llmService.downloadExcelFile)
+            )
         ) {
             return
         }
 
         const requestId = conversionRequestIdRef.current
-        const excelOutput = buildTabularExportPayload(
-            generatedOutput,
-            uploadResultForExport,
-            outputFile
-        )
         const excelFilename = getExcelDownloadFilename(outputFile.filename)
+        const sessionExcelDownload = llmService.downloadSessionOutputExcelFile
+        const canUseSessionDownload = canUseSessionOutputDownload(
+            generatedSessionId,
+            generatedOutputId,
+            sessionExcelDownload
+        )
 
         setExcelError(null)
         setExcelSuccessMessage(null)
         setIsExcelDownloading(true)
 
         try {
-            const excelResult = await llmService.exportToExcel(
-                excelOutput,
-                getActiveSignal()
-            )
+            if (canUseSessionDownload) {
+                await sessionExcelDownload(
+                    generatedSessionId,
+                    generatedOutputId,
+                    excelFilename
+                )
+            } else {
+                if (!hasLegacyExcelDownloadDependencies(generatedOutput, llmService) || !llmService.exportToExcel || !llmService.downloadExcelFile) {
+                    return
+                }
+                const excelOutput = buildTabularExportPayload(
+                    generatedOutput,
+                    uploadResultForExport,
+                    outputFile
+                )
+                const excelResult = await llmService.exportToExcel(
+                    excelOutput,
+                    getActiveSignal()
+                )
 
-            if (requestId !== conversionRequestIdRef.current) {
-                return
+                if (requestId !== conversionRequestIdRef.current) {
+                    return
+                }
+
+                await llmService.downloadExcelFile(
+                    excelResult.file_id,
+                    excelFilename
+                )
             }
-
-            await llmService.downloadExcelFile(
-                excelResult.file_id,
-                excelFilename
-            )
 
             if (requestId !== conversionRequestIdRef.current) {
                 return
@@ -583,14 +678,18 @@ export function useConvertFlow(
 
     const canDownloadCsv = (
         generatedOutput !== null &&
-        !!llmService.exportToCsv &&
-        !!llmService.downloadCsvFile
+        (
+            !!llmService.downloadSessionOutputCsvFile ||
+            (!!llmService.exportToCsv && !!llmService.downloadCsvFile)
+        )
     )
 
     const canDownloadExcel = (
         generatedOutput !== null &&
-        !!llmService.exportToExcel &&
-        !!llmService.downloadExcelFile
+        (
+            !!llmService.downloadSessionOutputExcelFile ||
+            (!!llmService.exportToExcel && !!llmService.downloadExcelFile)
+        )
     )
 
     return {

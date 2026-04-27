@@ -1,18 +1,20 @@
+import json
 import logging
 from typing import Any, cast
 from uuid import UUID
 
+from artifact_history.services import create_artifact_history
+from django.db import transaction
 from chat_sessions.models import ChatMessage
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from django.db import transaction
 
-from artifact_history.services import create_artifact_history
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
+    create_generated_output,
     build_history_with_summary,
     create_session_for_user,
     get_session_for_user,
@@ -121,12 +123,40 @@ def _extract_document_type(payload) -> str:
     if not isinstance(payload, dict):
         return "unknown"
 
+    document_info = payload.get("document_info")
+    if isinstance(document_info, dict):
+        for key in ("source_type", "document_type", "file_type", "format"):
+            value = document_info.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip().lower()
+
     for key in ("document_type", "file_type", "format"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip().lower()
 
     return "unknown"
+
+
+def _format_export_source_type(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"pdf"}:
+        return "PDF"
+    if normalized in {"excel", "xlsx", "xls"}:
+        return "Excel"
+    return ""
+
+
+def _resolve_export_source_type(input_json, output_json) -> str:
+    source_type = _format_export_source_type(_extract_document_type(input_json))
+    if source_type:
+        return source_type
+
+    filename = extract_original_name(input_json, output_json).lower()
+    if filename.endswith(".pdf"):
+        return "PDF"
+
+    return "Excel"
 
 
 def _sanitize_output_json(payload: Any) -> Any:
@@ -137,6 +167,278 @@ def _sanitize_output_json(payload: Any) -> Any:
         key: value
         for key, value in payload.items()
         if key not in REASONING_META_KEYS
+    }
+
+
+DEFAULT_EXPORT_TABLE_NAME = "Sheet1"
+DEFAULT_EXPORT_VALUE_HEADER = "value"
+
+
+def _get_cell_serialization_cache_key(value):
+    if isinstance(value, bytes):
+        return ("bytes", value)
+    return ("object", id(value))
+
+
+def _to_scalar_cell(value, serialization_cache=None):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    cache_key = None
+    if serialization_cache is not None:
+        cache_key = _get_cell_serialization_cache_key(value)
+        cached_value = serialization_cache.get(cache_key)
+        if cached_value is not None:
+            return cached_value
+
+    try:
+        serialized_value = str(value) if isinstance(value, bytes) else json.dumps(value)
+    except Exception:
+        serialized_value = "[Unserializable Value]"
+
+    if serialization_cache is not None and cache_key is not None:
+        serialization_cache[cache_key] = serialized_value
+
+    return serialized_value
+
+
+def _normalize_headers(raw_headers):
+    if not raw_headers:
+        return [DEFAULT_EXPORT_VALUE_HEADER]
+
+    counts = {}
+    normalized = []
+    for index, raw_header in enumerate(raw_headers):
+        trimmed = (
+            raw_header.strip()
+            if isinstance(raw_header, str) and raw_header.strip()
+            else f"column_{index + 1}"
+        )
+        key = trimmed.lower()
+        count = counts.get(key, 0)
+        counts[key] = count + 1
+        normalized.append(trimmed if count == 0 else f"{trimmed}_{count + 1}")
+    return normalized
+
+
+def _map_array_row_to_object(row, headers, serialization_cache=None):
+    return {
+        header: _to_scalar_cell(
+            row[index] if index < len(row) else None,
+            serialization_cache=serialization_cache,
+        )
+        for index, header in enumerate(headers)
+    }
+
+
+def _map_object_row_to_object(row, headers, serialization_cache=None):
+    return {
+        header: _to_scalar_cell(row.get(header), serialization_cache=serialization_cache)
+        for header in headers
+    }
+
+
+def _map_unknown_row_to_object(row, headers, serialization_cache=None):
+    mapped_row = {}
+    for index, header in enumerate(headers):
+        mapped_row[header] = (
+            _to_scalar_cell(row, serialization_cache=serialization_cache)
+            if index == 0
+            else None
+        )
+    return mapped_row
+
+
+def _collect_rows_array_metadata(rows):
+    all_lists = bool(rows)
+    all_dicts = bool(rows)
+    max_columns = 0
+    collected_headers = []
+    seen_headers = set()
+
+    for row in rows:
+        is_list_row = isinstance(row, list)
+        is_dict_row = isinstance(row, dict)
+        all_lists = all_lists and is_list_row
+        all_dicts = all_dicts and is_dict_row
+
+        if is_list_row:
+            max_columns = max(max_columns, len(row))
+        if is_dict_row:
+            for key in row:
+                if key not in seen_headers:
+                    seen_headers.add(key)
+                    collected_headers.append(key)
+
+    return all_lists, all_dicts, max_columns, collected_headers
+
+
+def _build_rows_from_generated_output_rows(rows, headers, serialization_cache=None):
+    normalized_rows = []
+    for row in rows:
+        if isinstance(row, list):
+            normalized_rows.append(
+                _map_array_row_to_object(
+                    row,
+                    headers,
+                    serialization_cache=serialization_cache,
+                )
+            )
+        elif isinstance(row, dict):
+            normalized_rows.append(
+                _map_object_row_to_object(
+                    row,
+                    headers,
+                    serialization_cache=serialization_cache,
+                )
+            )
+        else:
+            normalized_rows.append(
+                _map_unknown_row_to_object(
+                    row,
+                    headers,
+                    serialization_cache=serialization_cache,
+                )
+            )
+    return normalized_rows
+
+
+def _infer_headers_and_rows_from_rows_array(rows, serialization_cache=None):
+    all_lists, all_dicts, max_columns, collected_headers = _collect_rows_array_metadata(rows)
+
+    if all_lists:
+        headers = _normalize_headers(
+            [f"column_{index + 1}" for index in range(max_columns)]
+        )
+        return headers, _build_rows_from_generated_output_rows(
+            rows,
+            headers,
+            serialization_cache=serialization_cache,
+        )
+
+    if all_dicts:
+        headers = _normalize_headers(collected_headers)
+        return headers, _build_rows_from_generated_output_rows(
+            rows,
+            headers,
+            serialization_cache=serialization_cache,
+        )
+
+    headers = [DEFAULT_EXPORT_VALUE_HEADER]
+    normalized_rows = [
+        {
+            DEFAULT_EXPORT_VALUE_HEADER: _to_scalar_cell(
+                value,
+                serialization_cache=serialization_cache,
+            )
+        }
+        for value in rows
+    ]
+    return headers, normalized_rows
+
+
+def _infer_headers_and_rows_from_output(output_json, serialization_cache=None):
+    if isinstance(output_json, dict):
+        headers = _normalize_headers(list(output_json.keys()))
+        return headers, [
+            _map_object_row_to_object(
+                output_json,
+                headers,
+                serialization_cache=serialization_cache,
+            )
+        ]
+
+    if isinstance(output_json, list):
+        return _infer_headers_and_rows_from_rows_array(
+            output_json,
+            serialization_cache=serialization_cache,
+        )
+
+    return [DEFAULT_EXPORT_VALUE_HEADER], [
+        {
+            DEFAULT_EXPORT_VALUE_HEADER: _to_scalar_cell(
+                output_json,
+                serialization_cache=serialization_cache,
+            )
+        }
+    ]
+
+
+def _build_content_data_from_output(output_json, serialization_cache=None):
+    if isinstance(output_json, dict):
+        direct_headers = output_json.get("headers")
+        direct_rows = output_json.get("rows")
+        if isinstance(direct_headers, list) and isinstance(direct_rows, list):
+            headers = _normalize_headers(direct_headers)
+            return [
+                {
+                    "table_name": DEFAULT_EXPORT_TABLE_NAME,
+                    "headers": headers,
+                    "rows": _build_rows_from_generated_output_rows(
+                        direct_rows,
+                        headers,
+                        serialization_cache=serialization_cache,
+                    ),
+                }
+            ]
+
+        entries = list(output_json.items())
+        has_sheet_like_entries = entries and all(isinstance(value, list) for _, value in entries)
+        if has_sheet_like_entries:
+            content_data = []
+            for index, (sheet_name, value) in enumerate(entries):
+                headers, rows = _infer_headers_and_rows_from_rows_array(
+                    value,
+                    serialization_cache=serialization_cache,
+                )
+                table_name = (
+                    sheet_name.strip()
+                    if isinstance(sheet_name, str) and sheet_name.strip()
+                    else f"Sheet{index + 1}"
+                )
+                content_data.append(
+                    {
+                        "table_name": table_name,
+                        "headers": headers,
+                        "rows": rows,
+                    }
+                )
+            return content_data
+
+    headers, rows = _infer_headers_and_rows_from_output(
+        output_json,
+        serialization_cache=serialization_cache,
+    )
+    return [
+        {
+            "table_name": DEFAULT_EXPORT_TABLE_NAME,
+            "headers": headers,
+            "rows": rows,
+        }
+    ]
+
+
+def build_export_output_json(input_json, output_json):
+    serialization_cache = {}
+    content_data = _build_content_data_from_output(
+        output_json,
+        serialization_cache=serialization_cache,
+    )
+
+    total_rows = sum(len(table["rows"]) for table in content_data)
+    total_columns = max((len(table["headers"]) for table in content_data), default=0)
+
+    return {
+        "document_info": {
+            "source_type": _resolve_export_source_type(input_json, output_json),
+            "filename": extract_original_name(input_json, output_json),
+        },
+        "summary": {
+            "total_tables": len(content_data),
+            "total_rows": total_rows,
+            "total_columns": total_columns,
+        },
+        "content_data": content_data,
     }
 
 
@@ -234,6 +536,88 @@ def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, r
     return queryset.defer("content", "role").order_by("-created_at", "-id")
 
 
+def _resolve_generate_session(user, session_id):
+    if session_id is None or not getattr(user, "is_authenticated", False):
+        return None, None
+
+    session = get_session_for_user(user, session_id)
+    if session is None:
+        return None, Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+
+    return session, None
+
+
+def _generate_output_json(llm_generation_service, input_json, custom_schema_id):
+    try:
+        return llm_generation_service.generate(
+            input_json=input_json,
+            custom_schema_id=custom_schema_id,
+        ), None
+    except CustomSchemaNotFoundError:
+        return None, Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
+    except OpenAIConfigurationError:
+        return None, Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
+    except OpenAIUpstreamError as exc:
+        logger.exception("Upstream LLM provider error while handling llm_generate request.")
+        return None, Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
+    except OpenAIServiceError:
+        return None, Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    except ValueError:
+        logger.exception("Invalid input_json payload.")
+        return None, Response(
+            {
+                "detail": INVALID_REQUEST_DETAIL,
+                "errors": {"input_json": [INVALID_INPUT_JSON_DETAIL]},
+            },
+            status=400,
+        )
+    except Exception:
+        logger.exception("Unexpected error while handling llm_generate request.")
+        return None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+
+
+def _persist_generate_output_for_authenticated_user(
+    user,
+    session,
+    output_json,
+    thinking_log,
+    export_output_json,
+):
+    if not getattr(user, "is_authenticated", False):
+        return None, None, None
+
+    try:
+        with transaction.atomic():
+            if session is None:
+                session = create_session_for_user(user)
+            generated_output = create_generated_output(
+                session,
+                output_json,
+                thinking_log=thinking_log,
+                export_output_json=export_output_json,
+            )
+        return session.id, generated_output.id, None
+    except Exception:
+        logger.exception(
+            "Unexpected error while persisting session-aware llm_generate output."
+        )
+        return None, None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+
+
+def _build_generate_success_response(output_json, session_id, output_id, reasoning):
+    response_serializer = LlmGenerateResponseSerializer(
+        data={
+            "output_json": output_json,
+            "session_id": session_id,
+            "output_id": output_id,
+            "reasoning": reasoning,
+        }
+    )
+    if not response_serializer.is_valid():
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    return Response(response_serializer.data)
+
+
 @api_view(["POST"])
 @require_http_methods(["POST"])
 def llm_generate(request):
@@ -250,52 +634,46 @@ def llm_generate(request):
 
     validated_data = cast(dict[str, Any], request_serializer.validated_data)
     input_json = validated_data["input_json"]
+    session_id = validated_data.get("session_id")
     custom_schema_id = validated_data.get("custom_schema_id")
+    session, error_response = _resolve_generate_session(request.user, session_id)
+    if error_response is not None:
+        return error_response
     include_reasoning = validated_data.get("include_reasoning", True)
     llm_generation_service = build_llm_generation_service(request.user)
+    output_json, error_response = _generate_output_json(
+        llm_generation_service,
+        input_json,
+        custom_schema_id,
+    )
+    if error_response is not None:
+        return error_response
 
-    try:
-        output_json = llm_generation_service.generate(
-            input_json=input_json,
-            custom_schema_id=custom_schema_id,
-        )
-        output_json = _sanitize_output_json(output_json)
-    except CustomSchemaNotFoundError:
-        return Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
-    except OpenAIConfigurationError:
-        return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
-    except OpenAIUpstreamError as exc:
-        logger.exception("Upstream LLM provider error while handling llm_generate request.")
-        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
-    except OpenAIServiceError:
-        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
-    except ValueError:
-        logger.exception("Invalid input_json payload.")
-        return Response(
-            {
-                "detail": INVALID_REQUEST_DETAIL,
-                "errors": {"input_json": [INVALID_INPUT_JSON_DETAIL]},
-            },
-            status=400,
-        )
-    except Exception:
-        logger.exception("Unexpected error while handling llm_generate request.")
-        return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
-
+    output_json = _sanitize_output_json(output_json)
+    export_output_json = build_export_output_json(
+        input_json=input_json,
+        output_json=output_json,
+    )
     reasoning_response = _generate_optional_reasoning(
         include_reasoning=include_reasoning,
         input_json=input_json,
         output_json=output_json,
     )
+    thinking_log = ""
+    if isinstance(reasoning_response, dict):
+        raw_thinking_log = reasoning_response.get("thinking_log")
+        if isinstance(raw_thinking_log, str):
+            thinking_log = raw_thinking_log
 
-    response_serializer = LlmGenerateResponseSerializer(
-        data={
-            "output_json": output_json,
-            "reasoning": reasoning_response,
-        }
+    response_session_id, response_output_id, error_response = _persist_generate_output_for_authenticated_user(
+        request.user,
+        session,
+        output_json,
+        thinking_log,
+        export_output_json,
     )
-    if not response_serializer.is_valid():
-        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    if error_response is not None:
+        return error_response
 
     if getattr(request.user, "is_authenticated", False):
         create_artifact_history(
@@ -305,7 +683,13 @@ def llm_generate(request):
             output_json=output_json,
             status_processing="completed",
         )
-    return Response(response_serializer.data)
+
+    return _build_generate_success_response(
+        output_json,
+        response_session_id,
+        response_output_id,
+        reasoning_response,
+    )
 
 @require_http_methods(["POST"])
 @api_view(["POST"])

@@ -70,6 +70,41 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("model", serializer.errors)
 
+    def test_generate_request_serializer_accepts_valid_session_id(self):
+        session_id = uuid4()
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}, "session_id": str(session_id)}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["session_id"], session_id)
+
+    def test_generate_request_serializer_allows_missing_session_id(self):
+        serializer = LlmGenerateRequestSerializer(data={"input_json": {"sheet": "Sheet1"}})
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertNotIn("session_id", serializer.validated_data)
+
+    def test_generate_request_serializer_rejects_invalid_session_id(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}, "session_id": "not-a-uuid"}
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("session_id", serializer.errors)
+
+    def test_generate_response_serializer_accepts_session_and_output_ids(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"sheet": "Sheet1"},
+                "session_id": str(uuid4()),
+                "output_id": str(uuid4()),
+                "reasoning": None,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
     def test_generate_request_serializer_accepts_include_reasoning(self):
         serializer = LlmGenerateRequestSerializer(
             data={"input_json": {"sheet": "Sheet1"}, "include_reasoning": False}
@@ -104,7 +139,6 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         serializer = LlmGenerateResponseSerializer(
             data={"output_json": [["row-1"]], "reasoning": None}
         )
-
         self.assertTrue(serializer.is_valid(), serializer.errors)
 
 

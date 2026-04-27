@@ -17,5 +17,15 @@ export interface ILLMService {
         signal?: AbortSignal
     ) => Promise<ExcelExportResponse>;
     downloadExcelFile?: (fileId: string, filename?: string) => Promise<void>;
+    downloadSessionOutputCsvFile?: (
+        sessionId: string,
+        outputId: string,
+        filename?: string
+    ) => Promise<void>;
+    downloadSessionOutputExcelFile?: (
+        sessionId: string,
+        outputId: string,
+        filename?: string
+    ) => Promise<void>;
     getDownloadUrl?: (fileId: string, filename?: string) => string;
 }
