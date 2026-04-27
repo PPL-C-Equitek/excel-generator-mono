@@ -22,6 +22,7 @@ from llm.views import (
     build_export_output_json,
     _extract_document_type,
     _sanitize_output_json,
+    _to_scalar_cell,
     build_llm_generation_service,
     build_llm_reasoning_service,
     extract_original_name,
@@ -401,6 +402,44 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             ],
         )
         self.assertEqual(mock_json_dumps.call_count, 1)
+
+    def test_build_export_output_json_serializes_repeated_bytes_cells_once_with_cache(self):
+        shared_value = b"ICU"
+
+        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
+            export_output_json = build_export_output_json(
+                input_json={"filename": "summary.xlsx"},
+                output_json={
+                    "headers": ["payload"],
+                    "rows": [
+                        [shared_value],
+                        [shared_value],
+                    ],
+                },
+            )
+
+        self.assertEqual(
+            export_output_json["content_data"][0]["rows"],
+            [
+                {"payload": "b'ICU'"},
+                {"payload": "b'ICU'"},
+            ],
+        )
+        self.assertEqual(mock_json_dumps.call_count, 0)
+
+    def test_to_scalar_cell_serializes_nested_object_without_cache(self):
+        payload = {"unit": "ICU", "meta": {"active": True}}
+
+        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
+            result = _to_scalar_cell(payload)
+
+        self.assertEqual(result, json.dumps(payload))
+        self.assertEqual(mock_json_dumps.call_count, 1)
+
+    def test_to_scalar_cell_returns_bytes_as_string_without_cache(self):
+        result = _to_scalar_cell(b"ICU")
+
+        self.assertEqual(result, "b'ICU'")
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):

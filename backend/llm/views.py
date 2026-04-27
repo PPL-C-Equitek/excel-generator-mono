@@ -247,6 +247,30 @@ def _map_unknown_row_to_object(row, headers, serialization_cache=None):
     return mapped_row
 
 
+def _collect_rows_array_metadata(rows):
+    all_lists = bool(rows)
+    all_dicts = bool(rows)
+    max_columns = 0
+    collected_headers = []
+    seen_headers = set()
+
+    for row in rows:
+        is_list_row = isinstance(row, list)
+        is_dict_row = isinstance(row, dict)
+        all_lists = all_lists and is_list_row
+        all_dicts = all_dicts and is_dict_row
+
+        if is_list_row:
+            max_columns = max(max_columns, len(row))
+        if is_dict_row:
+            for key in row:
+                if key not in seen_headers:
+                    seen_headers.add(key)
+                    collected_headers.append(key)
+
+    return all_lists, all_dicts, max_columns, collected_headers
+
+
 def _build_rows_from_generated_output_rows(rows, headers, serialization_cache=None):
     normalized_rows = []
     for row in rows:
@@ -278,25 +302,7 @@ def _build_rows_from_generated_output_rows(rows, headers, serialization_cache=No
 
 
 def _infer_headers_and_rows_from_rows_array(rows, serialization_cache=None):
-    all_lists = bool(rows)
-    all_dicts = bool(rows)
-    max_columns = 0
-    collected_headers = []
-    seen_headers = set()
-
-    for row in rows:
-        is_list_row = isinstance(row, list)
-        is_dict_row = isinstance(row, dict)
-        all_lists = all_lists and is_list_row
-        all_dicts = all_dicts and is_dict_row
-
-        if is_list_row:
-            max_columns = max(max_columns, len(row))
-        if is_dict_row:
-            for key in row.keys():
-                if key not in seen_headers:
-                    seen_headers.add(key)
-                    collected_headers.append(key)
+    all_lists, all_dicts, max_columns, collected_headers = _collect_rows_array_metadata(rows)
 
     if all_lists:
         headers = _normalize_headers(
