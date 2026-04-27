@@ -215,6 +215,26 @@ def resolve_session_title(candidate_title, fallback="New Chat"):
     return sanitized
 
 
+def generate_session_title_from_message(message, fallback="New Chat"):
+    if not message or not message.strip():
+        return fallback
+
+    title_prompt = (
+        "Berikan judul singkat maksimal 3-5 kata untuk chat berikut. "
+        "Abaikan sapaan, ambil konteks utama. Jangan gunakan karakter newline, "
+        f"cukup 1 kalimat: {message}"
+    )
+
+    try:
+        title_suggestion = generate_chat_response(
+            [{"role": "user", "content": title_prompt}]
+        )
+    except Exception:
+        return fallback
+
+    return resolve_session_title(title_suggestion, fallback=fallback)
+
+
 def delete_session(session):
     session.delete()
 
