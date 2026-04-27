@@ -6,6 +6,12 @@ const ACCESS_REASON_MESSAGES: Record<string, string> = {
     ok: 'Monitoring access granted.',
 }
 
+const CHECK_NAME_LABELS: Record<string, string> = {
+    database: 'Database',
+    storage: 'Storage',
+    openai_config: 'LLM Config',
+}
+
 export function formatTimestamp(value: string): string {
     const parsed = new Date(value)
     if (Number.isNaN(parsed.getTime())) {
@@ -58,6 +64,22 @@ export function statusBadgeClass(status: string): string {
     return 'border border-gray-300 bg-gray-100 text-gray-700'
 }
 
+export function formatStatusLabel(status: string): string {
+    const normalizedStatus = status.toLowerCase()
+    if (normalizedStatus === 'ok') {
+        return 'OK'
+    }
+    if (normalizedStatus === 'error') {
+        return 'Error'
+    }
+    return status
+}
+
+export function formatReadinessCheckName(name: string): string {
+    const normalizedName = name.trim().toLowerCase()
+    return CHECK_NAME_LABELS[normalizedName] ?? name
+}
+
 export function resolveAccessMessage(reason: string): string {
     return ACCESS_REASON_MESSAGES[reason] ?? `Access status: ${reason}`
 }
@@ -65,4 +87,3 @@ export function resolveAccessMessage(reason: string): string {
 export function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value))
 }
-

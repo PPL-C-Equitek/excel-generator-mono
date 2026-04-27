@@ -173,18 +173,33 @@ def _safe_thinking_log_summary(output_json) -> str:
 class ThinkingLogItemSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     session_id = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
-    request_id = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
+    chat_id = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
     thinking_log = serializers.CharField(read_only=True, allow_blank=True)
     status_processing = serializers.CharField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 
     def to_representation(self, instance):
-        output_json = instance.output_json if isinstance(instance.output_json, dict) else {}
+        output_json = instance.output_json if isinstance(getattr(instance, "output_json", None), dict) else {}
+
+        session_id = getattr(instance, "session_id", None)
+        is_chat_message_record = session_id is not None
+        chat_id = (
+            getattr(instance, "chat_id", None)
+        )
+        if chat_id is None and is_chat_message_record:
+            chat_id = getattr(instance, "id", None)
+        if chat_id is None:
+            chat_id = output_json.get("chat_id")
+
+        thinking_log = getattr(instance, "thinking_log", None)
+        if thinking_log is None:
+            thinking_log = _safe_thinking_log_summary(output_json)
+
         return {
             "id": str(instance.id),
-            "session_id": output_json.get("session_id"),
-            "request_id": output_json.get("request_id"),
-            "thinking_log": _safe_thinking_log_summary(output_json),
-            "status_processing": instance.status_processing,
+            "session_id": str(session_id) if session_id is not None else None,
+            "chat_id": str(chat_id) if chat_id is not None else None,
+            "thinking_log": thinking_log,
+            "status_processing": getattr(instance, "status_processing", "completed"),
             "created_at": instance.created_at,
         }

@@ -1,8 +1,9 @@
 import json
 import logging
 from typing import Any, cast
+from uuid import UUID
 
-from artifact_history.models import ArtifactHistory
+from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
 from django.db import transaction
 from django.views.decorators.http import require_http_methods
@@ -65,6 +66,7 @@ REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
 SESSION_NOT_FOUND_DETAIL = "Session not found."
 THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
+INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."
 MAX_THINKING_LOG_PAGE_SIZE = 100
 
 
@@ -174,14 +176,32 @@ DEFAULT_EXPORT_TABLE_NAME = "Sheet1"
 DEFAULT_EXPORT_VALUE_HEADER = "value"
 
 
-def _to_scalar_cell(value):
+def _get_cell_serialization_cache_key(value):
+    if isinstance(value, bytes):
+        return ("bytes", value)
+    return ("object", id(value))
+
+
+def _to_scalar_cell(value, serialization_cache=None):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
 
+    cache_key = None
+    if serialization_cache is not None:
+        cache_key = _get_cell_serialization_cache_key(value)
+        cached_value = serialization_cache.get(cache_key)
+        if cached_value is not None:
+            return cached_value
+
     try:
-        return str(value) if isinstance(value, bytes) else json.dumps(value)
+        serialized_value = str(value) if isinstance(value, bytes) else json.dumps(value)
     except Exception:
-        return "[Unserializable Value]"
+        serialized_value = "[Unserializable Value]"
+
+    if serialization_cache is not None and cache_key is not None:
+        serialization_cache[cache_key] = serialized_value
+
+    return serialized_value
 
 
 def _normalize_headers(raw_headers):
@@ -203,73 +223,150 @@ def _normalize_headers(raw_headers):
     return normalized
 
 
-def _map_array_row_to_object(row, headers):
+def _map_array_row_to_object(row, headers, serialization_cache=None):
     return {
-        header: _to_scalar_cell(row[index] if index < len(row) else None)
+        header: _to_scalar_cell(
+            row[index] if index < len(row) else None,
+            serialization_cache=serialization_cache,
+        )
         for index, header in enumerate(headers)
     }
 
 
-def _map_object_row_to_object(row, headers):
+def _map_object_row_to_object(row, headers, serialization_cache=None):
     return {
-        header: _to_scalar_cell(row.get(header))
+        header: _to_scalar_cell(row.get(header), serialization_cache=serialization_cache)
         for header in headers
     }
 
 
-def _map_unknown_row_to_object(row, headers):
+def _map_unknown_row_to_object(row, headers, serialization_cache=None):
     mapped_row = {}
     for index, header in enumerate(headers):
-        mapped_row[header] = _to_scalar_cell(row) if index == 0 else None
+        mapped_row[header] = (
+            _to_scalar_cell(row, serialization_cache=serialization_cache)
+            if index == 0
+            else None
+        )
     return mapped_row
 
 
-def _build_rows_from_generated_output_rows(rows, headers):
+def _collect_rows_array_metadata(rows):
+    all_lists = bool(rows)
+    all_dicts = bool(rows)
+    max_columns = 0
+    collected_headers = []
+    seen_headers = set()
+
+    for row in rows:
+        is_list_row = isinstance(row, list)
+        is_dict_row = isinstance(row, dict)
+        all_lists = all_lists and is_list_row
+        all_dicts = all_dicts and is_dict_row
+
+        if is_list_row:
+            max_columns = max(max_columns, len(row))
+        if is_dict_row:
+            for key in row:
+                if key not in seen_headers:
+                    seen_headers.add(key)
+                    collected_headers.append(key)
+
+    return all_lists, all_dicts, max_columns, collected_headers
+
+
+def _build_rows_from_generated_output_rows(rows, headers, serialization_cache=None):
     normalized_rows = []
     for row in rows:
         if isinstance(row, list):
-            normalized_rows.append(_map_array_row_to_object(row, headers))
+            normalized_rows.append(
+                _map_array_row_to_object(
+                    row,
+                    headers,
+                    serialization_cache=serialization_cache,
+                )
+            )
         elif isinstance(row, dict):
-            normalized_rows.append(_map_object_row_to_object(row, headers))
+            normalized_rows.append(
+                _map_object_row_to_object(
+                    row,
+                    headers,
+                    serialization_cache=serialization_cache,
+                )
+            )
         else:
-            normalized_rows.append(_map_unknown_row_to_object(row, headers))
+            normalized_rows.append(
+                _map_unknown_row_to_object(
+                    row,
+                    headers,
+                    serialization_cache=serialization_cache,
+                )
+            )
     return normalized_rows
 
 
-def _infer_headers_and_rows_from_rows_array(rows):
-    if rows and all(isinstance(row, list) for row in rows):
-        max_columns = max((len(row) for row in rows), default=0)
+def _infer_headers_and_rows_from_rows_array(rows, serialization_cache=None):
+    all_lists, all_dicts, max_columns, collected_headers = _collect_rows_array_metadata(rows)
+
+    if all_lists:
         headers = _normalize_headers(
             [f"column_{index + 1}" for index in range(max_columns)]
         )
-        return headers, _build_rows_from_generated_output_rows(rows, headers)
+        return headers, _build_rows_from_generated_output_rows(
+            rows,
+            headers,
+            serialization_cache=serialization_cache,
+        )
 
-    if rows and all(isinstance(row, dict) for row in rows):
-        collected_headers = []
-        for row in rows:
-            for key in row.keys():
-                if key not in collected_headers:
-                    collected_headers.append(key)
+    if all_dicts:
         headers = _normalize_headers(collected_headers)
-        return headers, _build_rows_from_generated_output_rows(rows, headers)
+        return headers, _build_rows_from_generated_output_rows(
+            rows,
+            headers,
+            serialization_cache=serialization_cache,
+        )
 
     headers = [DEFAULT_EXPORT_VALUE_HEADER]
-    normalized_rows = [{DEFAULT_EXPORT_VALUE_HEADER: _to_scalar_cell(value)} for value in rows]
+    normalized_rows = [
+        {
+            DEFAULT_EXPORT_VALUE_HEADER: _to_scalar_cell(
+                value,
+                serialization_cache=serialization_cache,
+            )
+        }
+        for value in rows
+    ]
     return headers, normalized_rows
 
 
-def _infer_headers_and_rows_from_output(output_json):
+def _infer_headers_and_rows_from_output(output_json, serialization_cache=None):
     if isinstance(output_json, dict):
         headers = _normalize_headers(list(output_json.keys()))
-        return headers, [_map_object_row_to_object(output_json, headers)]
+        return headers, [
+            _map_object_row_to_object(
+                output_json,
+                headers,
+                serialization_cache=serialization_cache,
+            )
+        ]
 
     if isinstance(output_json, list):
-        return _infer_headers_and_rows_from_rows_array(output_json)
+        return _infer_headers_and_rows_from_rows_array(
+            output_json,
+            serialization_cache=serialization_cache,
+        )
 
-    return [DEFAULT_EXPORT_VALUE_HEADER], [{DEFAULT_EXPORT_VALUE_HEADER: _to_scalar_cell(output_json)}]
+    return [DEFAULT_EXPORT_VALUE_HEADER], [
+        {
+            DEFAULT_EXPORT_VALUE_HEADER: _to_scalar_cell(
+                output_json,
+                serialization_cache=serialization_cache,
+            )
+        }
+    ]
 
 
-def _build_content_data_from_output(output_json):
+def _build_content_data_from_output(output_json, serialization_cache=None):
     if isinstance(output_json, dict):
         direct_headers = output_json.get("headers")
         direct_rows = output_json.get("rows")
@@ -279,7 +376,11 @@ def _build_content_data_from_output(output_json):
                 {
                     "table_name": DEFAULT_EXPORT_TABLE_NAME,
                     "headers": headers,
-                    "rows": _build_rows_from_generated_output_rows(direct_rows, headers),
+                    "rows": _build_rows_from_generated_output_rows(
+                        direct_rows,
+                        headers,
+                        serialization_cache=serialization_cache,
+                    ),
                 }
             ]
 
@@ -288,7 +389,10 @@ def _build_content_data_from_output(output_json):
         if has_sheet_like_entries:
             content_data = []
             for index, (sheet_name, value) in enumerate(entries):
-                headers, rows = _infer_headers_and_rows_from_rows_array(value)
+                headers, rows = _infer_headers_and_rows_from_rows_array(
+                    value,
+                    serialization_cache=serialization_cache,
+                )
                 table_name = (
                     sheet_name.strip()
                     if isinstance(sheet_name, str) and sheet_name.strip()
@@ -303,7 +407,10 @@ def _build_content_data_from_output(output_json):
                 )
             return content_data
 
-    headers, rows = _infer_headers_and_rows_from_output(output_json)
+    headers, rows = _infer_headers_and_rows_from_output(
+        output_json,
+        serialization_cache=serialization_cache,
+    )
     return [
         {
             "table_name": DEFAULT_EXPORT_TABLE_NAME,
@@ -314,7 +421,11 @@ def _build_content_data_from_output(output_json):
 
 
 def build_export_output_json(input_json, output_json):
-    content_data = _build_content_data_from_output(output_json)
+    serialization_cache = {}
+    content_data = _build_content_data_from_output(
+        output_json,
+        serialization_cache=serialization_cache,
+    )
 
     total_rows = sum(len(table["rows"]) for table in content_data)
     total_columns = max((len(table["headers"]) for table in content_data), default=0)
@@ -373,6 +484,18 @@ def _invalid_thinking_log_pagination_response():
     )
 
 
+def _invalid_thinking_log_identifier_response(field_name: str):
+    return Response(
+        {
+            "detail": INVALID_REQUEST_DETAIL,
+            "errors": {
+                field_name: [INVALID_THINKING_LOG_IDENTIFIER_DETAIL],
+            },
+        },
+        status=400,
+    )
+
+
 def _parse_thinking_log_positive_int(value, default, minimum=1):
     if value is None:
         return default
@@ -390,19 +513,28 @@ def _parse_thinking_log_page_size(value, default=10):
     return parsed
 
 
-def _build_thinking_log_queryset_for_user(user, session_id=None, request_id=None):
-    queryset = ArtifactHistory.objects.filter(owner=user)
+def _parse_thinking_log_identifier(value, field_name: str):
+    normalized_value = value.strip() if isinstance(value, str) else ""
+    if not normalized_value:
+        return None
 
-    normalized_session_id = session_id.strip() if isinstance(session_id, str) else ""
-    normalized_request_id = request_id.strip() if isinstance(request_id, str) else ""
+    try:
+        return UUID(normalized_value)
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError(field_name) from exc
 
-    if normalized_session_id:
-        queryset = queryset.filter(output_json__session_id=normalized_session_id)
 
-    if normalized_request_id:
-        queryset = queryset.filter(output_json__request_id=normalized_request_id)
+def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, request_id=None):
+    queryset = GeneratedOutput.objects.filter(session__owner=user).exclude(thinking_log="")
 
-    return queryset
+    if session_id:
+        queryset = queryset.filter(session_id=session_id)
+
+    identifier = chat_id or request_id
+    if identifier:
+        queryset = queryset.filter(id=identifier)
+
+    return queryset.defer("export_output_json").order_by("-created_at", "-id")
 
 
 def _resolve_generate_session(user, session_id):
@@ -695,11 +827,21 @@ def thinking_log_list(request):
         return _invalid_thinking_log_pagination_response()
 
     session_id = request.query_params.get("session_id")
+    chat_id = request.query_params.get("chat_id")
     request_id = request.query_params.get("request_id")
+
+    try:
+        parsed_session_id = _parse_thinking_log_identifier(session_id, "session_id")
+        parsed_chat_id = _parse_thinking_log_identifier(chat_id, "chat_id")
+        parsed_request_id = _parse_thinking_log_identifier(request_id, "request_id")
+    except ValueError as exc:
+        return _invalid_thinking_log_identifier_response(str(exc))
+
     queryset = _build_thinking_log_queryset_for_user(
         user=request.user,
-        session_id=session_id,
-        request_id=request_id,
+        session_id=parsed_session_id,
+        chat_id=parsed_chat_id,
+        request_id=parsed_request_id,
     )
 
     total_count = queryset.count()
@@ -721,7 +863,10 @@ def thinking_log_list(request):
 @require_http_methods(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def thinking_log_detail(request, history_id):
-    record = ArtifactHistory.objects.filter(owner=request.user, id=history_id).first()
+    record = _build_thinking_log_queryset_for_user(
+        user=request.user,
+        chat_id=history_id,
+    ).first()
     if record is None:
         return _thinking_log_not_found_response()
 

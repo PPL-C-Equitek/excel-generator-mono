@@ -6,8 +6,12 @@ from unittest.mock import patch
 from authentication.models import User
 from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from chat_sessions.services import (
+    _build_fallback_thinking_log,
+    _normalize_fallback_lines,
+    _select_thinking_log_confidence,
     append_assistant_message,
     append_user_message,
+    build_frontend_thinking_log_response,
     build_history_with_summary,
     build_resume_context_for_user,
     create_generated_output,
@@ -685,6 +689,193 @@ class SummarizeOldMessagesServiceTest(SimpleTestCase):
         call_args = mock_llm.call_args[0][0]
         self.assertEqual(len(call_args), 1)
         self.assertEqual(call_args[0]["role"], "user")
+
+
+class BuildFrontendThinkingLogResponseTest(SimpleTestCase):
+    def test_reuses_existing_valid_thinking_log_unchanged(self):
+        payload = {
+            "result": {"ok": True},
+            "reasoning": {
+                "final_answer": "Normalized output prepared.",
+                "reasoning_steps": ["Mapped headers", "Validated totals"],
+                "thinking_log": [
+                    "Detected headers: ID, Barang, Harga, Discount, Total.",
+                    "Grouped remaining values into rows of five columns.",
+                    "Validated row consistency.",
+                    "Confidence: High",
+                ],
+            },
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Detected headers: ID, Barang, Harga, Discount, Total.",
+                    "Grouped remaining values into rows of five columns.",
+                    "Validated row consistency.",
+                    "Confidence: High",
+                ]
+            },
+        )
+
+    def test_generates_fallback_when_existing_thinking_log_contains_blocked_pattern(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Extraction result prepared.",
+                "reasoning_steps": [
+                    "Detected headers",
+                    "Grouped rows",
+                ],
+                "thinking_log": [
+                    "I considered multiple options before choosing this format.",
+                ],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Identified available response reasoning fields.",
+                    "Summarized key transformation steps from response data.",
+                    "Aligned summary details with the final answer content.",
+                    "Validated thinking log consistency for frontend parsing.",
+                    "Prepared parser-safe thinking log output.",
+                    "Confidence: High",
+                ]
+            },
+        )
+
+    def test_returns_fail_safe_when_reasoning_fields_are_missing(self):
+        response = build_frontend_thinking_log_response({"result": {"items": []}})
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Processed available response data.",
+                    "Unable to extract detailed reasoning.",
+                    "Prepared safest structured output.",
+                    "Confidence: Low",
+                ]
+            },
+        )
+
+    def test_returns_fail_safe_when_payload_is_non_dict(self):
+        response = build_frontend_thinking_log_response(["not", "a", "dict"])
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Processed available response data.",
+                    "Unable to extract detailed reasoning.",
+                    "Prepared safest structured output.",
+                    "Confidence: Low",
+                ]
+            },
+        )
+
+    def test_generates_fallback_when_existing_thinking_log_contains_non_string_item(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Extraction result prepared.",
+                "reasoning_steps": ["Detected headers"],
+                "thinking_log": [123],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(response["thinking_log"][-1], "Confidence: High")
+
+    def test_generates_fallback_when_existing_thinking_log_contains_blank_item(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Extraction result prepared.",
+                "reasoning_steps": ["Detected headers"],
+                "thinking_log": ["   \n\t  "],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(response["thinking_log"][-1], "Confidence: High")
+
+    def test_fallback_includes_only_final_answer_path_and_sets_medium_confidence(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Only final answer is available.",
+                "reasoning_steps": [],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Identified available response reasoning fields.",
+                    "Aligned summary details with the final answer content.",
+                    "Validated thinking log consistency for frontend parsing.",
+                    "Prepared parser-safe thinking log output.",
+                    "Confidence: Medium",
+                ]
+            },
+        )
+
+    def test_fallback_normalizes_blank_reasoning_steps_and_sets_medium_confidence(self):
+        payload = {
+            "reasoning": {
+                "final_answer": None,
+                "reasoning_steps": ["", "  ", "Mapped rows"],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Identified available response reasoning fields.",
+                    "Summarized key transformation steps from response data.",
+                    "Validated thinking log consistency for frontend parsing.",
+                    "Prepared parser-safe thinking log output.",
+                    "Confidence: Medium",
+                ]
+            },
+        )
+
+    def test_private_helpers_cover_unreachable_branches(self):
+        self.assertEqual(
+            _build_fallback_thinking_log("not-a-dict"),
+            [
+                "Processed available response data.",
+                "Unable to extract detailed reasoning.",
+                "Prepared safest structured output.",
+                "Confidence: Low",
+            ],
+        )
+        self.assertEqual(_select_thinking_log_confidence([], ""), "Low")
+        self.assertEqual(
+            _normalize_fallback_lines(
+                [
+                    "line-a",
+                    "line-a",
+                    "   ",
+                    "line-b",
+                ],
+                "Low",
+            ),
+            ["line-a", "line-b", "Confidence: Low"],
+        )
 
 
 class BuildHistoryWithSummaryServiceTest(TestCase):
