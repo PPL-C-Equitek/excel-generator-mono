@@ -178,7 +178,7 @@ def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, r
     if identifier:
         queryset = queryset.filter(id=identifier)
 
-    return queryset.order_by("-created_at", "-id")
+    return queryset.defer("content", "role").order_by("-created_at", "-id")
 
 
 @api_view(["POST"])
