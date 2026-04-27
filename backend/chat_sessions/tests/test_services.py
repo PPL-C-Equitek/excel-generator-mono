@@ -842,9 +842,17 @@ class SessionTitleHelperServiceTest(SimpleTestCase):
     def test_sanitize_session_title_returns_empty_string_for_whitespace_only(self):
         self.assertEqual(sanitize_session_title("   \n \t "), "")
 
+    def test_sanitize_session_title_strips_wrapping_quotes_from_llm_title(self):
+        result = sanitize_session_title('   "Diskusi Bantuan Excel"   ')
+        self.assertEqual(result, "Diskusi Bantuan Excel")
+
     def test_resolve_session_title_returns_sanitized_title_when_valid(self):
         result = resolve_session_title("   Good Title \n ", fallback="New Chat")
         self.assertEqual(result, "Good Title")
+
+    def test_resolve_session_title_returns_fallback_when_title_only_contains_wrapping_quotes(self):
+        result = resolve_session_title('   ""   ', fallback="New Chat")
+        self.assertEqual(result, "New Chat")
 
     def test_resolve_session_title_returns_fallback_when_sanitized_is_empty(self):
         result = resolve_session_title("   ", fallback="New Chat")
