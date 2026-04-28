@@ -609,16 +609,23 @@ class CreateGeneratedOutputServiceTest(TestCase):
             "final_answer": "Raw output",
         }
         self.valid_thinking_log = "Checked totals and aligned categories."
+        self.valid_reasoning = {
+            "final_answer": "Checked totals and aligned categories.",
+            "reasoning_steps": ["Mapped headers", "Validated row totals"],
+            "thinking_log": self.valid_thinking_log,
+        }
 
     def test_create_generated_output_creates_output_with_correct_data(self):
         output = create_generated_output(
             self.session,
             self.valid_output_json,
             self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
         )
 
         self.assertEqual(output.output_json, self.valid_output_json)
         self.assertEqual(output.thinking_log, self.valid_thinking_log)
+        self.assertEqual(output.reasoning, self.valid_reasoning)
         self.assertEqual(output.session, self.session)
 
     def test_create_generated_output_persists_to_db(self):
@@ -626,6 +633,7 @@ class CreateGeneratedOutputServiceTest(TestCase):
             self.session,
             self.valid_output_json,
             self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
         )
 
         self.assertTrue(GeneratedOutput.objects.filter(id=output.id).exists())
@@ -637,6 +645,7 @@ class CreateGeneratedOutputServiceTest(TestCase):
             self.session,
             self.valid_output_json,
             self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
         )
 
         self.session.refresh_from_db()
@@ -649,6 +658,7 @@ class CreateGeneratedOutputServiceTest(TestCase):
         )
 
         self.assertEqual(output.thinking_log, "")
+        self.assertEqual(output.reasoning, {})
 
     def test_create_generated_output_supports_legacy_export_payload_as_third_positional_arg(self):
         legacy_export_output_json = {
@@ -664,6 +674,7 @@ class CreateGeneratedOutputServiceTest(TestCase):
         )
 
         self.assertEqual(output.thinking_log, "")
+        self.assertEqual(output.reasoning, {})
         self.assertEqual(output.export_output_json, legacy_export_output_json)
 
     def test_create_generated_output_rejects_non_dict_output_json(self):

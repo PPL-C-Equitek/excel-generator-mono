@@ -1223,6 +1223,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             generated_output.thinking_log,
             "Normalized columns and preserved totals.",
         )
+        self.assertEqual(generated_output.reasoning, mock_generate_reasoning.return_value)
 
     @patch("llm.views._generate_optional_reasoning")
     @patch("llm.views.build_llm_generation_service")
@@ -1253,6 +1254,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self.assertEqual(response.status_code, 200)
         generated_output = GeneratedOutput.objects.get()
         self.assertEqual(generated_output.thinking_log, "")
+        self.assertEqual(generated_output.reasoning, {})
 
     @patch("llm.views._build_generate_success_response")
     @patch("llm.views._generate_optional_reasoning")
@@ -1289,6 +1291,10 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self.assertEqual(response.status_code, 200)
         generated_output = GeneratedOutput.objects.get()
         self.assertEqual(generated_output.thinking_log, "")
+        self.assertEqual(
+            generated_output.reasoning,
+            mock_generate_reasoning.return_value,
+        )
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_does_not_create_session_or_generated_output_when_generation_fails(

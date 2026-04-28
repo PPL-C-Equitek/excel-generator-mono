@@ -236,3 +236,26 @@ class ChatSessionModelTest(TestCase):
             generated_output.thinking_log,
             "Normalized categories and preserved totals.",
         )
+
+    def test_generated_output_can_store_reasoning_payload(self):
+        session = Session.objects.create(
+            owner=self.user,
+            title="Transformasi Excel April",
+        )
+
+        reasoning = {
+            "final_answer": "Normalization complete.",
+            "reasoning_steps": ["Mapped categories", "Validated totals"],
+            "thinking_log": "Normalized categories and preserved totals.",
+        }
+        generated_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"filename": "invoice.pdf"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+            reasoning=reasoning,
+        )
+
+        self.assertEqual(generated_output.reasoning, reasoning)

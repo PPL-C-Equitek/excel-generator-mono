@@ -644,6 +644,7 @@ def _persist_generate_output_for_authenticated_user(
     session,
     output_json,
     thinking_log,
+    reasoning,
     export_output_json,
     title="",
 ):
@@ -658,6 +659,7 @@ def _persist_generate_output_for_authenticated_user(
                 session,
                 output_json,
                 thinking_log=thinking_log,
+                reasoning=reasoning,
                 export_output_json=export_output_json,
             )
         return session.id, generated_output.id, None
@@ -734,6 +736,7 @@ def llm_generate(request):
         session,
         output_json,
         thinking_log,
+        reasoning_response,
         export_output_json,
         title=resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
     )

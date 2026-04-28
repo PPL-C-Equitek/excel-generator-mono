@@ -423,6 +423,7 @@ def create_generated_output(
     output_json,
     thinking_log="",
     export_output_json=None,
+    reasoning=None,
 ):
     now = timezone.now()
     # Temporary compatibility shim while callers are migrated away from
@@ -435,6 +436,7 @@ def create_generated_output(
         session=session,
         output_json=output_json,
         thinking_log=thinking_log or "",
+        reasoning=reasoning if isinstance(reasoning, dict) else {},
         export_output_json=export_output_json or {},
     )
     session.last_output_at = now
