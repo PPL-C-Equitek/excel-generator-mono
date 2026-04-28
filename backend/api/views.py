@@ -914,7 +914,7 @@ def _session_csv_download_internal_error_response():
 
 
 def _normalize_session_output_export_payload(output):
-    payload = getattr(output, "output_json", None)
+    payload = getattr(output, "export_output_json", None) or {}
     if not isinstance(payload, dict):
         return payload
 

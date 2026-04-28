@@ -11,6 +11,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from chat_sessions.models import ChatMessage
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
@@ -214,10 +215,27 @@ def _resolve_send_message_session_context(user, session_id):
     return session, _build_session_message_history(session)
 
 
+def _inject_file_context_if_available(session, history: list) -> list:
+    if session is None:
+        return history
+    last_output = session.generated_outputs.order_by("-created_at").first()
+    if last_output is None:
+        return history
+    export_json = last_output.export_output_json or {}
+    file_context = (
+        "[CONVERTED_FILE_CONTEXT]\n"
+        "The user is reviewing a converted file. "
+        "Here is the full extracted data (document info, summary, and table content):\n"
+        + json.dumps(export_json)
+    )
+    return [{"role": "system", "content": file_context}] + history
+
+
 def _generate_send_message_reply_and_title(session, history, message):
     prepared_history = (
         build_history_with_summary(session, history) if session is not None else history
     )
+    prepared_history = _inject_file_context_if_available(session, prepared_history)
     if session is None:
         return _generate_reply_and_title_for_new_session(prepared_history, message)
     return generate_chat_response(prepared_history), "New Chat"
@@ -430,6 +448,13 @@ def _infer_headers_and_rows_from_output(output_json, serialization_cache=None):
 
 def _build_content_data_from_output(output_json, serialization_cache=None):
     if isinstance(output_json, dict):
+        # LLM kadang mengembalikan format export secara langsung (punya 'content_data').
+        # Gunakan langsung daripada fallback ke parsing heuristik yang salah
+        # menginterpretasikan key top-level (document_info, summary) sebagai header kolom.
+        raw_content_data = output_json.get("content_data")
+        if isinstance(raw_content_data, list) and raw_content_data:
+            return raw_content_data
+
         direct_headers = output_json.get("headers")
         direct_rows = output_json.get("rows")
         if isinstance(direct_headers, list) and isinstance(direct_rows, list):
@@ -610,11 +635,25 @@ def _resolve_generate_session(user, session_id):
     return session, None
 
 
-def _generate_output_json(llm_generation_service, input_json, custom_schema_id):
+def _build_chat_context_from_session(session) -> str | None:
+    if session is None:
+        return None
+    messages = list(session.messages.order_by("created_at"))
+    if not messages:
+        return None
+    lines = []
+    for msg in messages:
+        role_label = "USER" if msg.role == ChatMessage.ROLE_USER else "ASSISTANT"
+        lines.append(f"{role_label}: {msg.content}")
+    return "\n".join(lines)
+
+
+def _generate_output_json(llm_generation_service, input_json, custom_schema_id, chat_context=None):
     try:
         return llm_generation_service.generate(
             input_json=input_json,
             custom_schema_id=custom_schema_id,
+            chat_context=chat_context,
         ), None
     except CustomSchemaNotFoundError:
         return None, Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
@@ -704,11 +743,13 @@ def llm_generate(request):
     if error_response is not None:
         return error_response
     include_reasoning = validated_data.get("include_reasoning", True)
+    chat_context = _build_chat_context_from_session(session)
     llm_generation_service = build_llm_generation_service(request.user)
     output_json, error_response = _generate_output_json(
         llm_generation_service,
         input_json,
         custom_schema_id,
+        chat_context=chat_context,
     )
     if error_response is not None:
         return error_response
