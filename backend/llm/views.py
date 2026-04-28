@@ -999,10 +999,43 @@ def thinking_log_list(request):
 @api_view(["GET"])
 @require_http_methods(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
-def thinking_log_detail(request, history_id):
+def thinking_log_session_list(request, session_id):
+    try:
+        page = _parse_thinking_log_positive_int(request.query_params.get("page"), default=1)
+        page_size = _parse_thinking_log_page_size(
+            request.query_params.get("page_size"),
+            default=10,
+        )
+    except (TypeError, ValueError):
+        return _invalid_thinking_log_pagination_response()
+
+    queryset = _build_thinking_log_queryset_for_user(
+        user=request.user,
+        session_id=session_id,
+    )
+
+    total_count = queryset.count()
+    offset = (page - 1) * page_size
+    paged_records = queryset[offset : offset + page_size]
+
+    return Response(
+        {
+            "count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "results": ThinkingLogItemSerializer(paged_records, many=True).data,
+        },
+        status=200,
+    )
+
+
+@api_view(["GET"])
+@require_http_methods(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def thinking_log_detail(request, output_id):
     record = _build_thinking_log_queryset_for_user(
         user=request.user,
-        request_id=history_id,
+        request_id=output_id,
     ).first()
     if record is None:
         return _thinking_log_not_found_response()
