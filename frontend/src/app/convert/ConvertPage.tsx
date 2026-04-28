@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import SchemaSelector from '@/components/SchemaSelector'
 import Sidebar from '@/components/Sidebar'
 import UploadZone from '@/components/UploadZone'
@@ -27,25 +27,115 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
         excelSuccessMessage,
         outputFile,
         thinkingLog,
+        reasoningSteps = [],
         handleFileSelect,
         resetConversionState,
         handleCsvDownload,
         handleExcelDownload,
     } = useConvertFlow(injectedService)
 
+    const reasoningPlaybackKey = useMemo(() => {
+        if (!outputFile || reasoningSteps.length === 0) {
+            return null
+        }
+
+        return [
+            outputFile.filename,
+            outputFile.size,
+            reasoningSteps.join('\n'),
+            thinkingLog ?? '',
+        ].join('|')
+    }, [outputFile, reasoningSteps, thinkingLog])
+
+    const [reasoningPlayback, setReasoningPlayback] = useState({
+        key: null as string | null,
+        visibleCount: 0,
+        completeKey: null as string | null,
+    })
+    const visibleReasoningCount = reasoningPlayback.key === reasoningPlaybackKey
+        ? reasoningPlayback.visibleCount
+        : 0
+
+    useEffect(() => {
+        if (!reasoningPlaybackKey || reasoningPlayback.completeKey === reasoningPlaybackKey) {
+            return
+        }
+
+        const timer = window.setTimeout(() => {
+            setReasoningPlayback((current) => {
+                if (current.completeKey === reasoningPlaybackKey) {
+                    return current
+                }
+
+                const currentVisibleCount = current.key === reasoningPlaybackKey
+                    ? current.visibleCount
+                    : 0
+
+                if (currentVisibleCount < reasoningSteps.length) {
+                    return {
+                        ...current,
+                        key: reasoningPlaybackKey,
+                        visibleCount: currentVisibleCount + 1,
+                    }
+                }
+
+                return {
+                    ...current,
+                    key: reasoningPlaybackKey,
+                    visibleCount: currentVisibleCount,
+                    completeKey: reasoningPlaybackKey,
+                }
+            })
+        }, visibleReasoningCount === 0 ? 250 : 700)
+
+        return () => window.clearTimeout(timer)
+    }, [
+        reasoningPlayback.completeKey,
+        reasoningPlaybackKey,
+        reasoningSteps.length,
+        visibleReasoningCount,
+    ])
+
+    const isReasoningPlaybackPending = Boolean(
+        reasoningPlaybackKey &&
+        reasoningPlayback.completeKey !== reasoningPlaybackKey
+    )
+    const visibleReasoningSteps = reasoningSteps.slice(0, visibleReasoningCount)
+
+    const renderReasoningSteps = (steps: string[], isWaitingForSteps: boolean) => (
+        <div data-testid="reasoning-steps">
+            <p className="font-semibold text-gray-900">Reasoning steps</p>
+            <div className="mt-3 space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                {steps.map((step, index) => (
+                    <div key={`${step}-${index}`} className="flex items-start gap-2">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-700 text-[10px] font-bold text-white">
+                            {index + 1}
+                        </span>
+                        <span className="whitespace-pre-wrap">{step}</span>
+                    </div>
+                ))}
+
+                {isWaitingForSteps && (
+                    <div className="flex items-center gap-2 text-red-700">
+                        <div className="h-2 w-2 animate-pulse rounded-full bg-red-700" />
+                        <span>
+                            {steps.length > 0
+                                ? 'Preparing the thinking log...'
+                                : 'Waiting for backend reasoning steps...'}
+                        </span>
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+
     const resultContent = (() => {
         if (isGenerating) {
-            return (
-                <div data-testid="loading-indicator">
-                    <p className="font-semibold text-gray-900">Thinking log</p>
-                    <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
-                        <div className="flex items-center gap-2 text-red-700">
-                            <div className="h-2 w-2 animate-pulse rounded-full bg-red-700" />
-                            <span>Waiting for backend reasoning...</span>
-                        </div>
-                    </div>
-                </div>
-            )
+            return renderReasoningSteps([], true)
+        }
+
+        if (isReasoningPlaybackPending) {
+            return renderReasoningSteps(visibleReasoningSteps, true)
         }
 
         if (error && errorPhase === 'generating') {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode, type DragEvent, type ChangeEvent } from 'react'
+import { useRef, useState, type ReactNode, type DragEvent, type ChangeEvent } from 'react'
 
 interface UploadZoneProps {
     readonly onFileSelect?: (file: File, prompt?: string) => void
@@ -14,10 +14,9 @@ interface UploadZoneProps {
     readonly validationError?: string | null
 }
 
-interface ChatMessage {
-    id: number
-    text: string
-}
+type ChatMessage =
+    | { id: number; role: 'user'; text: string }
+    | { id: number; role: 'assistant'; content: ReactNode }
 
 function FileIcon({ className = 'h-12 w-12' }: Readonly<{ className?: string }>) {
     return (
@@ -108,6 +107,7 @@ export default function UploadZone({
     const [submittedFile, setSubmittedFile] = useState<File | null>(null)
     const [chatInput, setChatInput] = useState('')
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+    const messageIdRef = useRef(0)
 
     const isConversationStarted = Boolean(submittedFile && (isGenerating || resultContent))
     const isValidationFeedbackVisible = Boolean(
@@ -117,11 +117,21 @@ export default function UploadZone({
     )
     const trimmedChatInput = chatInput.trim()
 
+    const createMessageId = () => {
+        messageIdRef.current += 1
+        return messageIdRef.current
+    }
+
+    const resetChatTranscript = () => {
+        messageIdRef.current = 0
+        setChatMessages([])
+        setChatInput('')
+    }
+
     const handleFile = (file: File) => {
         setSelectedFile(file)
         setSubmittedFile(null)
-        setChatMessages([])
-        setChatInput('')
+        resetChatTranscript()
         onFileChange?.()
     }
 
@@ -142,25 +152,40 @@ export default function UploadZone({
     const handleReset = () => {
         setSelectedFile(null)
         setSubmittedFile(null)
-        setChatMessages([])
-        setChatInput('')
+        resetChatTranscript()
         onFileChange?.()
     }
 
     const handleSubmit = () => {
         if (!selectedFile) return
         setSubmittedFile(selectedFile)
-        setChatMessages([])
+        resetChatTranscript()
         onFileSelect?.(selectedFile)
     }
 
     const handleFollowUpSubmit = () => {
         if (!submittedFile || trimmedChatInput.length === 0) return
+
+        const prompt = trimmedChatInput
+        const archivedResultMessage: ChatMessage | null = resultContent
+            ? {
+                id: createMessageId(),
+                role: 'assistant',
+                content: resultContent,
+            }
+            : null
+        const userMessage: ChatMessage = {
+            id: createMessageId(),
+            role: 'user',
+            text: prompt,
+        }
+
         setChatMessages((messages) => [
             ...messages,
-            { id: Date.now(), text: trimmedChatInput },
+            ...(archivedResultMessage ? [archivedResultMessage] : []),
+            userMessage,
         ])
-        onFileSelect?.(submittedFile, trimmedChatInput)
+        onFileSelect?.(submittedFile, prompt)
         setChatInput('')
     }
 
@@ -195,6 +220,24 @@ export default function UploadZone({
                         </div>
                     )}
 
+                    {chatMessages.map((message) => (
+                        message.role === 'assistant' ? (
+                            <div key={message.id} className="flex w-full items-start justify-start gap-3">
+                                <AssistantAvatar />
+                                <div className="max-w-2xl rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-gray-700 shadow-sm ring-1 ring-gray-200 lg:max-w-3xl">
+                                    {message.content}
+                                </div>
+                            </div>
+                        ) : (
+                            <div key={message.id} className="flex w-full items-start justify-end gap-3">
+                                <div className="max-w-xl rounded-2xl rounded-tr-sm bg-blue-600 p-4 text-sm text-white shadow-md lg:max-w-2xl">
+                                    <p className="whitespace-pre-wrap">{message.text}</p>
+                                </div>
+                                <UserAvatar />
+                            </div>
+                        )
+                    ))}
+
                     {resultContent ? (
                         <div className="flex w-full items-start justify-start gap-3">
                             <AssistantAvatar />
@@ -203,15 +246,6 @@ export default function UploadZone({
                             </div>
                         </div>
                     ) : null}
-
-                    {chatMessages.map((message) => (
-                        <div key={message.id} className="flex w-full items-start justify-end gap-3">
-                            <div className="max-w-xl rounded-2xl rounded-tr-sm bg-blue-600 p-4 text-sm text-white shadow-md lg:max-w-2xl">
-                                <p className="whitespace-pre-wrap">{message.text}</p>
-                            </div>
-                            <UserAvatar />
-                        </div>
-                    ))}
                 </div>
 
                 {submittedFile && resultContent ? (

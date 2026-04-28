@@ -383,7 +383,11 @@ function isExportOutputEmpty(output: unknown): boolean {
         (typeof output === 'object' && output !== null && Object.keys(output).length === 0)
 }
 
-function buildGenerationInput(uploadResult: JsonObject, userPrompt?: string | null): JsonObject {
+function buildGenerationInput(
+    uploadResult: JsonObject,
+    userPrompt?: string | null,
+    previousOutput?: JsonValue | null
+): JsonObject {
     const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
 
     if (trimmedPrompt.length === 0) {
@@ -392,6 +396,9 @@ function buildGenerationInput(uploadResult: JsonObject, userPrompt?: string | nu
 
     return {
         ...uploadResult,
+        ...(previousOutput !== null && previousOutput !== undefined
+            ? { previous_output: previousOutput }
+            : {}),
         user_prompt: trimmedPrompt,
     }
 }
@@ -411,6 +418,7 @@ export interface UseConvertFlowReturn {
     excelSuccessMessage: string | null
     outputFile: OutputFile | null
     thinkingLog: string | null
+    reasoningSteps: string[]
     csvMetadata: CsvMetadata | null
     handleFileSelect: (file: File, customSchemaId?: string | null, userPrompt?: string | null) => Promise<void>
     resetConversionState: () => void
@@ -431,6 +439,7 @@ export function useConvertFlow(
     const [excelSuccessMessage, setExcelSuccessMessage] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
     const [thinkingLog, setThinkingLog] = useState<string | null>(null)
+    const [reasoningSteps, setReasoningSteps] = useState<string[]>([])
     const [uploadResultForExport, setUploadResultForExport] = useState<JsonObject | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
     const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
@@ -491,6 +500,7 @@ export function useConvertFlow(
         setExcelSuccessMessage(null)
         setOutputFile(null)
         setThinkingLog(null)
+        setReasoningSteps([])
         setUploadResultForExport(null)
         setCsvMetadata(null)
         setGeneratedOutput(null)
@@ -504,18 +514,27 @@ export function useConvertFlow(
         file: File,
         signal: AbortSignal,
         customSchemaId?: string | null,
-        userPrompt?: string | null
+        userPrompt?: string | null,
+        previousOutput?: JsonValue | null
     ) => {
         try {
-            const generationInput = buildGenerationInput(uploadResult, userPrompt)
+            const generationInput = buildGenerationInput(uploadResult, userPrompt, previousOutput)
             const llmResult =
                 typeof customSchemaId === 'string' && customSchemaId.length > 0
                     ? await llmService.generate(generationInput, customSchemaId, signal)
                     : await llmService.generate(generationInput, undefined, signal)
             if (signal.aborted) return
 
+            const reasoning = llmResult.reasoning
+            const parsedReasoningSteps = Array.isArray(reasoning?.reasoning_steps)
+                ? reasoning.reasoning_steps
+                    .map((step) => step.trim())
+                    .filter((step) => step.length > 0)
+                : []
+
             setGeneratedOutput(llmResult.output_json)
-            setThinkingLog(llmResult.reasoning?.thinking_log?.trim() || null)
+            setThinkingLog(reasoning?.thinking_log?.trim() || null)
+            setReasoningSteps(parsedReasoningSteps)
             setGeneratedSessionId(llmResult.session_id ?? null)
             setGeneratedOutputId(llmResult.output_id ?? null)
             setUploadResultForExport(uploadResult)
@@ -537,8 +556,26 @@ export function useConvertFlow(
     ): Promise<void> => {
         conversionRequestIdRef.current += 1
         const signal = abortPreviousRequest()
+        const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
+        const isFollowUpPrompt = trimmedPrompt.length > 0
+        const previousOutput = isFollowUpPrompt ? generatedOutput : null
+        const cachedUploadResult = isFollowUpPrompt ? uploadResultForExport : null
 
         resetConversionState()
+        setIsConverting(true)
+
+        if (cachedUploadResult) {
+            setConversionPhase('generating')
+            await processConversion(
+                cachedUploadResult,
+                file,
+                signal,
+                customSchemaId,
+                userPrompt,
+                previousOutput
+            )
+            return
+        }
 
         if (file.size > MAX_UPLOAD_SIZE_BYTES) {
             setError(FILE_TOO_LARGE_MESSAGE)
@@ -548,14 +585,20 @@ export function useConvertFlow(
             return
         }
 
-        setIsConverting(true)
         setConversionPhase('validating')
 
         const uploadResult = await processUpload(file, signal)
         if (!uploadResult) return
 
         setConversionPhase('generating')
-        await processConversion(uploadResult, file, signal, customSchemaId, userPrompt)
+        await processConversion(
+            uploadResult,
+            file,
+            signal,
+            customSchemaId,
+            userPrompt,
+            previousOutput
+        )
     }
 
     const exportCsvIfNeeded = async (
@@ -749,6 +792,7 @@ export function useConvertFlow(
         excelSuccessMessage,
         outputFile,
         thinkingLog,
+        reasoningSteps,
         csvMetadata,
         handleFileSelect,
         resetConversionState,

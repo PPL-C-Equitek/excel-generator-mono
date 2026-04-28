@@ -217,6 +217,40 @@ describe('File Confirmation', () => {
     expect(mockOnFileSelect).toHaveBeenNthCalledWith(2, file, 'Refine the invoice rows')
   })
 
+  it('keeps completed assistant results before follow-up prompts and latest results', async () => {
+    const mockOnFileSelect = vi.fn()
+    const { rerender } = render(<UploadZone onFileSelect={mockOnFileSelect} />)
+
+    await uploadAndStageFile(createMockFile('few-shot.pdf'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    rerender(
+      <UploadZone
+        onFileSelect={mockOnFileSelect}
+        resultContent={<p>Initial file is ready.</p>}
+      />
+    )
+
+    await userEvent.type(screen.getByLabelText('Follow-up message'), 'Only keep paid invoices')
+    await userEvent.click(screen.getByRole('button', { name: /send/i }))
+
+    rerender(
+      <UploadZone
+        onFileSelect={mockOnFileSelect}
+        resultContent={<p>Latest refined file is ready.</p>}
+      />
+    )
+
+    const pageText = document.body.textContent ?? ''
+    const initialResultIndex = pageText.indexOf('Initial file is ready.')
+    const promptIndex = pageText.indexOf('Only keep paid invoices')
+    const latestResultIndex = pageText.indexOf('Latest refined file is ready.')
+
+    expect(initialResultIndex).toBeGreaterThan(-1)
+    expect(promptIndex).toBeGreaterThan(initialResultIndex)
+    expect(latestResultIndex).toBeGreaterThan(promptIndex)
+  })
+
   it('shows selected schema context in the submitted file bubble', async () => {
     const mockOnFileSelect = vi.fn()
     const { rerender } = render(
