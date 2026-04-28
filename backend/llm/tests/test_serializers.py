@@ -276,3 +276,17 @@ class ThinkingLogSerializerTest(SimpleTestCase):
         serializer = ThinkingLogItemSerializer(instance)
 
         self.assertEqual(serializer.data["reasoning"], [])
+
+    def test_thinking_log_item_serializer_returns_reasoning_steps_when_list(self):
+        instance = SimpleNamespace(
+            id=uuid4(),
+            output_json={},
+            thinking_log="Structured summary",
+            reasoning={"reasoning_steps": ["Step one", "Step two"]},
+            status_processing="completed",
+            created_at=timezone.now(),
+        )
+
+        serializer = ThinkingLogItemSerializer(instance)
+
+        self.assertEqual(serializer.data["reasoning"], ["Step one", "Step two"])

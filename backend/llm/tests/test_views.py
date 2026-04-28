@@ -20,6 +20,7 @@ from llm.services.openai_client import (
 )
 from llm.views import (
     build_export_output_json,
+    _build_generate_bootstrap_message,
     _extract_document_type,
     _sanitize_output_json,
     _to_scalar_cell,
@@ -56,6 +57,18 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         result = get_authenticated_user_id(SimpleNamespace(is_authenticated=False))
 
         self.assertIsNone(result)
+
+    @patch("llm.views.extract_original_name", return_value="")
+    def test_build_generate_bootstrap_message_returns_title_when_filename_missing(self, _mock_extract_original_name):
+        result = _build_generate_bootstrap_message({}, "Custom title")
+
+        self.assertEqual(result, "Custom title")
+
+    @patch("llm.views.extract_original_name", return_value="")
+    def test_build_generate_bootstrap_message_returns_default_when_filename_and_title_missing(self, _mock_extract_original_name):
+        result = _build_generate_bootstrap_message({}, "")
+
+        self.assertEqual(result, "Uploaded file for conversion")
 
     def test_extract_original_name_uses_input_document_info_filename(self):
         result = extract_original_name(
@@ -1857,6 +1870,19 @@ class ThinkingLogEndpointTest(TestCase):
         self.client.force_authenticate(user=self.verified_user)
 
         response = self.client.get("/llm/thinking-logs/?page=0&page_size=10")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(
+            response.data["errors"],
+            {"pagination": ["Invalid thinking log pagination request."]},
+        )
+
+    def test_thinking_log_session_list_error_schema_is_consistent_for_invalid_pagination(self):
+        session = Session.objects.create(owner=self.verified_user, title="Owned Session")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(f"/llm/thinking-logs/{session.id}/?page=0&page_size=10")
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["detail"], "Invalid request payload.")
