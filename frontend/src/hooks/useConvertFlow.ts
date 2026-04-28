@@ -383,6 +383,19 @@ function isExportOutputEmpty(output: unknown): boolean {
         (typeof output === 'object' && output !== null && Object.keys(output).length === 0)
 }
 
+function buildGenerationInput(uploadResult: JsonObject, userPrompt?: string | null): JsonObject {
+    const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
+
+    if (trimmedPrompt.length === 0) {
+        return uploadResult
+    }
+
+    return {
+        ...uploadResult,
+        user_prompt: trimmedPrompt,
+    }
+}
+
 export interface UseConvertFlowReturn {
     isConverting: boolean
     isExcelDownloading: boolean
@@ -392,8 +405,9 @@ export interface UseConvertFlowReturn {
     excelError: string | null
     excelSuccessMessage: string | null
     outputFile: OutputFile | null
+    thinkingLog: string | null
     csvMetadata: CsvMetadata | null
-    handleFileSelect: (file: File, customSchemaId?: string | null) => Promise<void>
+    handleFileSelect: (file: File, customSchemaId?: string | null, userPrompt?: string | null) => Promise<void>
     handleCsvDownload: () => Promise<void>
     handleExcelDownload: () => Promise<void>
     llmService: ILLMService
@@ -408,6 +422,7 @@ export function useConvertFlow(
     const [excelError, setExcelError] = useState<string | null>(null)
     const [excelSuccessMessage, setExcelSuccessMessage] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
+    const [thinkingLog, setThinkingLog] = useState<string | null>(null)
     const [uploadResultForExport, setUploadResultForExport] = useState<JsonObject | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
     const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
@@ -456,6 +471,7 @@ export function useConvertFlow(
         setExcelError(null)
         setExcelSuccessMessage(null)
         setOutputFile(null)
+        setThinkingLog(null)
         setUploadResultForExport(null)
         setCsvMetadata(null)
         setGeneratedOutput(null)
@@ -468,16 +484,19 @@ export function useConvertFlow(
         uploadResult: JsonObject,
         file: File,
         signal: AbortSignal,
-        customSchemaId?: string | null
+        customSchemaId?: string | null,
+        userPrompt?: string | null
     ) => {
         try {
+            const generationInput = buildGenerationInput(uploadResult, userPrompt)
             const llmResult =
                 typeof customSchemaId === 'string' && customSchemaId.length > 0
-                    ? await llmService.generate(uploadResult, customSchemaId, signal)
-                    : await llmService.generate(uploadResult, undefined, signal)
+                    ? await llmService.generate(generationInput, customSchemaId, signal)
+                    : await llmService.generate(generationInput, undefined, signal)
             if (signal.aborted) return
 
             setGeneratedOutput(llmResult.output_json)
+            setThinkingLog(llmResult.reasoning?.thinking_log?.trim() || null)
             setGeneratedSessionId(llmResult.session_id ?? null)
             setGeneratedOutputId(llmResult.output_id ?? null)
             setUploadResultForExport(uploadResult)
@@ -493,7 +512,8 @@ export function useConvertFlow(
 
     const handleFileSelect = async (
         file: File,
-        customSchemaId?: string | null
+        customSchemaId?: string | null,
+        userPrompt?: string | null
     ): Promise<void> => {
         conversionRequestIdRef.current += 1
         const signal = abortPreviousRequest()
@@ -511,7 +531,7 @@ export function useConvertFlow(
         const uploadResult = await processUpload(file, signal)
         if (!uploadResult) return
 
-        await processConversion(uploadResult, file, signal, customSchemaId)
+        await processConversion(uploadResult, file, signal, customSchemaId, userPrompt)
     }
 
     const exportCsvIfNeeded = async (
@@ -701,6 +721,7 @@ export function useConvertFlow(
         excelError,
         excelSuccessMessage,
         outputFile,
+        thinkingLog,
         csvMetadata,
         handleFileSelect,
         handleCsvDownload,
