@@ -153,6 +153,7 @@ describe('useConvertFlow', () => {
             expect(result.current.isConverting).toBe(false)
             expect(result.current.error).toBeNull()
             expect(result.current.outputFile).toBeNull()
+            expect(result.current.thinkingLog).toBeNull()
         })
 
         it('exposes handleFileSelect as a function', () => {
@@ -210,6 +211,48 @@ describe('useConvertFlow', () => {
                 '11111111-1111-1111-1111-111111111111',
                 expect.any(AbortSignal)
             )
+        })
+
+        it('adds typed user prompt into the LLM input when provided', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(
+                    testFile,
+                    null,
+                    'Extract invoice rows only'
+                )
+            })
+
+            expect(service.generate).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    ...validUploadResponse,
+                    user_prompt: 'Extract invoice rows only',
+                }),
+                undefined,
+                expect.any(AbortSignal)
+            )
+        })
+
+        it('stores thinking log from backend reasoning response', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: { status: 'ok' },
+                    reasoning: {
+                        final_answer: 'Done',
+                        reasoning_steps: ['Read file', 'Mapped rows'],
+                        thinking_log: 'Read file and mapped rows to the selected schema.',
+                    },
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.thinkingLog).toBe('Read file and mapped rows to the selected schema.')
         })
 
         it('passes AbortSignal into llmService.generate after upload succeeds', async () => {

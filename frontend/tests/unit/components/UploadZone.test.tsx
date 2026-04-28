@@ -49,6 +49,11 @@ describe('UploadZone', () => {
       expect(input).toHaveAttribute('type', 'file')
       expect(input).toHaveClass('hidden')
     })
+
+    it('does not render follow-up chat before a file is generated', () => {
+      render(<UploadZone />)
+      expect(screen.queryByLabelText('Follow-up message')).not.toBeInTheDocument()
+    })
   })
 
   it('does nothing when input change has no file', () => {
@@ -179,6 +184,43 @@ describe('File Confirmation', () => {
 
     expect(mockOnFileSelect).toHaveBeenCalledTimes(1)
     expect(mockOnFileSelect).toHaveBeenCalledWith(file)
+  })
+
+  it('shows schema/footer content after a file is staged', async () => {
+    render(<UploadZone footerContent={<div>Footer note</div>} />)
+
+    expect(screen.queryByText('Footer note')).not.toBeInTheDocument()
+
+    await uploadAndStageFile(createMockFile('schema-context.pdf'))
+
+    expect(screen.getByText('Footer note')).toBeInTheDocument()
+  })
+
+  it('sends follow-up chat with the submitted file after result content appears', async () => {
+    const mockOnFileSelect = vi.fn()
+    const { rerender } = render(<UploadZone onFileSelect={mockOnFileSelect} />)
+
+    const file = await uploadAndStageFile(createMockFile('follow-up.pdf'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    rerender(
+      <UploadZone
+        onFileSelect={mockOnFileSelect}
+        resultContent={<p>Your file is ready.</p>}
+      />
+    )
+
+    await userEvent.type(screen.getByLabelText('Follow-up message'), 'Refine the invoice rows')
+    await userEvent.click(screen.getByRole('button', { name: /send/i }))
+
+    expect(mockOnFileSelect).toHaveBeenNthCalledWith(1, file)
+    expect(mockOnFileSelect).toHaveBeenNthCalledWith(2, file, 'Refine the invoice rows')
+  })
+
+  it('renders assistant result content inside the chat surface', () => {
+    render(<UploadZone resultContent={<button>Download CSV</button>} />)
+
+    expect(screen.getByRole('button', { name: 'Download CSV' })).toBeInTheDocument()
   })
 
   it('displays file size in B for files under 1 KB', async () => {
