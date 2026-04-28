@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { within, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SchemaSelector from '../../../src/components/SchemaSelector'
@@ -96,7 +96,7 @@ describe('SchemaSelector', () => {
         })
 
         const select = screen.getByTestId('schema-select')
-        expect(select).toHaveValue('none')
+        expect(select).toHaveTextContent('No schema')
         expect(screen.queryByRole('heading', { name: 'Receipt Mapping' })).not.toBeInTheDocument()
     })
 
@@ -135,7 +135,9 @@ describe('SchemaSelector', () => {
         )
 
         const select = await screen.findByTestId('schema-select')
-        await user.selectOptions(select, '00000000-0000-0000-0000-000000000002')
+        await user.click(select)
+        const listbox = screen.getByRole('listbox', { name: 'Schema options' })
+        await user.click(within(listbox).getByRole('option', { name: /Receipt Mapping/i }))
 
         await waitFor(() => {
             expect(onSchemaChange).toHaveBeenLastCalledWith(
@@ -231,7 +233,9 @@ describe('SchemaSelector', () => {
         )
 
         const select = await screen.findByTestId('schema-select')
-        await user.selectOptions(select, '00000000-0000-0000-0000-000000000002')
+        await user.click(select)
+        const listbox = screen.getByRole('listbox', { name: 'Schema options' })
+        await user.click(within(listbox).getByRole('option', { name: /Receipt Mapping/i }))
 
         await waitFor(() => {
             expect(onSchemaChange).toHaveBeenLastCalledWith(
@@ -251,7 +255,7 @@ describe('SchemaSelector', () => {
         )
 
         await waitFor(() => {
-            expect(screen.getByTestId('schema-select')).toHaveValue('none')
+            expect(screen.getByTestId('schema-select')).toHaveTextContent('No schema')
         })
 
         await waitFor(() => {

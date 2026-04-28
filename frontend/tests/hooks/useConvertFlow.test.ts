@@ -151,16 +151,20 @@ describe('useConvertFlow', () => {
             const { result } = renderHook(() => useConvertFlow(service))
 
             expect(result.current.isConverting).toBe(false)
+            expect(result.current.isValidating).toBe(false)
+            expect(result.current.isGenerating).toBe(false)
+            expect(result.current.errorPhase).toBeNull()
             expect(result.current.error).toBeNull()
             expect(result.current.outputFile).toBeNull()
             expect(result.current.thinkingLog).toBeNull()
         })
 
-        it('exposes handleFileSelect as a function', () => {
+        it('exposes handleFileSelect and resetConversionState as functions', () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
 
             expect(typeof result.current.handleFileSelect).toBe('function')
+            expect(typeof result.current.resetConversionState).toBe('function')
         })
     })
 
@@ -280,6 +284,10 @@ describe('useConvertFlow', () => {
             })
 
             expect(service.generate).not.toHaveBeenCalled()
+            expect(result.current.error).toBe('Network error')
+            expect(result.current.errorPhase).toBe('validating')
+            expect(result.current.isValidating).toBe(false)
+            expect(result.current.isGenerating).toBe(false)
         })
 
         it('rejects files larger than 10MB on frontend before uploading', async () => {
@@ -295,6 +303,7 @@ describe('useConvertFlow', () => {
             expect(mockUploadFile).not.toHaveBeenCalled()
             expect(service.generate).not.toHaveBeenCalled()
             expect(result.current.error).toBe(FILE_TOO_LARGE_MESSAGE)
+            expect(result.current.errorPhase).toBe('validating')
             expect(result.current.isConverting).toBe(false)
         })
     })

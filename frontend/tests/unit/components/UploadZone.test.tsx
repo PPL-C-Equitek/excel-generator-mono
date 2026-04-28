@@ -186,10 +186,10 @@ describe('File Confirmation', () => {
     expect(mockOnFileSelect).toHaveBeenCalledWith(file)
   })
 
-  it('shows schema/footer content after a file is staged', async () => {
+  it('shows schema/footer content below upload before and after a file is staged', async () => {
     render(<UploadZone footerContent={<div>Footer note</div>} />)
 
-    expect(screen.queryByText('Footer note')).not.toBeInTheDocument()
+    expect(screen.getByText('Footer note')).toBeInTheDocument()
 
     await uploadAndStageFile(createMockFile('schema-context.pdf'))
 
@@ -217,10 +217,79 @@ describe('File Confirmation', () => {
     expect(mockOnFileSelect).toHaveBeenNthCalledWith(2, file, 'Refine the invoice rows')
   })
 
-  it('renders assistant result content inside the chat surface', () => {
-    render(<UploadZone resultContent={<button>Download CSV</button>} />)
+  it('shows selected schema context in the submitted file bubble', async () => {
+    const mockOnFileSelect = vi.fn()
+    const { rerender } = render(
+      <UploadZone
+        onFileSelect={mockOnFileSelect}
+        selectedSchemaName="Invoice Mapping"
+      />
+    )
+
+    await uploadAndStageFile(createMockFile('schema-bubble.pdf'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    rerender(
+      <UploadZone
+        onFileSelect={mockOnFileSelect}
+        selectedSchemaName="Invoice Mapping"
+        resultContent={<p>Your file is ready.</p>}
+      />
+    )
+
+    expect(screen.getByText('Schema context')).toBeInTheDocument()
+    expect(screen.getByText('Invoice Mapping')).toBeInTheDocument()
+  })
+
+  it('renders assistant result content inside the chat surface after submit', async () => {
+    const { rerender } = render(<UploadZone onFileSelect={vi.fn()} />)
+
+    await uploadAndStageFile(createMockFile('ready.pdf'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    rerender(<UploadZone onFileSelect={vi.fn()} resultContent={<button>Download CSV</button>} />)
 
     expect(screen.getByRole('button', { name: 'Download CSV' })).toBeInTheDocument()
+  })
+
+  it('keeps validation errors on the upload page instead of opening chat', async () => {
+    const mockOnFileSelect = vi.fn()
+    render(
+      <UploadZone
+        onFileSelect={mockOnFileSelect}
+        isValidating={false}
+        validationError="File is password-protected."
+      />
+    )
+
+    await uploadAndStageFile(createMockFile('invalid.pdf'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('File is password-protected.')
+    expect(screen.getByTestId('convert-btn')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Follow-up message')).not.toBeInTheDocument()
+  })
+
+  it('clears stale validation errors when a new file is staged', async () => {
+    const mockOnFileChange = vi.fn()
+    render(
+      <UploadZone
+        onFileChange={mockOnFileChange}
+        validationError="Unsupported file type."
+      />
+    )
+
+    await uploadAndStageFile(createMockFile('invalid.txt', 'text/plain'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Unsupported file type.')
+
+    await userEvent.click(screen.getByText('Change File'))
+    await uploadAndStageFile(createMockFile('valid.pdf', 'application/pdf'))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('valid.pdf')).toBeInTheDocument()
+    expect(mockOnFileChange).toHaveBeenCalledTimes(3)
   })
 
   it('displays file size in B for files under 1 KB', async () => {
