@@ -3468,6 +3468,26 @@ class SessionEndpointTests(TestCase):
             },
         )
 
+    def test_normalize_session_output_export_payload_falls_back_to_output_json_when_export_empty(self):
+        output_json = {
+            "headers": ["Unit", "Nilai"],
+            "rows": [["ICU", 100]],
+        }
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json={}, output_json=output_json)
+        )
+
+        self.assertIn("content_data", normalized)
+        self.assertEqual(normalized["content_data"][0]["headers"], ["Unit", "Nilai"])
+
+    def test_normalize_session_output_export_payload_returns_empty_when_both_fields_empty(self):
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json={}, output_json=None)
+        )
+
+        self.assertEqual(normalized, {})
+
     def test_session_csv_download_helper_responses_use_expected_messages(self):
         not_found_response = views._session_csv_download_not_found_response()
         internal_error_response = views._session_csv_download_internal_error_response()

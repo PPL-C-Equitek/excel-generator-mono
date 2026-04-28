@@ -201,7 +201,7 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
 
         self.assertIn("USER: Format tanggal DD/MM/YYYY", result)
 
-    def test_positive_formats_assistant_message_as_ASSISTANT_prefix(self):
+    def test_negative_excludes_assistant_only_messages(self):
         from llm.views import _build_chat_context_from_session
 
         session = self._make_session([
@@ -209,9 +209,9 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
         ])
         result = _build_chat_context_from_session(session)
 
-        self.assertIn("ASSISTANT: Siap, akan diformat", result)
+        self.assertIsNone(result)
 
-    def test_positive_multiple_messages_joined_by_newlines(self):
+    def test_positive_multiple_messages_only_includes_user_lines(self):
         from llm.views import _build_chat_context_from_session
 
         session = self._make_session([
@@ -222,10 +222,28 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
         result = _build_chat_context_from_session(session)
 
         lines = result.split("\n")
-        self.assertEqual(len(lines), 3)
+        self.assertEqual(len(lines), 2)
         self.assertEqual(lines[0], "USER: Instruksi 1")
-        self.assertEqual(lines[1], "ASSISTANT: Baik")
-        self.assertEqual(lines[2], "USER: Instruksi 2")
+        self.assertEqual(lines[1], "USER: Instruksi 2")
+
+    def test_edge_limits_to_last_n_user_instructions(self):
+        from django.test import override_settings
+        from llm.views import _build_chat_context_from_session
+
+        session = self._make_session([
+            self._make_message("user", "Instruksi lama 1"),
+            self._make_message("user", "Instruksi lama 2"),
+            self._make_message("user", "Instruksi lama 3"),
+            self._make_message("user", "Instruksi terbaru 1"),
+            self._make_message("user", "Instruksi terbaru 2"),
+        ])
+        with override_settings(CHAT_CONTEXT_MAX_USER_INSTRUCTIONS=2):
+            result = _build_chat_context_from_session(session)
+
+        lines = result.split("\n")
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0], "USER: Instruksi terbaru 1")
+        self.assertEqual(lines[1], "USER: Instruksi terbaru 2")
 
     def test_negative_returns_none_when_session_is_none(self):
         from llm.views import _build_chat_context_from_session
@@ -335,6 +353,64 @@ class InjectFileContextTest(SimpleTestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["role"], "system")
+
+    def test_positive_compact_context_shows_metadata_headers_and_sample_rows(self):
+        from llm.views import _inject_file_context_if_available
+
+        export_json = {
+            "document_info": {"source_type": "Excel", "filename": "laporan.xlsx"},
+            "summary": {"total_tables": 1, "total_rows": 2},
+            "content_data": [
+                {
+                    "table_name": "Sheet1",
+                    "headers": ["Nama", "Nilai"],
+                    "rows": [
+                        {"Nama": "Alice", "Nilai": 90},
+                        {"Nama": "Bob", "Nilai": 80},
+                    ],
+                }
+            ],
+        }
+        session = self._make_session(last_output=self._make_output(export_json))
+        result = _inject_file_context_if_available(session, [])
+
+        content = result[0]["content"]
+        self.assertIn("laporan.xlsx", content)
+        self.assertIn("Sheet1", content)
+        self.assertIn("Nama", content)
+        self.assertIn("Alice", content)
+        self.assertNotIn('"rows"', content)
+
+    def test_positive_fallback_builds_context_from_output_json_when_export_empty(self):
+        from llm.views import _inject_file_context_if_available
+
+        output = Mock()
+        output.export_output_json = {}
+        output.output_json = {
+            "headers": ["Unit", "Nilai"],
+            "rows": [["ICU", 100]],
+        }
+        session = self._make_session(last_output=output)
+
+        result = _inject_file_context_if_available(session, [])
+
+        self.assertEqual(result[0]["role"], "system")
+        self.assertIn("[CONVERTED_FILE_CONTEXT]", result[0]["content"])
+        self.assertIn("Unit", result[0]["content"])
+
+    def test_negative_returns_history_unchanged_when_both_export_and_output_json_empty(self):
+        from llm.views import _inject_file_context_if_available
+
+        output = Mock()
+        output.export_output_json = {}
+        output.output_json = None
+        session = self._make_session(last_output=output)
+        history = [{"role": "user", "content": "Halo"}]
+
+        result = _inject_file_context_if_available(session, history)
+
+        self.assertEqual(result, history)
+
 
 class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
     def test_positive_uses_content_data_directly_when_llm_returns_export_format(self):

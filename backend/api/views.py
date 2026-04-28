@@ -70,6 +70,7 @@ from file_processing.services.export_service import (
     resolve_csv_download_artifact,
     resolve_excel_download_artifact,
 )
+from llm.views import build_export_output_json
 
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
@@ -915,6 +916,10 @@ def _session_csv_download_internal_error_response():
 
 def _normalize_session_output_export_payload(output):
     payload = getattr(output, "export_output_json", None) or {}
+    if not payload:
+        raw = getattr(output, "output_json", None)
+        if raw:
+            payload = build_export_output_json(input_json=raw, output_json=raw)
     if not isinstance(payload, dict):
         return payload
 

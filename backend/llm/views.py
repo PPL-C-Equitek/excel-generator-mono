@@ -215,6 +215,42 @@ def _resolve_send_message_session_context(user, session_id):
     return session, _build_session_message_history(session)
 
 
+def _build_compact_file_context(export_json: dict) -> str:
+    lines = [
+        "[CONVERTED_FILE_CONTEXT]",
+        "The user is reviewing a converted file. "
+        "Use the metadata and samples below to answer questions about the file.",
+    ]
+    doc_info = export_json.get("document_info")
+    if isinstance(doc_info, dict):
+        filename = doc_info.get("filename", "unknown")
+        source_type = doc_info.get("source_type", "unknown")
+        lines.append(f"File: {filename} ({source_type})")
+
+    summary = export_json.get("summary")
+    if isinstance(summary, dict) and summary:
+        parts = [f"{k}={v}" for k, v in summary.items()]
+        lines.append("Summary: " + ", ".join(parts))
+
+    content_data = export_json.get("content_data")
+    if isinstance(content_data, list):
+        for table in content_data:
+            if not isinstance(table, dict):
+                continue
+            table_name = table.get("table_name", "Sheet")
+            headers = table.get("headers") or []
+            rows = table.get("rows") or []
+            lines.append(f"Table '{table_name}': {len(headers)} columns, {len(rows)} rows")
+            if headers:
+                lines.append(f"  Headers: {', '.join(str(h) for h in headers)}")
+            for i, row in enumerate(rows[:3]):
+                if isinstance(row, dict):
+                    sample = dict(list(row.items())[:5])
+                    lines.append(f"  Row {i + 1}: {json.dumps(sample)}")
+
+    return "\n".join(lines)
+
+
 def _inject_file_context_if_available(session, history: list) -> list:
     if session is None:
         return history
@@ -222,13 +258,13 @@ def _inject_file_context_if_available(session, history: list) -> list:
     if last_output is None:
         return history
     export_json = last_output.export_output_json or {}
-    file_context = (
-        "[CONVERTED_FILE_CONTEXT]\n"
-        "The user is reviewing a converted file. "
-        "Here is the full extracted data (document info, summary, and table content):\n"
-        + json.dumps(export_json)
-    )
-    return [{"role": "system", "content": file_context}] + history
+    if not export_json:
+        raw = getattr(last_output, "output_json", None)
+        if raw:
+            export_json = build_export_output_json(input_json=raw, output_json=raw)
+    if not export_json:
+        return history
+    return [{"role": "system", "content": _build_compact_file_context(export_json)}] + history
 
 
 def _generate_send_message_reply_and_title(session, history, message):
@@ -629,14 +665,14 @@ def _resolve_generate_session(user, session_id):
 def _build_chat_context_from_session(session) -> str | None:
     if session is None:
         return None
-    messages = list(session.messages.order_by("created_at"))
-    if not messages:
+    from django.conf import settings as django_settings
+    max_instructions = getattr(django_settings, "CHAT_CONTEXT_MAX_USER_INSTRUCTIONS", 5)
+    all_messages = list(session.messages.order_by("created_at"))
+    user_messages = [m for m in all_messages if m.role == ChatMessage.ROLE_USER]
+    if not user_messages:
         return None
-    lines = []
-    for msg in messages:
-        role_label = "USER" if msg.role == ChatMessage.ROLE_USER else "ASSISTANT"
-        lines.append(f"{role_label}: {msg.content}")
-    return "\n".join(lines)
+    recent = user_messages[-max_instructions:]
+    return "\n".join(f"USER: {msg.content}" for msg in recent)
 
 
 def _generate_output_json(llm_generation_service, input_json, custom_schema_id, chat_context=None):
