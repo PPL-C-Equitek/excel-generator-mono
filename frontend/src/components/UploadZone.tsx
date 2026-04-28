@@ -27,7 +27,7 @@ interface FileDropTargetProps {
 }
 
 interface ConversationViewProps {
-    readonly submittedFile: File | null
+    readonly submittedFile: File
     readonly selectedSchemaName?: string | null
     readonly chatMessages: ChatMessage[]
     readonly resultContent?: ReactNode
@@ -139,13 +139,11 @@ function createFollowUpMessages(
 ): ChatMessage[] {
     const nextMessages = [...messages]
 
-    if (resultContent) {
-        nextMessages.push({
-            id: createMessageId(),
-            role: 'assistant',
-            content: resultContent,
-        })
-    }
+    nextMessages.push({
+        id: createMessageId(),
+        role: 'assistant',
+        content: resultContent,
+    })
 
     nextMessages.push({
         id: createMessageId(),
@@ -352,7 +350,7 @@ function ConversationView({
                 {resultContent ? <AssistantResultBubble resultContent={resultContent} /> : null}
             </div>
 
-            {submittedFile && resultContent ? (
+            {resultContent ? (
                 <FollowUpComposer
                     chatInput={chatInput}
                     trimmedChatInput={trimmedChatInput}
@@ -505,16 +503,13 @@ export default function UploadZone({
         onFileChange?.()
     }
 
-    const handleSubmit = () => {
-        if (!selectedFile) return
-        setSubmittedFile(selectedFile)
+    const handleSubmit = (file: File) => {
+        setSubmittedFile(file)
         resetChatTranscript()
-        onFileSelect?.(selectedFile)
+        onFileSelect?.(file)
     }
 
-    const handleFollowUpSubmit = () => {
-        if (!submittedFile || trimmedChatInput.length === 0) return
-
+    const handleFollowUpSubmit = (file: File) => {
         const prompt = trimmedChatInput
         setChatMessages((messages) => createFollowUpMessages(
             messages,
@@ -522,7 +517,7 @@ export default function UploadZone({
             prompt,
             createMessageId
         ))
-        onFileSelect?.(submittedFile, prompt)
+        onFileSelect?.(file, prompt)
         setChatInput('')
     }
 
@@ -531,7 +526,7 @@ export default function UploadZone({
     const dropZoneClassName = `${dropZoneBaseClassName} ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-red-600 hover:bg-red-50'} ${dropZoneStateClassName}`
     const stagedFileZoneClassName = `${dropZoneBaseClassName} ${disabled ? 'opacity-60' : ''} ${dropZoneStateClassName}`
 
-    if (isConversationStarted) {
+    if (isConversationStarted && submittedFile) {
         return (
             <ConversationView
                 submittedFile={submittedFile}
@@ -542,7 +537,7 @@ export default function UploadZone({
                 trimmedChatInput={trimmedChatInput}
                 disabled={disabled}
                 onChatInputChange={setChatInput}
-                onFollowUpSubmit={handleFollowUpSubmit}
+                onFollowUpSubmit={() => handleFollowUpSubmit(submittedFile)}
             />
         )
     }
@@ -557,7 +552,7 @@ export default function UploadZone({
                 isValidationFeedbackVisible={isValidationFeedbackVisible}
                 validationError={validationError}
                 onReset={handleReset}
-                onSubmit={handleSubmit}
+                onSubmit={() => handleSubmit(selectedFile)}
             />
         )
     }

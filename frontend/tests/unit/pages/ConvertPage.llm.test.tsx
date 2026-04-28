@@ -13,7 +13,7 @@
  * - Timely: ditulis bersamaan implementasi refactor
  */
 
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -235,6 +235,72 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
             expect(screen.getByText('report.pdf')).toBeInTheDocument()
+        })
+
+        it('shows the final thinking log when output is ready', () => {
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.thinkingLog = 'Final reasoning summary.'
+
+            render(<ConvertPage />)
+
+            expect(screen.getByText('Thinking log')).toBeInTheDocument()
+            expect(screen.getByText('Final reasoning summary.')).toBeInTheDocument()
+        })
+
+        it('completes reasoning playback when the thinking log is absent', async () => {
+            const setTimeoutSpy = vi
+                .spyOn(globalThis, 'setTimeout')
+                .mockImplementation((handler: TimerHandler) => {
+                    if (typeof handler === 'function') {
+                        handler()
+                        handler()
+                        handler()
+                    }
+
+                    return 1 as unknown as ReturnType<typeof globalThis.setTimeout>
+                })
+            const clearTimeoutSpy = vi
+                .spyOn(globalThis, 'clearTimeout')
+                .mockImplementation(() => undefined)
+
+            try {
+                mockHookReturn.outputFile = sampleOutput
+                mockHookReturn.reasoningSteps = ['Reviewed the uploaded file.']
+                mockHookReturn.thinkingLog = null
+
+                render(<ConvertPage />)
+
+                expect(screen.getByText('Your file is ready.')).toBeInTheDocument()
+                expect(screen.queryByText('Thinking log')).not.toBeInTheDocument()
+            } finally {
+                setTimeoutSpy.mockRestore()
+                clearTimeoutSpy.mockRestore()
+            }
+        })
+
+        it('reveals reasoning steps before the final thinking log', async () => {
+            vi.useFakeTimers()
+
+            try {
+                mockHookReturn.outputFile = sampleOutput
+                mockHookReturn.reasoningSteps = [
+                    'Reviewed the uploaded file.',
+                    'Mapped the output columns.',
+                ]
+                mockHookReturn.thinkingLog = 'Final reasoning summary.'
+
+                render(<ConvertPage />)
+
+                await act(async () => {
+                    vi.advanceTimersByTime(250)
+                })
+
+                expect(screen.getByText('Reviewed the uploaded file.')).toBeInTheDocument()
+                expect(screen.getByText('Preparing the thinking log...')).toBeInTheDocument()
+                expect(screen.queryByText('Thinking log')).not.toBeInTheDocument()
+            } finally {
+                vi.useRealTimers()
+            }
         })
 
         it('shows output format', () => {

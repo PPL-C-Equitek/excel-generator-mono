@@ -286,6 +286,37 @@ describe('File Confirmation', () => {
     expect(screen.getByRole('button', { name: 'Download CSV' })).toBeInTheDocument()
   })
 
+  it('keeps the chat surface open without a composer while generating', async () => {
+    const mockOnFileSelect = vi.fn()
+    const { rerender } = render(<UploadZone onFileSelect={mockOnFileSelect} />)
+
+    await uploadAndStageFile(createMockFile('generating.pdf'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    rerender(<UploadZone onFileSelect={mockOnFileSelect} isGenerating={true} />)
+
+    expect(screen.getByText('Generate this file.')).toBeInTheDocument()
+    expect(screen.getByText('generating.pdf')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Follow-up message')).not.toBeInTheDocument()
+  })
+
+  it('keeps the follow-up send action disabled for blank prompts', async () => {
+    const mockOnFileSelect = vi.fn()
+    const { rerender } = render(<UploadZone onFileSelect={mockOnFileSelect} />)
+
+    await uploadAndStageFile(createMockFile('blank-follow-up.pdf'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    rerender(
+      <UploadZone
+        onFileSelect={mockOnFileSelect}
+        resultContent={<p>Your file is ready.</p>}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled()
+  })
+
   it('keeps validation errors on the upload page instead of opening chat', async () => {
     const mockOnFileSelect = vi.fn()
     render(
@@ -302,6 +333,16 @@ describe('File Confirmation', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('File is password-protected.')
     expect(screen.getByTestId('convert-btn')).toBeInTheDocument()
     expect(screen.queryByLabelText('Follow-up message')).not.toBeInTheDocument()
+  })
+
+  it('shows inline validating feedback after submit', async () => {
+    render(<UploadZone isValidating={true} />)
+
+    await uploadAndStageFile(createMockFile('validating.pdf'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    expect(screen.getByText('Validating file...')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('clears stale validation errors when a new file is staged', async () => {
