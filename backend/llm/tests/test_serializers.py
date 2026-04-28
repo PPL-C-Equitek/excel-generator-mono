@@ -262,3 +262,17 @@ class ThinkingLogSerializerTest(SimpleTestCase):
         self.assertIsNone(serializer.data["session_id"])
         self.assertIsNone(serializer.data["chat_id"])
         self.assertNotIn("request_id", serializer.data)
+
+    def test_thinking_log_item_serializer_returns_empty_reasoning_when_reasoning_steps_is_not_list(self):
+        instance = SimpleNamespace(
+            id=uuid4(),
+            output_json={},
+            thinking_log="Structured summary",
+            reasoning={"reasoning_steps": "single-step-string"},
+            status_processing="completed",
+            created_at=timezone.now(),
+        )
+
+        serializer = ThinkingLogItemSerializer(instance)
+
+        self.assertEqual(serializer.data["reasoning"], [])
