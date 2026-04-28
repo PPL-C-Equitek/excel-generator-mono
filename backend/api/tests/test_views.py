@@ -2998,7 +2998,7 @@ class SessionEndpointTests(TestCase):
     ):
         stub_output = SimpleNamespace(
             id=self.output_id,
-            output_json={
+            export_output_json={
                 "document_info": {
                     "filename": "invoice.pdf",
                     "source_type": "PDF",
@@ -3247,7 +3247,7 @@ class SessionEndpointTests(TestCase):
     ):
         stub_output = SimpleNamespace(
             id=self.output_id,
-            output_json={
+            export_output_json={
                 "document_info": {
                     "filename": "invoice.pdf",
                     "source_type": "PDF",
@@ -3313,7 +3313,7 @@ class SessionEndpointTests(TestCase):
     ):
         stub_output = SimpleNamespace(
             id=self.output_id,
-            output_json={
+            export_output_json={
                 "document_info": {
                     "source_type": "unknown",
                     "filename": "invoice.pdf",
@@ -3428,7 +3428,7 @@ class SessionEndpointTests(TestCase):
         payload = ["not", "a", "dict"]
 
         normalized = views._normalize_session_output_export_payload(
-            SimpleNamespace(output_json=payload)
+            SimpleNamespace(export_output_json=payload)
         )
 
         self.assertEqual(normalized, payload)
@@ -3441,7 +3441,7 @@ class SessionEndpointTests(TestCase):
         }
 
         normalized = views._normalize_session_output_export_payload(
-            SimpleNamespace(output_json=payload)
+            SimpleNamespace(export_output_json=payload)
         )
 
         self.assertEqual(normalized, payload)
@@ -3457,7 +3457,7 @@ class SessionEndpointTests(TestCase):
         }
 
         normalized = views._normalize_session_output_export_payload(
-            SimpleNamespace(output_json=payload)
+            SimpleNamespace(export_output_json=payload)
         )
 
         self.assertEqual(
@@ -3467,6 +3467,26 @@ class SessionEndpointTests(TestCase):
                 "filename": "invoice.xlsx",
             },
         )
+
+    def test_normalize_session_output_export_payload_falls_back_to_output_json_when_export_empty(self):
+        output_json = {
+            "headers": ["Unit", "Nilai"],
+            "rows": [["ICU", 100]],
+        }
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json={}, output_json=output_json)
+        )
+
+        self.assertIn("content_data", normalized)
+        self.assertEqual(normalized["content_data"][0]["headers"], ["Unit", "Nilai"])
+
+    def test_normalize_session_output_export_payload_returns_empty_when_both_fields_empty(self):
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json={}, output_json=None)
+        )
+
+        self.assertEqual(normalized, {})
 
     def test_session_csv_download_helper_responses_use_expected_messages(self):
         not_found_response = views._session_csv_download_not_found_response()

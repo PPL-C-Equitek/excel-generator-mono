@@ -5,12 +5,14 @@ from uuid import UUID
 
 from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
+from django.conf import settings
 from django.db import transaction
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from chat_sessions.models import ChatMessage
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
@@ -216,10 +218,67 @@ def _resolve_send_message_session_context(user, session_id):
     return session, _build_session_message_history(session)
 
 
+def _build_table_context_lines(table: dict) -> list:
+    table_name = table.get("table_name", "Sheet")
+    headers = table.get("headers") or []
+    rows = table.get("rows") or []
+    lines = [f"Table '{table_name}': {len(headers)} columns, {len(rows)} rows"]
+    if headers:
+        lines.append(f"  Headers: {', '.join(str(h) for h in headers)}")
+    for i, row in enumerate(rows[:3]):
+        if isinstance(row, dict):
+            sample = dict(list(row.items())[:5])
+            lines.append(f"  Row {i + 1}: {json.dumps(sample)}")
+    return lines
+
+
+def _build_compact_file_context(export_json: dict) -> str:
+    lines = [
+        "[CONVERTED_FILE_CONTEXT]",
+        "The user is reviewing a converted file. "
+        "Use the metadata and samples below to answer questions about the file.",
+    ]
+    doc_info = export_json.get("document_info")
+    if isinstance(doc_info, dict):
+        filename = doc_info.get("filename", "unknown")
+        source_type = doc_info.get("source_type", "unknown")
+        lines.append(f"File: {filename} ({source_type})")
+
+    summary = export_json.get("summary")
+    if isinstance(summary, dict) and summary:
+        parts = [f"{k}={v}" for k, v in summary.items()]
+        lines.append("Summary: " + ", ".join(parts))
+
+    content_data = export_json.get("content_data")
+    if isinstance(content_data, list):
+        for table in content_data:
+            if isinstance(table, dict):
+                lines.extend(_build_table_context_lines(table))
+
+    return "\n".join(lines)
+
+
+def _inject_file_context_if_available(session, history: list) -> list:
+    if session is None:
+        return history
+    last_output = session.generated_outputs.order_by("-created_at").first()
+    if last_output is None:
+        return history
+    export_json = last_output.export_output_json or {}
+    if not export_json:
+        raw = getattr(last_output, "output_json", None)
+        if raw:
+            export_json = build_export_output_json(input_json=raw, output_json=raw)
+    if not export_json:
+        return history
+    return [{"role": "system", "content": _build_compact_file_context(export_json)}] + history
+
+
 def _generate_send_message_reply_and_title(session, history, message):
     prepared_history = (
         build_history_with_summary(session, history) if session is not None else history
     )
+    prepared_history = _inject_file_context_if_available(session, prepared_history)
     if session is None:
         return _generate_reply_and_title_for_new_session(prepared_history, message)
     return generate_chat_response(prepared_history), "New Chat"
@@ -430,8 +489,25 @@ def _infer_headers_and_rows_from_output(output_json, serialization_cache=None):
     ]
 
 
+def _build_sheet_content_data(entries, serialization_cache):
+    content_data = []
+    for index, (sheet_name, value) in enumerate(entries):
+        headers, rows = _infer_headers_and_rows_from_rows_array(
+            value,
+            serialization_cache=serialization_cache,
+        )
+        normalized_name = sheet_name.strip() if isinstance(sheet_name, str) else ""
+        table_name = normalized_name or f"Sheet{index + 1}"
+        content_data.append({"table_name": table_name, "headers": headers, "rows": rows})
+    return content_data
+
+
 def _build_content_data_from_output(output_json, serialization_cache=None):
     if isinstance(output_json, dict):
+        raw_content_data = output_json.get("content_data")
+        if isinstance(raw_content_data, list) and raw_content_data:
+            return raw_content_data
+
         direct_headers = output_json.get("headers")
         direct_rows = output_json.get("rows")
         if isinstance(direct_headers, list) and isinstance(direct_rows, list):
@@ -449,27 +525,8 @@ def _build_content_data_from_output(output_json, serialization_cache=None):
             ]
 
         entries = list(output_json.items())
-        has_sheet_like_entries = entries and all(isinstance(value, list) for _, value in entries)
-        if has_sheet_like_entries:
-            content_data = []
-            for index, (sheet_name, value) in enumerate(entries):
-                headers, rows = _infer_headers_and_rows_from_rows_array(
-                    value,
-                    serialization_cache=serialization_cache,
-                )
-                table_name = (
-                    sheet_name.strip()
-                    if isinstance(sheet_name, str) and sheet_name.strip()
-                    else f"Sheet{index + 1}"
-                )
-                content_data.append(
-                    {
-                        "table_name": table_name,
-                        "headers": headers,
-                        "rows": rows,
-                    }
-                )
-            return content_data
+        if entries and all(isinstance(value, list) for _, value in entries):
+            return _build_sheet_content_data(entries, serialization_cache)
 
     headers, rows = _infer_headers_and_rows_from_output(
         output_json,
@@ -613,6 +670,21 @@ def _resolve_generate_session(user, session_id):
     return session, None
 
 
+def _build_chat_context_from_session(session) -> str | None:
+    if session is None:
+        return None
+    max_instructions = max(1, getattr(settings, "CHAT_CONTEXT_MAX_USER_INSTRUCTIONS", 5))
+    recent = list(
+        session.messages
+        .filter(role=ChatMessage.ROLE_USER)
+        .order_by("-created_at")[:max_instructions]
+    )
+    if not recent:
+        return None
+    recent.reverse()
+    return "\n".join(f"USER: {msg.content}" for msg in recent)
+
+
 def _resolve_message_target_output(user, session, target_output_id):
     if target_output_id is None:
         return None, None
@@ -649,11 +721,12 @@ def _resolve_generate_source_message(user, session, chat_id):
     return source_message, source_message.session, None
 
 
-def _generate_output_json(llm_generation_service, input_json, custom_schema_id):
+def _generate_output_json(llm_generation_service, input_json, custom_schema_id, chat_context=None):
     try:
         return llm_generation_service.generate(
             input_json=input_json,
             custom_schema_id=custom_schema_id,
+            chat_context=chat_context,
         ), None
     except CustomSchemaNotFoundError:
         return None, Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
@@ -778,11 +851,13 @@ def llm_generate(request):
     if error_response is not None:
         return error_response
     include_reasoning = validated_data.get("include_reasoning", True)
+    chat_context = _build_chat_context_from_session(session)
     llm_generation_service = build_llm_generation_service(request.user)
     output_json, error_response = _generate_output_json(
         llm_generation_service,
         input_json,
         custom_schema_id,
+        chat_context=chat_context,
     )
     if error_response is not None:
         return error_response
