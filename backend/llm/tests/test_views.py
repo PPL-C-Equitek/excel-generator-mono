@@ -21,6 +21,7 @@ from llm.services.openai_client import (
 from llm.views import (
     _build_generate_bootstrap_message,
     build_export_output_json,
+    _build_generate_bootstrap_message,
     _extract_document_type,
     _sanitize_output_json,
     _to_scalar_cell,
@@ -57,6 +58,18 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         result = get_authenticated_user_id(SimpleNamespace(is_authenticated=False))
 
         self.assertIsNone(result)
+
+    @patch("llm.views.extract_original_name", return_value="")
+    def test_build_generate_bootstrap_message_returns_title_when_filename_missing(self, _mock_extract_original_name):
+        result = _build_generate_bootstrap_message({}, "Custom title")
+
+        self.assertEqual(result, "Custom title")
+
+    @patch("llm.views.extract_original_name", return_value="")
+    def test_build_generate_bootstrap_message_returns_default_when_filename_and_title_missing(self, _mock_extract_original_name):
+        result = _build_generate_bootstrap_message({}, "")
+
+        self.assertEqual(result, "Uploaded file for conversion")
 
     def test_extract_original_name_uses_input_document_info_filename(self):
         result = extract_original_name(
@@ -1664,6 +1677,11 @@ class ThinkingLogEndpointTest(TestCase):
             session=owned_session,
             thinking_log="Mapped invoice total to total_amount.",
         )
+        owned_match_2 = self._create_generated_output(
+            self.verified_user,
+            session=owned_session,
+            thinking_log="Normalized decimal separator handling.",
+        )
         self._create_generated_output(
             self.verified_user,
             session=Session.objects.create(owner=self.verified_user, title="Owned Session 2"),
@@ -1676,17 +1694,19 @@ class ThinkingLogEndpointTest(TestCase):
         )
 
         self.client.force_authenticate(user=self.verified_user)
-        response = self.client.get(f"/llm/thinking-logs/?session_id={owned_session.id}")
+        response = self.client.get(f"/llm/thinking-logs/{owned_session.id}/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["count"], 2)
         self.assertEqual(response.data["page"], 1)
         self.assertEqual(response.data["page_size"], 10)
-        self.assertEqual(len(response.data["results"]), 1)
-        self.assertEqual(response.data["results"][0]["id"], str(owned_match.id))
-        self.assertEqual(response.data["results"][0]["session_id"], str(owned_session.id))
-        self.assertIsNone(response.data["results"][0]["chat_id"])
-        self.assertNotIn("request_id", response.data["results"][0])
+        self.assertEqual(len(response.data["results"]), 2)
+        result_ids = {item["id"] for item in response.data["results"]}
+        self.assertSetEqual(result_ids, {str(owned_match.id), str(owned_match_2.id)})
+        self.assertTrue(all(item["session_id"] == str(owned_session.id) for item in response.data["results"]))
+        self.assertTrue(all(item["chat_id"] is None for item in response.data["results"]))
+        self.assertTrue(all("request_id" not in item for item in response.data["results"]))
+        self.assertTrue(all(item["reasoning"] == [] for item in response.data["results"]))
 
     def test_thinking_log_list_filters_by_chat_id_without_session_filter(self):
         matched_session = Session.objects.create(owner=self.verified_user, title="Matched Session")
@@ -1784,7 +1804,7 @@ class ThinkingLogEndpointTest(TestCase):
         )
 
         self.client.force_authenticate(user=self.verified_user)
-        response = self.client.get(f"/llm/thinking-logs/{record.id}/")
+        response = self.client.get(f"/llm/thinking-logs/output/{record.id}/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["id"], str(record.id))
@@ -1799,7 +1819,7 @@ class ThinkingLogEndpointTest(TestCase):
     def test_thinking_log_detail_returns_404_when_not_found(self):
         self.client.force_authenticate(user=self.verified_user)
 
-        response = self.client.get("/llm/thinking-logs/00000000-0000-0000-0000-000000000000/")
+        response = self.client.get("/llm/thinking-logs/output/00000000-0000-0000-0000-000000000000/")
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data, {"detail": "Thinking log not found."})
@@ -1813,7 +1833,7 @@ class ThinkingLogEndpointTest(TestCase):
         )
         self.client.force_authenticate(user=self.verified_user)
 
-        response = self.client.get(f"/llm/thinking-logs/{foreign_record.id}/")
+        response = self.client.get(f"/llm/thinking-logs/output/{foreign_record.id}/")
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data, {"detail": "Thinking log not found."})
@@ -1827,7 +1847,7 @@ class ThinkingLogEndpointTest(TestCase):
         )
 
         self.client.force_authenticate(user=self.verified_user)
-        response = self.client.get(f"/llm/thinking-logs/{empty_log_record.id}/")
+        response = self.client.get(f"/llm/thinking-logs/output/{empty_log_record.id}/")
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data, {"detail": "Thinking log not found."})
@@ -1866,6 +1886,19 @@ class ThinkingLogEndpointTest(TestCase):
         self.client.force_authenticate(user=self.verified_user)
 
         response = self.client.get("/llm/thinking-logs/?page=0&page_size=10")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertEqual(
+            response.data["errors"],
+            {"pagination": ["Invalid thinking log pagination request."]},
+        )
+
+    def test_thinking_log_session_list_error_schema_is_consistent_for_invalid_pagination(self):
+        session = Session.objects.create(owner=self.verified_user, title="Owned Session")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(f"/llm/thinking-logs/{session.id}/?page=0&page_size=10")
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["detail"], "Invalid request payload.")
@@ -2262,8 +2295,6 @@ class SendMessageNegativeTest(TestCase):
         response = self.client.get("/llm/send-message/")
 
         self.assertEqual(response.status_code, 405)
-
-
 class SendMessageErrorHandlingTest(TestCase):
 
     def setUp(self):
