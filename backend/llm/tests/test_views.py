@@ -19,6 +19,7 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
 )
 from llm.views import (
+    _build_generate_bootstrap_message,
     build_export_output_json,
     _extract_document_type,
     _sanitize_output_json,
@@ -93,6 +94,21 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
 
         self.assertEqual(result, "generated-output")
+
+    def test_build_generate_bootstrap_message_falls_back_to_title_without_filename(self):
+        result = _build_generate_bootstrap_message({}, "Convert generated-output")
+
+        self.assertEqual(result, "Convert generated-output")
+
+    def test_build_generate_bootstrap_message_uses_generic_fallback_when_blank(self):
+        result = _build_generate_bootstrap_message({}, "")
+
+        self.assertEqual(result, "Uploaded file for conversion")
+
+    def test_build_generate_bootstrap_message_handles_non_object_input(self):
+        result = _build_generate_bootstrap_message([], "Convert generated-output")
+
+        self.assertEqual(result, "Convert generated-output")
 
     def test_extract_document_type_returns_unknown_for_non_object_payload(self):
         result = _extract_document_type(["not-an-object"])
@@ -824,6 +840,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             data={
                 "output_json": {"status": "ok"},
                 "session_id": None,
+                "chat_id": None,
                 "output_id": None,
                 "reasoning": {
                     "final_answer": "Answer",
@@ -1149,13 +1166,21 @@ class LlmGenerateSessionIntegrationTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("session_id", response.data)
+        self.assertIn("chat_id", response.data)
         self.assertIn("output_id", response.data)
         self.assertEqual(Session.objects.count(), 1)
         session = Session.objects.get(owner=self.user)
         self.assertEqual(str(session.id), response.data["session_id"])
+        self.assertEqual(ChatMessage.objects.count(), 1)
+        bootstrap_message = ChatMessage.objects.get(session=session)
+        self.assertEqual(bootstrap_message.role, ChatMessage.ROLE_USER)
+        self.assertEqual(str(bootstrap_message.id), response.data["chat_id"])
+        self.assertIn("invoice.pdf", bootstrap_message.content)
         self.assertEqual(GeneratedOutput.objects.count(), 1)
         generated_output = GeneratedOutput.objects.get(session=session)
         self.assertEqual(str(generated_output.id), response.data["output_id"])
+        self.assertEqual(generated_output.source_message_id, bootstrap_message.id)
+        self.assertIsNone(generated_output.parent_output_id)
         self.assertEqual(
             generated_output.output_json,
             {
@@ -1223,6 +1248,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             generated_output.thinking_log,
             "Normalized columns and preserved totals.",
         )
+        self.assertEqual(generated_output.reasoning, mock_generate_reasoning.return_value)
 
     @patch("llm.views._generate_optional_reasoning")
     @patch("llm.views.build_llm_generation_service")
@@ -1253,6 +1279,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self.assertEqual(response.status_code, 200)
         generated_output = GeneratedOutput.objects.get()
         self.assertEqual(generated_output.thinking_log, "")
+        self.assertEqual(generated_output.reasoning, {})
 
     @patch("llm.views._build_generate_success_response")
     @patch("llm.views._generate_optional_reasoning")
@@ -1289,6 +1316,98 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self.assertEqual(response.status_code, 200)
         generated_output = GeneratedOutput.objects.get()
         self.assertEqual(generated_output.thinking_log, "")
+        self.assertEqual(
+            generated_output.reasoning,
+            mock_generate_reasoning.return_value,
+        )
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_links_output_to_source_chat_and_parent_output(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        session = Session.objects.create(owner=self.user, title="Refine Session")
+        parent_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"content_data": []},
+        )
+        source_message = ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="Refine output sebelumnya.",
+            target_output=parent_output,
+        )
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                },
+                "chat_id": str(source_message.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        generated_output = GeneratedOutput.objects.exclude(id=parent_output.id).get()
+        self.assertEqual(generated_output.session, session)
+        self.assertEqual(generated_output.source_message, source_message)
+        self.assertEqual(generated_output.parent_output, parent_output)
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_404_for_unknown_chat_id(self, mock_build_service):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                },
+                "chat_id": str(uuid4()),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        mock_build_service.assert_not_called()
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_400_when_chat_id_session_mismatches_request_session(self, mock_build_service):
+        session = Session.objects.create(owner=self.user, title="Requested Session")
+        other_session = Session.objects.create(owner=self.user, title="Source Session")
+        source_message = ChatMessage.objects.create(
+            session=other_session,
+            role=ChatMessage.ROLE_USER,
+            content="Refine output sebelumnya.",
+        )
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                },
+                "session_id": str(session.id),
+                "chat_id": str(source_message.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["errors"]["chat_id"],
+            ["chat_id must belong to the same session."],
+        )
+        mock_build_service.assert_not_called()
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_does_not_create_session_or_generated_output_when_generation_fails(
@@ -1526,10 +1645,11 @@ class ThinkingLogEndpointTest(TestCase):
             status="verified",
         )
 
-    def _create_generated_output(self, owner, *, session=None, thinking_log):
+    def _create_generated_output(self, owner, *, session=None, thinking_log, source_message=None):
         session = session or Session.objects.create(owner=owner, title="Thinking Log Session")
         return GeneratedOutput.objects.create(
             session=session,
+            source_message=source_message,
             output_json={"source": "thinking-log-test"},
             thinking_log=thinking_log,
             created_at=timezone.now(),
@@ -1565,15 +1685,21 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(response.data["results"][0]["id"], str(owned_match.id))
         self.assertEqual(response.data["results"][0]["session_id"], str(owned_session.id))
-        self.assertEqual(response.data["results"][0]["chat_id"], str(owned_match.id))
+        self.assertIsNone(response.data["results"][0]["chat_id"])
         self.assertNotIn("request_id", response.data["results"][0])
 
     def test_thinking_log_list_filters_by_chat_id_without_session_filter(self):
         matched_session = Session.objects.create(owner=self.verified_user, title="Matched Session")
+        source_message = ChatMessage.objects.create(
+            session=matched_session,
+            role=ChatMessage.ROLE_USER,
+            content="Refine this output.",
+        )
         matched = self._create_generated_output(
             self.verified_user,
             session=matched_session,
             thinking_log="Request filtered record.",
+            source_message=source_message,
         )
         self._create_generated_output(
             self.verified_user,
@@ -1587,13 +1713,13 @@ class ThinkingLogEndpointTest(TestCase):
         )
 
         self.client.force_authenticate(user=self.verified_user)
-        response = self.client.get(f"/llm/thinking-logs/?chat_id={matched.id}")
+        response = self.client.get(f"/llm/thinking-logs/?chat_id={source_message.id}")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(response.data["results"][0]["id"], str(matched.id))
-        self.assertEqual(response.data["results"][0]["chat_id"], str(matched.id))
+        self.assertEqual(response.data["results"][0]["chat_id"], str(source_message.id))
 
     def test_thinking_log_list_filters_by_request_id_for_backward_compatibility(self):
         matched_session = Session.objects.create(owner=self.verified_user, title="Matched Session")
@@ -1663,7 +1789,7 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["id"], str(record.id))
         self.assertEqual(response.data["session_id"], str(session.id))
-        self.assertEqual(response.data["chat_id"], str(record.id))
+        self.assertIsNone(response.data["chat_id"])
         self.assertNotIn("request_id", response.data)
         self.assertEqual(
             response.data["thinking_log"],
@@ -1809,7 +1935,9 @@ class SendMessagePositiveTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["reply"], "Halo! Ada yang bisa saya bantu?")
         self.assertIn("session_id", response.data)
+        self.assertIn("chat_id", response.data)
         self.assertIsNotNone(response.data["session_id"])
+        self.assertIsNotNone(response.data["chat_id"])
 
     @patch("llm.views.generate_chat_response")
     def test_send_message_creates_new_session_when_no_session_id_given(self, mock_generate):
@@ -1853,14 +1981,105 @@ class SendMessagePositiveTest(TestCase):
         )
 
         session_id = response.data["session_id"]
+        chat_id = response.data["chat_id"]
         messages = list(
             ChatMessage.objects.filter(session_id=session_id).order_by("created_at")
         )
         self.assertEqual(len(messages), 2)
+        self.assertEqual(str(messages[0].id), str(chat_id))
         self.assertEqual(messages[0].role, ChatMessage.ROLE_USER)
         self.assertEqual(messages[0].content, "Halo dari user")
         self.assertEqual(messages[1].role, ChatMessage.ROLE_ASSISTANT)
         self.assertEqual(messages[1].content, "Balasan dari AI.")
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_attaches_target_output_to_user_message(self, mock_generate):
+        mock_generate.return_value = "Balasan refine."
+        session = Session.objects.create(owner=self.user)
+        target_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"content_data": []},
+        )
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {
+                "session_id": str(session.id),
+                "target_output_id": str(target_output.id),
+                "message": "Refine output ini",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user_message = ChatMessage.objects.get(id=response.data["chat_id"])
+        self.assertEqual(user_message.target_output, target_output)
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_uses_target_output_session_when_session_id_missing(self, mock_generate):
+        mock_generate.return_value = "Balasan refine."
+        session = Session.objects.create(owner=self.user)
+        target_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"content_data": []},
+        )
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {
+                "target_output_id": str(target_output.id),
+                "message": "Refine output ini",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(str(response.data["session_id"]), str(session.id))
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_404_for_unknown_target_output_id(self, mock_generate):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {
+                "target_output_id": str(uuid4()),
+                "message": "Refine output ini",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        mock_generate.assert_not_called()
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_returns_400_for_target_output_from_other_session(self, mock_generate):
+        session = Session.objects.create(owner=self.user)
+        other_session = Session.objects.create(owner=self.user)
+        target_output = GeneratedOutput.objects.create(
+            session=other_session,
+            output_json={"content_data": []},
+        )
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/send-message/",
+            {
+                "session_id": str(session.id),
+                "target_output_id": str(target_output.id),
+                "message": "Refine output ini",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["errors"]["target_output_id"],
+            ["target_output_id must belong to the same session."],
+        )
+        mock_generate.assert_not_called()
 
     @patch("llm.views.generate_chat_response")
     def test_send_message_passes_full_history_to_llm(self, mock_generate):

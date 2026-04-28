@@ -94,16 +94,19 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         self.assertIn("session_id", serializer.errors)
 
     def test_generate_response_serializer_accepts_session_and_output_ids(self):
+        chat_id = uuid4()
         serializer = LlmGenerateResponseSerializer(
             data={
                 "output_json": {"sheet": "Sheet1"},
                 "session_id": str(uuid4()),
+                "chat_id": str(chat_id),
                 "output_id": str(uuid4()),
                 "reasoning": None,
             }
         )
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.data["chat_id"], str(chat_id))
 
     def test_generate_request_serializer_accepts_include_reasoning(self):
         serializer = LlmGenerateRequestSerializer(
@@ -233,6 +236,7 @@ class ThinkingLogSerializerTest(SimpleTestCase):
         instance = SimpleNamespace(
             id=uuid4(),
             session_id=uuid4(),
+            source_message_id=uuid4(),
             output_json={"request_id": "req-123"},
             thinking_log="Structured summary",
             status_processing="completed",
@@ -241,7 +245,7 @@ class ThinkingLogSerializerTest(SimpleTestCase):
 
         serializer = ThinkingLogItemSerializer(instance)
 
-        self.assertEqual(serializer.data["chat_id"], str(instance.id))
+        self.assertEqual(serializer.data["chat_id"], str(instance.source_message_id))
         self.assertNotIn("request_id", serializer.data)
 
     def test_thinking_log_item_serializer_does_not_classify_output_json_session_id_as_chat(self):
