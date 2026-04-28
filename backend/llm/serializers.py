@@ -179,6 +179,7 @@ class ThinkingLogItemSerializer(serializers.Serializer):
     session_id = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
     chat_id = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
     thinking_log = serializers.CharField(read_only=True, allow_blank=True)
+    reasoning = serializers.ListField(child=serializers.CharField(), read_only=True)
     status_processing = serializers.CharField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 
@@ -194,11 +195,20 @@ class ThinkingLogItemSerializer(serializers.Serializer):
         if thinking_log is None:
             thinking_log = _safe_thinking_log_summary(output_json)
 
+        reasoning_payload = getattr(instance, "reasoning", None)
+        if not isinstance(reasoning_payload, dict):
+            reasoning_payload = {}
+
+        reasoning_steps = reasoning_payload.get("reasoning_steps")
+        if not isinstance(reasoning_steps, list):
+            reasoning_steps = []
+
         return {
             "id": str(instance.id),
             "session_id": str(session_id) if session_id is not None else None,
             "chat_id": str(chat_id) if chat_id is not None else None,
             "thinking_log": thinking_log,
+            "reasoning": reasoning_steps,
             "status_processing": getattr(instance, "status_processing", "completed"),
             "created_at": instance.created_at,
         }
