@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import { useHistoryFiles } from '@/hooks/useHistoryFiles'
 import type { HistoryItem } from '@/services/history'
@@ -41,36 +42,44 @@ function formatCreatedAt(value: string): string {
 }
 
 export default function HistoryPage() {
+    const searchParams = useSearchParams()
+    const selectedHistoryIdFromQuery = searchParams.get('historyId')
     const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null)
     const [renameValue, setRenameValue] = useState('')
     const [historyToDelete, setHistoryToDelete] = useState<HistoryItem | null>(null)
     const {
         items,
-        count,
-        limit,
-        offset,
         isLoading,
         renamingHistoryId,
         deletingHistoryId,
         isDownloading,
+        reloadHistory,
         loadError,
         downloadError,
         mutationError,
-        reloadHistory,
-        goToNextPage,
-        goToPreviousPage,
         downloadCsv,
         downloadExcel,
         renameHistory,
         deleteHistory,
-    } = useHistoryFiles()
+    } = useHistoryFiles({ loadAll: true, pageSize: 50 })
 
-    const hasNextPage = offset + limit < count
-    const hasItems = items.length > 0
     const isDeleteDialogOpen = historyToDelete !== null
     const isDeletePending =
         historyToDelete !== null && deletingHistoryId === historyToDelete.id
     const actionError = mutationError ?? downloadError
+
+    const selectedHistoryId = useMemo(() => {
+        if (selectedHistoryIdFromQuery) {
+            return selectedHistoryIdFromQuery
+        }
+
+        return items[0]?.id ?? null
+    }, [items, selectedHistoryIdFromQuery])
+
+    const selectedHistoryItem = useMemo(
+        () => items.find((item) => item.id === selectedHistoryId) ?? null,
+        [items, selectedHistoryId]
+    )
 
     const startEditing = (item: HistoryItem) => {
         setEditingHistoryId(item.id)
@@ -92,302 +101,236 @@ export default function HistoryPage() {
     const handleDeleteConfirm = async (item: HistoryItem) => {
         const didDelete = await deleteHistory(item.id)
         if (didDelete) {
-            if (editingHistoryId === item.id) {
-                stopEditing()
-            }
+            stopEditing()
             setHistoryToDelete(null)
         }
     }
 
     const deleteDialogHistory = historyToDelete
+    const noSelectionMessage = isLoading
+        ? 'Loading history...'
+        : (loadError || 'Choose a history item from the left panel to see details and actions.')
 
     return (
         <div className="flex min-h-screen bg-gray-50">
-            <Sidebar activeMenu="history" />
-            <main className="ml-56 flex-1 px-8 py-12">
-                <div className="mx-auto max-w-6xl space-y-8">
-                    <section className="rounded-3xl border border-red-100 bg-white p-8 shadow-sm shadow-red-100/30">
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                            <div className="space-y-3">
-                                <span className="inline-flex rounded-full bg-red-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-red-700">
-                                    Download History
-                                </span>
-                                <div>
-                                    <h1 className="text-2xl font-bold text-slate-900">History</h1>
-                                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-                                        Your generated results are stored here for CSV or Excel
-                                        download whenever you need them again.
-                                    </p>
-                                </div>
-                            </div>
-                            <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                                Total records: <span className="ml-2 font-semibold text-slate-900">{count}</span>
-                            </div>
-                        </div>
-                    </section>
-
-                    {isLoading ? (
-                        <div className="rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
-                            Loading history...
-                        </div>
-                    ) : null}
-
-                    {!isLoading && loadError ? (
-                        <div className="rounded-3xl border border-red-200 bg-white p-6 shadow-sm">
-                            <p className="text-sm text-red-700">{loadError}</p>
-                            <button
-                                type="button"
-                                className="mt-4 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300"
-                                onClick={() => {
-                                    void reloadHistory()
-                                }}
-                            >
-                                Retry
-                            </button>
-                        </div>
-                    ) : null}
-
-                    {!isLoading && !loadError && !hasItems ? (
-                        <div className="rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
-                            <h2 className="text-base font-semibold text-slate-900">No history yet</h2>
-                            <p className="mt-2">
-                                Generate a result first, then it will appear here for download.
-                            </p>
-                        </div>
-                    ) : null}
-
-                    {!isLoading && !loadError && hasItems ? (
-                        <div className="space-y-4">
+            <Sidebar
+                activeMenu="history"
+                selectedHistoryId={selectedHistoryId}
+                historyListState={{
+                    items,
+                    isLoading,
+                    loadError,
+                    renamingHistoryId,
+                    deletingHistoryId,
+                    reloadHistory,
+                    renameHistory,
+                    deleteHistory,
+                }}
+            />
+            <main className="ml-56 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+                <div className="mx-auto h-[calc(100vh-4rem)] max-w-6xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md shadow-slate-200/70">
+                    <section className="h-full min-h-0 min-w-0 bg-white">
+                        <div className="h-full overflow-y-auto px-5 py-5 sm:px-8 sm:py-6">
                             {actionError ? (
-                                <div className="rounded-2xl border border-red-200 bg-white p-4 text-sm text-red-700 shadow-sm">
+                                <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                                     {actionError}
                                 </div>
                             ) : null}
 
-                            <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
-                                <p className="text-sm text-slate-500">
-                                    Showing {offset + 1}-{Math.min(offset + items.length, count)} of {count}
-                                </p>
-                                <div className="flex items-center gap-3">
-                                    <button
-                                        type="button"
-                                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-                                        onClick={() => {
-                                            void goToPreviousPage()
-                                        }}
-                                        disabled={offset === 0}
-                                    >
-                                        Previous
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-                                        onClick={() => {
-                                            void goToNextPage()
-                                        }}
-                                        disabled={!hasNextPage}
-                                    >
-                                        Next
-                                    </button>
+                            {selectedHistoryItem ? (
+                                (() => {
+                                    const item = selectedHistoryItem
+                                    const isEditing = editingHistoryId === item.id
+                                    const isRenaming = renamingHistoryId === item.id
+                                    const isDeleting = deletingHistoryId === item.id
+                                    const isCsvDownloading = isDownloading(item.id, 'csv')
+                                    const isExcelDownloading = isDownloading(item.id, 'xlsx')
+                                    const historyName = getDisplayName(
+                                        item.custom_name,
+                                        item.original_name
+                                    )
+
+                                    return (
+                                        <div className="space-y-6">
+                                            <div className="grid gap-4 md:grid-cols-2">
+                                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                        Status
+                                                    </p>
+                                                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                                                        {item.status_processing}
+                                                    </p>
+                                                </div>
+                                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                        Created at
+                                                    </p>
+                                                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                                                        {formatCreatedAt(item.created_at)}
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            {isEditing ? (
+                                                <form
+                                                    className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4"
+                                                    onSubmit={(event) => {
+                                                        event.preventDefault()
+                                                        void handleRenameSubmit(item)
+                                                    }}
+                                                >
+                                                    <div>
+                                                        <label
+                                                            htmlFor={`history-name-${item.id}`}
+                                                            className="block text-sm font-semibold text-slate-900"
+                                                        >
+                                                            File Name
+                                                        </label>
+                                                        <input
+                                                            id={`history-name-${item.id}`}
+                                                            type="text"
+                                                            value={renameValue}
+                                                            onChange={(event) => {
+                                                                setRenameValue(event.target.value)
+                                                            }}
+                                                            placeholder="Enter a file name"
+                                                            className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                                                            maxLength={HISTORY_FILE_NAME_MAX_LENGTH}
+                                                            disabled={isRenaming}
+                                                        />
+                                                    </div>
+                                                    <p className="text-xs text-slate-500">
+                                                        Leave blank to use the uploaded file name. Up to {HISTORY_FILE_NAME_MAX_LENGTH} characters.
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-3">
+                                                        <button
+                                                            type="submit"
+                                                            className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            disabled={isRenaming}
+                                                        >
+                                                            {isRenaming ? 'Saving...' : 'Save Name'}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            onClick={stopEditing}
+                                                            disabled={isRenaming}
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </div>
+                                                </form>
+                                            ) : (
+                                                <div className="flex flex-wrap gap-3">
+                                                    <button
+                                                        type="button"
+                                                        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        onClick={() => {
+                                                            startEditing(item)
+                                                        }}
+                                                        disabled={isDeleting || isRenaming}
+                                                    >
+                                                        Edit Name
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        onClick={() => {
+                                                            setHistoryToDelete(item)
+                                                        }}
+                                                        disabled={isDeleting || isRenaming}
+                                                    >
+                                                        {isDeleting ? 'Deleting...' : 'Delete'}
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            <div className="flex flex-wrap gap-3">
+                                                <button
+                                                    type="button"
+                                                    className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-red-700"
+                                                    onClick={() => {
+                                                        void downloadCsv(item.id, getCsvFilename(historyName))
+                                                    }}
+                                                    disabled={isCsvDownloading}
+                                                >
+                                                    {isCsvDownloading ? 'Downloading CSV...' : 'Download CSV'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                                                    onClick={() => {
+                                                        void downloadExcel(item.id, getXlsxFilename(historyName))
+                                                    }}
+                                                    disabled={isExcelDownloading}
+                                                >
+                                                    {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )
+                                })()
+                            ) : (
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-5 text-sm text-slate-600">
+                                    {noSelectionMessage}
                                 </div>
-                            </div>
-
-                            {items.map((item) => (
-                                <section
-                                    key={item.id}
-                                    className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-red-100/20"
-                                >
-                                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                                        {(() => {
-                                            const isEditing = editingHistoryId === item.id
-                                            const isRenaming = renamingHistoryId === item.id
-                                            const isDeleting = deletingHistoryId === item.id
-                                            const isCsvDownloading = isDownloading(item.id, 'csv')
-                                            const isExcelDownloading = isDownloading(item.id, 'xlsx')
-                                            const historyName = getDisplayName(
-                                                item.custom_name,
-                                                item.original_name
-                                            )
-
-                                            return (
-                                                <>
-                                                    <div className="flex-1 space-y-3">
-                                                        {isEditing ? (
-                                                            <form
-                                                                className="space-y-3"
-                                                                onSubmit={(event) => {
-                                                                    event.preventDefault()
-                                                                    void handleRenameSubmit(item)
-                                                                }}
-                                                            >
-                                                                <div>
-                                                                    <label
-                                                                        htmlFor={`history-name-${item.id}`}
-                                                                        className="block text-sm font-semibold text-slate-900"
-                                                                    >
-                                                                        File Name
-                                                                    </label>
-                                                                    <input
-                                                                        id={`history-name-${item.id}`}
-                                                                        type="text"
-                                                                        value={renameValue}
-                                                                        onChange={(event) => {
-                                                                            setRenameValue(event.target.value)
-                                                                        }}
-                                                                        placeholder="Enter a file name"
-                                                                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
-                                                                        maxLength={HISTORY_FILE_NAME_MAX_LENGTH}
-                                                                        disabled={isRenaming}
-                                                                    />
-                                                                </div>
-                                                                <p className="text-xs text-slate-500">
-                                                                    Leave this blank to use the uploaded file name. Up to {HISTORY_FILE_NAME_MAX_LENGTH} characters.
-                                                                </p>
-                                                                <div className="flex flex-wrap gap-3">
-                                                                    <button
-                                                                        type="submit"
-                                                                        className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                        disabled={isRenaming}
-                                                                    >
-                                                                        {isRenaming ? 'Saving...' : 'Save Name'}
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                        onClick={stopEditing}
-                                                                        disabled={isRenaming}
-                                                                    >
-                                                                        Cancel
-                                                                    </button>
-                                                                </div>
-                                                            </form>
-                                                        ) : (
-                                                            <h2 className="break-words text-lg font-semibold text-slate-900">
-                                                                {historyName}
-                                                            </h2>
-                                                        )}
-                                                        <p className="inline-flex w-fit rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
-                                                            Status: {item.status_processing}
-                                                        </p>
-                                                        <p className="text-sm text-slate-500">
-                                                            Created at: {formatCreatedAt(item.created_at)}
-                                                        </p>
-                                                    </div>
-
-                                                    <div className="flex flex-col gap-3 sm:items-end">
-                                                        <div className="flex flex-wrap gap-3 sm:justify-end">
-                                                            {isEditing ? null : (
-                                                                <button
-                                                                    type="button"
-                                                                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                    onClick={() => {
-                                                                        startEditing(item)
-                                                                    }}
-                                                                    disabled={isDeleting || isRenaming}
-                                                                >
-                                                                    Edit Name
-                                                                </button>
-                                                            )}
-                                                            <button
-                                                                type="button"
-                                                                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                onClick={() => {
-                                                                    setHistoryToDelete(item)
-                                                                }}
-                                                                disabled={isDeleting || isRenaming}
-                                                            >
-                                                                {isDeleting ? 'Deleting...' : 'Delete'}
-                                                            </button>
-                                                        </div>
-
-                                                        <div className="flex flex-col gap-3 sm:flex-row">
-                                                            <button
-                                                                type="button"
-                                                                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-red-700"
-                                                                onClick={() => {
-                                                                    void downloadCsv(
-                                                                        item.id,
-                                                                        getCsvFilename(historyName)
-                                                                    )
-                                                                }}
-                                                                disabled={isCsvDownloading}
-                                                            >
-                                                                {isCsvDownloading ? 'Downloading CSV...' : 'Download CSV'}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-                                                                onClick={() => {
-                                                                    void downloadExcel(
-                                                                        item.id,
-                                                                        getXlsxFilename(historyName)
-                                                                    )
-                                                                }}
-                                                                disabled={isExcelDownloading}
-                                                            >
-                                                                {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </>
-                                            )
-                                        })()}
-                                    </div>
-                                </section>
-                            ))}
+                            )}
                         </div>
-                    ) : null}
+                    </section>
                 </div>
             </main>
 
             {isDeleteDialogOpen && deleteDialogHistory ? (
-                <dialog
-                    open
-                    aria-labelledby="delete-history-title"
-                    className="fixed inset-0 z-50 m-auto w-full max-w-md rounded-3xl border border-red-100 bg-white p-6 shadow-2xl shadow-slate-900/15 backdrop:bg-slate-900/40"
-                >
-                    <span className="inline-flex rounded-full bg-red-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-red-700">
-                        Delete History
-                    </span>
-                    <h2
-                        id="delete-history-title"
-                        className="mt-4 text-xl font-bold text-slate-900"
+                <>
+                    <div className="fixed inset-0 z-40 bg-slate-900/70" />
+                    <dialog
+                        open
+                        aria-labelledby="delete-history-title"
+                        className="fixed inset-0 z-50 m-auto w-full max-w-md rounded-3xl border border-red-100 bg-white p-6 shadow-2xl shadow-slate-900/15"
                     >
-                        Delete this history item?
-                    </h2>
-                    <p className="mt-3 text-sm leading-relaxed text-slate-600">
-                        This will remove{' '}
-                        <span className="font-semibold text-slate-900">
-                            {getDisplayName(
-                                deleteDialogHistory.custom_name,
-                                deleteDialogHistory.original_name
-                            )}
-                        </span>{' '}
-                        from your history list and clear its cached download artifacts.
-                    </p>
-                    <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                        <button
-                            type="button"
-                            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
-                            onClick={() => {
-                                setHistoryToDelete(null)
-                            }}
-                            disabled={isDeletePending}
+                        <span className="inline-flex rounded-full bg-red-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-red-700">
+                            Delete History
+                        </span>
+                        <h2
+                            id="delete-history-title"
+                            className="mt-4 text-xl font-bold text-slate-900"
                         >
-                            Cancel
-                        </button>
-                        <button
-                            type="button"
-                            className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
-                            onClick={() => {
-                                void handleDeleteConfirm(deleteDialogHistory)
-                            }}
-                            disabled={isDeletePending}
-                        >
-                            {isDeletePending ? 'Deleting...' : 'Delete History'}
-                        </button>
-                    </div>
-                </dialog>
+                            Delete this history item?
+                        </h2>
+                        <p className="mt-3 text-sm leading-relaxed text-slate-600">
+                            This will remove{' '}
+                            <span className="font-semibold text-slate-900">
+                                {getDisplayName(
+                                    deleteDialogHistory.custom_name,
+                                    deleteDialogHistory.original_name
+                                )}
+                            </span>{' '}
+                            from your history list and clear its cached download artifacts.
+                        </p>
+                        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                onClick={() => {
+                                    setHistoryToDelete(null)
+                                }}
+                                disabled={isDeletePending}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                onClick={() => {
+                                    void handleDeleteConfirm(deleteDialogHistory)
+                                }}
+                                disabled={isDeletePending}
+                            >
+                                {isDeletePending ? 'Deleting...' : 'Delete History'}
+                            </button>
+                        </div>
+                    </dialog>
+                </>
             ) : null}
         </div>
     )
