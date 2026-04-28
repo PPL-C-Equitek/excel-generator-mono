@@ -105,6 +105,11 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(result, "Uploaded file for conversion")
 
+    def test_build_generate_bootstrap_message_handles_non_object_input(self):
+        result = _build_generate_bootstrap_message([], "Convert generated-output")
+
+        self.assertEqual(result, "Convert generated-output")
+
     def test_extract_document_type_returns_unknown_for_non_object_payload(self):
         result = _extract_document_type(["not-an-object"])
 
