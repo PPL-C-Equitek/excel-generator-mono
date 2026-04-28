@@ -683,6 +683,7 @@ export function useConvertFlow(
                 return
             }
             setError(csvErr instanceof Error ? csvErr.message : 'CSV Export failed')
+            setErrorPhase('generating')
         }
     }
 

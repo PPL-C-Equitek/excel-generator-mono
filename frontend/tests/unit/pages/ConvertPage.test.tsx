@@ -40,9 +40,13 @@ vi.mock('../../../src/components/UploadZone', () => ({
     default: ({
         onFileSelect,
         footerContent,
+        resultContent,
+        validationError,
     }: {
         onFileSelect?: (file: File) => void
         footerContent?: ReactNode
+        resultContent?: ReactNode
+        validationError?: string | null
     }) => {
         const handleClick = () => {
             const mockFile = createMockFile()
@@ -55,6 +59,8 @@ vi.mock('../../../src/components/UploadZone', () => ({
                 <button onClick={handleClick}>Upload File</button>
                 <span data-testid="upload-zone-rendered">UploadZone Rendered</span>
                 {footerContent}
+                {validationError && <div role="alert">{validationError}</div>}
+                {resultContent}
             </div>
         )
     }
@@ -97,20 +103,19 @@ describe('ConvertPage', () => {
             expect(container).toBeTruthy()
         })
 
-        it('renders page heading with correct text', () => {
+        it('renders schema selector heading in the simplified convert page', () => {
             render(<ConvertPage />)
-            expect(screen.getByText('Automate Your Data Structuring')).toBeInTheDocument()
+            expect(screen.getByText('Choose A Schema')).toBeInTheDocument()
         })
 
-        it('renders subtitle text', () => {
+        it('renders schema selector helper text', () => {
             render(<ConvertPage />)
-            expect(screen.getByText(/Replace manual entry/i)).toBeInTheDocument()
+            expect(screen.getByText(/Use a saved schema/i)).toBeInTheDocument()
         })
 
-        it('renders complete subtitle with AI-driven text', () => {
+        it('renders schema builder entry point', () => {
             render(<ConvertPage />)
-            expect(screen.getByText(/AI-driven extraction/i)).toBeInTheDocument()
-            expect(screen.getByText(/seamless Excel template mapping/i)).toBeInTheDocument()
+            expect(screen.getByText('Open Schema Builder')).toBeInTheDocument()
         })
 
         it('renders all child components', () => {
@@ -153,35 +158,34 @@ describe('ConvertPage', () => {
         it('main content area has correct styling classes', () => {
             const { container } = render(<ConvertPage />)
             const mainContent = container.querySelector('main')
-            expect(mainContent).toHaveClass('flex-1', 'bg-gray-50')
-            expect(mainContent).toHaveClass('flex', 'flex-col', 'items-center', 'justify-center')
+            expect(mainContent).toHaveClass('ml-56', 'flex', 'min-h-screen', 'flex-1', 'bg-gray-50')
         })
 
-        it('heading has correct styling and semantic HTML', () => {
+        it('schema selector heading has accessible heading semantics', () => {
             render(<ConvertPage />)
-            const heading = screen.getByText('Automate Your Data Structuring')
-            expect(heading.tagName).toBe('H1')
-            expect(heading).toHaveClass('text-2xl', 'font-bold', 'text-gray-900', 'mb-3')
+            const heading = screen.getByText('Choose A Schema')
+            expect(heading.tagName).toBe('H2')
+            expect(heading).toHaveClass('text-lg', 'font-semibold', 'text-gray-900')
         })
 
-        it('subtitle has correct styling', () => {
+        it('schema selector helper text has muted styling', () => {
             render(<ConvertPage />)
-            const subtitle = screen.getByText(/Replace manual entry/i)
+            const subtitle = screen.getByText(/Use a saved schema/i)
             expect(subtitle.tagName).toBe('P')
-            expect(subtitle).toHaveClass('text-gray-500', 'text-center')
+            expect(subtitle).toHaveClass('text-sm', 'text-gray-500')
         })
 
-        it('container for UploadZone has max width constraint', () => {
+        it('container for UploadZone spans available chat width', () => {
             const { container } = render(<ConvertPage />)
-            const uploadContainer = container.querySelector('.max-w-3xl')
+            const uploadContainer = container.querySelector('main > div')
             expect(uploadContainer).toBeInTheDocument()
             expect(uploadContainer).toHaveClass('w-full')
         })
 
-        it('renders with correct responsive padding', () => {
+        it('renders without legacy responsive padding on main', () => {
             const { container } = render(<ConvertPage />)
             const mainContent = container.querySelector('main')
-            expect(mainContent).toHaveClass('px-16')
+            expect(mainContent).not.toHaveClass('px-16')
         })
     })
 
@@ -275,13 +279,14 @@ describe('ConvertPage', () => {
         it('uses semantic HTML elements', () => {
             const { container } = render(<ConvertPage />)
             expect(container.querySelector('main')).toBeInTheDocument()
-            expect(container.querySelector('h1')).toBeInTheDocument()
+            expect(container.querySelector('h2')).toBeInTheDocument()
         })
 
         it('maintains proper heading hierarchy', () => {
             const { container } = render(<ConvertPage />)
             const h1Elements = container.querySelectorAll('h1')
-            expect(h1Elements).toHaveLength(1)
+            expect(h1Elements).toHaveLength(0)
+            expect(container.querySelectorAll('h2').length).toBeGreaterThan(0)
         })
     })
 
