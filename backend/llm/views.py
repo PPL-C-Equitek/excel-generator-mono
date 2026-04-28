@@ -687,15 +687,22 @@ def _persist_generate_output_for_authenticated_user(
     export_output_json,
     source_message=None,
     parent_output=None,
+    bootstrap_message_content="",
     title="",
 ):
     if not getattr(user, "is_authenticated", False):
-        return None, None, None
+        return None, None, None, None
 
     try:
         with transaction.atomic():
+            created_new_session = session is None
             if session is None:
                 session = create_session_for_user(user, title=title)
+            if created_new_session and source_message is None:
+                source_message = append_user_message(
+                    session,
+                    bootstrap_message_content,
+                )
             generated_output = create_generated_output(
                 session,
                 output_json,
@@ -705,19 +712,29 @@ def _persist_generate_output_for_authenticated_user(
                 source_message=source_message,
                 parent_output=parent_output,
             )
-        return session.id, generated_output.id, None
+        return session.id, generated_output.id, source_message.id if source_message else None, None
     except Exception:
         logger.exception(
             "Unexpected error while persisting session-aware llm_generate output."
         )
-        return None, None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+        return None, None, None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
 
-def _build_generate_success_response(output_json, session_id, output_id, reasoning):
+def _build_generate_bootstrap_message(input_json, title):
+    filename = extract_original_name(input_json, {}).strip()
+    if filename:
+        return f"Uploaded file: {filename}"
+    if title:
+        return title
+    return "Uploaded file for conversion"
+
+
+def _build_generate_success_response(output_json, session_id, chat_id, output_id, reasoning):
     response_serializer = LlmGenerateResponseSerializer(
         data={
             "output_json": output_json,
             "session_id": session_id,
+            "chat_id": chat_id,
             "output_id": output_id,
             "reasoning": reasoning,
         }
@@ -782,7 +799,7 @@ def llm_generate(request):
         if isinstance(raw_thinking_log, str):
             thinking_log = raw_thinking_log
 
-    response_session_id, response_output_id, error_response = _persist_generate_output_for_authenticated_user(
+    response_session_id, response_output_id, response_chat_id, error_response = _persist_generate_output_for_authenticated_user(
         request.user,
         session,
         output_json,
@@ -791,6 +808,10 @@ def llm_generate(request):
         export_output_json,
         source_message=source_message,
         parent_output=getattr(source_message, "target_output", None),
+        bootstrap_message_content=_build_generate_bootstrap_message(
+            input_json,
+            resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
+        ),
         title=resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
     )
     if error_response is not None:
@@ -808,6 +829,7 @@ def llm_generate(request):
     return _build_generate_success_response(
         output_json,
         response_session_id,
+        response_chat_id,
         response_output_id,
         reasoning_response,
     )
