@@ -1677,6 +1677,7 @@ class ThinkingLogEndpointTest(TestCase):
         self.assertTrue(all(item["session_id"] == str(owned_session.id) for item in response.data["results"]))
         self.assertTrue(all(item["chat_id"] is None for item in response.data["results"]))
         self.assertTrue(all("request_id" not in item for item in response.data["results"]))
+        self.assertTrue(all(item["reasoning"] == [] for item in response.data["results"]))
 
     def test_thinking_log_list_filters_by_chat_id_without_session_filter(self):
         matched_session = Session.objects.create(owner=self.verified_user, title="Matched Session")
@@ -2252,8 +2253,6 @@ class SendMessageNegativeTest(TestCase):
         response = self.client.get("/llm/send-message/")
 
         self.assertEqual(response.status_code, 405)
-
-
 class SendMessageErrorHandlingTest(TestCase):
 
     def setUp(self):
