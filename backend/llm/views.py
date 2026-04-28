@@ -446,11 +446,21 @@ def _infer_headers_and_rows_from_output(output_json, serialization_cache=None):
     ]
 
 
+def _build_sheet_content_data(entries, serialization_cache):
+    content_data = []
+    for index, (sheet_name, value) in enumerate(entries):
+        headers, rows = _infer_headers_and_rows_from_rows_array(
+            value,
+            serialization_cache=serialization_cache,
+        )
+        normalized_name = sheet_name.strip() if isinstance(sheet_name, str) else ""
+        table_name = normalized_name or f"Sheet{index + 1}"
+        content_data.append({"table_name": table_name, "headers": headers, "rows": rows})
+    return content_data
+
+
 def _build_content_data_from_output(output_json, serialization_cache=None):
     if isinstance(output_json, dict):
-        # LLM kadang mengembalikan format export secara langsung (punya 'content_data').
-        # Gunakan langsung daripada fallback ke parsing heuristik yang salah
-        # menginterpretasikan key top-level (document_info, summary) sebagai header kolom.
         raw_content_data = output_json.get("content_data")
         if isinstance(raw_content_data, list) and raw_content_data:
             return raw_content_data
@@ -472,27 +482,8 @@ def _build_content_data_from_output(output_json, serialization_cache=None):
             ]
 
         entries = list(output_json.items())
-        has_sheet_like_entries = entries and all(isinstance(value, list) for _, value in entries)
-        if has_sheet_like_entries:
-            content_data = []
-            for index, (sheet_name, value) in enumerate(entries):
-                headers, rows = _infer_headers_and_rows_from_rows_array(
-                    value,
-                    serialization_cache=serialization_cache,
-                )
-                table_name = (
-                    sheet_name.strip()
-                    if isinstance(sheet_name, str) and sheet_name.strip()
-                    else f"Sheet{index + 1}"
-                )
-                content_data.append(
-                    {
-                        "table_name": table_name,
-                        "headers": headers,
-                        "rows": rows,
-                    }
-                )
-            return content_data
+        if entries and all(isinstance(value, list) for _, value in entries):
+            return _build_sheet_content_data(entries, serialization_cache)
 
     headers, rows = _infer_headers_and_rows_from_output(
         output_json,
