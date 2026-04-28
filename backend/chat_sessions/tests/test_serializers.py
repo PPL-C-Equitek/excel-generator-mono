@@ -70,6 +70,7 @@ class ChatSessionSerializerTest(SimpleTestCase):
                         "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
                         "content_data": [],
                     },
+                    thinking_log="Normalized columns and preserved totals.",
                     reasoning={"step1": "Normalized columns and preserved totals."},
                     created_at=datetime(2026, 4, 21, 10, 2, tzinfo=timezone.utc),
                 )
@@ -88,6 +89,10 @@ class ChatSessionSerializerTest(SimpleTestCase):
         self.assertEqual(
             serializer.data["generated_outputs"]["results"][0]["chat_id"],
             "message-1",
+        )
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["thinking_log"],
+            "Normalized columns and preserved totals.",
         )
         self.assertEqual(
             serializer.data["generated_outputs"]["results"][0]["reasoning"],
@@ -125,6 +130,7 @@ class ChatSessionSerializerTest(SimpleTestCase):
                         "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
                         "content_data": [],
                     },
+                    thinking_log="Kept row grouping stable.",
                     reasoning={"step1": "Kept row grouping stable."},
                     created_at=datetime(2026, 4, 21, 10, 4, tzinfo=timezone.utc),
                 )
@@ -146,6 +152,10 @@ class ChatSessionSerializerTest(SimpleTestCase):
         self.assertEqual(
             serializer.data["generated_outputs"]["results"][0]["chat_id"],
             "message-2",
+        )
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["thinking_log"],
+            "Kept row grouping stable.",
         )
         self.assertEqual(
             serializer.data["generated_outputs"]["results"][0]["reasoning"],
@@ -187,6 +197,7 @@ class ChatSessionSerializerTest(SimpleTestCase):
                     "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
                     "content_data": [],
                 },
+                thinking_log="Normalized columns and preserved totals.",
                 reasoning={"step1": "Normalized columns and preserved totals."},
                 created_at=datetime(2026, 4, 21, 10, 4, tzinfo=timezone.utc),
             ),
@@ -209,6 +220,10 @@ class ChatSessionSerializerTest(SimpleTestCase):
         self.assertEqual(
             serializer.data["history"][1]["output_json"]["document_info"]["filename"],
             "example.xlsx",
+        )
+        self.assertEqual(
+            serializer.data["history"][1]["thinking_log"],
+            "Normalized columns and preserved totals.",
         )
         self.assertEqual(
             serializer.data["history"][1]["reasoning"],
