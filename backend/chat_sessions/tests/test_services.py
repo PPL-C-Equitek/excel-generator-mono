@@ -17,6 +17,8 @@ from chat_sessions.services import (
     create_generated_output,
     create_session_for_user,
     delete_session,
+    get_chat_message_for_user,
+    get_generated_output_for_user,
     get_generated_output_for_session_user,
     get_default_session_detail_pagination,
     get_paginated_session_detail_for_user,
@@ -330,7 +332,7 @@ class ChatSessionServiceTest(TestCase):
                 "summary": {"total_sheets": 1, "total_rows": 1, "total_columns": 2},
                 "content_data": [],
             },
-            thinking_log="Normalized columns and preserved totals.",
+            reasoning={"step1": "Normalized columns and preserved totals."},
             created_at=timezone.now() + timezone.timedelta(minutes=3),
         )
 
@@ -347,8 +349,8 @@ class ChatSessionServiceTest(TestCase):
         )
         self.assertEqual(result.history[2].id, generated_output.id)
         self.assertEqual(
-            result.history[2].thinking_log,
-            "Normalized columns and preserved totals.",
+            result.history[2].reasoning,
+            {"step1": "Normalized columns and preserved totals."},
         )
 
     def test_build_resume_context_for_user_returns_none_for_missing_session(self):
@@ -381,7 +383,7 @@ class ChatSessionServiceTest(TestCase):
                 "summary": {"total_sheets": 1, "total_rows": 0, "total_columns": 0},
                 "content_data": [],
             },
-            thinking_log="Only thinking log metadata is available.",
+            reasoning={"step1": "Only thinking log metadata is available."},
             created_at=timezone.now() + timezone.timedelta(minutes=1),
         )
 
@@ -391,8 +393,8 @@ class ChatSessionServiceTest(TestCase):
         self.assertEqual(len(result.history), 1)
         self.assertEqual(result.history[0].type, "output")
         self.assertEqual(
-            result.history[0].thinking_log,
-            "Only thinking log metadata is available.",
+            result.history[0].reasoning,
+            {"step1": "Only thinking log metadata is available."},
         )
 
     def test_build_resume_context_for_user_prefetches_history_without_extra_queries_after_load(self):
@@ -542,6 +544,16 @@ class AppendUserMessageServiceTest(TestCase):
 
         self.assertEqual(msg.thinking_log, "")
 
+    def test_append_user_message_stores_target_output_when_provided(self):
+        target_output = GeneratedOutput.objects.create(
+            session=self.session,
+            output_json={"content_data": []},
+        )
+
+        msg = append_user_message(self.session, "Refine output ini", target_output=target_output)
+
+        self.assertEqual(msg.target_output, target_output)
+
     def test_append_user_message_updates_session_last_message_at(self):
         self.assertIsNone(self.session.last_message_at)
 
@@ -609,16 +621,23 @@ class CreateGeneratedOutputServiceTest(TestCase):
             "final_answer": "Raw output",
         }
         self.valid_thinking_log = "Checked totals and aligned categories."
+        self.valid_reasoning = {
+            "final_answer": "Checked totals and aligned categories.",
+            "reasoning_steps": ["Mapped headers", "Validated row totals"],
+            "thinking_log": self.valid_thinking_log,
+        }
 
     def test_create_generated_output_creates_output_with_correct_data(self):
         output = create_generated_output(
             self.session,
             self.valid_output_json,
             self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
         )
 
         self.assertEqual(output.output_json, self.valid_output_json)
         self.assertEqual(output.thinking_log, self.valid_thinking_log)
+        self.assertEqual(output.reasoning, self.valid_reasoning)
         self.assertEqual(output.session, self.session)
 
     def test_create_generated_output_persists_to_db(self):
@@ -626,6 +645,7 @@ class CreateGeneratedOutputServiceTest(TestCase):
             self.session,
             self.valid_output_json,
             self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
         )
 
         self.assertTrue(GeneratedOutput.objects.filter(id=output.id).exists())
@@ -637,6 +657,7 @@ class CreateGeneratedOutputServiceTest(TestCase):
             self.session,
             self.valid_output_json,
             self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
         )
 
         self.session.refresh_from_db()
@@ -649,6 +670,7 @@ class CreateGeneratedOutputServiceTest(TestCase):
         )
 
         self.assertEqual(output.thinking_log, "")
+        self.assertEqual(output.reasoning, {})
 
     def test_create_generated_output_supports_legacy_export_payload_as_third_positional_arg(self):
         legacy_export_output_json = {
@@ -664,7 +686,32 @@ class CreateGeneratedOutputServiceTest(TestCase):
         )
 
         self.assertEqual(output.thinking_log, "")
+        self.assertEqual(output.reasoning, {})
         self.assertEqual(output.export_output_json, legacy_export_output_json)
+
+    def test_create_generated_output_stores_source_message_and_parent_output(self):
+        parent_output = GeneratedOutput.objects.create(
+            session=self.session,
+            output_json={"content_data": []},
+        )
+        source_message = ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="Refine hasil sebelumnya.",
+            target_output=parent_output,
+        )
+
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+            source_message=source_message,
+            parent_output=parent_output,
+        )
+
+        self.assertEqual(output.source_message, source_message)
+        self.assertEqual(output.parent_output, parent_output)
 
     def test_create_generated_output_rejects_non_dict_output_json(self):
         with self.assertRaises(ValidationError):
@@ -673,6 +720,56 @@ class CreateGeneratedOutputServiceTest(TestCase):
                 ["bukan", "dict"],
                 self.valid_thinking_log,
             )
+
+    def test_get_generated_output_for_user_returns_owned_record(self):
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+        )
+
+        fetched = get_generated_output_for_user(self.session.owner, output.id)
+
+        self.assertEqual(fetched, output)
+
+    def test_get_generated_output_for_user_returns_none_for_other_owner(self):
+        other_user = User.objects.create_user(
+            email="other-gen-output@example.com",
+            name="Other Gen Output",
+            password="secret",
+            status="verified",
+        )
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+        )
+
+        fetched = get_generated_output_for_user(other_user, output.id)
+
+        self.assertIsNone(fetched)
+
+    def test_get_chat_message_for_user_returns_owned_record(self):
+        message = append_user_message(self.session, "Halo")
+
+        fetched = get_chat_message_for_user(self.session.owner, message.id)
+
+        self.assertEqual(fetched, message)
+
+    def test_get_chat_message_for_user_returns_none_for_other_owner(self):
+        other_user = User.objects.create_user(
+            email="other-chat-message@example.com",
+            name="Other Chat Message",
+            password="secret",
+            status="verified",
+        )
+        message = append_user_message(self.session, "Halo")
+
+        fetched = get_chat_message_for_user(other_user, message.id)
+
+        self.assertIsNone(fetched)
 
 
 class SummarizeOldMessagesServiceTest(SimpleTestCase):

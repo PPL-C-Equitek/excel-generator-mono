@@ -5,6 +5,7 @@ from uuid import UUID
 
 from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
+from django.conf import settings
 from django.db import transaction
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
@@ -19,6 +20,8 @@ from chat_sessions.services import (
     create_generated_output,
     create_session_for_user,
     generate_session_title_from_message,
+    get_chat_message_for_user,
+    get_generated_output_for_user,
     get_session_for_user,
     resolve_session_title,
     sanitize_session_title,
@@ -215,6 +218,20 @@ def _resolve_send_message_session_context(user, session_id):
     return session, _build_session_message_history(session)
 
 
+def _build_table_context_lines(table: dict) -> list:
+    table_name = table.get("table_name", "Sheet")
+    headers = table.get("headers") or []
+    rows = table.get("rows") or []
+    lines = [f"Table '{table_name}': {len(headers)} columns, {len(rows)} rows"]
+    if headers:
+        lines.append(f"  Headers: {', '.join(str(h) for h in headers)}")
+    for i, row in enumerate(rows[:3]):
+        if isinstance(row, dict):
+            sample = dict(list(row.items())[:5])
+            lines.append(f"  Row {i + 1}: {json.dumps(sample)}")
+    return lines
+
+
 def _build_compact_file_context(export_json: dict) -> str:
     lines = [
         "[CONVERTED_FILE_CONTEXT]",
@@ -235,18 +252,8 @@ def _build_compact_file_context(export_json: dict) -> str:
     content_data = export_json.get("content_data")
     if isinstance(content_data, list):
         for table in content_data:
-            if not isinstance(table, dict):
-                continue
-            table_name = table.get("table_name", "Sheet")
-            headers = table.get("headers") or []
-            rows = table.get("rows") or []
-            lines.append(f"Table '{table_name}': {len(headers)} columns, {len(rows)} rows")
-            if headers:
-                lines.append(f"  Headers: {', '.join(str(h) for h in headers)}")
-            for i, row in enumerate(rows[:3]):
-                if isinstance(row, dict):
-                    sample = dict(list(row.items())[:5])
-                    lines.append(f"  Row {i + 1}: {json.dumps(sample)}")
+            if isinstance(table, dict):
+                lines.extend(_build_table_context_lines(table))
 
     return "\n".join(lines)
 
@@ -644,9 +651,10 @@ def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, r
     if session_id:
         queryset = queryset.filter(session_id=session_id)
 
-    identifier = chat_id or request_id
-    if identifier:
-        queryset = queryset.filter(id=identifier)
+    if chat_id:
+        queryset = queryset.filter(source_message_id=chat_id)
+    elif request_id:
+        queryset = queryset.filter(id=request_id)
 
     return queryset.defer("export_output_json").order_by("-created_at", "-id")
 
@@ -665,14 +673,52 @@ def _resolve_generate_session(user, session_id):
 def _build_chat_context_from_session(session) -> str | None:
     if session is None:
         return None
-    from django.conf import settings as django_settings
-    max_instructions = getattr(django_settings, "CHAT_CONTEXT_MAX_USER_INSTRUCTIONS", 5)
-    all_messages = list(session.messages.order_by("created_at"))
-    user_messages = [m for m in all_messages if m.role == ChatMessage.ROLE_USER]
-    if not user_messages:
+    max_instructions = max(1, getattr(settings, "CHAT_CONTEXT_MAX_USER_INSTRUCTIONS", 5))
+    recent = list(
+        session.messages
+        .filter(role=ChatMessage.ROLE_USER)
+        .order_by("-created_at")[:max_instructions]
+    )
+    if not recent:
         return None
-    recent = user_messages[-max_instructions:]
+    recent.reverse()
     return "\n".join(f"USER: {msg.content}" for msg in recent)
+
+
+def _resolve_message_target_output(user, session, target_output_id):
+    if target_output_id is None:
+        return None, None
+
+    target_output = get_generated_output_for_user(user, target_output_id)
+    if target_output is None:
+        return None, Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+    if session is not None and target_output.session_id != session.id:
+        return None, Response(
+            {
+                "detail": INVALID_REQUEST_DETAIL,
+                "errors": {"target_output_id": ["target_output_id must belong to the same session."]},
+            },
+            status=400,
+        )
+    return target_output, None
+
+
+def _resolve_generate_source_message(user, session, chat_id):
+    if chat_id is None:
+        return None, session, None
+
+    source_message = get_chat_message_for_user(user, chat_id)
+    if source_message is None:
+        return None, session, Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+    if session is not None and source_message.session_id != session.id:
+        return None, session, Response(
+            {
+                "detail": INVALID_REQUEST_DETAIL,
+                "errors": {"chat_id": ["chat_id must belong to the same session."]},
+            },
+            status=400,
+        )
+    return source_message, source_message.session, None
 
 
 def _generate_output_json(llm_generation_service, input_json, custom_schema_id, chat_context=None):
@@ -710,35 +756,62 @@ def _persist_generate_output_for_authenticated_user(
     session,
     output_json,
     thinking_log,
+    reasoning,
     export_output_json,
+    source_message=None,
+    parent_output=None,
+    bootstrap_message_content="",
     title="",
 ):
     if not getattr(user, "is_authenticated", False):
-        return None, None, None
+        return None, None, None, None
 
     try:
         with transaction.atomic():
+            created_new_session = session is None
             if session is None:
                 session = create_session_for_user(user, title=title)
+            if created_new_session and source_message is None:
+                source_message = append_user_message(
+                    session,
+                    bootstrap_message_content,
+                )
             generated_output = create_generated_output(
                 session,
                 output_json,
                 thinking_log=thinking_log,
+                reasoning=reasoning,
                 export_output_json=export_output_json,
+                source_message=source_message,
+                parent_output=parent_output,
             )
-        return session.id, generated_output.id, None
+        return session.id, generated_output.id, source_message.id if source_message else None, None
     except Exception:
         logger.exception(
             "Unexpected error while persisting session-aware llm_generate output."
         )
-        return None, None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+        return None, None, None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
 
-def _build_generate_success_response(output_json, session_id, output_id, reasoning):
+def _build_generate_bootstrap_message(input_json, title):
+    filename = None
+    if isinstance(input_json, dict):
+        filename = _normalize_filename_candidate(input_json.get("filename"))
+        if filename is None:
+            filename = _extract_document_info_filename(input_json)
+    if filename:
+        return f"Uploaded file: {filename}"
+    if title:
+        return title
+    return "Uploaded file for conversion"
+
+
+def _build_generate_success_response(output_json, session_id, chat_id, output_id, reasoning):
     response_serializer = LlmGenerateResponseSerializer(
         data={
             "output_json": output_json,
             "session_id": session_id,
+            "chat_id": chat_id,
             "output_id": output_id,
             "reasoning": reasoning,
         }
@@ -765,8 +838,16 @@ def llm_generate(request):
     validated_data = cast(dict[str, Any], request_serializer.validated_data)
     input_json = validated_data["input_json"]
     session_id = validated_data.get("session_id")
+    chat_id = validated_data.get("chat_id")
     custom_schema_id = validated_data.get("custom_schema_id")
     session, error_response = _resolve_generate_session(request.user, session_id)
+    if error_response is not None:
+        return error_response
+    source_message, session, error_response = _resolve_generate_source_message(
+        request.user,
+        session,
+        chat_id,
+    )
     if error_response is not None:
         return error_response
     include_reasoning = validated_data.get("include_reasoning", True)
@@ -797,12 +878,19 @@ def llm_generate(request):
         if isinstance(raw_thinking_log, str):
             thinking_log = raw_thinking_log
 
-    response_session_id, response_output_id, error_response = _persist_generate_output_for_authenticated_user(
+    response_session_id, response_output_id, response_chat_id, error_response = _persist_generate_output_for_authenticated_user(
         request.user,
         session,
         output_json,
         thinking_log,
+        reasoning_response,
         export_output_json,
+        source_message=source_message,
+        parent_output=getattr(source_message, "target_output", None),
+        bootstrap_message_content=_build_generate_bootstrap_message(
+            input_json,
+            resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
+        ),
         title=resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
     )
     if error_response is not None:
@@ -820,6 +908,7 @@ def llm_generate(request):
     return _build_generate_success_response(
         output_json,
         response_session_id,
+        response_chat_id,
         response_output_id,
         reasoning_response,
     )
@@ -841,9 +930,20 @@ def send_message(request):
 
     message = serializer.validated_data["message"]
     session_id = serializer.validated_data.get("session_id")
+    target_output_id = serializer.validated_data.get("target_output_id")
     session, history = _resolve_send_message_session_context(request.user, session_id)
     if session_id and session is None:
         return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+    target_output, error_response = _resolve_message_target_output(
+        request.user,
+        session,
+        target_output_id,
+    )
+    if error_response is not None:
+        return error_response
+    if session is None and target_output is not None:
+        session = target_output.session
+        history = _build_session_message_history(session)
 
     history.append({"role": "user", "content": message})
 
@@ -863,11 +963,15 @@ def send_message(request):
     with transaction.atomic():
         if session is None:
             session = create_session_for_user(request.user, title=title)
-        append_user_message(session, message)
+        user_message = append_user_message(
+            session,
+            message,
+            target_output=target_output,
+        )
         append_assistant_message(session, reply)
 
     response_serializer = SendMessageResponseSerializer(
-        data={"session_id": session.id, "reply": reply}
+        data={"session_id": session.id, "chat_id": user_message.id, "reply": reply}
     )
     if not response_serializer.is_valid():
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
@@ -977,7 +1081,7 @@ def thinking_log_list(request):
 def thinking_log_detail(request, history_id):
     record = _build_thinking_log_queryset_for_user(
         user=request.user,
-        chat_id=history_id,
+        request_id=history_id,
     ).first()
     if record is None:
         return _thinking_log_not_found_response()

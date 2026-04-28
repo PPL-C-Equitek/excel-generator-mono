@@ -43,6 +43,40 @@ class ChatSessionModelTest(TestCase):
         self.assertEqual(message.content, "Tolong ubah data ini ke tabel.")
         self.assertEqual(message.thinking_log, "")
 
+    def test_chat_message_can_reference_target_output(self):
+        session = Session.objects.create(owner=self.user, title="Transformasi Excel April")
+        output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"content_data": []},
+        )
+
+        message = ChatMessage.objects.create(
+            session=session,
+            role="user",
+            content="Refine output ini.",
+            target_output=output,
+        )
+
+        self.assertEqual(message.target_output, output)
+
+    def test_chat_message_rejects_target_output_from_other_session(self):
+        session = Session.objects.create(owner=self.user, title="Transformasi Excel April")
+        other_session = Session.objects.create(owner=self.user, title="Other Session")
+        output = GeneratedOutput.objects.create(
+            session=other_session,
+            output_json={"content_data": []},
+        )
+
+        message = ChatMessage(
+            session=session,
+            role="user",
+            content="Refine output ini.",
+            target_output=output,
+        )
+
+        with self.assertRaises(ValidationError):
+            message.save()
+
     def test_can_create_generated_output_for_session(self):
         session = Session.objects.create(
             owner=self.user,
@@ -236,3 +270,99 @@ class ChatSessionModelTest(TestCase):
             generated_output.thinking_log,
             "Normalized categories and preserved totals.",
         )
+
+    def test_generated_output_can_store_reasoning_payload(self):
+        session = Session.objects.create(
+            owner=self.user,
+            title="Transformasi Excel April",
+        )
+
+        reasoning = {
+            "final_answer": "Normalization complete.",
+            "reasoning_steps": ["Mapped categories", "Validated totals"],
+            "thinking_log": "Normalized categories and preserved totals.",
+        }
+        generated_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"filename": "invoice.pdf"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+            reasoning=reasoning,
+        )
+
+        self.assertEqual(generated_output.reasoning, reasoning)
+
+    def test_generated_output_save_rejects_non_object_reasoning(self):
+        session = Session.objects.create(
+            owner=self.user,
+            title="Transformasi Excel April",
+        )
+
+        generated_output = GeneratedOutput(
+            session=session,
+            output_json={"content_data": []},
+            reasoning=[],
+        )
+
+        with self.assertRaises(ValidationError):
+            generated_output.save()
+
+    def test_generated_output_can_reference_source_message_and_parent_output(self):
+        session = Session.objects.create(owner=self.user, title="Transformasi Excel April")
+        parent_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"content_data": []},
+        )
+        source_message = ChatMessage.objects.create(
+            session=session,
+            role="user",
+            content="Refine hasil sebelumnya.",
+            target_output=parent_output,
+        )
+
+        generated_output = GeneratedOutput.objects.create(
+            session=session,
+            source_message=source_message,
+            parent_output=parent_output,
+            output_json={"content_data": []},
+        )
+
+        self.assertEqual(generated_output.source_message, source_message)
+        self.assertEqual(generated_output.parent_output, parent_output)
+
+    def test_generated_output_rejects_source_message_from_other_session(self):
+        session = Session.objects.create(owner=self.user, title="Transformasi Excel April")
+        other_session = Session.objects.create(owner=self.user, title="Other Session")
+        source_message = ChatMessage.objects.create(
+            session=other_session,
+            role="user",
+            content="Refine output ini.",
+        )
+
+        generated_output = GeneratedOutput(
+            session=session,
+            source_message=source_message,
+            output_json={"content_data": []},
+        )
+
+        with self.assertRaises(ValidationError):
+            generated_output.save()
+
+    def test_generated_output_rejects_parent_output_from_other_session(self):
+        session = Session.objects.create(owner=self.user, title="Transformasi Excel April")
+        other_session = Session.objects.create(owner=self.user, title="Other Session")
+        parent_output = GeneratedOutput.objects.create(
+            session=other_session,
+            output_json={"content_data": []},
+        )
+
+        generated_output = GeneratedOutput(
+            session=session,
+            parent_output=parent_output,
+            output_json={"content_data": []},
+        )
+
+        with self.assertRaises(ValidationError):
+            generated_output.save()

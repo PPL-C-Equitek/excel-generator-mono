@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -188,7 +189,8 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
 
     def _make_session(self, messages):
         session = Mock()
-        session.messages.order_by.return_value = messages
+        user_msgs = [m for m in messages if getattr(m, "role", None) == "user"]
+        session.messages.filter.return_value.order_by.return_value = list(reversed(user_msgs))
         return session
 
     def test_positive_formats_user_message_as_USER_prefix(self):
@@ -266,6 +268,23 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
 
         self.assertNotIn("\n", result)
         self.assertEqual(result, "USER: Satu instruksi")
+
+    def test_edge_clamps_zero_max_instructions_to_one_message(self):
+        from django.test import override_settings
+        from llm.views import _build_chat_context_from_session
+
+        session = self._make_session([
+            self._make_message("user", "Instruksi 1"),
+            self._make_message("user", "Instruksi 2"),
+            self._make_message("user", "Instruksi 3"),
+        ])
+        with override_settings(CHAT_CONTEXT_MAX_USER_INSTRUCTIONS=0):
+            result = _build_chat_context_from_session(session)
+
+        lines = result.split("\n")
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0], "USER: Instruksi 3")
+
 
 class InjectFileContextTest(SimpleTestCase):
     def _make_output(self, export_output_json):
@@ -600,3 +619,144 @@ class NormalizeSessionOutputExportPayloadTest(SimpleTestCase):
         _normalize_session_output_export_payload(output)
 
         self.assertNotIn("source_type", original["document_info"])
+
+
+class BuildTableContextLinesTest(SimpleTestCase):
+    def test_positive_returns_summary_line_with_column_and_row_count(self):
+        from llm.views import _build_table_context_lines
+
+        table = {"table_name": "Sales", "headers": ["A", "B"], "rows": [{"A": 1, "B": 2}]}
+        lines = _build_table_context_lines(table)
+
+        self.assertEqual(lines[0], "Table 'Sales': 2 columns, 1 rows")
+
+    def test_positive_includes_headers_line_when_headers_present(self):
+        from llm.views import _build_table_context_lines
+
+        table = {"table_name": "T", "headers": ["Col1", "Col2"], "rows": []}
+        lines = _build_table_context_lines(table)
+
+        self.assertTrue(any("Col1" in line and "Col2" in line for line in lines))
+
+    def test_negative_no_headers_line_when_empty_headers(self):
+        from llm.views import _build_table_context_lines
+
+        table = {"table_name": "T", "headers": [], "rows": []}
+        lines = _build_table_context_lines(table)
+
+        self.assertFalse(any("Headers:" in line for line in lines))
+
+    def test_positive_includes_up_to_3_sample_rows(self):
+        from llm.views import _build_table_context_lines
+
+        rows = [{"X": i} for i in range(3)]
+        table = {"table_name": "T", "headers": ["X"], "rows": rows}
+        lines = _build_table_context_lines(table)
+
+        row_lines = [line for line in lines if line.startswith("  Row")]
+        self.assertEqual(len(row_lines), 3)
+
+    def test_edge_truncates_to_3_rows_when_more_exist(self):
+        from llm.views import _build_table_context_lines
+
+        rows = [{"X": i} for i in range(5)]
+        table = {"table_name": "T", "headers": ["X"], "rows": rows}
+        lines = _build_table_context_lines(table)
+
+        row_lines = [line for line in lines if line.startswith("  Row")]
+        self.assertEqual(len(row_lines), 3)
+
+    def test_edge_truncates_to_5_columns_per_row_when_more_exist(self):
+        from llm.views import _build_table_context_lines
+
+        row = {f"col{i}": i for i in range(8)}
+        table = {"table_name": "T", "headers": [f"col{i}" for i in range(8)], "rows": [row]}
+        lines = _build_table_context_lines(table)
+
+        row_line = next(line for line in lines if line.startswith("  Row"))
+        parsed = json.loads(row_line.split(": ", 1)[1])
+        self.assertEqual(len(parsed), 5)
+
+    def test_edge_non_dict_rows_skipped(self):
+        from llm.views import _build_table_context_lines
+
+        table = {"table_name": "T", "headers": ["A"], "rows": [["list_row"], "string_row"]}
+        lines = _build_table_context_lines(table)
+
+        row_lines = [line for line in lines if line.startswith("  Row")]
+        self.assertEqual(len(row_lines), 0)
+
+    def test_edge_uses_default_sheet_name_when_table_name_missing(self):
+        from llm.views import _build_table_context_lines
+
+        table = {"headers": ["A"], "rows": []}
+        lines = _build_table_context_lines(table)
+
+        self.assertIn("Sheet", lines[0])
+
+
+class BuildCompactFileContextTest(SimpleTestCase):
+    def test_positive_starts_with_converted_file_context_header(self):
+        from llm.views import _build_compact_file_context
+
+        result = _build_compact_file_context({})
+
+        self.assertTrue(result.startswith("[CONVERTED_FILE_CONTEXT]"))
+
+    def test_positive_includes_file_info_from_document_info(self):
+        from llm.views import _build_compact_file_context
+
+        export_json = {"document_info": {"filename": "report.xlsx", "source_type": "Excel"}}
+        result = _build_compact_file_context(export_json)
+
+        self.assertIn("report.xlsx", result)
+        self.assertIn("Excel", result)
+
+    def test_positive_includes_summary_key_value_pairs(self):
+        from llm.views import _build_compact_file_context
+
+        export_json = {"summary": {"total_tables": 2, "total_rows": 10}}
+        result = _build_compact_file_context(export_json)
+
+        self.assertIn("total_tables=2", result)
+        self.assertIn("total_rows=10", result)
+
+    def test_negative_no_file_line_when_document_info_missing(self):
+        from llm.views import _build_compact_file_context
+
+        result = _build_compact_file_context({})
+
+        self.assertNotIn("File:", result)
+
+    def test_negative_no_summary_line_when_summary_is_empty_dict(self):
+        from llm.views import _build_compact_file_context
+
+        export_json = {"summary": {}}
+        result = _build_compact_file_context(export_json)
+
+        self.assertNotIn("Summary:", result)
+
+    def test_negative_non_dict_tables_in_content_data_are_skipped(self):
+        from llm.views import _build_compact_file_context
+
+        export_json = {"content_data": ["not_a_dict", 42, None]}
+        result = _build_compact_file_context(export_json)
+
+        self.assertNotIn("Table '", result)
+
+    def test_negative_no_table_lines_when_content_data_absent(self):
+        from llm.views import _build_compact_file_context
+
+        result = _build_compact_file_context({"document_info": {"filename": "f.csv"}})
+
+        self.assertNotIn("Table '", result)
+
+    def test_positive_includes_table_name_from_content_data(self):
+        from llm.views import _build_compact_file_context
+
+        export_json = {
+            "content_data": [{"table_name": "DataSheet", "headers": [], "rows": []}]
+        }
+        result = _build_compact_file_context(export_json)
+
+        self.assertIn("DataSheet", result)
