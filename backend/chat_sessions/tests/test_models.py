@@ -294,6 +294,21 @@ class ChatSessionModelTest(TestCase):
 
         self.assertEqual(generated_output.reasoning, reasoning)
 
+    def test_generated_output_save_rejects_non_object_reasoning(self):
+        session = Session.objects.create(
+            owner=self.user,
+            title="Transformasi Excel April",
+        )
+
+        generated_output = GeneratedOutput(
+            session=session,
+            output_json={"content_data": []},
+            reasoning=[],
+        )
+
+        with self.assertRaises(ValidationError):
+            generated_output.save()
+
     def test_generated_output_can_reference_source_message_and_parent_output(self):
         session = Session.objects.create(owner=self.user, title="Transformasi Excel April")
         parent_output = GeneratedOutput.objects.create(

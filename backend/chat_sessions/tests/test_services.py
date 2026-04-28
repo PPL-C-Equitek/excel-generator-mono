@@ -332,7 +332,7 @@ class ChatSessionServiceTest(TestCase):
                 "summary": {"total_sheets": 1, "total_rows": 1, "total_columns": 2},
                 "content_data": [],
             },
-            thinking_log="Normalized columns and preserved totals.",
+            reasoning={"step1": "Normalized columns and preserved totals."},
             created_at=timezone.now() + timezone.timedelta(minutes=3),
         )
 
@@ -349,8 +349,8 @@ class ChatSessionServiceTest(TestCase):
         )
         self.assertEqual(result.history[2].id, generated_output.id)
         self.assertEqual(
-            result.history[2].thinking_log,
-            "Normalized columns and preserved totals.",
+            result.history[2].reasoning,
+            {"step1": "Normalized columns and preserved totals."},
         )
 
     def test_build_resume_context_for_user_returns_none_for_missing_session(self):
@@ -383,7 +383,7 @@ class ChatSessionServiceTest(TestCase):
                 "summary": {"total_sheets": 1, "total_rows": 0, "total_columns": 0},
                 "content_data": [],
             },
-            thinking_log="Only thinking log metadata is available.",
+            reasoning={"step1": "Only thinking log metadata is available."},
             created_at=timezone.now() + timezone.timedelta(minutes=1),
         )
 
@@ -393,8 +393,8 @@ class ChatSessionServiceTest(TestCase):
         self.assertEqual(len(result.history), 1)
         self.assertEqual(result.history[0].type, "output")
         self.assertEqual(
-            result.history[0].thinking_log,
-            "Only thinking log metadata is available.",
+            result.history[0].reasoning,
+            {"step1": "Only thinking log metadata is available."},
         )
 
     def test_build_resume_context_for_user_prefetches_history_without_extra_queries_after_load(self):

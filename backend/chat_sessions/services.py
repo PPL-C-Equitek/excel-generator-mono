@@ -350,7 +350,7 @@ def _build_resume_history(session):
             source_message_id=output.source_message_id,
             parent_output_id=output.parent_output_id,
             output_json=output.output_json,
-            thinking_log=output.thinking_log,
+            reasoning=output.reasoning,
             created_at=output.created_at,
         )
         for output in session.generated_outputs.all()
