@@ -94,16 +94,19 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         self.assertIn("session_id", serializer.errors)
 
     def test_generate_response_serializer_accepts_session_and_output_ids(self):
+        chat_id = uuid4()
         serializer = LlmGenerateResponseSerializer(
             data={
                 "output_json": {"sheet": "Sheet1"},
                 "session_id": str(uuid4()),
+                "chat_id": str(chat_id),
                 "output_id": str(uuid4()),
                 "reasoning": None,
             }
         )
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.data["chat_id"], str(chat_id))
 
     def test_generate_request_serializer_accepts_include_reasoning(self):
         serializer = LlmGenerateRequestSerializer(

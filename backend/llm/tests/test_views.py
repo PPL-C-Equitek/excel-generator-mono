@@ -824,6 +824,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             data={
                 "output_json": {"status": "ok"},
                 "session_id": None,
+                "chat_id": None,
                 "output_id": None,
                 "reasoning": {
                     "final_answer": "Answer",
@@ -1149,13 +1150,21 @@ class LlmGenerateSessionIntegrationTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("session_id", response.data)
+        self.assertIn("chat_id", response.data)
         self.assertIn("output_id", response.data)
         self.assertEqual(Session.objects.count(), 1)
         session = Session.objects.get(owner=self.user)
         self.assertEqual(str(session.id), response.data["session_id"])
+        self.assertEqual(ChatMessage.objects.count(), 1)
+        bootstrap_message = ChatMessage.objects.get(session=session)
+        self.assertEqual(bootstrap_message.role, ChatMessage.ROLE_USER)
+        self.assertEqual(str(bootstrap_message.id), response.data["chat_id"])
+        self.assertIn("invoice.pdf", bootstrap_message.content)
         self.assertEqual(GeneratedOutput.objects.count(), 1)
         generated_output = GeneratedOutput.objects.get(session=session)
         self.assertEqual(str(generated_output.id), response.data["output_id"])
+        self.assertEqual(generated_output.source_message_id, bootstrap_message.id)
+        self.assertIsNone(generated_output.parent_output_id)
         self.assertEqual(
             generated_output.output_json,
             {
