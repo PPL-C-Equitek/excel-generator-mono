@@ -137,21 +137,19 @@ function createFollowUpMessages(
     prompt: string,
     createMessageId: () => number
 ): ChatMessage[] {
-    const nextMessages = [...messages]
-
-    nextMessages.push({
-        id: createMessageId(),
-        role: 'assistant',
-        content: resultContent,
-    })
-
-    nextMessages.push({
-        id: createMessageId(),
-        role: 'user',
-        text: prompt,
-    })
-
-    return nextMessages
+    return [
+        ...messages,
+        {
+            id: createMessageId(),
+            role: 'assistant',
+            content: resultContent,
+        },
+        {
+            id: createMessageId(),
+            role: 'user',
+            text: prompt,
+        },
+    ]
 }
 
 function shouldShowValidationFeedback(
