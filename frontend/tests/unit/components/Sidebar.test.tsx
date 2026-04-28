@@ -75,6 +75,11 @@ describe('Sidebar', () => {
         expect(screen.getByTestId('history-sidebar-list')).toBeInTheDocument()
     })
 
+    it('keeps sidebar modal backdrops above convert page overlays', () => {
+        render(<Sidebar activeMenu="convert" />)
+        expect(screen.getByRole('complementary')).toHaveClass('z-50')
+    })
+
     it('marks Convert as active when activeMenu is convert', () => {
         render(<Sidebar activeMenu="convert" />)
         expect(screen.getByText('Convert').closest('a')).toHaveClass('bg-white')
