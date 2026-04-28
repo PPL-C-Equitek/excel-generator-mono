@@ -2998,7 +2998,7 @@ class SessionEndpointTests(TestCase):
     ):
         stub_output = SimpleNamespace(
             id=self.output_id,
-            output_json={
+            export_output_json={
                 "document_info": {
                     "filename": "invoice.pdf",
                     "source_type": "PDF",
@@ -3247,7 +3247,7 @@ class SessionEndpointTests(TestCase):
     ):
         stub_output = SimpleNamespace(
             id=self.output_id,
-            output_json={
+            export_output_json={
                 "document_info": {
                     "filename": "invoice.pdf",
                     "source_type": "PDF",
@@ -3313,7 +3313,7 @@ class SessionEndpointTests(TestCase):
     ):
         stub_output = SimpleNamespace(
             id=self.output_id,
-            output_json={
+            export_output_json={
                 "document_info": {
                     "source_type": "unknown",
                     "filename": "invoice.pdf",
@@ -3428,7 +3428,7 @@ class SessionEndpointTests(TestCase):
         payload = ["not", "a", "dict"]
 
         normalized = views._normalize_session_output_export_payload(
-            SimpleNamespace(output_json=payload)
+            SimpleNamespace(export_output_json=payload)
         )
 
         self.assertEqual(normalized, payload)
@@ -3441,7 +3441,7 @@ class SessionEndpointTests(TestCase):
         }
 
         normalized = views._normalize_session_output_export_payload(
-            SimpleNamespace(output_json=payload)
+            SimpleNamespace(export_output_json=payload)
         )
 
         self.assertEqual(normalized, payload)
@@ -3457,7 +3457,7 @@ class SessionEndpointTests(TestCase):
         }
 
         normalized = views._normalize_session_output_export_payload(
-            SimpleNamespace(output_json=payload)
+            SimpleNamespace(export_output_json=payload)
         )
 
         self.assertEqual(

@@ -413,6 +413,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            chat_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_not_called()
         json_generator.generate.assert_called_once_with(
@@ -442,6 +443,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="Use only invoice_number and total_amount.",
+            chat_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
         json_generator.generate.assert_called_once_with(
@@ -469,6 +471,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="   ",
+            chat_context=None,
         )
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
@@ -494,6 +497,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            chat_context=None,
         )
         json_generator.generate.assert_called_once_with(
             input_json={"name": "Pen", "price": 5000},
@@ -525,6 +529,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="Use only invoice_number and total_amount.",
+            chat_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
         json_generator.generate.assert_called_once_with(

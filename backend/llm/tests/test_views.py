@@ -458,6 +458,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             custom_schema_id=None,
+            chat_context=None,
         )
 
     @patch("llm.views.build_llm_reasoning_service")
@@ -625,6 +626,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             custom_schema_id=schema_id,
+            chat_context=None,
         )
 
     @patch("llm.views.build_llm_generation_service")
@@ -651,6 +653,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             custom_schema_id=schema_id,
+            chat_context=None,
         )
 
     def test_llm_generate_rejects_missing_input_json(self):
@@ -2360,3 +2363,88 @@ class LlmGenerateSessionTitleGenerationTest(TestCase):
         
         session = Session.objects.get(id=session_id)
         self.assertEqual(session.title, "Convert laporan_keuangan.pdf")
+
+
+class SendMessageFileContextTest(TestCase):
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="send-msg-file@example.com",
+            name="File Context User",
+            password="secret",
+            status="verified",
+        )
+        self.output_json = {
+            "document_info": {"filename": "report.xlsx"},
+            "summary": {"total_sheets": 2},
+            "content_data": [{"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}],
+        }
+        self.export_output_json = {
+            "document_info": {"source_type": "Excel", "filename": "report.xlsx"},
+            "summary": {"total_tables": 1, "total_rows": 1, "total_columns": 1},
+            "content_data": [{"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}],
+        }
+
+    def _create_output(self, session, filename="report.xlsx"):
+        return GeneratedOutput.objects.create(
+            session=session,
+            output_json=self.output_json,
+            export_output_json={
+                **self.export_output_json,
+                "document_info": {"source_type": "Excel", "filename": filename},
+            },
+        )
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_injects_file_context_as_first_system_message(self, mock_generate):
+        mock_generate.return_value = "ok"
+        session = Session.objects.create(owner=self.user)
+        self._create_output(session)
+        self.client.force_authenticate(user=self.user)
+
+        self.client.post(
+            "/llm/send-message/",
+            {"session_id": str(session.id), "message": "Apa isi file ini?"},
+            format="json",
+        )
+
+        call_args = mock_generate.call_args[0][0]
+        self.assertEqual(call_args[0]["role"], "system")
+        self.assertIn("[CONVERTED_FILE_CONTEXT]", call_args[0]["content"])
+        self.assertIn("report.xlsx", call_args[0]["content"])
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_does_not_inject_file_context_when_no_generated_output(self, mock_generate):
+        mock_generate.return_value = "ok"
+        session = Session.objects.create(owner=self.user)
+        self.client.force_authenticate(user=self.user)
+
+        self.client.post(
+            "/llm/send-message/",
+            {"session_id": str(session.id), "message": "Halo"},
+            format="json",
+        )
+
+        call_args = mock_generate.call_args[0][0]
+        system_messages = [m for m in call_args if m.get("role") == "system"]
+        self.assertEqual(len(system_messages), 0)
+
+    @patch("llm.views.generate_chat_response")
+    def test_send_message_uses_most_recent_generated_output(self, mock_generate):
+        mock_generate.return_value = "ok"
+        session = Session.objects.create(owner=self.user)
+        self._create_output(session, filename="old_file.xlsx")
+        self._create_output(session, filename="new_file.xlsx")
+        self.client.force_authenticate(user=self.user)
+
+        self.client.post(
+            "/llm/send-message/",
+            {"session_id": str(session.id), "message": "Apa isi file ini?"},
+            format="json",
+        )
+
+        call_args = mock_generate.call_args[0][0]
+        self.assertEqual(call_args[0]["role"], "system")
+        self.assertIn("new_file.xlsx", call_args[0]["content"])
+        self.assertNotIn("old_file.xlsx", call_args[0]["content"])
