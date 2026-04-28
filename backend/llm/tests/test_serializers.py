@@ -233,6 +233,7 @@ class ThinkingLogSerializerTest(SimpleTestCase):
         instance = SimpleNamespace(
             id=uuid4(),
             session_id=uuid4(),
+            source_message_id=uuid4(),
             output_json={"request_id": "req-123"},
             thinking_log="Structured summary",
             status_processing="completed",
@@ -241,7 +242,7 @@ class ThinkingLogSerializerTest(SimpleTestCase):
 
         serializer = ThinkingLogItemSerializer(instance)
 
-        self.assertEqual(serializer.data["chat_id"], str(instance.id))
+        self.assertEqual(serializer.data["chat_id"], str(instance.source_message_id))
         self.assertNotIn("request_id", serializer.data)
 
     def test_thinking_log_item_serializer_does_not_classify_output_json_session_id_as_chat(self):

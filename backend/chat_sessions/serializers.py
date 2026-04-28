@@ -6,11 +6,14 @@ class ChatMessageSerializer(serializers.Serializer):
     role = serializers.CharField()
     content = serializers.CharField()
     thinking_log = serializers.CharField(allow_blank=True)
+    target_output_id = serializers.UUIDField(allow_null=True, required=False)
     created_at = serializers.DateTimeField()
 
 
 class GeneratedOutputSerializer(serializers.Serializer):
     id = serializers.UUIDField()
+    chat_id = serializers.UUIDField(source="source_message_id", allow_null=True, required=False)
+    parent_output_id = serializers.UUIDField(allow_null=True, required=False)
     output_json = serializers.JSONField()
     thinking_log = serializers.CharField(allow_blank=True)
     created_at = serializers.DateTimeField()
@@ -22,12 +25,15 @@ class ResumeHistoryMessageSerializer(serializers.Serializer):
     role = serializers.CharField()
     content = serializers.CharField()
     thinking_log = serializers.CharField(allow_blank=True)
+    target_output_id = serializers.UUIDField(allow_null=True, required=False)
     created_at = serializers.DateTimeField()
 
 
 class ResumeHistoryOutputSerializer(serializers.Serializer):
     type = serializers.CharField()
     id = serializers.UUIDField()
+    chat_id = serializers.UUIDField(source="source_message_id", allow_null=True, required=False)
+    parent_output_id = serializers.UUIDField(allow_null=True, required=False)
     output_json = serializers.JSONField()
     thinking_log = serializers.CharField(allow_blank=True)
     created_at = serializers.DateTimeField()

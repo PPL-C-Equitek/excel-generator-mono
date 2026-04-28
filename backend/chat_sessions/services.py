@@ -197,7 +197,29 @@ def get_generated_output_for_session_user(user, session_id, output_id):
             session_id=session_id,
             id=output_id,
         )
-        .select_related("session")
+        .select_related("session", "source_message", "parent_output")
+        .first()
+    )
+
+
+def get_generated_output_for_user(user, output_id):
+    return (
+        GeneratedOutput.objects.filter(
+            session__owner=user,
+            id=output_id,
+        )
+        .select_related("session", "source_message", "parent_output")
+        .first()
+    )
+
+
+def get_chat_message_for_user(user, message_id):
+    return (
+        ChatMessage.objects.filter(
+            session__owner=user,
+            id=message_id,
+        )
+        .select_related("session", "target_output")
         .first()
     )
 
@@ -223,12 +245,12 @@ def get_paginated_session_detail_for_user(
         return None
 
     messages = _build_paginated_collection(
-        queryset=session.messages.order_by("created_at", "id"),
+        queryset=session.messages.select_related("target_output").order_by("created_at", "id"),
         limit=messages_limit,
         offset=messages_offset,
     )
     generated_outputs = _build_paginated_collection(
-        queryset=session.generated_outputs.order_by("created_at", "id"),
+        queryset=session.generated_outputs.select_related("source_message", "parent_output").order_by("created_at", "id"),
         limit=outputs_limit,
         offset=outputs_offset,
     )
@@ -251,11 +273,11 @@ def build_resume_context_for_user(user, session_id):
         .prefetch_related(
             Prefetch(
                 "messages",
-                queryset=ChatMessage.objects.order_by("created_at", "id"),
+                queryset=ChatMessage.objects.select_related("target_output").order_by("created_at", "id"),
             ),
             Prefetch(
                 "generated_outputs",
-                queryset=GeneratedOutput.objects.order_by("created_at", "id"),
+                queryset=GeneratedOutput.objects.select_related("source_message", "parent_output").order_by("created_at", "id"),
             ),
         )
         .first()
@@ -316,6 +338,7 @@ def _build_resume_history(session):
             role=message.role,
             content=message.content,
             thinking_log=message.thinking_log,
+            target_output_id=message.target_output_id,
             created_at=message.created_at,
         )
         for message in session.messages.all()
@@ -324,6 +347,8 @@ def _build_resume_history(session):
         SimpleNamespace(
             type="output",
             id=output.id,
+            source_message_id=output.source_message_id,
+            parent_output_id=output.parent_output_id,
             output_json=output.output_json,
             thinking_log=output.thinking_log,
             created_at=output.created_at,
@@ -393,12 +418,13 @@ def delete_session(session):
     session.delete()
 
 
-def append_user_message(session, content):
+def append_user_message(session, content, target_output=None):
     now = timezone.now()
     msg = ChatMessage.objects.create(
         session=session,
         role=ChatMessage.ROLE_USER,
         content=content,
+        target_output=target_output,
     )
     session.last_message_at = now
     session.save(update_fields=["last_message_at", "updated_at"])
@@ -424,6 +450,8 @@ def create_generated_output(
     thinking_log="",
     export_output_json=None,
     reasoning=None,
+    source_message=None,
+    parent_output=None,
 ):
     now = timezone.now()
     # Temporary compatibility shim while callers are migrated away from
@@ -434,6 +462,8 @@ def create_generated_output(
 
     output = GeneratedOutput.objects.create(
         session=session,
+        source_message=source_message,
+        parent_output=parent_output,
         output_json=output_json,
         thinking_log=thinking_log or "",
         reasoning=reasoning if isinstance(reasoning, dict) else {},

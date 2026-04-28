@@ -18,6 +18,8 @@ from chat_sessions.services import (
     create_generated_output,
     create_session_for_user,
     generate_session_title_from_message,
+    get_chat_message_for_user,
+    get_generated_output_for_user,
     get_session_for_user,
     resolve_session_title,
     sanitize_session_title,
@@ -592,9 +594,10 @@ def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, r
     if session_id:
         queryset = queryset.filter(session_id=session_id)
 
-    identifier = chat_id or request_id
-    if identifier:
-        queryset = queryset.filter(id=identifier)
+    if chat_id:
+        queryset = queryset.filter(source_message_id=chat_id)
+    elif request_id:
+        queryset = queryset.filter(id=request_id)
 
     return queryset.defer("export_output_json").order_by("-created_at", "-id")
 
@@ -608,6 +611,42 @@ def _resolve_generate_session(user, session_id):
         return None, Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
 
     return session, None
+
+
+def _resolve_message_target_output(user, session, target_output_id):
+    if target_output_id is None:
+        return None, None
+
+    target_output = get_generated_output_for_user(user, target_output_id)
+    if target_output is None:
+        return None, Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+    if session is not None and target_output.session_id != session.id:
+        return None, Response(
+            {
+                "detail": INVALID_REQUEST_DETAIL,
+                "errors": {"target_output_id": ["target_output_id must belong to the same session."]},
+            },
+            status=400,
+        )
+    return target_output, None
+
+
+def _resolve_generate_source_message(user, session, chat_id):
+    if chat_id is None:
+        return None, session, None
+
+    source_message = get_chat_message_for_user(user, chat_id)
+    if source_message is None:
+        return None, session, Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+    if session is not None and source_message.session_id != session.id:
+        return None, session, Response(
+            {
+                "detail": INVALID_REQUEST_DETAIL,
+                "errors": {"chat_id": ["chat_id must belong to the same session."]},
+            },
+            status=400,
+        )
+    return source_message, source_message.session, None
 
 
 def _generate_output_json(llm_generation_service, input_json, custom_schema_id):
@@ -646,6 +685,8 @@ def _persist_generate_output_for_authenticated_user(
     thinking_log,
     reasoning,
     export_output_json,
+    source_message=None,
+    parent_output=None,
     title="",
 ):
     if not getattr(user, "is_authenticated", False):
@@ -661,6 +702,8 @@ def _persist_generate_output_for_authenticated_user(
                 thinking_log=thinking_log,
                 reasoning=reasoning,
                 export_output_json=export_output_json,
+                source_message=source_message,
+                parent_output=parent_output,
             )
         return session.id, generated_output.id, None
     except Exception:
@@ -701,8 +744,16 @@ def llm_generate(request):
     validated_data = cast(dict[str, Any], request_serializer.validated_data)
     input_json = validated_data["input_json"]
     session_id = validated_data.get("session_id")
+    chat_id = validated_data.get("chat_id")
     custom_schema_id = validated_data.get("custom_schema_id")
     session, error_response = _resolve_generate_session(request.user, session_id)
+    if error_response is not None:
+        return error_response
+    source_message, session, error_response = _resolve_generate_source_message(
+        request.user,
+        session,
+        chat_id,
+    )
     if error_response is not None:
         return error_response
     include_reasoning = validated_data.get("include_reasoning", True)
@@ -738,6 +789,8 @@ def llm_generate(request):
         thinking_log,
         reasoning_response,
         export_output_json,
+        source_message=source_message,
+        parent_output=getattr(source_message, "target_output", None),
         title=resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
     )
     if error_response is not None:
@@ -776,9 +829,20 @@ def send_message(request):
 
     message = serializer.validated_data["message"]
     session_id = serializer.validated_data.get("session_id")
+    target_output_id = serializer.validated_data.get("target_output_id")
     session, history = _resolve_send_message_session_context(request.user, session_id)
     if session_id and session is None:
         return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+    target_output, error_response = _resolve_message_target_output(
+        request.user,
+        session,
+        target_output_id,
+    )
+    if error_response is not None:
+        return error_response
+    if session is None and target_output is not None:
+        session = target_output.session
+        history = _build_session_message_history(session)
 
     history.append({"role": "user", "content": message})
 
@@ -798,11 +862,15 @@ def send_message(request):
     with transaction.atomic():
         if session is None:
             session = create_session_for_user(request.user, title=title)
-        append_user_message(session, message)
+        user_message = append_user_message(
+            session,
+            message,
+            target_output=target_output,
+        )
         append_assistant_message(session, reply)
 
     response_serializer = SendMessageResponseSerializer(
-        data={"session_id": session.id, "reply": reply}
+        data={"session_id": session.id, "chat_id": user_message.id, "reply": reply}
     )
     if not response_serializer.is_valid():
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
@@ -912,7 +980,7 @@ def thinking_log_list(request):
 def thinking_log_detail(request, history_id):
     record = _build_thinking_log_queryset_for_user(
         user=request.user,
-        chat_id=history_id,
+        request_id=history_id,
     ).first()
     if record is None:
         return _thinking_log_not_found_response()

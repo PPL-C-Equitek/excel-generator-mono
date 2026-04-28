@@ -17,6 +17,8 @@ from chat_sessions.services import (
     create_generated_output,
     create_session_for_user,
     delete_session,
+    get_chat_message_for_user,
+    get_generated_output_for_user,
     get_generated_output_for_session_user,
     get_default_session_detail_pagination,
     get_paginated_session_detail_for_user,
@@ -542,6 +544,16 @@ class AppendUserMessageServiceTest(TestCase):
 
         self.assertEqual(msg.thinking_log, "")
 
+    def test_append_user_message_stores_target_output_when_provided(self):
+        target_output = GeneratedOutput.objects.create(
+            session=self.session,
+            output_json={"content_data": []},
+        )
+
+        msg = append_user_message(self.session, "Refine output ini", target_output=target_output)
+
+        self.assertEqual(msg.target_output, target_output)
+
     def test_append_user_message_updates_session_last_message_at(self):
         self.assertIsNone(self.session.last_message_at)
 
@@ -677,6 +689,30 @@ class CreateGeneratedOutputServiceTest(TestCase):
         self.assertEqual(output.reasoning, {})
         self.assertEqual(output.export_output_json, legacy_export_output_json)
 
+    def test_create_generated_output_stores_source_message_and_parent_output(self):
+        parent_output = GeneratedOutput.objects.create(
+            session=self.session,
+            output_json={"content_data": []},
+        )
+        source_message = ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="Refine hasil sebelumnya.",
+            target_output=parent_output,
+        )
+
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+            source_message=source_message,
+            parent_output=parent_output,
+        )
+
+        self.assertEqual(output.source_message, source_message)
+        self.assertEqual(output.parent_output, parent_output)
+
     def test_create_generated_output_rejects_non_dict_output_json(self):
         with self.assertRaises(ValidationError):
             create_generated_output(
@@ -684,6 +720,56 @@ class CreateGeneratedOutputServiceTest(TestCase):
                 ["bukan", "dict"],
                 self.valid_thinking_log,
             )
+
+    def test_get_generated_output_for_user_returns_owned_record(self):
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+        )
+
+        fetched = get_generated_output_for_user(self.session.owner, output.id)
+
+        self.assertEqual(fetched, output)
+
+    def test_get_generated_output_for_user_returns_none_for_other_owner(self):
+        other_user = User.objects.create_user(
+            email="other-gen-output@example.com",
+            name="Other Gen Output",
+            password="secret",
+            status="verified",
+        )
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+        )
+
+        fetched = get_generated_output_for_user(other_user, output.id)
+
+        self.assertIsNone(fetched)
+
+    def test_get_chat_message_for_user_returns_owned_record(self):
+        message = append_user_message(self.session, "Halo")
+
+        fetched = get_chat_message_for_user(self.session.owner, message.id)
+
+        self.assertEqual(fetched, message)
+
+    def test_get_chat_message_for_user_returns_none_for_other_owner(self):
+        other_user = User.objects.create_user(
+            email="other-chat-message@example.com",
+            name="Other Chat Message",
+            password="secret",
+            status="verified",
+        )
+        message = append_user_message(self.session, "Halo")
+
+        fetched = get_chat_message_for_user(other_user, message.id)
+
+        self.assertIsNone(fetched)
 
 
 class SummarizeOldMessagesServiceTest(SimpleTestCase):

@@ -48,6 +48,13 @@ class ChatMessage(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     content = models.TextField()
     thinking_log = models.TextField(blank=True, default="")
+    target_output = models.ForeignKey(
+        "chat_sessions.GeneratedOutput",
+        on_delete=models.SET_NULL,
+        related_name="targeted_by_messages",
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -58,6 +65,20 @@ class ChatMessage(models.Model):
             ),
         ]
 
+    def clean(self):
+        super().clean()
+        if (
+            self.target_output_id is not None
+            and self.target_output.session_id != self.session_id
+        ):
+            raise ValidationError(
+                {"target_output": "target_output must belong to the same session."}
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
 
 class GeneratedOutput(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -65,6 +86,20 @@ class GeneratedOutput(models.Model):
         "chat_sessions.Session",
         on_delete=models.CASCADE,
         related_name="generated_outputs",
+    )
+    source_message = models.ForeignKey(
+        "chat_sessions.ChatMessage",
+        on_delete=models.SET_NULL,
+        related_name="generated_outputs",
+        null=True,
+        blank=True,
+    )
+    parent_output = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        related_name="refined_outputs",
+        null=True,
+        blank=True,
     )
     output_json = models.JSONField()
     thinking_log = models.TextField(blank=True, default="")
@@ -84,6 +119,20 @@ class GeneratedOutput(models.Model):
         super().clean()
         if not isinstance(self.output_json, dict):
             raise ValidationError({"output_json": "output_json must be an object."})
+        if (
+            self.source_message_id is not None
+            and self.source_message.session_id != self.session_id
+        ):
+            raise ValidationError(
+                {"source_message": "source_message must belong to the same session."}
+            )
+        if (
+            self.parent_output_id is not None
+            and self.parent_output.session_id != self.session_id
+        ):
+            raise ValidationError(
+                {"parent_output": "parent_output must belong to the same session."}
+            )
         if not isinstance(self.reasoning, dict):
             raise ValidationError({"reasoning": "reasoning must be an object."})
         if not isinstance(self.export_output_json, dict):

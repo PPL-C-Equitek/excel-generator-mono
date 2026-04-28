@@ -51,6 +51,7 @@ class ChatSessionSerializerTest(SimpleTestCase):
                     role="user",
                     content="Transform this file",
                     thinking_log="",
+                    target_output_id=None,
                     created_at=datetime(2026, 4, 21, 10, 1, tzinfo=timezone.utc),
                 )
             ],
@@ -62,6 +63,8 @@ class ChatSessionSerializerTest(SimpleTestCase):
             "results": [
                 SimpleNamespace(
                     id="output-1",
+                    source_message_id="message-1",
+                    parent_output_id=None,
                     output_json={
                         "document_info": {"source_type": "Excel", "filename": "example.xlsx"},
                         "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
@@ -77,9 +80,14 @@ class ChatSessionSerializerTest(SimpleTestCase):
 
         self.assertEqual(serializer.data["id"], "session-1")
         self.assertEqual(serializer.data["messages"]["results"][0]["role"], "user")
+        self.assertIsNone(serializer.data["messages"]["results"][0]["target_output_id"])
         self.assertEqual(
             serializer.data["generated_outputs"]["results"][0]["output_json"]["document_info"]["filename"],
             "example.xlsx",
+        )
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["chat_id"],
+            "message-1",
         )
         self.assertEqual(
             serializer.data["generated_outputs"]["results"][0]["thinking_log"],
@@ -98,6 +106,7 @@ class ChatSessionSerializerTest(SimpleTestCase):
                     role="assistant",
                     content="Here is the result",
                     thinking_log="Reasoning summary",
+                    target_output_id="output-0",
                     created_at=datetime(2026, 4, 21, 10, 3, tzinfo=timezone.utc),
                 )
             ],
@@ -109,6 +118,8 @@ class ChatSessionSerializerTest(SimpleTestCase):
             "results": [
                 SimpleNamespace(
                     id="output-1",
+                    source_message_id="message-2",
+                    parent_output_id="output-0",
                     output_json={
                         "document_info": {"source_type": "Excel", "filename": "example.xlsx"},
                         "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
@@ -126,10 +137,15 @@ class ChatSessionSerializerTest(SimpleTestCase):
         self.assertEqual(serializer.data["messages"]["limit"], 1)
         self.assertEqual(serializer.data["messages"]["offset"], 1)
         self.assertEqual(serializer.data["messages"]["results"][0]["role"], "assistant")
+        self.assertEqual(serializer.data["messages"]["results"][0]["target_output_id"], "output-0")
         self.assertEqual(serializer.data["generated_outputs"]["count"], 1)
         self.assertEqual(
             serializer.data["generated_outputs"]["results"][0]["output_json"]["document_info"]["filename"],
             "example.xlsx",
+        )
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["chat_id"],
+            "message-2",
         )
         self.assertEqual(
             serializer.data["generated_outputs"]["results"][0]["thinking_log"],
@@ -158,11 +174,14 @@ class ChatSessionSerializerTest(SimpleTestCase):
                 role="assistant",
                 content="Here is the summary.",
                 thinking_log="Grouped expense rows before answering.",
+                target_output_id="output-0",
                 created_at=datetime(2026, 4, 21, 10, 3, tzinfo=timezone.utc),
             ),
             SimpleNamespace(
                 type="output",
                 id="output-1",
+                source_message_id="message-1",
+                parent_output_id="output-0",
                 output_json={
                     "document_info": {"source_type": "Excel", "filename": "example.xlsx"},
                     "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
@@ -179,11 +198,14 @@ class ChatSessionSerializerTest(SimpleTestCase):
         self.assertEqual(len(serializer.data["history"]), 2)
         self.assertEqual(serializer.data["history"][0]["type"], "message")
         self.assertEqual(serializer.data["history"][0]["role"], "assistant")
+        self.assertEqual(serializer.data["history"][0]["target_output_id"], "output-0")
         self.assertEqual(
             serializer.data["history"][0]["thinking_log"],
             "Grouped expense rows before answering.",
         )
         self.assertEqual(serializer.data["history"][1]["type"], "output")
+        self.assertEqual(serializer.data["history"][1]["chat_id"], "message-1")
+        self.assertEqual(serializer.data["history"][1]["parent_output_id"], "output-0")
         self.assertEqual(
             serializer.data["history"][1]["output_json"]["document_info"]["filename"],
             "example.xlsx",

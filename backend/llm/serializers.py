@@ -10,6 +10,7 @@ REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
 class LlmGenerateRequestSerializer(serializers.Serializer):
     input_json = serializers.JSONField()
     session_id = serializers.UUIDField(required=False, allow_null=True)
+    chat_id = serializers.UUIDField(required=False, allow_null=True)
     custom_schema_id = serializers.UUIDField(required=False, allow_null=True)
     include_reasoning = serializers.BooleanField(required=False, default=True)
 
@@ -57,6 +58,7 @@ class LlmGenerateResponseSerializer(serializers.Serializer):
 
 class SendMessageRequestSerializer(serializers.Serializer):
     session_id = serializers.UUIDField(required=False, allow_null=True)
+    target_output_id = serializers.UUIDField(required=False, allow_null=True)
     message = serializers.CharField(
         max_length=MAX_MESSAGE_LENGTH,
         allow_blank=False,
@@ -71,6 +73,7 @@ class SendMessageRequestSerializer(serializers.Serializer):
 
 class SendMessageResponseSerializer(serializers.Serializer):
     session_id = serializers.UUIDField()
+    chat_id = serializers.UUIDField()
     reply = serializers.CharField()
 
 
@@ -182,12 +185,7 @@ class ThinkingLogItemSerializer(serializers.Serializer):
         output_json = instance.output_json if isinstance(getattr(instance, "output_json", None), dict) else {}
 
         session_id = getattr(instance, "session_id", None)
-        is_chat_message_record = session_id is not None
-        chat_id = (
-            getattr(instance, "chat_id", None)
-        )
-        if chat_id is None and is_chat_message_record:
-            chat_id = getattr(instance, "id", None)
+        chat_id = getattr(instance, "source_message_id", None)
         if chat_id is None:
             chat_id = output_json.get("chat_id")
 
