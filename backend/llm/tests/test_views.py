@@ -19,6 +19,7 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
 )
 from llm.views import (
+    _build_generate_bootstrap_message,
     build_export_output_json,
     _extract_document_type,
     _sanitize_output_json,
@@ -93,6 +94,16 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
 
         self.assertEqual(result, "generated-output")
+
+    def test_build_generate_bootstrap_message_falls_back_to_title_without_filename(self):
+        result = _build_generate_bootstrap_message({}, "Convert generated-output")
+
+        self.assertEqual(result, "Convert generated-output")
+
+    def test_build_generate_bootstrap_message_uses_generic_fallback_when_blank(self):
+        result = _build_generate_bootstrap_message({}, "")
+
+        self.assertEqual(result, "Uploaded file for conversion")
 
     def test_extract_document_type_returns_unknown_for_non_object_payload(self):
         result = _extract_document_type(["not-an-object"])

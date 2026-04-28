@@ -721,7 +721,11 @@ def _persist_generate_output_for_authenticated_user(
 
 
 def _build_generate_bootstrap_message(input_json, title):
-    filename = extract_original_name(input_json, {}).strip()
+    filename = None
+    if isinstance(input_json, dict):
+        filename = _normalize_filename_candidate(input_json.get("filename"))
+        if filename is None:
+            filename = _extract_document_info_filename(input_json)
     if filename:
         return f"Uploaded file: {filename}"
     if title:
