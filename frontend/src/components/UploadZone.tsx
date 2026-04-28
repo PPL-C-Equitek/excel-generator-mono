@@ -4,9 +4,14 @@ import { useState, type ReactNode, type DragEvent, type ChangeEvent } from 'reac
 
 interface UploadZoneProps {
     readonly onFileSelect?: (file: File, prompt?: string) => void
+    readonly onFileChange?: () => void
     readonly disabled?: boolean
     readonly footerContent?: ReactNode
     readonly resultContent?: ReactNode
+    readonly selectedSchemaName?: string | null
+    readonly isValidating?: boolean
+    readonly isGenerating?: boolean
+    readonly validationError?: string | null
 }
 
 interface ChatMessage {
@@ -87,18 +92,37 @@ function AttachedFileCard({ file, variant = 'light' }: Readonly<{ file: File; va
     )
 }
 
-export default function UploadZone({ onFileSelect, disabled, footerContent, resultContent }: UploadZoneProps) {
+export default function UploadZone({
+    onFileSelect,
+    onFileChange,
+    disabled,
+    footerContent,
+    resultContent,
+    selectedSchemaName,
+    isValidating = false,
+    isGenerating = false,
+    validationError,
+}: UploadZoneProps) {
     const [isDragging, setIsDragging] = useState(false)
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
     const [submittedFile, setSubmittedFile] = useState<File | null>(null)
     const [chatInput, setChatInput] = useState('')
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
 
-    const isConversationStarted = Boolean(submittedFile || resultContent)
+    const isConversationStarted = Boolean(submittedFile && (isGenerating || resultContent))
+    const isValidationFeedbackVisible = Boolean(
+        submittedFile &&
+        selectedFile === submittedFile &&
+        (isValidating || validationError)
+    )
     const trimmedChatInput = chatInput.trim()
 
     const handleFile = (file: File) => {
         setSelectedFile(file)
+        setSubmittedFile(null)
+        setChatMessages([])
+        setChatInput('')
+        onFileChange?.()
     }
 
     const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -117,6 +141,10 @@ export default function UploadZone({ onFileSelect, disabled, footerContent, resu
 
     const handleReset = () => {
         setSelectedFile(null)
+        setSubmittedFile(null)
+        setChatMessages([])
+        setChatInput('')
+        onFileChange?.()
     }
 
     const handleSubmit = () => {
@@ -136,18 +164,29 @@ export default function UploadZone({ onFileSelect, disabled, footerContent, resu
         setChatInput('')
     }
 
-    const dropZoneClassName = `flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-12 text-center transition-colors sm:p-20
-        ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-red-600 hover:bg-red-50'}
-        ${isDragging ? 'border-red-600 bg-red-50' : 'border-gray-300 bg-gray-100'}`
+    const dropZoneBaseClassName = 'flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-12 text-center transition-colors sm:p-20'
+    const dropZoneStateClassName = isDragging ? 'border-red-600 bg-red-50' : 'border-gray-300 bg-gray-100'
+    const dropZoneClassName = `${dropZoneBaseClassName} ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-red-600 hover:bg-red-50'} ${dropZoneStateClassName}`
+    const stagedFileZoneClassName = `${dropZoneBaseClassName} ${disabled ? 'opacity-60' : ''} ${dropZoneStateClassName}`
 
     if (isConversationStarted) {
         return (
-            <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
-                <div className="space-y-5 bg-gray-50/80 px-4 py-5 sm:px-6">
+            <section className="flex h-screen flex-col">
+                <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8">
                     {submittedFile && (
-                        <div className="flex items-start justify-end gap-3">
-                            <div className="max-w-xl rounded-2xl rounded-tr-sm bg-blue-600 p-4 text-sm text-white shadow-md">
+                        <div className="flex w-full items-start justify-end gap-3">
+                            <div className="max-w-xl rounded-2xl rounded-tr-sm bg-blue-600 p-4 text-sm text-white shadow-md lg:max-w-2xl">
                                 <p className="font-semibold">Generate this file.</p>
+                                {selectedSchemaName && (
+                                    <div className="mt-3 rounded-xl bg-white/15 px-3 py-2 text-left ring-1 ring-white/20">
+                                        <p className="text-xs font-semibold uppercase tracking-widest text-blue-100">
+                                            Schema context
+                                        </p>
+                                        <p className="mt-1 break-words text-sm font-semibold text-white">
+                                            {selectedSchemaName}
+                                        </p>
+                                    </div>
+                                )}
                                 <div className="mt-3">
                                     <AttachedFileCard file={submittedFile} variant="dark" />
                                 </div>
@@ -157,17 +196,17 @@ export default function UploadZone({ onFileSelect, disabled, footerContent, resu
                     )}
 
                     {resultContent ? (
-                        <div className="flex items-start gap-3">
+                        <div className="flex w-full items-start justify-start gap-3">
                             <AssistantAvatar />
-                            <div className="max-w-2xl rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-gray-700 shadow-sm ring-1 ring-gray-200">
+                            <div className="max-w-2xl rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-gray-700 shadow-sm ring-1 ring-gray-200 lg:max-w-3xl">
                                 {resultContent}
                             </div>
                         </div>
                     ) : null}
 
                     {chatMessages.map((message) => (
-                        <div key={message.id} className="flex items-start justify-end gap-3">
-                            <div className="max-w-xl rounded-2xl rounded-tr-sm bg-blue-600 p-4 text-sm text-white shadow-md">
+                        <div key={message.id} className="flex w-full items-start justify-end gap-3">
+                            <div className="max-w-xl rounded-2xl rounded-tr-sm bg-blue-600 p-4 text-sm text-white shadow-md lg:max-w-2xl">
                                 <p className="whitespace-pre-wrap">{message.text}</p>
                             </div>
                             <UserAvatar />
@@ -176,11 +215,11 @@ export default function UploadZone({ onFileSelect, disabled, footerContent, resu
                 </div>
 
                 {submittedFile && resultContent ? (
-                    <div className="border-t border-gray-200 bg-white p-4 sm:p-5">
+                    <div className="border-t border-gray-200 bg-gray-50/95 px-4 py-4 backdrop-blur sm:px-6 lg:px-8">
                         <label htmlFor="follow-up-chat" className="sr-only">
                             Follow-up message
                         </label>
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                        <div className="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-end">
                             <textarea
                                 id="follow-up-chat"
                                 aria-label="Follow-up message"
@@ -209,34 +248,50 @@ export default function UploadZone({ onFileSelect, disabled, footerContent, resu
 
     if (selectedFile) {
         return (
-            <section className="flex min-h-[calc(100vh-8rem)] items-center justify-center">
-                <div className="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-6 shadow-xl">
-                    <div className="mx-auto flex max-w-xl flex-col items-center gap-6 py-4">
-                        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
+            <section className="flex min-h-screen items-center justify-center px-6 py-8 lg:px-12">
+                <div className="w-full max-w-3xl space-y-6">
+                    <div className={stagedFileZoneClassName}>
+                        <div className="w-full max-w-sm">
                             <AttachedFileCard file={selectedFile} />
                         </div>
+                    </div>
 
-                        {footerContent ? <div className="w-full">{footerContent}</div> : null}
+                    {footerContent}
 
-                        <div className="flex items-center gap-3">
-                            <button
-                                type="button"
-                                onClick={handleReset}
-                                disabled={disabled}
-                                className="rounded-xl border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                Change File
-                            </button>
-                            <button
-                                type="button"
-                                data-testid="convert-btn"
-                                onClick={handleSubmit}
-                                disabled={disabled}
-                                className="rounded-xl bg-red-700 px-8 py-2.5 text-sm font-bold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                Generate File
-                            </button>
+                    {isValidationFeedbackVisible && (
+                        <div className={`rounded-lg border px-4 py-3 text-sm ${validationError
+                            ? 'border-red-400 bg-red-50 text-red-700'
+                            : 'border-gray-200 bg-gray-50 text-gray-600'
+                            }`} role={validationError ? 'alert' : undefined}>
+                            {validationError ? (
+                                <span>{validationError}</span>
+                            ) : (
+                                <span className="inline-flex items-center gap-2">
+                                    <span className="h-2 w-2 animate-pulse rounded-full bg-red-700" />
+                                    Validating file...
+                                </span>
+                            )}
                         </div>
+                    )}
+
+                    <div className="flex justify-center gap-3">
+                        <button
+                            type="button"
+                            onClick={handleReset}
+                            disabled={disabled}
+                            className="rounded-xl border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            Change File
+                        </button>
+                        <button
+                            type="button"
+                            data-testid="convert-btn"
+                            onClick={handleSubmit}
+                            disabled={disabled}
+                            className="rounded-xl bg-red-700 px-8 py-2.5 text-sm font-bold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            Generate File
+                        </button>
                     </div>
                 </div>
             </section>
@@ -245,29 +300,33 @@ export default function UploadZone({ onFileSelect, disabled, footerContent, resu
 
     return (
         <section className="flex min-h-[calc(100vh-8rem)] items-center justify-center">
-            <label
-                data-testid="drop-zone"
-                onDragOver={(e) => { e.preventDefault(); if (!disabled) setIsDragging(true) }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={handleDrop}
-                aria-label="File upload drop zone"
-                className={`w-full max-w-3xl ${dropZoneClassName}`}
-            >
-                <input
-                    data-testid="file-input"
-                    type="file"
-                    onChange={handleChange}
-                    disabled={disabled}
-                    className="hidden"
-                />
-                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-red-700 text-white shadow-md transition">
-                    <AttachmentIcon />
-                </span>
-                <span className="rounded-xl bg-red-700 px-8 py-3 font-bold text-white transition">
-                    Upload File
-                </span>
-                <p className="text-sm text-gray-500">Or drop file here</p>
-            </label>
+            <div className="w-full max-w-3xl space-y-6">
+                <label
+                    data-testid="drop-zone"
+                    onDragOver={(e) => { e.preventDefault(); if (!disabled) setIsDragging(true) }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={handleDrop}
+                    aria-label="File upload drop zone"
+                    className={dropZoneClassName}
+                >
+                    <input
+                        data-testid="file-input"
+                        type="file"
+                        onChange={handleChange}
+                        disabled={disabled}
+                        className="hidden"
+                    />
+                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-red-700 text-white shadow-md transition">
+                        <AttachmentIcon />
+                    </span>
+                    <span className="rounded-xl bg-red-700 px-8 py-3 font-bold text-white transition">
+                        Upload File
+                    </span>
+                    <p className="text-sm text-gray-500">Or drop file here</p>
+                </label>
+
+                {footerContent}
+            </div>
         </section>
     )
 }

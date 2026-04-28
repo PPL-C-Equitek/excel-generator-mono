@@ -16,6 +16,9 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
     const [selectedSchema, setSelectedSchema] = useState<CustomSchemaRecord | null>(null)
     const {
         isConverting,
+        isValidating,
+        isGenerating,
+        errorPhase,
         isExcelDownloading,
         canDownloadCsv,
         canDownloadExcel,
@@ -25,12 +28,13 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
         outputFile,
         thinkingLog,
         handleFileSelect,
+        resetConversionState,
         handleCsvDownload,
         handleExcelDownload,
     } = useConvertFlow(injectedService)
 
     const resultContent = (() => {
-        if (isConverting) {
+        if (isGenerating) {
             return (
                 <div data-testid="loading-indicator">
                     <p className="font-semibold text-gray-900">Thinking log</p>
@@ -44,7 +48,7 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
             )
         }
 
-        if (error) {
+        if (error && errorPhase === 'generating') {
             return (
                 <div role="alert" className="flex items-start gap-2 text-red-700">
                     <span aria-hidden>⚠</span>
@@ -131,14 +135,19 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
     return (
         <div className="flex min-h-screen">
             <Sidebar activeMenu="convert" />
-            <main className="ml-56 flex min-h-screen flex-1 justify-center bg-gray-50 px-6 py-8 lg:px-12">
-                <div className="w-full max-w-3xl">
+            <main className="ml-56 flex min-h-screen flex-1 bg-gray-50">
+                <div className="w-full">
                     <UploadZone
                         onFileSelect={(file, prompt) => {
                             void handleFileSelect(file, selectedSchema?.id ?? null, prompt ?? null)
                         }}
+                        onFileChange={resetConversionState}
                         disabled={isConverting}
                         resultContent={resultContent}
+                        selectedSchemaName={selectedSchema?.name ?? null}
+                        isValidating={isValidating}
+                        isGenerating={isGenerating}
+                        validationError={errorPhase === 'validating' ? error : null}
                         footerContent={
                             <SchemaSelector
                                 className="mt-0"
