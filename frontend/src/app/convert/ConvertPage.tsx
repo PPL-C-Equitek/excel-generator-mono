@@ -61,7 +61,7 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
             return
         }
 
-        const timer = window.setTimeout(() => {
+        const timer = globalThis.setTimeout(() => {
             setReasoningPlayback((current) => {
                 if (current.completeKey === reasoningPlaybackKey) {
                     return current
@@ -88,7 +88,7 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
             })
         }, visibleReasoningCount === 0 ? 250 : 700)
 
-        return () => window.clearTimeout(timer)
+        return () => globalThis.clearTimeout(timer)
     }, [
         reasoningPlayback.completeKey,
         reasoningPlaybackKey,

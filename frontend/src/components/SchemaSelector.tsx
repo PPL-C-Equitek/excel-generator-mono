@@ -103,8 +103,8 @@ export default function SchemaSelector({
                             <button
                                 type="button"
                                 data-testid="schema-select"
-                                aria-haspopup="listbox"
                                 aria-expanded={isDropdownOpen}
+                                aria-controls="schema-options"
                                 onClick={() => setIsDropdownOpen((isOpen) => !isOpen)}
                                 className="flex w-full items-center justify-between gap-3 rounded-xl border border-gray-300 bg-white px-4 py-3 text-left shadow-sm transition hover:border-red-300 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             >
@@ -140,8 +140,8 @@ export default function SchemaSelector({
 
                             {isDropdownOpen && (
                                 <div
-                                    role="listbox"
-                                    aria-label="Schema options"
+                                    id="schema-options"
+                                    data-testid="schema-options"
                                     className="absolute z-20 mt-2 max-h-72 w-full overflow-y-auto rounded-2xl border border-gray-200 bg-white p-2 shadow-xl"
                                 >
                                     {options.map((option) => {
@@ -150,8 +150,7 @@ export default function SchemaSelector({
                                             <button
                                                 key={option.id}
                                                 type="button"
-                                                role="option"
-                                                aria-selected={isSelected}
+                                                aria-pressed={isSelected}
                                                 data-testid={`schema-option-${option.id}`}
                                                 onClick={() => handleSelect(option.id)}
                                                 className={`flex w-full items-start justify-between gap-3 rounded-xl px-4 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-blue-500 ${isSelected

@@ -136,8 +136,8 @@ describe('SchemaSelector', () => {
 
         const select = await screen.findByTestId('schema-select')
         await user.click(select)
-        const listbox = screen.getByRole('listbox', { name: 'Schema options' })
-        await user.click(within(listbox).getByRole('option', { name: /Receipt Mapping/i }))
+        const options = screen.getByTestId('schema-options')
+        await user.click(within(options).getByRole('button', { name: /Receipt Mapping/i }))
 
         await waitFor(() => {
             expect(onSchemaChange).toHaveBeenLastCalledWith(
@@ -234,8 +234,8 @@ describe('SchemaSelector', () => {
 
         const select = await screen.findByTestId('schema-select')
         await user.click(select)
-        const listbox = screen.getByRole('listbox', { name: 'Schema options' })
-        await user.click(within(listbox).getByRole('option', { name: /Receipt Mapping/i }))
+        const options = screen.getByTestId('schema-options')
+        await user.click(within(options).getByRole('button', { name: /Receipt Mapping/i }))
 
         await waitFor(() => {
             expect(onSchemaChange).toHaveBeenLastCalledWith(
