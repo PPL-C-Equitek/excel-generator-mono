@@ -5,7 +5,7 @@ import { useState } from "react"
 import { getStoredUser } from "@/lib/auth"
 import LogoutButton from "@/components/LogoutButton"
 import HistorySidebarList from "@/components/HistorySidebarList"
-import { useHistoryFiles } from '@/hooks/useHistoryFiles'
+import { useHistoryFiles, type HistoryCommands } from '@/hooks/useHistoryFiles'
 import type { HistoryItem } from '@/services/history'
 
 interface SidebarHistoryListState {
@@ -15,8 +15,7 @@ interface SidebarHistoryListState {
     readonly renamingHistoryId: string | null
     readonly deletingHistoryId: string | null
     readonly reloadHistory: () => Promise<void>
-    readonly renameHistory: (historyId: string, customName: string) => Promise<boolean>
-    readonly deleteHistory: (historyId: string) => Promise<boolean>
+    readonly commands: Pick<HistoryCommands, 'rename' | 'delete'>
 }
 
 interface SidebarProps {
@@ -51,8 +50,7 @@ export default function Sidebar({ activeMenu, onLogout, selectedHistoryId, histo
         renamingHistoryId: localHistoryListState.renamingHistoryId,
         deletingHistoryId: localHistoryListState.deletingHistoryId,
         reloadHistory: localHistoryListState.reloadHistory,
-        renameHistory: localHistoryListState.renameHistory,
-        deleteHistory: localHistoryListState.deleteHistory,
+        commands: localHistoryListState.commands,
     }
 
     return (
@@ -90,8 +88,7 @@ export default function Sidebar({ activeMenu, onLogout, selectedHistoryId, histo
                     renamingHistoryId={resolvedHistoryListState.renamingHistoryId}
                     deletingHistoryId={resolvedHistoryListState.deletingHistoryId}
                     reloadHistory={resolvedHistoryListState.reloadHistory}
-                    renameHistory={resolvedHistoryListState.renameHistory}
-                    deleteHistory={resolvedHistoryListState.deleteHistory}
+                    commands={resolvedHistoryListState.commands}
                 />
             </div>
 

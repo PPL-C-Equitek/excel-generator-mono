@@ -57,10 +57,7 @@ export default function HistoryPage() {
         loadError,
         downloadError,
         mutationError,
-        downloadCsv,
-        downloadExcel,
-        renameHistory,
-        deleteHistory,
+        commands,
     } = useHistoryFiles({ loadAll: true, pageSize: 50 })
 
     const isDeleteDialogOpen = historyToDelete !== null
@@ -92,14 +89,14 @@ export default function HistoryPage() {
     }
 
     const handleRenameSubmit = async (item: HistoryItem) => {
-        const didRename = await renameHistory(item.id, renameValue.trim())
+        const didRename = await commands.rename(item.id, renameValue.trim()).execute()
         if (didRename) {
             stopEditing()
         }
     }
 
     const handleDeleteConfirm = async (item: HistoryItem) => {
-        const didDelete = await deleteHistory(item.id)
+        const didDelete = await commands.delete(item.id).execute()
         if (didDelete) {
             stopEditing()
             setHistoryToDelete(null)
@@ -123,8 +120,7 @@ export default function HistoryPage() {
                     renamingHistoryId,
                     deletingHistoryId,
                     reloadHistory,
-                    renameHistory,
-                    deleteHistory,
+                    commands,
                 }}
             />
             <main className="ml-56 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -250,7 +246,9 @@ export default function HistoryPage() {
                                                     type="button"
                                                     className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-red-700"
                                                     onClick={() => {
-                                                        void downloadCsv(item.id, getCsvFilename(historyName))
+                                                        void commands
+                                                            .downloadCsv(item.id, getCsvFilename(historyName))
+                                                            .execute()
                                                     }}
                                                     disabled={isCsvDownloading}
                                                 >
@@ -260,7 +258,9 @@ export default function HistoryPage() {
                                                     type="button"
                                                     className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                                                     onClick={() => {
-                                                        void downloadExcel(item.id, getXlsxFilename(historyName))
+                                                        void commands
+                                                            .downloadExcel(item.id, getXlsxFilename(historyName))
+                                                            .execute()
                                                     }}
                                                     disabled={isExcelDownloading}
                                                 >

@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import type { HistoryCommands } from '@/hooks/useHistoryFiles'
 import type { HistoryItem } from '@/services/history'
 
 const HISTORY_FILE_NAME_MAX_LENGTH = 120
@@ -48,8 +49,7 @@ interface HistorySidebarListProps {
     readonly renamingHistoryId: string | null
     readonly deletingHistoryId: string | null
     readonly reloadHistory: () => Promise<void>
-    readonly renameHistory: (historyId: string, customName: string) => Promise<boolean>
-    readonly deleteHistory: (historyId: string) => Promise<boolean>
+    readonly commands: Pick<HistoryCommands, 'rename' | 'delete'>
 }
 
 interface HistoryGroup {
@@ -380,8 +380,7 @@ export default function HistorySidebarList({
     renamingHistoryId,
     deletingHistoryId,
     reloadHistory,
-    renameHistory,
-    deleteHistory,
+    commands,
 }: HistorySidebarListProps) {
     const [searchQuery, setSearchQuery] = useState('')
     const [openMenuHistoryId, setOpenMenuHistoryId] = useState<string | null>(null)
@@ -450,7 +449,7 @@ export default function HistorySidebarList({
     }
 
     const handleRenameSubmit = async (target: HistoryItem) => {
-        const didRename = await renameHistory(target.id, renameValue.trim())
+        const didRename = await commands.rename(target.id, renameValue.trim()).execute()
         if (didRename) {
             setRenameTarget(null)
             setRenameValue('')
@@ -458,7 +457,7 @@ export default function HistorySidebarList({
     }
 
     const handleDeleteConfirm = async (target: HistoryItem) => {
-        const didDelete = await deleteHistory(target.id)
+        const didDelete = await commands.delete(target.id).execute()
         if (didDelete) {
             setDeleteTarget(null)
         }
