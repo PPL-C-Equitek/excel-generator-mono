@@ -383,8 +383,33 @@ function isExportOutputEmpty(output: unknown): boolean {
         (typeof output === 'object' && output !== null && Object.keys(output).length === 0)
 }
 
+function buildGenerationInput(
+    uploadResult: JsonObject,
+    userPrompt?: string | null,
+    previousOutput?: JsonValue | null
+): JsonObject {
+    const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
+
+    if (trimmedPrompt.length === 0) {
+        return uploadResult
+    }
+
+    return {
+        ...uploadResult,
+        ...(previousOutput !== null && previousOutput !== undefined
+            ? { previous_output: previousOutput }
+            : {}),
+        user_prompt: trimmedPrompt,
+    }
+}
+
+type ConversionPhase = 'idle' | 'validating' | 'generating'
+
 export interface UseConvertFlowReturn {
     isConverting: boolean
+    isValidating: boolean
+    isGenerating: boolean
+    errorPhase: ConversionPhase | null
     isExcelDownloading: boolean
     canDownloadCsv: boolean
     canDownloadExcel: boolean
@@ -392,8 +417,11 @@ export interface UseConvertFlowReturn {
     excelError: string | null
     excelSuccessMessage: string | null
     outputFile: OutputFile | null
+    thinkingLog: string | null
+    reasoningSteps: string[]
     csvMetadata: CsvMetadata | null
-    handleFileSelect: (file: File, customSchemaId?: string | null) => Promise<void>
+    handleFileSelect: (file: File, customSchemaId?: string | null, userPrompt?: string | null) => Promise<void>
+    resetConversionState: () => void
     handleCsvDownload: () => Promise<void>
     handleExcelDownload: () => Promise<void>
     llmService: ILLMService
@@ -403,11 +431,15 @@ export function useConvertFlow(
     llmService: ILLMService = defaultService
 ): UseConvertFlowReturn {
     const [isConverting, setIsConverting] = useState(false)
+    const [conversionPhase, setConversionPhase] = useState<ConversionPhase>('idle')
+    const [errorPhase, setErrorPhase] = useState<ConversionPhase | null>(null)
     const [isExcelDownloading, setIsExcelDownloading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [excelError, setExcelError] = useState<string | null>(null)
     const [excelSuccessMessage, setExcelSuccessMessage] = useState<string | null>(null)
     const [outputFile, setOutputFile] = useState<OutputFile | null>(null)
+    const [thinkingLog, setThinkingLog] = useState<string | null>(null)
+    const [reasoningSteps, setReasoningSteps] = useState<string[]>([])
     const [uploadResultForExport, setUploadResultForExport] = useState<JsonObject | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
     const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
@@ -428,11 +460,18 @@ export function useConvertFlow(
     const getActiveSignal = (): AbortSignal | undefined =>
         abortControllerRef.current?.signal
 
-    const handleProcessError = (err: unknown, defaultMsg: string, signal: AbortSignal) => {
+    const handleProcessError = (
+        err: unknown,
+        defaultMsg: string,
+        signal: AbortSignal,
+        phase: ConversionPhase
+    ) => {
         if (signal.aborted) return
         if (err instanceof DOMException && err.name === 'AbortError') return
         setError(err instanceof Error ? err.message : defaultMsg)
+        setErrorPhase(phase)
         setIsConverting(false)
+        setConversionPhase('idle')
     }
 
     const processUpload = async (file: File, signal: AbortSignal): Promise<JsonObject | null> => {
@@ -441,21 +480,27 @@ export function useConvertFlow(
             if (signal.aborted) return null
             if (!isJsonObject(raw)) {
                 setError('The server returned an invalid upload response.')
+                setErrorPhase('validating')
                 setIsConverting(false)
+                setConversionPhase('idle')
                 return null
             }
             return raw
         } catch (err: unknown) {
-            handleProcessError(err, 'Upload failed', signal)
+            handleProcessError(err, 'Upload failed', signal, 'validating')
             return null
         }
     }
 
     const resetConversionState = () => {
         setError(null)
+        setErrorPhase(null)
+        setConversionPhase('idle')
         setExcelError(null)
         setExcelSuccessMessage(null)
         setOutputFile(null)
+        setThinkingLog(null)
+        setReasoningSteps([])
         setUploadResultForExport(null)
         setCsvMetadata(null)
         setGeneratedOutput(null)
@@ -468,50 +513,92 @@ export function useConvertFlow(
         uploadResult: JsonObject,
         file: File,
         signal: AbortSignal,
-        customSchemaId?: string | null
+        customSchemaId?: string | null,
+        userPrompt?: string | null,
+        previousOutput?: JsonValue | null
     ) => {
         try {
+            const generationInput = buildGenerationInput(uploadResult, userPrompt, previousOutput)
             const llmResult =
                 typeof customSchemaId === 'string' && customSchemaId.length > 0
-                    ? await llmService.generate(uploadResult, customSchemaId, signal)
-                    : await llmService.generate(uploadResult, undefined, signal)
+                    ? await llmService.generate(generationInput, customSchemaId, signal)
+                    : await llmService.generate(generationInput, undefined, signal)
             if (signal.aborted) return
 
+            const reasoning = llmResult.reasoning
+            const parsedReasoningSteps = Array.isArray(reasoning?.reasoning_steps)
+                ? reasoning.reasoning_steps
+                    .map((step) => step.trim())
+                    .filter((step) => step.length > 0)
+                : []
+
             setGeneratedOutput(llmResult.output_json)
+            setThinkingLog(reasoning?.thinking_log?.trim() || null)
+            setReasoningSteps(parsedReasoningSteps)
             setGeneratedSessionId(llmResult.session_id ?? null)
             setGeneratedOutputId(llmResult.output_id ?? null)
             setUploadResultForExport(uploadResult)
             setOutputFile(parseOutputFile(uploadResult, file))
         } catch (err: unknown) {
-            handleProcessError(err, 'Conversion failed', signal)
+            handleProcessError(err, 'Conversion failed', signal, 'generating')
         } finally {
             if (!signal.aborted) {
                 setIsConverting(false)
+                setConversionPhase('idle')
             }
         }
     }
 
     const handleFileSelect = async (
         file: File,
-        customSchemaId?: string | null
+        customSchemaId?: string | null,
+        userPrompt?: string | null
     ): Promise<void> => {
         conversionRequestIdRef.current += 1
         const signal = abortPreviousRequest()
+        const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
+        const isFollowUpPrompt = trimmedPrompt.length > 0
+        const previousOutput = isFollowUpPrompt ? generatedOutput : null
+        const cachedUploadResult = isFollowUpPrompt ? uploadResultForExport : null
 
         resetConversionState()
+        setIsConverting(true)
 
-        if (file.size > MAX_UPLOAD_SIZE_BYTES) {
-            setError(FILE_TOO_LARGE_MESSAGE)
-            setIsConverting(false)
+        if (cachedUploadResult) {
+            setConversionPhase('generating')
+            await processConversion(
+                cachedUploadResult,
+                file,
+                signal,
+                customSchemaId,
+                userPrompt,
+                previousOutput
+            )
             return
         }
 
-        setIsConverting(true)
+        if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+            setError(FILE_TOO_LARGE_MESSAGE)
+            setErrorPhase('validating')
+            setIsConverting(false)
+            setConversionPhase('idle')
+            return
+        }
+
+        setConversionPhase('validating')
 
         const uploadResult = await processUpload(file, signal)
         if (!uploadResult) return
 
-        await processConversion(uploadResult, file, signal, customSchemaId)
+        setConversionPhase('generating')
+        await processConversion(
+            uploadResult,
+            file,
+            signal,
+            customSchemaId,
+            userPrompt,
+            previousOutput
+        )
     }
 
     const exportCsvIfNeeded = async (
@@ -596,6 +683,7 @@ export function useConvertFlow(
                 return
             }
             setError(csvErr instanceof Error ? csvErr.message : 'CSV Export failed')
+            setErrorPhase('generating')
         }
     }
 
@@ -694,6 +782,9 @@ export function useConvertFlow(
 
     return {
         isConverting,
+        isValidating: conversionPhase === 'validating',
+        isGenerating: conversionPhase === 'generating',
+        errorPhase,
         isExcelDownloading,
         canDownloadCsv,
         canDownloadExcel,
@@ -701,8 +792,11 @@ export function useConvertFlow(
         excelError,
         excelSuccessMessage,
         outputFile,
+        thinkingLog,
+        reasoningSteps,
         csvMetadata,
         handleFileSelect,
+        resetConversionState,
         handleCsvDownload,
         handleExcelDownload,
         llmService

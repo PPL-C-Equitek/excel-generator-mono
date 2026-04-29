@@ -12,10 +12,17 @@ export interface LLMRequest {
   custom_schema_id?: string;
 }
 
+export interface LLMReasoning {
+  final_answer: string;
+  reasoning_steps: string[];
+  thinking_log: string;
+}
+
 export interface LLMResponse {
   output_json: JsonValue;
   session_id?: string | null;
   output_id?: string | null;
+  reasoning?: LLMReasoning | null;
 }
 
 export interface ExcelExportResponse {

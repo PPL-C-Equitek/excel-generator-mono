@@ -56,7 +56,7 @@ export default function Sidebar({ activeMenu, onLogout, selectedHistoryId, histo
     }
 
     return (
-        <aside className="fixed inset-y-0 left-0 w-56 overflow-y-auto bg-red-700 flex flex-col">
+        <aside className="fixed inset-y-0 left-0 z-50 w-56 overflow-y-auto bg-red-700 flex flex-col">
             <div className="px-6 py-5">
                 <Link
                     href="/"

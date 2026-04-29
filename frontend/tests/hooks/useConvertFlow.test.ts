@@ -151,15 +151,21 @@ describe('useConvertFlow', () => {
             const { result } = renderHook(() => useConvertFlow(service))
 
             expect(result.current.isConverting).toBe(false)
+            expect(result.current.isValidating).toBe(false)
+            expect(result.current.isGenerating).toBe(false)
+            expect(result.current.errorPhase).toBeNull()
             expect(result.current.error).toBeNull()
             expect(result.current.outputFile).toBeNull()
+            expect(result.current.thinkingLog).toBeNull()
+            expect(result.current.reasoningSteps).toEqual([])
         })
 
-        it('exposes handleFileSelect as a function', () => {
+        it('exposes handleFileSelect and resetConversionState as functions', () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
 
             expect(typeof result.current.handleFileSelect).toBe('function')
+            expect(typeof result.current.resetConversionState).toBe('function')
         })
     })
 
@@ -212,6 +218,100 @@ describe('useConvertFlow', () => {
             )
         })
 
+        it('adds typed user prompt into the LLM input when provided', async () => {
+            const service = makeMockService()
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(
+                    testFile,
+                    null,
+                    'Extract invoice rows only'
+                )
+            })
+
+            expect(service.generate).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    ...validUploadResponse,
+                    user_prompt: 'Extract invoice rows only',
+                }),
+                undefined,
+                expect.any(AbortSignal)
+            )
+        })
+
+        it('sends the latest generated output as previous_output for follow-up prompts', async () => {
+            const firstOutput = { rows: [{ status: 'all' }] }
+            const secondOutput = { rows: [{ status: 'paid' }] }
+            const service = makeMockService({
+                generate: vi.fn()
+                    .mockResolvedValueOnce({ output_json: firstOutput })
+                    .mockResolvedValueOnce({ output_json: secondOutput }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile, null, 'Only keep paid invoices')
+            })
+
+            expect(mockUploadFile).toHaveBeenCalledTimes(1)
+            expect(service.generate).toHaveBeenNthCalledWith(
+                2,
+                expect.objectContaining({
+                    ...validUploadResponse,
+                    previous_output: firstOutput,
+                    user_prompt: 'Only keep paid invoices',
+                }),
+                undefined,
+                expect.any(AbortSignal)
+            )
+        })
+
+        it('stores thinking log from backend reasoning response', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: { status: 'ok' },
+                    reasoning: {
+                        final_answer: 'Done',
+                        reasoning_steps: ['Read file', 'Mapped rows'],
+                        thinking_log: 'Read file and mapped rows to the selected schema.',
+                    },
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.thinkingLog).toBe('Read file and mapped rows to the selected schema.')
+            expect(result.current.reasoningSteps).toEqual(['Read file', 'Mapped rows'])
+        })
+
+        it('drops empty reasoning steps from backend reasoning response', async () => {
+            const service = makeMockService({
+                generate: vi.fn().mockResolvedValue({
+                    output_json: { status: 'ok' },
+                    reasoning: {
+                        final_answer: 'Done',
+                        reasoning_steps: [' Read file ', '', '   ', 'Mapped rows'],
+                        thinking_log: 'Done.',
+                    },
+                }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            expect(result.current.reasoningSteps).toEqual(['Read file', 'Mapped rows'])
+        })
+
         it('passes AbortSignal into llmService.generate after upload succeeds', async () => {
             const service = makeMockService()
             const { result } = renderHook(() => useConvertFlow(service))
@@ -237,6 +337,10 @@ describe('useConvertFlow', () => {
             })
 
             expect(service.generate).not.toHaveBeenCalled()
+            expect(result.current.error).toBe('Network error')
+            expect(result.current.errorPhase).toBe('validating')
+            expect(result.current.isValidating).toBe(false)
+            expect(result.current.isGenerating).toBe(false)
         })
 
         it('rejects files larger than 10MB on frontend before uploading', async () => {
@@ -252,6 +356,7 @@ describe('useConvertFlow', () => {
             expect(mockUploadFile).not.toHaveBeenCalled()
             expect(service.generate).not.toHaveBeenCalled()
             expect(result.current.error).toBe(FILE_TOO_LARGE_MESSAGE)
+            expect(result.current.errorPhase).toBe('validating')
             expect(result.current.isConverting).toBe(false)
         })
     })
