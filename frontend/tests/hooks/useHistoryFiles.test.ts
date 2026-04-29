@@ -323,6 +323,36 @@ describe('useHistoryFiles', () => {
         expect(result.current.mutationError).toBeNull()
     })
 
+    it('executes history actions through hook commands', async () => {
+        const service = makeServiceMock()
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.commands.downloadCsv(historyItems[0].id, 'report-a.csv').execute()
+            await result.current.commands.rename(historyItems[0].id, 'Command Rename').execute()
+        })
+
+        await waitFor(() => expect(result.current.items[0].custom_name).toBe('Command Rename'))
+
+        await act(async () => {
+            await result.current.commands.delete(historyItems[1].id).execute()
+        })
+
+        expect(service.downloadHistoryFile).toHaveBeenCalledWith(
+            historyItems[0].id,
+            'csv',
+            'report-a.csv'
+        )
+        expect(service.renameHistoryFile).toHaveBeenCalledWith(
+            historyItems[0].id,
+            'Command Rename'
+        )
+        expect(service.deleteHistoryFile).toHaveBeenCalledWith(historyItems[1].id)
+        expect(result.current.items[0].custom_name).toBe('Command Rename')
+    })
+
     it('stores a mutation error when renaming fails', async () => {
         const service = makeServiceMock({
             renameHistoryFile: vi.fn().mockRejectedValue(new Error('Rename failed.')),

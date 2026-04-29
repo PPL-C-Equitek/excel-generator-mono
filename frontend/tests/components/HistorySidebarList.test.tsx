@@ -38,16 +38,24 @@ function makeListState(
     deleteHistory: (historyId: string) => Promise<boolean>;
   }>
 ) {
+  const renameHistory = overrides?.renameHistory ?? vi.fn().mockResolvedValue(true);
+  const deleteHistory = overrides?.deleteHistory ?? vi.fn().mockResolvedValue(true);
+
   return {
-    items: historyItems,
-    isLoading: false,
-    renamingHistoryId: null,
-    deletingHistoryId: null,
-    loadError: null,
-    reloadHistory: vi.fn().mockResolvedValue(undefined),
-    renameHistory: vi.fn().mockResolvedValue(true),
-    deleteHistory: vi.fn().mockResolvedValue(true),
-    ...overrides,
+    items: overrides?.items ?? historyItems,
+    isLoading: overrides?.isLoading ?? false,
+    renamingHistoryId: overrides?.renamingHistoryId ?? null,
+    deletingHistoryId: overrides?.deletingHistoryId ?? null,
+    loadError: overrides?.loadError ?? null,
+    reloadHistory: overrides?.reloadHistory ?? vi.fn().mockResolvedValue(undefined),
+    commands: {
+      rename: vi.fn((historyId: string, customName: string) => ({
+        execute: () => renameHistory(historyId, customName),
+      })),
+      delete: vi.fn((historyId: string) => ({
+        execute: () => deleteHistory(historyId),
+      })),
+    },
   };
 }
 
