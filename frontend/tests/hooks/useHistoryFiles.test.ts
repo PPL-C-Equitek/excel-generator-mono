@@ -290,6 +290,26 @@ describe('useHistoryFiles', () => {
         expect(result.current.downloadError).toBeNull()
     })
 
+    it('executes an xlsx download through the downloadExcel command', async () => {
+        const service = makeServiceMock()
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.commands
+                .downloadExcel(historyItems[1].id, 'report-b.xlsx')
+                .execute()
+        })
+
+        expect(service.downloadHistoryFile).toHaveBeenCalledWith(
+            historyItems[1].id,
+            'xlsx',
+            'report-b.xlsx'
+        )
+        expect(result.current.downloadError).toBeNull()
+    })
+
     it('stores a download error when csv download fails', async () => {
         const service = makeServiceMock({
             downloadHistoryFile: vi.fn().mockRejectedValue(new Error('Download failed.')),
