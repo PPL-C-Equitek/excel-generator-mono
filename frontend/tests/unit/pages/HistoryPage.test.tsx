@@ -42,6 +42,25 @@ const historyItems = [
 ]
 
 function makeHookState(overrides?: Partial<ReturnType<typeof useHistoryFiles>>) {
+    const downloadCsv = vi.fn().mockResolvedValue(undefined)
+    const downloadExcel = vi.fn().mockResolvedValue(undefined)
+    const renameHistory = vi.fn().mockResolvedValue(true)
+    const deleteHistory = vi.fn().mockResolvedValue(true)
+    const commands = {
+        downloadCsv: vi.fn((historyId: string, filename?: string) => ({
+            execute: () => downloadCsv(historyId, filename),
+        })),
+        downloadExcel: vi.fn((historyId: string, filename?: string) => ({
+            execute: () => downloadExcel(historyId, filename),
+        })),
+        rename: vi.fn((historyId: string, customName: string) => ({
+            execute: () => renameHistory(historyId, customName),
+        })),
+        delete: vi.fn((historyId: string) => ({
+            execute: () => deleteHistory(historyId),
+        })),
+    }
+
     return {
         items: historyItems,
         count: historyItems.length,
@@ -58,10 +77,11 @@ function makeHookState(overrides?: Partial<ReturnType<typeof useHistoryFiles>>) 
         reloadHistory: vi.fn().mockResolvedValue(undefined),
         goToNextPage: vi.fn().mockResolvedValue(undefined),
         goToPreviousPage: vi.fn().mockResolvedValue(undefined),
-        downloadCsv: vi.fn().mockResolvedValue(undefined),
-        downloadExcel: vi.fn().mockResolvedValue(undefined),
-        renameHistory: vi.fn().mockResolvedValue(true),
-        deleteHistory: vi.fn().mockResolvedValue(true),
+        commands,
+        downloadCsv,
+        downloadExcel,
+        renameHistory,
+        deleteHistory,
         ...overrides,
     }
 }
@@ -169,7 +189,21 @@ describe('HistoryPage', () => {
     it('calls csv and excel download handlers with derived filenames', () => {
         const downloadCsv = vi.fn().mockResolvedValue(undefined)
         const downloadExcel = vi.fn().mockResolvedValue(undefined)
-        mockUseHistoryFiles.mockReturnValue(makeHookState({ downloadCsv, downloadExcel }))
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                commands: {
+                    ...makeHookState().commands,
+                    downloadCsv: vi.fn((historyId: string, filename?: string) => ({
+                        execute: () => downloadCsv(historyId, filename),
+                    })),
+                    downloadExcel: vi.fn((historyId: string, filename?: string) => ({
+                        execute: () => downloadExcel(historyId, filename),
+                    })),
+                },
+                downloadCsv,
+                downloadExcel,
+            })
+        )
 
         render(<HistoryPage />)
 
@@ -201,7 +235,17 @@ describe('HistoryPage', () => {
 
     it('allows rename flow and submits new name', async () => {
         const renameHistory = vi.fn().mockResolvedValue(true)
-        mockUseHistoryFiles.mockReturnValue(makeHookState({ renameHistory }))
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                commands: {
+                    ...makeHookState().commands,
+                    rename: vi.fn((historyId: string, customName: string) => ({
+                        execute: () => renameHistory(historyId, customName),
+                    })),
+                },
+                renameHistory,
+            })
+        )
 
         render(<HistoryPage />)
 
@@ -233,7 +277,17 @@ describe('HistoryPage', () => {
 
     it('keeps rename form open when rename fails', async () => {
         const renameHistory = vi.fn().mockResolvedValue(false)
-        mockUseHistoryFiles.mockReturnValue(makeHookState({ renameHistory }))
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                commands: {
+                    ...makeHookState().commands,
+                    rename: vi.fn((historyId: string, customName: string) => ({
+                        execute: () => renameHistory(historyId, customName),
+                    })),
+                },
+                renameHistory,
+            })
+        )
 
         render(<HistoryPage />)
 
@@ -248,7 +302,17 @@ describe('HistoryPage', () => {
 
     it('opens delete dialog and confirms deletion', async () => {
         const deleteHistory = vi.fn().mockResolvedValue(true)
-        mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                commands: {
+                    ...makeHookState().commands,
+                    delete: vi.fn((historyId: string) => ({
+                        execute: () => deleteHistory(historyId),
+                    })),
+                },
+                deleteHistory,
+            })
+        )
 
         render(<HistoryPage />)
 
@@ -264,7 +328,17 @@ describe('HistoryPage', () => {
 
     it('keeps delete dialog open when delete fails', async () => {
         const deleteHistory = vi.fn().mockResolvedValue(false)
-        mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                commands: {
+                    ...makeHookState().commands,
+                    delete: vi.fn((historyId: string) => ({
+                        execute: () => deleteHistory(historyId),
+                    })),
+                },
+                deleteHistory,
+            })
+        )
 
         render(<HistoryPage />)
 

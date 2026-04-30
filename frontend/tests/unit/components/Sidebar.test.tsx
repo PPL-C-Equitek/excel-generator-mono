@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import * as auth from '@/lib/auth'
 import Sidebar from '../../../src/components/Sidebar'
 import { useHistoryFiles } from '@/hooks/useHistoryFiles'
@@ -35,6 +35,12 @@ function makeHistoryHookState() {
         reloadHistory: vi.fn().mockResolvedValue(undefined),
         goToNextPage: vi.fn().mockResolvedValue(undefined),
         goToPreviousPage: vi.fn().mockResolvedValue(undefined),
+        commands: {
+            downloadCsv: vi.fn(() => ({ execute: vi.fn().mockResolvedValue(undefined) })),
+            downloadExcel: vi.fn(() => ({ execute: vi.fn().mockResolvedValue(undefined) })),
+            rename: vi.fn(() => ({ execute: vi.fn().mockResolvedValue(true) })),
+            delete: vi.fn(() => ({ execute: vi.fn().mockResolvedValue(true) })),
+        },
         downloadCsv: vi.fn().mockResolvedValue(undefined),
         downloadExcel: vi.fn().mockResolvedValue(undefined),
         renameHistory: vi.fn().mockResolvedValue(true),

@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
+    CallbackHistoryCommand,
+    createHistoryServiceCommandFactory,
+    type HistoryActionService,
+    type HistoryCommand,
+    type HistoryFileFormat,
+} from '@/commands/historyCommands'
+import {
     deleteHistoryFile,
     downloadHistoryFile,
     getHistoryFiles,
@@ -10,15 +17,15 @@ import {
     type HistoryListResponse,
 } from '@/services/history'
 
-interface HistoryService {
+interface HistoryService extends HistoryActionService {
     getHistoryFiles: (limit?: number, offset?: number) => Promise<HistoryListResponse>
-    downloadHistoryFile: (
-        historyId: string,
-        fileFormat: 'csv' | 'xlsx',
-        filename?: string
-    ) => Promise<void>
-    renameHistoryFile: (historyId: string, customName: string) => Promise<HistoryItem>
-    deleteHistoryFile: (historyId: string) => Promise<void>
+}
+
+export interface HistoryCommands {
+    readonly downloadCsv: (historyId: string, filename?: string) => HistoryCommand<void>
+    readonly downloadExcel: (historyId: string, filename?: string) => HistoryCommand<void>
+    readonly rename: (historyId: string, customName: string) => HistoryCommand<boolean>
+    readonly delete: (historyId: string) => HistoryCommand<boolean>
 }
 
 interface UseHistoryFilesReturn {
@@ -34,6 +41,7 @@ interface UseHistoryFilesReturn {
     loadError: string | null
     mutationError: string | null
     error: string | null
+    commands: HistoryCommands
     reloadHistory: () => Promise<void>
     goToNextPage: () => Promise<void>
     goToPreviousPage: () => Promise<void>
@@ -62,7 +70,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return error instanceof Error ? error.message : fallback
 }
 
-function getDownloadKey(historyId: string, fileFormat: 'csv' | 'xlsx'): string {
+function getDownloadKey(historyId: string, fileFormat: HistoryFileFormat): string {
     return `${historyId}:${fileFormat}`
 }
 
@@ -89,6 +97,7 @@ export function useHistoryFiles(
 ): UseHistoryFilesReturn {
     const service = isHistoryService(serviceOrOptions) ? serviceOrOptions : historyService
     const options = isHistoryService(serviceOrOptions) ? optionsArg : serviceOrOptions
+    const serviceCommands = createHistoryServiceCommandFactory(service)
 
     const loadAllHistory = options.loadAll ?? false
     const isEnabled = options.enabled ?? true
@@ -206,7 +215,7 @@ export function useHistoryFiles(
 
     const downloadFile = async (
         historyId: string,
-        fileFormat: 'csv' | 'xlsx',
+        fileFormat: HistoryFileFormat,
         filename?: string
     ) => {
         const downloadKey = getDownloadKey(historyId, fileFormat)
@@ -221,7 +230,7 @@ export function useHistoryFiles(
         }))
 
         try {
-            await service.downloadHistoryFile(historyId, fileFormat, filename)
+            await serviceCommands.download(historyId, fileFormat, filename).execute()
         } catch (error: unknown) {
             setDownloadError(getErrorMessage(error, 'Failed to download history file.'))
         } finally {
@@ -241,7 +250,7 @@ export function useHistoryFiles(
         setRenamingHistoryId(historyId)
 
         try {
-            const updatedHistory = await service.renameHistoryFile(historyId, customName)
+            const updatedHistory = await serviceCommands.rename(historyId, customName).execute()
             setItems((current) =>
                 current.map((item) =>
                     item.id === historyId ? updatedHistory : item
@@ -261,7 +270,7 @@ export function useHistoryFiles(
         setDeletingHistoryId(historyId)
 
         try {
-            await service.deleteHistoryFile(historyId)
+            await serviceCommands.delete(historyId).execute()
             const nextCount = Math.max(0, count - 1)
             const remainingItems = items.filter((item) => item.id !== historyId)
             const shouldLoadPreviousPage = !loadAllHistory && nextCount > 0 && offset >= nextCount
@@ -294,7 +303,18 @@ export function useHistoryFiles(
         await downloadFile(historyId, 'xlsx', filename)
     }
 
-    const isDownloading = (historyId: string, fileFormat: 'csv' | 'xlsx') =>
+    const commands: HistoryCommands = {
+        downloadCsv: (historyId, filename) =>
+            new CallbackHistoryCommand(() => downloadCsv(historyId, filename)),
+        downloadExcel: (historyId, filename) =>
+            new CallbackHistoryCommand(() => downloadExcel(historyId, filename)),
+        rename: (historyId, customName) =>
+            new CallbackHistoryCommand(() => renameHistory(historyId, customName)),
+        delete: (historyId) =>
+            new CallbackHistoryCommand(() => deleteHistory(historyId)),
+    }
+
+    const isDownloading = (historyId: string, fileFormat: HistoryFileFormat) =>
         !!activeDownloads[getDownloadKey(historyId, fileFormat)]
 
     return {
@@ -310,6 +330,7 @@ export function useHistoryFiles(
         loadError,
         mutationError,
         error: loadError ?? downloadError ?? mutationError,
+        commands,
         reloadHistory,
         goToNextPage,
         goToPreviousPage,
