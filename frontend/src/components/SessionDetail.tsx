@@ -16,12 +16,16 @@ export default function SessionDetail({
     session,
     isNotFound,
 }: Readonly<SessionDetailProps>) {
-    if (isNotFound || !session) {
+    if (isNotFound) {
         return (
-            <section role="alert" aria-live="polite">
+            <section role="status" aria-live="polite">
                 <h1>Sesi Tidak Ditemukan</h1>
             </section>
         )
+    }
+
+    if (!session) {
+        return null
     }
 
     return (
