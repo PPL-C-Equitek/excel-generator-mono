@@ -30,9 +30,19 @@ const extremelyLongLine = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             render(<SessionDetail session={null} isNotFound />)
 
             expect(screen.getByText('Sesi Tidak Ditemukan')).toBeInTheDocument()
+            expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
             expect(
                 screen.queryByText(validSession.prompt)
             ).not.toBeInTheDocument()
+        })
+
+        it('renders nothing when session data is still unavailable but the page is not in a not-found state', () => {
+            const { container } = render(
+                <SessionDetail session={null} isNotFound={false} />
+            )
+
+            expect(container).toBeEmptyDOMElement()
+            expect(screen.queryByText('Sesi Tidak Ditemukan')).not.toBeInTheDocument()
         })
     })
 
