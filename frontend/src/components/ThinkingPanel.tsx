@@ -1,4 +1,7 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useId, useRef, type ReactNode } from "react";
+import { useAutoScrollToBottom } from "@/hooks/useAutoScrollToBottom";
 
 export const THINKING_PANEL_STATUS = {
   idle: "idle",
@@ -24,6 +27,7 @@ const scrollRegionClassName =
   "max-h-[400px] overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:border-2 [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-track]:bg-transparent";
 const statusClassName =
   "flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm shadow-sm";
+const contentClassName = "space-y-3 whitespace-pre-wrap leading-6 text-slate-700";
 
 function renderInlineMarkdown(text: string): ReactNode[] {
   return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
@@ -102,7 +106,7 @@ function renderMarkdownContent(content: string) {
   return blocks;
 }
 
-function renderContent(content: string) {
+function renderSafeContent(content: string) {
   if (!looksLikeMarkdown(content)) {
     return <p className="whitespace-pre-wrap">{content}</p>;
   }
@@ -115,6 +119,8 @@ export default function ThinkingPanel({
   content,
   animated = false,
 }: Readonly<ThinkingPanelProps>) {
+  const titleId = useId();
+  const scrollRegionRef = useRef<HTMLDivElement>(null);
   const normalizedContent = content?.trim() ?? "";
   const showEmptyState =
     status !== THINKING_PANEL_STATUS.error &&
@@ -124,31 +130,52 @@ export default function ThinkingPanel({
   const showLoadingState =
     status === THINKING_PANEL_STATUS.loading ||
     status === THINKING_PANEL_STATUS.thinking;
+  const isStreaming =
+    status === THINKING_PANEL_STATUS.loading ||
+    status === THINKING_PANEL_STATUS.thinking;
+
+  useAutoScrollToBottom(scrollRegionRef, isStreaming, content ?? "");
 
   if (status === THINKING_PANEL_STATUS.error) {
     return (
-      <div
+      <section
         role="alert"
         aria-label={panelLabel}
+        aria-labelledby={titleId}
         className={`${statusClassName} border-red-200 bg-red-50 text-red-700`}
       >
+        <h3 id={titleId} className="sr-only">
+          {panelLabel}
+        </h3>
         <span aria-hidden className="mt-0.5 text-red-500">
           !
         </span>
         <p>Gagal memuat proses</p>
-      </div>
+      </section>
     );
   }
 
   return (
-    <div
+    <section
       role="status"
       aria-live="polite"
       aria-label={panelLabel}
+      aria-labelledby={titleId}
+      aria-busy={isStreaming}
       className={`${shellClassName} ${animated ? "animate-pulse" : ""}`}
     >
+      <header className="mb-2">
+        <h3 id={titleId} className="sr-only">
+          {panelLabel}
+        </h3>
+      </header>
       <div
+        ref={scrollRegionRef}
         data-testid="thinking-panel-scroll-region"
+        role="log"
+        aria-live="polite"
+        aria-atomic="false"
+        aria-relevant="additions text"
         className={scrollRegionClassName}
       >
         {showLoadingState ? (
@@ -168,12 +195,12 @@ export default function ThinkingPanel({
         ) : (
           <div
             data-testid="thinking-panel-content"
-            className="space-y-3 whitespace-pre-wrap leading-6 text-slate-700"
+            className={contentClassName}
           >
-            {renderContent(content ?? "")}
+            {renderSafeContent(content ?? "")}
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }
