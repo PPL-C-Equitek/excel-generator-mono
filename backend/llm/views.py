@@ -901,6 +901,7 @@ def llm_generate(request):
             owner=request.user,
             original_name=extract_original_name(input_json, output_json),
             custom_name=None,
+            session_id=response_session_id,
             output_json=output_json,
             status_processing="completed",
         )

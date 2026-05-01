@@ -3,7 +3,10 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
+import SessionConversationView from '@/components/SessionConversationView'
 import { useHistoryFiles } from '@/hooks/useHistoryFiles'
+import { useSessionResume } from '@/hooks/useSessionResume'
+import { useSessionThinkingLogs } from '@/hooks/useSessionThinkingLogs'
 import type { HistoryItem } from '@/services/history'
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -44,6 +47,7 @@ function formatCreatedAt(value: string): string {
 export default function HistoryPage() {
     const searchParams = useSearchParams()
     const selectedHistoryIdFromQuery = searchParams.get('historyId')
+    const selectedSessionIdFromQuery = searchParams.get('sessionId')
     const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null)
     const [renameValue, setRenameValue] = useState('')
     const [historyToDelete, setHistoryToDelete] = useState<HistoryItem | null>(null)
@@ -80,6 +84,24 @@ export default function HistoryPage() {
         () => items.find((item) => item.id === selectedHistoryId) ?? null,
         [items, selectedHistoryId]
     )
+    const selectedSessionId = useMemo(() => {
+        if (selectedSessionIdFromQuery) {
+            return selectedSessionIdFromQuery
+        }
+
+        return selectedHistoryItem?.session_id ?? null
+    }, [selectedHistoryItem?.session_id, selectedSessionIdFromQuery])
+    const {
+        session,
+        isLoading: isLoadingSession,
+        error: sessionError,
+        isNotFound: isSessionNotFound,
+    } = useSessionResume(selectedSessionId)
+    const {
+        thinkingLogsByOutputId,
+        isLoading: isLoadingThinkingLogs,
+        error: thinkingLogsError,
+    } = useSessionThinkingLogs(selectedSessionId)
 
     const startEditing = (item: HistoryItem) => {
         setEditingHistoryId(item.id)
@@ -266,6 +288,24 @@ export default function HistoryPage() {
                                                 >
                                                     {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
                                                 </button>
+                                            </div>
+
+                                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                                                {selectedSessionId ? (
+                                                    <SessionConversationView
+                                                        session={session}
+                                                        isLoadingSession={isLoadingSession}
+                                                        sessionError={sessionError}
+                                                        isSessionNotFound={isSessionNotFound}
+                                                        thinkingLogsByOutputId={thinkingLogsByOutputId}
+                                                        isLoadingThinkingLogs={isLoadingThinkingLogs}
+                                                        thinkingLogsError={thinkingLogsError}
+                                                    />
+                                                ) : (
+                                                    <p className="text-sm text-slate-600">
+                                                        Session context belum tersedia untuk history ini, jadi thinking log per sesi belum bisa dimuat.
+                                                    </p>
+                                                )}
                                             </div>
                                         </div>
                                     )

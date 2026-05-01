@@ -117,6 +117,15 @@ function HistorySidebarItemRow({
 }: HistorySidebarItemRowProps) {
     const historyName = getDisplayName(item.custom_name, item.original_name)
     const isSelected = selectedHistoryId === item.id
+    const historyHref = item.session_id
+        ? {
+            pathname: '/history',
+            query: {
+                historyId: item.id,
+                sessionId: item.session_id,
+            },
+        }
+        : `/history?historyId=${item.id}`
 
     return (
         <div
@@ -129,7 +138,7 @@ function HistorySidebarItemRow({
         >
             <div className="flex items-start gap-1 px-2 py-1.5">
                 <Link
-                    href={`/history?historyId=${item.id}`}
+                    href={historyHref}
                     className="min-w-0 flex-1 rounded-md px-2 py-1 text-left transition focus:outline-none"
                     title={historyName}
                 >

@@ -337,7 +337,7 @@ def _build_resume_history(session):
             id=message.id,
             role=message.role,
             content=message.content,
-            thinking_log=message.thinking_log,
+            thinking_log=message.thinking_log or "",
             target_output_id=message.target_output_id,
             created_at=message.created_at,
         )
@@ -350,7 +350,8 @@ def _build_resume_history(session):
             source_message_id=output.source_message_id,
             parent_output_id=output.parent_output_id,
             output_json=output.output_json,
-            reasoning=output.reasoning,
+            thinking_log=output.thinking_log or "",
+            reasoning=output.reasoning or {},
             created_at=output.created_at,
         )
         for output in session.generated_outputs.all()
