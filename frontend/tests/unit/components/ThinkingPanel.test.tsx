@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import ThinkingPanel from "@/components/ThinkingPanel";
+import { thinkingPanelInternals } from "@/components/ThinkingPanel";
 
 type ThinkingPanelContractProps = {
   status?: "idle" | "loading" | "thinking" | "success" | "error";
@@ -121,5 +122,59 @@ describe("ThinkingPanel", () => {
     const panel = screen.getByLabelText("Proses berpikir");
     expect(panel).toHaveAttribute("aria-busy", "true");
     expect(panel).toHaveTextContent("Memuat proses berpikir...");
+  });
+
+  it("renders mixed inline markdown safely, including empty and unclosed markers", () => {
+    renderThinkingPanel({
+      status: "success",
+      content: "Awalan **tebal** akhiran **** sisa **tidak tertutup",
+    });
+
+    const body = screen.getByTestId("thinking-panel-content");
+    const strongTexts = body.querySelectorAll("strong");
+
+    expect(strongTexts).toHaveLength(2);
+    expect(strongTexts[0]).toHaveTextContent("tebal");
+    expect(strongTexts[1]).toHaveTextContent("sisa");
+    expect(body).toHaveTextContent("Awalan");
+    expect(body).toHaveTextContent("akhiran ** sisa tidak tertutup");
+  });
+
+  it("treats malformed list markers as plain text instead of list content", () => {
+    renderThinkingPanel({
+      status: "success",
+      content: "-   ",
+    });
+
+    const body = screen.getByTestId("thinking-panel-content");
+
+    expect(within(body).queryByRole("list")).not.toBeInTheDocument();
+    expect(body).toHaveTextContent("-");
+  });
+
+  it("keeps unclosed inline markdown markers as literal text", () => {
+    render(
+      <div data-testid="inline-markdown">
+        {thinkingPanelInternals.renderInlineMarkdown("Awal **tidak tertutup")}
+      </div>,
+    );
+
+    expect(screen.getByTestId("inline-markdown")).toHaveTextContent(
+      "Awal **tidak tertutup",
+    );
+  });
+
+  it("returns false for empty and empty-bold markdown detection cases", () => {
+    expect(thinkingPanelInternals.hasBoldMarkdown("")).toBe(false);
+    expect(thinkingPanelInternals.hasBoldMarkdown("****")).toBe(false);
+    expect(thinkingPanelInternals.looksLikeMarkdown("****")).toBe(false);
+  });
+
+  it('uses the "empty" fallback when creating keys from blank content', () => {
+    const keyCounts = new Map<string, number>();
+
+    expect(
+      thinkingPanelInternals.createContentKey("paragraph", "   \n\t   ", keyCounts),
+    ).toBe("paragraph-empty-1");
   });
 });

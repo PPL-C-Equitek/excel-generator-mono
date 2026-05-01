@@ -34,7 +34,7 @@ function createContentKey(
   value: string,
   keyCounts: Map<string, number>,
 ): string {
-  const normalizedValue = value.replace(/\s+/g, " ").trim() || "empty";
+  const normalizedValue = value.replaceAll(/\s+/g, " ").trim() || "empty";
   const baseKey = `${prefix}-${normalizedValue.slice(0, 60)}`;
   const nextCount = (keyCounts.get(baseKey) ?? 0) + 1;
   keyCounts.set(baseKey, nextCount);
@@ -115,7 +115,7 @@ function getListItemContent(line: string): string | null {
   const trimmedStart = line.trimStart();
   if (
     trimmedStart.length < 3 ||
-    (trimmedStart[0] !== "-" && trimmedStart[0] !== "*")
+    (!trimmedStart.startsWith("-") && !trimmedStart.startsWith("*"))
   ) {
     return null;
   }
@@ -214,6 +214,14 @@ function renderSafeContent(content: string) {
 
   return renderMarkdownContent(content);
 }
+
+export const thinkingPanelInternals = {
+  createContentKey,
+  renderInlineMarkdown,
+  hasBoldMarkdown,
+  getListItemContent,
+  looksLikeMarkdown,
+};
 
 export default function ThinkingPanel({
   status,
