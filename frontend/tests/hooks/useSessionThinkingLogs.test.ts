@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useSessionThinkingLogs } from '../../src/hooks/useSessionThinkingLogs'
 import { getThinkingLogsBySession } from '../../src/services/thinkingLogs'
+import type { ThinkingLogListResponse } from '../../src/services/thinkingLogs'
 
 vi.mock('../../src/services/thinkingLogs', () => ({
     getThinkingLogsBySession: vi.fn(),
@@ -80,7 +81,7 @@ describe('useSessionThinkingLogs', () => {
 
     it('does not update state when unmounted before request resolves', async () => {
         vi.useFakeTimers()
-        let resolveThinkingLogs: ((value: any) => void) | null = null
+        let resolveThinkingLogs: ((value: ThinkingLogListResponse) => void) | null = null
         mockGetThinkingLogsBySession.mockImplementation(
             () =>
                 new Promise((resolve) => {

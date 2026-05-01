@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useSessionResume } from '../../src/hooks/useSessionResume'
 import { getSessionResume } from '../../src/services/sessions'
+import type { SessionResume } from '../../src/services/sessions'
 
 vi.mock('../../src/services/sessions', () => ({
     getSessionResume: vi.fn(),
@@ -84,7 +85,7 @@ describe('useSessionResume', () => {
 
     it('does not set state when component unmounts before request completes', async () => {
         vi.useFakeTimers()
-        let resolveGetSession: ((value: any) => void) | null = null
+        let resolveGetSession: ((value: SessionResume) => void) | null = null
         mockGetSessionResume.mockImplementation(
             () => new Promise((resolve) => {
                 resolveGetSession = resolve
@@ -111,7 +112,7 @@ describe('useSessionResume', () => {
 
     it('does not set state when component unmounts during error handling', async () => {
         vi.useFakeTimers()
-        let rejectGetSession: ((reason: any) => void) | null = null
+        let rejectGetSession: ((reason: unknown) => void) | null = null
         mockGetSessionResume.mockImplementation(
             () => new Promise((_, reject) => {
                 rejectGetSession = reject
