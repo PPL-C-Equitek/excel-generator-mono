@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
+from hypothesis import given, settings, strategies as st
 from PIL import Image
 
 from file_processing.utils.image_validators import (
@@ -699,3 +700,45 @@ class TestValidateFileImageIntegration(SimpleTestCase):
                 is_valid, err = validate_file(f)
         self.assertTrue(is_valid)
         self.assertIsNone(err)
+
+
+class TestImageValidationHypothesis(SimpleTestCase):
+    @settings(max_examples=50, deadline=None)
+    @given(
+        ext=st.sampled_from([".png", ".jpg", ".jpeg"]),
+        tail=st.binary(min_size=0, max_size=64),
+    )
+    def test_magic_number_accepts_supported_signatures(self, ext, tail):
+        if ext == ".png":
+            header = b"\x89PNG\r\n\x1a\n"
+        else:
+            header = b"\xFF\xD8\xFF"
+
+        f = _make_uploaded(f"img{ext}", header + tail)
+        is_valid, err = validate_image_magic_number(f)
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(err)
+
+    @settings(max_examples=50, deadline=None)
+    @given(
+        header=st.binary(min_size=0, max_size=8).filter(
+            lambda data: not data.startswith(b"\x89PNG\r\n\x1a\n")
+            and not data.startswith(b"\xFF\xD8\xFF")
+        )
+    )
+    def test_magic_number_rejects_unsupported_headers(self, header):
+        f = _make_uploaded("img.png", header + b"random-tail")
+        is_valid, err = validate_image_magic_number(f)
+
+        self.assertFalse(is_valid)
+        self.assertIn("does not match", err)
+
+    @settings(max_examples=50, deadline=None)
+    @given(size=st.integers(min_value=0, max_value=10 * 1024 * 1024 + 1024))
+    def test_size_validation_boundary(self, size):
+        f = _make_uploaded("img.png", b"x", content_type="image/png")
+        f.size = size
+
+        is_valid, _err = validate_image_size(f)
+        self.assertEqual(is_valid, size <= 10 * 1024 * 1024)

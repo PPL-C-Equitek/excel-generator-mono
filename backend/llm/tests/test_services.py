@@ -11,7 +11,13 @@ from llm.services.generation_service import (
     LlmGenerationService,
     compose_system_prompt,
 )
-from llm.services.openai_client import OpenAIServiceError, OpenAIUpstreamError, generate_json, generate_text
+from llm.services.openai_client import (
+    OpenAIServiceError,
+    OpenAIUpstreamError,
+    generate_chat_response,
+    generate_json,
+    generate_text,
+)
 
 
 class DummyAuthenticationError(Exception):
@@ -152,7 +158,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
         with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
             generate_text("Hello")
 
-        self.assertEqual(exc_ctx.exception.status_code, 401)
+        self.assertEqual(exc_ctx.exception.status_code, 502)
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.RateLimitError", new=DummyRateLimitError)
@@ -196,7 +202,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
     @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_api_status_401_to_401(self, mock_openai):
+    def test_generate_text_maps_api_status_401_to_502(self, mock_openai):
         mock_client = Mock()
         mock_openai.return_value = mock_client
         mock_client.responses.create.side_effect = DummyAPIStatusError("api status", status_code=401)
@@ -204,7 +210,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
         with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
             generate_text("Hello")
 
-        self.assertEqual(exc_ctx.exception.status_code, 401)
+        self.assertEqual(exc_ctx.exception.status_code, 502)
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
@@ -388,10 +394,14 @@ class LlmGenerationServiceTest(SimpleTestCase):
             system_prompt="Schema-specific prompt",
         )
 
-    def test_llm_generation_service_uses_base_prompt_when_no_schema_selected(self):
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_uses_base_prompt_when_no_schema_selected(
+        self, mock_build_extraction_prompt
+    ):
         json_generator = Mock()
         json_generator.generate.return_value = {"status": "ok"}
         schema_prompt_source = Mock()
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
         service = LlmGenerationService(
             json_generator=json_generator,
             schema_prompt_source=schema_prompt_source,
@@ -401,19 +411,27 @@ class LlmGenerationServiceTest(SimpleTestCase):
         result = service.generate({"sheet": "Sheet1"})
 
         self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint=None,
+            chat_context=None,
+        )
         schema_prompt_source.get_prompt_fragment.assert_not_called()
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
-            system_prompt="Base prompt.",
+            system_prompt="Base prompt.\n\nExtraction prompt.",
         )
 
-    def test_llm_generation_service_combines_base_and_schema_prompts(self):
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_combines_base_and_schema_prompts(
+        self, mock_build_extraction_prompt
+    ):
         json_generator = Mock()
         json_generator.generate.return_value = {"status": "ok"}
         schema_prompt_source = Mock()
         schema_prompt_source.get_prompt_fragment.return_value = (
             "Use only invoice_number and total_amount."
         )
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
         service = LlmGenerationService(
             json_generator=json_generator,
             schema_prompt_source=schema_prompt_source,
@@ -423,17 +441,25 @@ class LlmGenerationServiceTest(SimpleTestCase):
         result = service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-1")
 
         self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint="Use only invoice_number and total_amount.",
+            chat_context=None,
+        )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
-            system_prompt="Base prompt.\n\nUse only invoice_number and total_amount.",
+            system_prompt="Base prompt.\n\nExtraction prompt.",
         )
 
-    def test_llm_generation_service_passes_none_when_no_prompt_exists(self):
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_passes_none_when_no_prompt_exists(
+        self, mock_build_extraction_prompt
+    ):
         json_generator = Mock()
         json_generator.generate.return_value = {"status": "ok"}
         schema_prompt_source = Mock()
         schema_prompt_source.get_prompt_fragment.return_value = "   "
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
         service = LlmGenerationService(
             json_generator=json_generator,
             schema_prompt_source=schema_prompt_source,
@@ -443,9 +469,72 @@ class LlmGenerationServiceTest(SimpleTestCase):
         result = service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-1")
 
         self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint="   ",
+            chat_context=None,
+        )
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
-            system_prompt=None,
+            system_prompt="Extraction prompt.",
+        )
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_uses_extraction_prompt_from_input_json(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "",
+        )
+
+        result = service.generate({"name": "Pen", "price": 5000})
+
+        self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint=None,
+            chat_context=None,
+        )
+        json_generator.generate.assert_called_once_with(
+            input_json={"name": "Pen", "price": 5000},
+            system_prompt="Extraction prompt.",
+        )
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_appends_custom_schema_to_extraction_prompt(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        schema_prompt_source.get_prompt_fragment.return_value = (
+            "Use only invoice_number and total_amount."
+        )
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "",
+        )
+
+        result = service.generate(
+            {"name": "Pen", "price": 5000},
+            custom_schema_id="schema-1",
+        )
+
+        self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint="Use only invoice_number and total_amount.",
+            chat_context=None,
+        )
+        schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
+        json_generator.generate.assert_called_once_with(
+            input_json={"name": "Pen", "price": 5000},
+            system_prompt="Extraction prompt.",
         )
 
     @patch("llm.services.generation_service.CustomSchema.objects.get")
@@ -484,3 +573,167 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         mock_get.assert_not_called()
 
+
+class GenerateChatResponseServiceTest(SimpleTestCase):
+    # Positive
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_returns_reply_from_first_choice(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="Halo!"))]
+        )
+
+        result = generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(result, "Halo!")
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_calls_chat_completions_with_correct_payload(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="ok"))]
+        )
+        messages = [{"role": "user", "content": "Halo"}]
+
+        generate_chat_response(messages)
+
+        mock_client.chat.completions.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            messages=messages,
+        )
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_passes_full_history_to_api(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="Follow-up reply"))]
+        )
+        messages = [
+            {"role": "user", "content": "Pesan pertama"},
+            {"role": "assistant", "content": "Balasan pertama"},
+            {"role": "user", "content": "Pesan lanjutan"},
+        ]
+
+        result = generate_chat_response(messages)
+
+        self.assertEqual(result, "Follow-up reply")
+        mock_client.chat.completions.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            messages=messages,
+        )
+
+    # Negative
+
+    def test_generate_chat_response_raises_for_empty_messages(self):
+        with self.assertRaises(ValueError):
+            generate_chat_response([])
+
+    @override_settings(OPENAI_API_KEY="", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_raises_when_api_key_missing(self, mock_openai):
+        with self.assertRaises(OpenAIServiceError):
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        mock_openai.assert_not_called()
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_raises_when_reply_content_is_empty(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content=""))]
+        )
+
+        with self.assertRaises(OpenAIServiceError):
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.AuthenticationError", new=DummyAuthenticationError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_maps_authentication_error_to_502(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = DummyAuthenticationError("bad auth")
+
+        with self.assertRaises(OpenAIUpstreamError) as ctx:
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(ctx.exception.status_code, 502)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.RateLimitError", new=DummyRateLimitError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_maps_rate_limit_error_to_429(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = DummyRateLimitError("rate limit")
+
+        with self.assertRaises(OpenAIUpstreamError) as ctx:
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(ctx.exception.status_code, 429)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APITimeoutError", new=DummyTimeoutError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_maps_timeout_error_to_504(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = DummyTimeoutError("timeout")
+
+        with self.assertRaises(OpenAIUpstreamError) as ctx:
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(ctx.exception.status_code, 504)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIConnectionError", new=DummyAPIConnectionError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_maps_connection_error_to_502(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = DummyAPIConnectionError("conn aborted")
+
+        with self.assertRaises(OpenAIUpstreamError) as ctx:
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(ctx.exception.status_code, 502)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_maps_api_status_error(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = DummyAPIStatusError("api status", status_code=502)
+
+        with self.assertRaises(OpenAIUpstreamError) as ctx:
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(ctx.exception.status_code, 502)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_raises_when_choices_missing_or_invalid(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        
+        # Simulating IndexError by returning empty choices
+        mock_client.chat.completions.create.return_value = Mock(choices=[])
+
+        with self.assertRaises(OpenAIServiceError):
+            generate_chat_response([{"role": "user", "content": "Halo"}])
+            
+        # Simulating AttributeError by returning an object without choices
+        mock_client.chat.completions.create.return_value = Mock(spec=[])
+        
+        with self.assertRaises(OpenAIServiceError):
+            generate_chat_response([{"role": "user", "content": "Halo"}])

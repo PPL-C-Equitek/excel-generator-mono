@@ -1,5 +1,6 @@
 import os
 import logging
+from dataclasses import dataclass
 
 from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
@@ -11,6 +12,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.views import APIView
 from .models import GroupMember
 from artifact_history.serializers import HistoryItemSerializer, HistoryRenameSerializer
 from artifact_history.services import (
@@ -22,6 +24,28 @@ from artifact_history.services import (
     update_artifact_history_custom_name,
 )
 from authentication.permissions import IsVerifiedUser
+from chat_sessions.serializers import (
+    SessionDetailSerializer,
+    SessionListItemSerializer,
+    SessionResumeSerializer,
+    SessionTitleUpdateSerializer,
+)
+from chat_sessions.services import (
+    build_resume_context_for_user,
+    delete_session,
+    get_generated_output_for_session_user,
+    get_default_session_detail_pagination,
+    get_paginated_session_detail_for_user,
+    get_session_for_user,
+    list_sessions_for_user,
+    SESSION_DETAIL_MAX_LIMIT,
+    SESSION_DETAIL_LIMIT_FIELDS,
+    SESSION_DETAIL_OFFSET_FIELDS,
+    SESSION_LIST_DEFAULT_LIMIT,
+    SESSION_LIST_MAX_LIMIT,
+    update_session_title,
+    validate_session_detail_pagination_params as validate_session_detail_pagination_params_service,
+)
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
     MAX_FILE_SIZE,
@@ -46,9 +70,120 @@ from file_processing.services.export_service import (
     resolve_csv_download_artifact,
     resolve_excel_download_artifact,
 )
+from llm.views import build_export_output_json
 
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
+NOT_FOUND_DETAIL = "Not found."
+INVALID_SESSION_LIST_PAGINATION_DETAIL = "Invalid session list pagination."
+INVALID_SESSION_DETAIL_PAGINATION_DETAIL = "Invalid session detail pagination."
+CSV_FILE_NOT_FOUND_MESSAGE = "CSV file not found."
+CSV_DOWNLOAD_INTERNAL_ERROR_MESSAGE = "Failed to download CSV due to internal error."
+EXCEL_FILE_NOT_FOUND_MESSAGE = "Excel file not found."
+EXCEL_DOWNLOAD_INTERNAL_ERROR_MESSAGE = "Failed to download Excel due to internal error."
+SESSION_LIST_PAGINATION_ERROR_DETAILS = {
+    "limit must be an integer.",
+    "offset must be an integer.",
+    "offset must be greater than or equal to 0.",
+    "limit must be greater than 0.",
+    f"limit must be less than or equal to {SESSION_LIST_MAX_LIMIT}.",
+}
+SESSION_DETAIL_PAGINATION_ERROR_DETAILS = {
+    f"{field} must be an integer."
+    for field in (*SESSION_DETAIL_LIMIT_FIELDS, *SESSION_DETAIL_OFFSET_FIELDS)
+} | {
+    "messages_limit must be greater than 0.",
+    f"messages_limit must be less than or equal to {SESSION_DETAIL_MAX_LIMIT}.",
+    "messages_offset must be greater than or equal to 0.",
+    "outputs_limit must be greater than 0.",
+    f"outputs_limit must be less than or equal to {SESSION_DETAIL_MAX_LIMIT}.",
+    "outputs_offset must be greater than or equal to 0.",
+}
+
+
+class SessionListPaginationError(Exception):
+    def __init__(self, detail):
+        super().__init__(detail)
+        self.detail = detail
+
+
+class SessionDetailPaginationError(Exception):
+    def __init__(self, detail):
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _parse_session_list_pagination(request):
+    limit_param = request.query_params.get("limit")
+    offset_param = request.query_params.get("offset")
+
+    if limit_param is None:
+        limit = SESSION_LIST_DEFAULT_LIMIT
+    else:
+        try:
+            limit = int(limit_param)
+        except (TypeError, ValueError):
+            raise SessionListPaginationError("limit must be an integer.")
+
+    if offset_param is None:
+        offset = 0
+    else:
+        try:
+            offset = int(offset_param)
+        except (TypeError, ValueError):
+            raise SessionListPaginationError("offset must be an integer.")
+
+    if offset < 0:
+        raise SessionListPaginationError("offset must be greater than or equal to 0.")
+
+    return limit, offset
+
+
+def _build_session_list_pagination_error_response(detail):
+    safe_detail = (
+        detail
+        if detail in SESSION_LIST_PAGINATION_ERROR_DETAILS
+        else INVALID_SESSION_LIST_PAGINATION_DETAIL
+    )
+    return Response({"detail": safe_detail}, status=status.HTTP_400_BAD_REQUEST)
+
+
+def _parse_session_detail_pagination(request):
+    pagination = get_default_session_detail_pagination()
+    for name, default in pagination.items():
+        pagination[name] = _parse_session_detail_int_param(
+            request,
+            name,
+            default=default,
+        )
+    _validate_session_detail_pagination_params(pagination)
+    return pagination
+
+
+def _parse_session_detail_int_param(request, name, default):
+    value = request.query_params.get(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise SessionDetailPaginationError(f"{name} must be an integer.")
+
+def _validate_session_detail_pagination_params(pagination):
+    try:
+        validate_session_detail_pagination_params_service(pagination)
+    except ValueError as exc:
+        detail = exc.args[0] if exc.args else INVALID_SESSION_DETAIL_PAGINATION_DETAIL
+        raise SessionDetailPaginationError(detail) from exc
+
+
+def _build_session_detail_pagination_error_response(detail):
+    safe_detail = (
+        detail
+        if detail in SESSION_DETAIL_PAGINATION_ERROR_DETAILS
+        else INVALID_SESSION_DETAIL_PAGINATION_DETAIL
+    )
+    return Response({"detail": safe_detail}, status=status.HTTP_400_BAD_REQUEST)
 
 
 def _sanitize_download_filename(candidate):
@@ -94,24 +229,44 @@ def _is_invalid_excel_download_id_error(error):
     return "format is invalid" in str(error).lower()
 
 
-def _excel_download_not_found_response():
+def _build_download_error_response(message, status_code):
     return Response(
         {
             "status": "error",
-            "message": "Excel file not found.",
+            "message": message,
         },
-        status=status.HTTP_404_NOT_FOUND,
+        status=status_code,
+    )
+
+
+def _excel_download_not_found_response():
+    return _build_download_error_response(
+        EXCEL_FILE_NOT_FOUND_MESSAGE,
+        status.HTTP_404_NOT_FOUND,
     )
 
 
 def _excel_download_internal_error_response():
-    return Response(
-        {
-            "status": "error",
-            "message": "Failed to download Excel due to internal error.",
-        },
-        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    return _build_download_error_response(
+        EXCEL_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
+        status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
+
+
+@dataclass(frozen=True)
+class SessionOutputDownloadConfig:
+    export_callable: callable
+    storage_dir: str
+    artifact_type: str
+    validation_error_types: tuple[type[Exception], ...]
+    generation_error_types: tuple[type[Exception], ...]
+    invalid_request_message: str
+    internal_error_message: str
+    validation_log_message: str
+    generation_log_message: str
+    unexpected_log_message: str
+    not_found_message: str
+    download_internal_error_message: str
 
 
 def _history_not_found_response():
@@ -654,12 +809,9 @@ def download_csv(request, file_id):
         )
     except OutputCSVDownloadLookupError:
         logger.warning("CSV download file not found or invalid file_id.", exc_info=True)
-        return Response(
-            {
-                "status": "error",
-                "message": "CSV file not found.",
-            },
-            status=status.HTTP_404_NOT_FOUND,
+        return _build_download_error_response(
+            CSV_FILE_NOT_FOUND_MESSAGE,
+            status.HTTP_404_NOT_FOUND,
         )
 
     try:
@@ -667,30 +819,21 @@ def download_csv(request, file_id):
         file_handle = open(safe_file_path, "rb")
     except (KeyError, SuspiciousFileOperation, ValueError):
         logger.warning("CSV download resolved unsafe artifact metadata.", exc_info=True)
-        return Response(
-            {
-                "status": "error",
-                "message": "CSV file not found.",
-            },
-            status=status.HTTP_404_NOT_FOUND,
+        return _build_download_error_response(
+            CSV_FILE_NOT_FOUND_MESSAGE,
+            status.HTTP_404_NOT_FOUND,
         )
     except OSError:
         logger.exception("CSV download failed while reading generated artifact.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to download CSV due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        return _build_download_error_response(
+            CSV_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     except Exception:
         logger.exception("Unexpected error while preparing CSV download.")
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed to download CSV due to internal error.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        return _build_download_error_response(
+            CSV_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
     download_name = _resolve_download_filename(
@@ -705,6 +848,294 @@ def download_csv(request, file_id):
         filename=download_name,
         content_type=artifact["content_type"],
     )
+
+
+@require_GET
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_output_download_csv(request, session_id, output_id):
+    return _build_session_output_download_response(
+        request=request,
+        session_id=session_id,
+        output_id=output_id,
+        config=SessionOutputDownloadConfig(
+            export_callable=export_csv_to_filesystem,
+            storage_dir=settings.CSV_EXPORT_DIR,
+            artifact_type="csv",
+            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
+            generation_error_types=(OutputCSVGenerationError,),
+            invalid_request_message="Invalid CSV export request.",
+            internal_error_message=CSV_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
+            validation_log_message="Validation or mapping error during session CSV download.",
+            generation_log_message="CSV generation error during session CSV download.",
+            unexpected_log_message="Unexpected error during session CSV download.",
+            not_found_message=CSV_FILE_NOT_FOUND_MESSAGE,
+            download_internal_error_message=CSV_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
+        ),
+    )
+
+
+@require_GET
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_output_download_excel(request, session_id, output_id):
+    return _build_session_output_download_response(
+        request=request,
+        session_id=session_id,
+        output_id=output_id,
+        config=SessionOutputDownloadConfig(
+            export_callable=export_excel_to_filesystem,
+            storage_dir=settings.EXCEL_EXPORT_DIR,
+            artifact_type="xlsx",
+            validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
+            generation_error_types=(OutputExcelGenerationError,),
+            invalid_request_message="Invalid Excel export request.",
+            internal_error_message=EXCEL_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
+            validation_log_message="Validation or mapping error during session Excel download.",
+            generation_log_message="Excel generation error during session Excel download.",
+            unexpected_log_message="Unexpected error during session Excel download.",
+            not_found_message=EXCEL_FILE_NOT_FOUND_MESSAGE,
+            download_internal_error_message=EXCEL_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
+        ),
+    )
+
+
+def _session_csv_download_not_found_response():
+    return _build_download_error_response(
+        CSV_FILE_NOT_FOUND_MESSAGE,
+        status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _session_csv_download_internal_error_response():
+    return _build_download_error_response(
+        CSV_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
+        status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
+
+def _normalize_session_output_export_payload(output):
+    payload = getattr(output, "export_output_json", None) or {}
+    if not payload:
+        raw = getattr(output, "output_json", None)
+        if raw:
+            payload = build_export_output_json(input_json=raw, output_json=raw)
+    if not isinstance(payload, dict):
+        return payload
+
+    normalized_payload = dict(payload)
+    document_info = payload.get("document_info")
+    if not isinstance(document_info, dict):
+        return normalized_payload
+
+    normalized_document_info = dict(document_info)
+    source_type = normalized_document_info.get("source_type")
+    if source_type in {"Excel", "PDF"}:
+        normalized_payload["document_info"] = normalized_document_info
+        return normalized_payload
+
+    filename = normalized_document_info.get("filename")
+    if isinstance(filename, str) and filename.strip().lower().endswith(".pdf"):
+        normalized_document_info["source_type"] = "PDF"
+    else:
+        normalized_document_info["source_type"] = "Excel"
+
+    normalized_payload["document_info"] = normalized_document_info
+    return normalized_payload
+
+
+def _build_session_output_download_response(
+    *,
+    request,
+    session_id,
+    output_id,
+    config,
+):
+    output = get_generated_output_for_session_user(
+        request.user,
+        session_id,
+        output_id,
+    )
+    if output is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        artifact = config.export_callable(
+            output_json=_normalize_session_output_export_payload(output),
+            storage_dir=config.storage_dir,
+        )
+    except Exception as exc:
+        return _build_export_error_response(
+            error=exc,
+            validation_error_types=config.validation_error_types,
+            generation_error_types=config.generation_error_types,
+            invalid_request_message=config.invalid_request_message,
+            internal_error_message=config.internal_error_message,
+            validation_log_message=config.validation_log_message,
+            generation_log_message=config.generation_log_message,
+            unexpected_log_message=config.unexpected_log_message,
+        )
+
+    try:
+        safe_file_path = safe_join(config.storage_dir, artifact["file_name"])
+        file_handle = open(safe_file_path, "rb")
+    except (KeyError, SuspiciousFileOperation, ValueError):
+        logger.warning(
+            "Session %s download resolved unsafe artifact metadata.",
+            config.artifact_type.upper(),
+            exc_info=True,
+        )
+        return _build_download_error_response(
+            config.not_found_message,
+            status.HTTP_404_NOT_FOUND,
+        )
+    except OSError:
+        logger.exception(
+            "Session %s download failed while reading generated artifact.",
+            config.artifact_type.upper(),
+        )
+        return _build_download_error_response(
+            config.download_internal_error_message,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    except Exception:
+        logger.exception(
+            "Unexpected error while preparing session %s download.",
+            config.artifact_type.upper(),
+        )
+        return _build_download_error_response(
+            config.download_internal_error_message,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    download_name = _resolve_download_filename(
+        requested_name=request.query_params.get("filename"),
+        default_name=artifact["file_name"],
+        artifact_type=artifact["artifact_type"],
+    )
+
+    return FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=download_name,
+        content_type=_get_history_download_content_type(artifact["artifact_type"]),
+    )
+
+
+@require_GET
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_list(request):
+    try:
+        limit, offset = _parse_session_list_pagination(request)
+        sessions = list(list_sessions_for_user(request.user, limit=limit, offset=offset))
+    except SessionListPaginationError as exc:
+        return _build_session_list_pagination_error_response(exc.detail)
+    except ValueError as exc:
+        detail = exc.args[0] if exc.args else None
+        return _build_session_list_pagination_error_response(detail)
+
+    serializer = SessionListItemSerializer(sessions, many=True)
+    return Response(
+        {
+            "count": len(sessions),
+            "limit": limit,
+            "offset": offset,
+            "results": serializer.data,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_detail(request, session_id):
+    return _build_session_detail_response(request, session_id)
+
+
+def _build_session_detail_response(request, session_id):
+    try:
+        pagination = _parse_session_detail_pagination(request)
+        session = get_paginated_session_detail_for_user(
+            request.user,
+            session_id,
+            **pagination,
+        )
+    except SessionDetailPaginationError as exc:
+        return _build_session_detail_pagination_error_response(exc.detail)
+    except ValueError as exc:
+        detail = exc.args[0] if exc.args else None
+        return _build_session_detail_pagination_error_response(detail)
+
+    if session is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response(SessionDetailSerializer(session).data, status=status.HTTP_200_OK)
+
+@require_GET
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_resume(request, session_id):
+    resume_context = build_resume_context_for_user(request.user, session_id)
+    if resume_context is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response(
+        SessionResumeSerializer(resume_context).data,
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_update(request, session_id):
+    return _build_session_update_response(request.user, request.data, session_id)
+
+
+def _build_session_update_response(user, data, session_id):
+    session = get_session_for_user(user, session_id)
+    if session is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = SessionTitleUpdateSerializer(data=data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    updated_session = update_session_title(session, serializer.validated_data["title"])
+    return Response(
+        SessionListItemSerializer(updated_session).data,
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+def session_delete(request, session_id):
+    return _build_session_delete_response(request.user, session_id)
+
+
+def _build_session_delete_response(user, session_id):
+    session = get_session_for_user(user, session_id)
+    if session is None:
+        return Response({"detail": NOT_FOUND_DETAIL}, status=status.HTTP_404_NOT_FOUND)
+
+    delete_session(session)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SessionResourceView(APIView):
+    permission_classes = [IsAuthenticated, IsVerifiedUser]
+
+    def get(self, request, session_id):
+        return _build_session_detail_response(request, session_id)
+
+    def patch(self, request, session_id):
+        return _build_session_update_response(request.user, request.data, session_id)
+
+    def delete(self, request, session_id):
+        return _build_session_delete_response(request.user, session_id)
+
+
 
 
 @require_GET

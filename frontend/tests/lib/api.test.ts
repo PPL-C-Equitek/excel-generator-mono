@@ -9,8 +9,18 @@ import {
     requestPasswordReset,
     resendPasswordReset,
 } from "@/lib/api";
+import { FILE_TOO_LARGE_MESSAGE } from "@/constants/upload";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+function parseMockRequestBody(mockFetch: ReturnType<typeof vi.fn>, callIndex = 0) {
+    const requestInit = mockFetch.mock.calls[callIndex]?.[1] as RequestInit | undefined
+    if (!requestInit || typeof requestInit.body !== "string") {
+        throw new Error("Expected a JSON request body")
+    }
+
+    return JSON.parse(requestInit.body)
+}
 
 describe("fetchAPI", () => {
     afterEach(() => {
@@ -209,7 +219,7 @@ describe("uploadFile", () => {
 
         const file = new File(["file-content"], "big.pdf", { type: "application/pdf" });
 
-        await expect(uploadFile(file)).rejects.toThrow("File size too big.");
+        await expect(uploadFile(file)).rejects.toThrow(FILE_TOO_LARGE_MESSAGE);
     });
 
     it("maps max PDF page count error to user-friendly FE message", async () => {
@@ -309,6 +319,19 @@ describe("uploadFile", () => {
         await expect(uploadFile(file)).rejects.toThrow("PDF file is corrupted or invalid.");
     });
 
+    it("maps PDF invalid structure error when message does not include exact corrupt phrase", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "PDF parser encountered invalid structure in cross-reference table." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "invalid.pdf", { type: "application/pdf" });
+
+        await expect(uploadFile(file)).rejects.toThrow("PDF file is corrupted or invalid.");
+    });
+
     it("maps corrupted Word error to dedicated FE message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
@@ -318,6 +341,21 @@ describe("uploadFile", () => {
         vi.stubGlobal("fetch", mockedFetch);
 
         const file = new File(["file-content"], "corrupt.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Word file is corrupt or has an invalid structure.");
+    });
+
+    it("maps Word invalid structure error when message does not include corrupt keyword", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Word parser error: invalid structure detected." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "invalid.docx", {
             type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         });
 
@@ -416,6 +454,23 @@ describe("uploadFile", () => {
         );
     });
 
+    it("maps generic password-protected error when file type is unspecified", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "This file is password-protected." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "archive.bin", {
+            type: "application/octet-stream",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow(
+            "File is password-protected. Please remove the password and try again."
+        );
+    });
+
     it("throws default error when upload fails without message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
@@ -487,7 +542,7 @@ describe('login', () => {
 
             await login('user1@gmail.com', 'user1123')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body).toEqual({ email: 'user1@gmail.com', password: 'user1123' })
         })
 
@@ -544,7 +599,7 @@ describe('login', () => {
 
             await login('  USER1@GMAIL.COM  ', 'user1123')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body.email).toBe('  USER1@GMAIL.COM  ')
         })
 
@@ -610,7 +665,7 @@ describe('loginWithGoogle', () => {
 
             await loginWithGoogle('mock-google-token')
 
-            const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+            const body = parseMockRequestBody(mockFetch)
             expect(body).toEqual({ token: 'mock-google-token' })
         })
 

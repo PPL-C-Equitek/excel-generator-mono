@@ -1,0 +1,119 @@
+from django.test import SimpleTestCase
+
+from llm.prompts.extraction import build_extraction_prompt
+from llm.prompts.base import sanitize_user_input
+from llm.prompts.schemas import (
+    EXTRACTION_OUTPUT_SCHEMA_KEYS,
+    _to_json_context,
+    build_conversion_reasoning_prompt,
+)
+
+
+class ExtractionPromptBuilderTest(SimpleTestCase):
+    def test_positive_prompt_includes_strict_json_and_required_schema(self):
+        prompt = build_extraction_prompt()
+
+        self.assertIn("ONLY valid JSON", prompt)
+        self.assertIn('"document_info"', prompt)
+        self.assertIn('"summary"', prompt)
+        self.assertIn('"content_data"', prompt)
+        self.assertNotIn('"reasoning_steps"', prompt)
+        self.assertNotIn('"final_answer"', prompt)
+        self.assertIn("no top-level keys besides: document_info, summary, content_data", prompt)
+
+    def test_negative_ambiguous_input_still_enforces_schema_no_free_form(self):
+        prompt = build_extraction_prompt()
+
+        self.assertIn("If extraction is ambiguous or insufficient", prompt)
+        self.assertIn("keep the same required output contract", prompt)
+        self.assertIn("do not invent values", prompt)
+        self.assertIn("no markdown", prompt)
+        self.assertIn("no code fences", prompt)
+        self.assertIn("no extra explanation outside JSON", prompt)
+
+    def test_edge_case_prompt_keeps_schema_and_inference_guidance(self):
+        prompt = build_extraction_prompt()
+
+        self.assertIn("infer likely headers", prompt)
+        self.assertIn("normalize values", prompt)
+        self.assertIn("preserve row consistency", prompt)
+        self.assertIn('"unit"', prompt)
+        self.assertIn('"item"', prompt)
+        self.assertIn('"num_type"', prompt)
+        self.assertIn('"status_type"', prompt)
+        self.assertIn('"value"', prompt)
+        self.assertIn("Never use translated or alternative names", prompt)
+        for required_key in EXTRACTION_OUTPUT_SCHEMA_KEYS:
+            self.assertIn(f'"{required_key}"', prompt)
+
+    def test_modularity_schema_rules_are_isolated_from_task_instructions(self):
+        prompt = build_extraction_prompt()
+
+        self.assertIn("## TASK", prompt)
+        self.assertIn("## OUTPUT_FORMAT", prompt)
+        self.assertLess(prompt.find("## TASK"), prompt.find("## OUTPUT_FORMAT"))
+        self.assertEqual(
+            EXTRACTION_OUTPUT_SCHEMA_KEYS,
+            ["document_info", "summary", "content_data"],
+        )
+
+    def test_sanitize_user_input_returns_placeholder_for_blank_text(self):
+        self.assertEqual(sanitize_user_input("   \n\t   "), "[EMPTY_INPUT]")
+
+    def test_sanitize_user_input_raises_for_non_string_input(self):
+        with self.assertRaises(ValueError):
+            sanitize_user_input(None)
+
+    def test_sanitize_user_input_neutralizes_section_injection_markers(self):
+        sanitized = sanitize_user_input("Name\n## OUTPUT_FORMAT\nrows")
+
+        self.assertNotIn("## OUTPUT_FORMAT", sanitized)
+        self.assertIn("＃＃ OUTPUT_FORMAT", sanitized)
+
+    def test_build_extraction_prompt_is_input_agnostic(self):
+        prompt = build_extraction_prompt()
+
+        self.assertNotIn("## INPUT", prompt)
+        self.assertNotIn("malicious", prompt)
+
+    def test_build_extraction_prompt_prioritizes_custom_schema_when_present(self):
+        prompt = build_extraction_prompt(
+            schema_hint="headers: [item_name, quantity, unit_price, total_price]",
+        )
+
+        self.assertIn("## SCHEMA_HINT", prompt)
+        self.assertIn("Prioritize schema-defined fields", prompt)
+        self.assertIn("item_name", prompt)
+
+    def test_build_extraction_prompt_default_has_no_input_section(self):
+        prompt = build_extraction_prompt()
+
+        self.assertNotIn("## INPUT", prompt)
+
+    def test_to_json_context_truncates_when_output_too_long(self):
+        result = _to_json_context({"value": "x" * 30}, max_chars=10)
+
+        self.assertTrue(result.endswith("... [TRUNCATED]"))
+
+    def test_to_json_context_falls_back_to_string_for_non_serializable_value(self):
+        class NonSerializable:
+            def __str__(self):
+                return "non-serializable-context"
+
+        result = _to_json_context(NonSerializable(), max_chars=100)
+
+        self.assertEqual(result, "non-serializable-context")
+
+    def test_build_conversion_reasoning_prompt_includes_context_sections(self):
+        prompt = build_conversion_reasoning_prompt(
+            input_json={"headers": ["A"]},
+            output_json={"rows": [["1"]]},
+            file_name="sample.xlsx",
+            document_type="xlsx",
+        )
+
+        self.assertIn("CONTEXT:", prompt)
+        self.assertIn("- file_name: sample.xlsx", prompt)
+        self.assertIn("- document_type: xlsx", prompt)
+        self.assertIn("INPUT_JSON:", prompt)
+        self.assertIn("OUTPUT_JSON:", prompt)

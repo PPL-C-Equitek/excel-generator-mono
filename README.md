@@ -61,52 +61,53 @@ sudo apt update
 sudo apt install -y poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-ind libmagic1
 ```
 
-### Environment files
-Create the backend environment file in the repository root:
-
-```bash
-cp .env.example .env
-```
-
-Create the frontend environment file:
-
-```bash
-cp .env.example frontend/.env
-```
-
-### Backend
-1. Navigate to the backend directory:
+### Dev run with Infisical (recommended)
+1. Install Infisical CLI:
+   - Windows:
+     ```bash
+     winget install infisical
+     ```
+   - macOS:
+     ```bash
+     brew install infisical/get-cli/infisical
+     ```
+2. Login:
    ```bash
-   cd backend
+   infisical login
    ```
-2. Update the root `.env` with the required local values.
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Apply migrations:
-   ```bash
-   python manage.py migrate
-   ```
-5. Start the backend server:
-   ```bash
-   python manage.py runserver
-   ```
-
-### Frontend
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-2. Update `frontend/.env` if the backend runs on a different URL.
-3. Install dependencies:
+3. Install monorepo dev dependencies (from repo root):
    ```bash
    npm install
    ```
-4. Start the frontend server:
-   ```bash
-   npm run dev
-   ```
+4. Run app from repo root:
+   - Backend only:
+     ```bash
+     npm run be:dev
+     ```
+   - Frontend only:
+     ```bash
+     npm run fe:dev
+     ```
+   - Backend + frontend concurrently:
+     ```bash
+     npm run all:dev
+     ```
+
+Each command above automatically pulls the latest `dev` secrets from Infisical into the root `.env` before starting the app.
+
+### Optional: local env fallback (without Infisical sync)
+- Frontend:
+  ```bash
+  cd frontend
+  npm run dev
+  # or
+  pnpm run dev
+  ```
+- Backend:
+  ```bash
+  cd backend
+  python manage.py runserver
+  ```
 
 ### Optional: initialize database with seed data
 ```bash

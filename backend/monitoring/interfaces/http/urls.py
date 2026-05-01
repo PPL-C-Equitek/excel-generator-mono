@@ -7,5 +7,7 @@ urlpatterns = [
     path("monitoring/live/", views.live),
     path("monitoring/ready/", views.ready),
     path("monitoring/stats/", views.stats),
+    path("monitoring/snapshot/", views.snapshot),
+    path("monitoring/stream/", views.stream),
     path("monitoring/access/", views.access),
 ]

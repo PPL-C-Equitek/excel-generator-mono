@@ -113,6 +113,7 @@ const FORGOT_PASSWORD_ACTION_CONFIG: EmailRequestActionConfig = {
   backLinkLabel: 'Back to login',
   validateEmail: validateForgotPasswordEmail,
 };
+
 export default function ForgotPasswordPage() {
   return <EmailRequestActionPage config={FORGOT_PASSWORD_ACTION_CONFIG} />;
 }

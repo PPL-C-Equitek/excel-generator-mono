@@ -1,4 +1,5 @@
 from PyPDF2 import PdfReader, PdfWriter
+import uuid
 from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
 from django.utils._os import safe_join
@@ -14,8 +15,12 @@ from reportlab.pdfgen import canvas
 from openpyxl import Workbook
 from django.utils import timezone
 
+from rest_framework import status
 from rest_framework.test import APIClient, APIRequestFactory, APISimpleTestCase
+from rest_framework.test import force_authenticate
+from rest_framework.response import Response
 
+from api import views
 from api.models import GroupMember
 from api.views import (
     _delete_history_artifact_file,
@@ -2510,4 +2515,1160 @@ class HistoryArtifactCleanupHelperTest(APISimpleTestCase):
         self.assertIn(
             "Failed to delete cached history artifact file during history removal.",
             "\n".join(log.output),
+        )
+
+
+class SessionEndpointTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.session_resource_view = views.SessionResourceView.as_view()
+        self.user = User.objects.create_user(
+            email="owner@example.com",
+            name="Owner",
+            password="Test12345",
+            status="verified",
+        )
+        self.unverified_user = User.objects.create_user(
+            email="pending@example.com",
+            name="Pending",
+            password="Test12345",
+            status="unverified",
+        )
+        self.session_id = "123e4567-e89b-12d3-a456-426614174000"
+        self.output_id = "123e4567-e89b-12d3-a456-426614174001"
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_requires_authentication(self, mock_list_sessions):
+        request = self.factory.get("/sessions/")
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        mock_list_sessions.assert_not_called()
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_requires_verified_user(self, mock_list_sessions):
+        request = self.factory.get("/sessions/")
+        force_authenticate(request, user=self.unverified_user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        mock_list_sessions.assert_not_called()
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_returns_serialized_owned_sessions(self, mock_list_sessions):
+        stub_session = SimpleNamespace(
+            id="123e4567-e89b-12d3-a456-426614174000",
+            title="April report",
+            created_at="2026-04-21T10:00:00Z",
+            updated_at="2026-04-21T10:05:00Z",
+            last_message_at=None,
+            last_output_at=None,
+        )
+        mock_list_sessions.return_value = [stub_session]
+        request = self.factory.get("/sessions/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["title"], "April report")
+        self.assertEqual(response.data["limit"], 10)
+        self.assertEqual(response.data["offset"], 0)
+        mock_list_sessions.assert_called_once_with(self.user, limit=10, offset=0)
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_applies_default_pagination_contract(self, mock_list_sessions):
+        stub_session = SimpleNamespace(
+            id="123e4567-e89b-12d3-a456-426614174000",
+            title="April report",
+            created_at="2026-04-21T10:00:00Z",
+            updated_at="2026-04-21T10:05:00Z",
+            last_message_at=None,
+            last_output_at=None,
+        )
+        mock_list_sessions.return_value = [stub_session]
+        request = self.factory.get("/sessions/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["limit"], 10)
+        self.assertEqual(response.data["offset"], 0)
+        mock_list_sessions.assert_called_once_with(self.user, limit=10, offset=0)
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_allows_explicit_limit_and_offset(self, mock_list_sessions):
+        mock_list_sessions.return_value = []
+        request = self.factory.get("/sessions/?limit=5&offset=10")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["limit"], 5)
+        self.assertEqual(response.data["offset"], 10)
+        mock_list_sessions.assert_called_once_with(self.user, limit=5, offset=10)
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_rejects_non_numeric_limit(self, mock_list_sessions):
+        request = self.factory.get("/sessions/?limit=abc")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "limit must be an integer."})
+        mock_list_sessions.assert_not_called()
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_rejects_negative_offset(self, mock_list_sessions):
+        request = self.factory.get("/sessions/?offset=-1")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"detail": "offset must be greater than or equal to 0."},
+        )
+        mock_list_sessions.assert_not_called()
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_rejects_non_numeric_offset(self, mock_list_sessions):
+        request = self.factory.get("/sessions/?offset=abc")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "offset must be an integer."})
+        mock_list_sessions.assert_not_called()
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_returns_whitelisted_message_for_service_validation_error(self, mock_list_sessions):
+        mock_list_sessions.side_effect = ValueError("limit must be less than or equal to 50.")
+        request = self.factory.get("/sessions/?limit=51")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"detail": "limit must be less than or equal to 50."},
+        )
+        mock_list_sessions.assert_called_once_with(self.user, limit=51, offset=0)
+
+    @patch("api.views.list_sessions_for_user")
+    def test_session_list_hides_non_whitelisted_service_validation_error(self, mock_list_sessions):
+        mock_list_sessions.side_effect = ValueError("database exploded")
+        request = self.factory.get("/sessions/?limit=10")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_list(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"detail": "Invalid session list pagination."},
+        )
+        mock_list_sessions.assert_called_once_with(self.user, limit=10, offset=0)
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_returns_not_found_when_missing(self, mock_get_session_detail):
+        mock_get_session_detail.return_value = None
+        request = self.factory.get("/sessions/session-1/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        mock_get_session_detail.assert_called_once_with(
+            self.user,
+            "session-1",
+            messages_limit=20,
+            messages_offset=0,
+            outputs_limit=10,
+            outputs_offset=0,
+        )
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_returns_serialized_session_when_found(self, mock_get_session_detail):
+        mock_get_session_detail.return_value = SimpleNamespace(
+            id="123e4567-e89b-12d3-a456-426614174000",
+            title="April report",
+            created_at="2026-04-21T10:00:00Z",
+            updated_at="2026-04-21T10:05:00Z",
+            last_message_at=None,
+            last_output_at=None,
+            messages={"count": 0, "limit": 20, "offset": 0, "results": []},
+            generated_outputs={"count": 0, "limit": 10, "offset": 0, "results": []},
+        )
+        request = self.factory.get("/sessions/session-1/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["title"], "April report")
+        self.assertEqual(response.data["messages"]["limit"], 20)
+        self.assertEqual(response.data["generated_outputs"]["limit"], 10)
+        mock_get_session_detail.assert_called_once_with(
+            self.user,
+            "session-1",
+            messages_limit=20,
+            messages_offset=0,
+            outputs_limit=10,
+            outputs_offset=0,
+        )
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_allows_explicit_messages_and_outputs_pagination(
+        self,
+        mock_get_session_detail,
+    ):
+        mock_get_session_detail.return_value = SimpleNamespace(
+            id="123e4567-e89b-12d3-a456-426614174000",
+            title="April report",
+            created_at="2026-04-21T10:00:00Z",
+            updated_at="2026-04-21T10:05:00Z",
+            last_message_at=None,
+            last_output_at=None,
+            messages={"count": 5, "limit": 2, "offset": 1, "results": []},
+            generated_outputs={"count": 3, "limit": 1, "offset": 2, "results": []},
+        )
+        request = self.factory.get(
+            "/sessions/session-1/?messages_limit=2&messages_offset=1&outputs_limit=1&outputs_offset=2"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["messages"]["limit"], 2)
+        self.assertEqual(response.data["messages"]["offset"], 1)
+        self.assertEqual(response.data["generated_outputs"]["limit"], 1)
+        self.assertEqual(response.data["generated_outputs"]["offset"], 2)
+        mock_get_session_detail.assert_called_once_with(
+            self.user,
+            "session-1",
+            messages_limit=2,
+            messages_offset=1,
+            outputs_limit=1,
+            outputs_offset=2,
+        )
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_rejects_non_numeric_messages_limit(self, mock_get_session_detail):
+        request = self.factory.get("/sessions/session-1/?messages_limit=abc")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "messages_limit must be an integer."})
+        mock_get_session_detail.assert_not_called()
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_rejects_negative_outputs_offset(self, mock_get_session_detail):
+        request = self.factory.get("/sessions/session-1/?outputs_offset=-1")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"detail": "outputs_offset must be greater than or equal to 0."},
+        )
+        mock_get_session_detail.assert_not_called()
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_rejects_zero_messages_limit(self, mock_get_session_detail):
+        request = self.factory.get("/sessions/session-1/?messages_limit=0")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "messages_limit must be greater than 0."})
+        mock_get_session_detail.assert_not_called()
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_rejects_outputs_limit_above_maximum(self, mock_get_session_detail):
+        request = self.factory.get("/sessions/session-1/?outputs_limit=51")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "outputs_limit must be less than or equal to 50."})
+        mock_get_session_detail.assert_not_called()
+
+    @patch("api.views.get_paginated_session_detail_for_user")
+    def test_session_detail_hides_non_whitelisted_service_validation_error(
+        self,
+        mock_get_session_detail,
+    ):
+        mock_get_session_detail.side_effect = ValueError("internal query detail")
+        request = self.factory.get("/sessions/session-1/?messages_limit=10")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_detail(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"detail": "Invalid session detail pagination."})
+
+    @patch("api.views.update_session_title")
+    @patch("api.views.get_session_for_user")
+    def test_session_update_rejects_blank_title(self, mock_get_session, mock_update_session_title):
+        mock_get_session.return_value = SimpleNamespace(id="session-1", title="Old title")
+        request = self.factory.patch(
+            "/sessions/session-1/",
+            {"title": "   "},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_update(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        mock_get_session.assert_called_once_with(self.user, "session-1")
+        mock_update_session_title.assert_not_called()
+
+    @patch("api.views.get_session_for_user")
+    def test_session_update_returns_not_found_when_missing(self, mock_get_session):
+        mock_get_session.return_value = None
+        request = self.factory.patch(
+            "/sessions/session-1/",
+            {"title": "Renamed"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_update(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        mock_get_session.assert_called_once_with(self.user, "session-1")
+
+    @patch("api.views.update_session_title")
+    @patch("api.views.get_session_for_user")
+    def test_session_update_returns_serialized_updated_session(
+        self,
+        mock_get_session,
+        mock_update_session_title,
+    ):
+        original_session = SimpleNamespace(id="session-1", title="Old title")
+        updated_session = SimpleNamespace(
+            id="123e4567-e89b-12d3-a456-426614174000",
+            title="Renamed",
+            created_at="2026-04-21T10:00:00Z",
+            updated_at="2026-04-21T10:05:00Z",
+            last_message_at=None,
+            last_output_at=None,
+        )
+        mock_get_session.return_value = original_session
+        mock_update_session_title.return_value = updated_session
+        request = self.factory.patch(
+            "/sessions/session-1/",
+            {"title": "  Renamed  "},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_update(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["title"], "Renamed")
+        mock_get_session.assert_called_once_with(self.user, "session-1")
+        mock_update_session_title.assert_called_once_with(original_session, "Renamed")
+
+    @patch("api.views.delete_session")
+    @patch("api.views.get_session_for_user")
+    def test_session_delete_returns_no_content_for_owned_session(self, mock_get_session, mock_delete_session):
+        stub_session = SimpleNamespace(id="session-1")
+        mock_get_session.return_value = stub_session
+        request = self.factory.delete("/sessions/session-1/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_delete(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        mock_get_session.assert_called_once_with(self.user, "session-1")
+        mock_delete_session.assert_called_once_with(stub_session)
+
+    @patch("api.views.delete_session")
+    @patch("api.views.get_session_for_user")
+    def test_session_delete_returns_not_found_when_missing(self, mock_get_session, mock_delete_session):
+        mock_get_session.return_value = None
+        request = self.factory.delete("/sessions/session-1/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_delete(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        mock_get_session.assert_called_once_with(self.user, "session-1")
+        mock_delete_session.assert_not_called()
+
+    @patch("api.views._build_session_detail_response")
+    def test_session_resource_dispatches_get_to_detail(self, mock_session_detail):
+        mock_session_detail.return_value = Response(status=status.HTTP_200_OK)
+        request = self.factory.get("/sessions/session-1/")
+        force_authenticate(request, user=self.user)
+
+        response = self.session_resource_view(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_session_detail.assert_called_once()
+        self.assertEqual(mock_session_detail.call_args.args[0].user, self.user)
+        self.assertEqual(mock_session_detail.call_args.args[1], "session-1")
+
+    @patch("api.views._build_session_update_response")
+    def test_session_resource_dispatches_patch_to_update(self, mock_session_update):
+        mock_session_update.return_value = Response(status=status.HTTP_200_OK)
+        request = self.factory.patch("/sessions/session-1/", {"title": "Renamed"}, format="json")
+        force_authenticate(request, user=self.user)
+
+        response = self.session_resource_view(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_session_update.assert_called_once()
+        self.assertEqual(mock_session_update.call_args.args[0], self.user)
+        self.assertEqual(mock_session_update.call_args.args[1], {"title": "Renamed"})
+        self.assertEqual(mock_session_update.call_args.args[2], "session-1")
+
+    @patch("api.views._build_session_delete_response")
+    def test_session_resource_dispatches_delete_to_delete(self, mock_session_delete):
+        mock_session_delete.return_value = Response(status=status.HTTP_204_NO_CONTENT)
+        request = self.factory.delete("/sessions/session-1/")
+        force_authenticate(request, user=self.user)
+
+        response = self.session_resource_view(request, "session-1")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        mock_session_delete.assert_called_once()
+        self.assertEqual(mock_session_delete.call_args.args[0], self.user)
+        self.assertEqual(mock_session_delete.call_args.args[1], "session-1")
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_requires_authentication(self, mock_get_output):
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        mock_get_output.assert_not_called()
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_requires_verified_user(self, mock_get_output):
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.unverified_user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        mock_get_output.assert_not_called()
+
+    @patch("api.views.open")
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_file_for_owned_output(
+        self,
+        mock_get_output,
+        mock_export_csv,
+        mock_open_file,
+    ):
+        stub_output = SimpleNamespace(
+            id=self.output_id,
+            export_output_json={
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_get_output.return_value = stub_output
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"col\n1\n")
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/?filename=report.csv"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn(
+            'attachment; filename="report.csv"',
+            response["Content-Disposition"],
+        )
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+        self.assertEqual(
+            mock_export_csv.call_args.kwargs["output_json"],
+            {
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_not_found_when_output_missing(
+        self,
+        mock_get_output,
+    ):
+        mock_get_output.return_value = None
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"detail": "Not found."})
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+
+    @patch("api.views.export_csv_to_filesystem", side_effect=OutputCSVGenerationError("boom"))
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_internal_error_when_generation_fails(
+        self,
+        mock_get_output,
+        mock_export_csv,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+        mock_export_csv.assert_called_once()
+
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_not_found_when_generated_artifact_metadata_is_unsafe(
+        self,
+        mock_get_output,
+        mock_export_csv,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf", "source_type": "PDF"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "CSV file not found.",
+            },
+        )
+
+    @patch("api.views.open", side_effect=OSError("disk error"))
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_internal_error_when_file_open_fails(
+        self,
+        mock_get_output,
+        mock_export_csv,
+        mock_open_file,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf", "source_type": "PDF"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+        mock_open_file.assert_called_once()
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_requires_authentication(self, mock_get_output):
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        mock_get_output.assert_not_called()
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_requires_verified_user(self, mock_get_output):
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+        force_authenticate(request, user=self.unverified_user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        mock_get_output.assert_not_called()
+
+    @patch("api.views.open")
+    @patch("api.views.export_excel_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_returns_file_for_owned_output(
+        self,
+        mock_get_output,
+        mock_export_excel,
+        mock_open_file,
+    ):
+        stub_output = SimpleNamespace(
+            id=self.output_id,
+            export_output_json={
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_get_output.return_value = stub_output
+        mock_export_excel.return_value = {
+            "file_id": "xlsx_token",
+            "file_name": "export_token.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 24,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"excel-bytes")
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/?filename=report.xlsx"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn(
+            'attachment; filename="report.xlsx"',
+            response["Content-Disposition"],
+        )
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+        self.assertEqual(
+            mock_export_excel.call_args.kwargs["output_json"],
+            {
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+
+    @patch("api.views.open")
+    @patch("api.views.export_excel_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_repairs_legacy_invalid_source_type_from_filename(
+        self,
+        mock_get_output,
+        mock_export_excel,
+        mock_open_file,
+    ):
+        stub_output = SimpleNamespace(
+            id=self.output_id,
+            export_output_json={
+                "document_info": {
+                    "source_type": "unknown",
+                    "filename": "invoice.pdf",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_get_output.return_value = stub_output
+        mock_export_excel.return_value = {
+            "file_id": "xlsx_token",
+            "file_name": "export_token.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 24,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"excel-bytes")
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            mock_export_excel.call_args.kwargs["output_json"],
+            {
+                "document_info": {
+                    "source_type": "PDF",
+                    "filename": "invoice.pdf",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_returns_not_found_when_output_missing(
+        self,
+        mock_get_output,
+    ):
+        mock_get_output.return_value = None
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"detail": "Not found."})
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+
+    @patch("api.views.export_excel_to_filesystem", side_effect=OutputExcelGenerationError("boom"))
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_returns_internal_error_when_generation_fails(
+        self,
+        mock_get_output,
+        mock_export_excel,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download Excel due to internal error.",
+            },
+        )
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+        mock_export_excel.assert_called_once()
+
+    def test_normalize_session_output_export_payload_keeps_non_dict_payload_unchanged(self):
+        payload = ["not", "a", "dict"]
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json=payload)
+        )
+
+        self.assertEqual(normalized, payload)
+
+    def test_normalize_session_output_export_payload_keeps_payload_when_document_info_is_not_object(self):
+        payload = {
+            "document_info": "invalid",
+            "summary": {"table_count": 1},
+            "content_data": [],
+        }
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json=payload)
+        )
+
+        self.assertEqual(normalized, payload)
+
+    def test_normalize_session_output_export_payload_defaults_to_excel_when_source_type_invalid_without_pdf_filename(self):
+        payload = {
+            "document_info": {
+                "source_type": "unknown",
+                "filename": "invoice.xlsx",
+            },
+            "summary": {"table_count": 1},
+            "content_data": [],
+        }
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json=payload)
+        )
+
+        self.assertEqual(
+            normalized["document_info"],
+            {
+                "source_type": "Excel",
+                "filename": "invoice.xlsx",
+            },
+        )
+
+    def test_normalize_session_output_export_payload_falls_back_to_output_json_when_export_empty(self):
+        output_json = {
+            "headers": ["Unit", "Nilai"],
+            "rows": [["ICU", 100]],
+        }
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json={}, output_json=output_json)
+        )
+
+        self.assertIn("content_data", normalized)
+        self.assertEqual(normalized["content_data"][0]["headers"], ["Unit", "Nilai"])
+
+    def test_normalize_session_output_export_payload_returns_empty_when_both_fields_empty(self):
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json={}, output_json=None)
+        )
+
+        self.assertEqual(normalized, {})
+
+    def test_session_csv_download_helper_responses_use_expected_messages(self):
+        not_found_response = views._session_csv_download_not_found_response()
+        internal_error_response = views._session_csv_download_internal_error_response()
+
+        self.assertEqual(not_found_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            not_found_response.data,
+            {"status": "error", "message": "CSV file not found."},
+        )
+        self.assertEqual(
+            internal_error_response.status_code,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+        self.assertEqual(
+            internal_error_response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+
+    @patch("api.views.open", side_effect=RuntimeError("unexpected read failure"))
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_internal_error_when_file_open_raises_unexpected_exception(
+        self,
+        mock_get_output,
+        mock_export_csv,
+        mock_open_file,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf", "source_type": "PDF"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+        mock_open_file.assert_called_once()
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_requires_authentication(self, mock_build_resume_context):
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        mock_build_resume_context.assert_not_called()
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_requires_verified_user(self, mock_build_resume_context):
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.unverified_user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        mock_build_resume_context.assert_not_called()
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_returns_not_found_when_session_missing(
+        self,
+        mock_build_resume_context,
+    ):
+        mock_build_resume_context.return_value = None
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"detail": "Not found."})
+        mock_build_resume_context.assert_called_once_with(self.user, self.session_id)
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_returns_serialized_history_when_found(
+        self,
+        mock_build_resume_context,
+    ):
+        created_at = timezone.now()
+        mock_build_resume_context.return_value = SimpleNamespace(
+            id=self.session_id,
+            title="Resume Session",
+            created_at=created_at,
+            updated_at=created_at,
+            last_message_at=created_at,
+            last_output_at=created_at,
+            history=[
+                SimpleNamespace(
+                    type="message",
+                    id=uuid.uuid4(),
+                    role="assistant",
+                    content="Resume me",
+                    thinking_log="Reasoned reply",
+                    created_at=created_at,
+                ),
+                SimpleNamespace(
+                    type="output",
+                    id=uuid.uuid4(),
+                    output_json={"document_info": {}, "summary": {}, "content_data": []},
+                    thinking_log="Mapped workbook structure",
+                    created_at=created_at,
+                ),
+            ],
+        )
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["id"], str(self.session_id))
+        self.assertEqual(response.data["title"], "Resume Session")
+        self.assertEqual(len(response.data["history"]), 2)
+        self.assertEqual(response.data["history"][0]["type"], "message")
+        self.assertEqual(response.data["history"][0]["thinking_log"], "Reasoned reply")
+        self.assertEqual(response.data["history"][1]["type"], "output")
+        self.assertEqual(
+            response.data["history"][1]["thinking_log"],
+            "Mapped workbook structure",
+        )
+        mock_build_resume_context.assert_called_once_with(self.user, self.session_id)
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_supports_minimal_or_partial_history(
+        self,
+        mock_build_resume_context,
+    ):
+        created_at = timezone.now()
+        mock_build_resume_context.return_value = SimpleNamespace(
+            id=self.session_id,
+            title="Partial Session",
+            created_at=created_at,
+            updated_at=created_at,
+            last_message_at=None,
+            last_output_at=created_at,
+            history=[
+                SimpleNamespace(
+                    type="output",
+                    id=uuid.uuid4(),
+                    output_json={"document_info": {}, "summary": {}, "content_data": []},
+                    thinking_log="Only output context",
+                    created_at=created_at,
+                )
+            ],
+        )
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["history"]), 1)
+        self.assertEqual(response.data["history"][0]["type"], "output")
+        self.assertEqual(
+            response.data["history"][0]["thinking_log"],
+            "Only output context",
         )
