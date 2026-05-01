@@ -3,9 +3,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSearchParams } from 'next/navigation'
 import HistoryPage from '../../../src/app/history/HistoryPage'
 import { useHistoryFiles } from '../../../src/hooks/useHistoryFiles'
+import { useSessionResume } from '../../../src/hooks/useSessionResume'
+import { useSessionThinkingLogs } from '../../../src/hooks/useSessionThinkingLogs'
 
 vi.mock('../../../src/hooks/useHistoryFiles', () => ({
     useHistoryFiles: vi.fn(),
+}))
+
+vi.mock('../../../src/hooks/useSessionResume', () => ({
+    useSessionResume: vi.fn(),
+}))
+
+vi.mock('../../../src/hooks/useSessionThinkingLogs', () => ({
+    useSessionThinkingLogs: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -23,6 +33,8 @@ vi.mock('../../../src/components/Sidebar', () => ({
 
 const mockUseHistoryFiles = vi.mocked(useHistoryFiles)
 const mockUseSearchParams = vi.mocked(useSearchParams)
+const mockUseSessionResume = vi.mocked(useSessionResume)
+const mockUseSessionThinkingLogs = vi.mocked(useSessionThinkingLogs)
 
 const historyItems = [
     {
@@ -68,8 +80,56 @@ function makeHookState(overrides?: Partial<ReturnType<typeof useHistoryFiles>>) 
 
 function mockSearchParam(historyId: string | null) {
     mockUseSearchParams.mockReturnValue({
-        get: vi.fn().mockImplementation((key: string) => (key === 'historyId' ? historyId : null)),
+        get: vi.fn().mockImplementation((key: string) => {
+            if (key === 'historyId') {
+                return historyId
+            }
+
+            return null
+        }),
     } as never)
+}
+
+function mockSessionSearchParam(historyId: string | null, sessionId: string | null) {
+    mockUseSearchParams.mockReturnValue({
+        get: vi.fn().mockImplementation((key: string) => {
+            if (key === 'historyId') {
+                return historyId
+            }
+
+            if (key === 'sessionId') {
+                return sessionId
+            }
+
+            return null
+        }),
+    } as never)
+}
+
+function makeSessionResumeState(sessionId: string) {
+    return {
+        session: {
+            id: sessionId,
+            title: 'Resume Session',
+            created_at: '2026-04-10T10:00:00Z',
+            updated_at: '2026-04-10T10:01:00Z',
+            last_message_at: null,
+            last_output_at: null,
+            history: [],
+        },
+        isLoading: false,
+        error: null,
+        isNotFound: false,
+    }
+}
+
+function makeThinkingLogsState() {
+    return {
+        thinkingLogsByOutputId: {},
+        thinkingLogs: [],
+        isLoading: false,
+        error: null,
+    }
 }
 
 describe('HistoryPage', () => {
@@ -77,6 +137,13 @@ describe('HistoryPage', () => {
         vi.clearAllMocks()
         mockSearchParam(null)
         mockUseHistoryFiles.mockReturnValue(makeHookState())
+        mockUseSessionResume.mockReturnValue({
+            session: null,
+            isLoading: false,
+            error: null,
+            isNotFound: false,
+        })
+        mockUseSessionThinkingLogs.mockReturnValue(makeThinkingLogsState())
     })
 
     it('renders sidebar with active history menu and first selected history id', () => {
@@ -95,6 +162,39 @@ describe('HistoryPage', () => {
         expect(screen.getByTestId('selected-history-id')).toHaveTextContent(historyItems[1].id)
         fireEvent.click(screen.getByRole('button', { name: 'Edit Name' }))
         expect(screen.getByLabelText('File Name')).toHaveValue('Budget Sheet')
+    })
+
+    it('uses the sessionId query parameter when present', () => {
+        const sessionId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        mockSessionSearchParam(historyItems[1].id, sessionId)
+        mockUseSessionResume.mockReturnValue(makeSessionResumeState(sessionId))
+
+        render(<HistoryPage />)
+
+        expect(mockUseSessionResume).toHaveBeenCalledWith(sessionId)
+        expect(mockUseSessionThinkingLogs).toHaveBeenCalledWith(sessionId)
+        expect(screen.getByText('Resume Session')).toBeInTheDocument()
+    })
+
+    it('falls back to the selected history session_id when the query parameter is absent', () => {
+        const sessionId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        mockSearchParam(historyItems[1].id)
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                items: [
+                    {
+                        ...historyItems[1],
+                        session_id: sessionId,
+                    },
+                ],
+            })
+        )
+        mockUseSessionResume.mockReturnValue(makeSessionResumeState(sessionId))
+
+        render(<HistoryPage />)
+
+        expect(mockUseSessionResume).toHaveBeenCalledWith(sessionId)
+        expect(mockUseSessionThinkingLogs).toHaveBeenCalledWith(sessionId)
     })
 
     it('renders loading state when there is no selected history item', () => {

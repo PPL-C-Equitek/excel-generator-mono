@@ -28,6 +28,7 @@ describe("history service", () => {
             id: "history-1",
             original_name: "invoice.pdf",
             custom_name: "",
+            session_id: "11111111-1111-1111-1111-111111111111",
             status_processing: "completed",
             created_at: "2026-04-10T13:00:00Z",
           },
@@ -53,6 +54,7 @@ describe("history service", () => {
             id: "history-1",
             original_name: "invoice.pdf",
             custom_name: "",
+            session_id: "11111111-1111-1111-1111-111111111111",
             status_processing: "completed",
             created_at: "2026-04-10T13:00:00Z",
           },
@@ -103,6 +105,7 @@ describe("history service", () => {
         "The history response is invalid."
       );
     });
+
 
     it("throws an error when the history list response is null", async () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");

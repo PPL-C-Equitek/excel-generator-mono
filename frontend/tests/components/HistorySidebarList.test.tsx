@@ -88,6 +88,33 @@ describe("HistorySidebarList", () => {
     expect(screen.queryByText(historyItems[0].original_name)).not.toBeInTheDocument();
   });
 
+  it("links history items with session ids to the session-aware history route", () => {
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({
+          items: [
+            {
+              ...historyItems[1],
+              session_id: "11111111-1111-1111-1111-111111111111",
+            },
+          ],
+        })}
+      />
+    );
+
+    const link = screen.getByRole("link", { name: historyItems[1].custom_name });
+
+    expect(link).toHaveAttribute(
+      "href",
+      expect.stringContaining(`historyId=${historyItems[1].id}`)
+    );
+    expect(link).toHaveAttribute(
+      "href",
+      expect.stringContaining("sessionId=11111111-1111-1111-1111-111111111111")
+    );
+  });
+
   it("shows loading, load error, empty and no matches states", async () => {
     const reloadHistory = vi.fn().mockResolvedValue(undefined);
     const { rerender } = render(
