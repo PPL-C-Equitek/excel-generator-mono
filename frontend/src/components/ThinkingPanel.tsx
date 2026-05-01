@@ -197,7 +197,7 @@ export default function ThinkingPanel({
             data-testid="thinking-panel-content"
             className={contentClassName}
           >
-            {renderSafeContent(content ?? "")}
+            {renderSafeContent(normalizedContent)}
           </div>
         )}
       </div>

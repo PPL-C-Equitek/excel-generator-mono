@@ -101,4 +101,25 @@ describe("ThinkingPanel", () => {
     expect(panel).toHaveTextContent("Belum ada proses yang tersedia.");
     expect(panel).not.toHaveClass("animate-pulse");
   });
+
+  it("treats null content as empty state safely", () => {
+    renderThinkingPanel({
+      status: "success",
+      content: null,
+    });
+
+    expect(screen.getByText("Belum ada proses yang tersedia.")).toBeInTheDocument();
+  });
+
+  it("renders raw content fallback for thinking status with null content", () => {
+    renderThinkingPanel({
+      status: "thinking",
+      content: null,
+      animated: true,
+    });
+
+    const panel = screen.getByLabelText("Proses berpikir");
+    expect(panel).toHaveAttribute("aria-busy", "true");
+    expect(panel).toHaveTextContent("Memuat proses berpikir...");
+  });
 });

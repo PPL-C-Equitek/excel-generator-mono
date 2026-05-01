@@ -175,4 +175,67 @@ describe('SessionConversationView', () => {
 
         expect(screen.getByText('Gagal memuat proses')).toBeInTheDocument()
     })
+
+    it('keeps raw timestamp text when history timestamp is invalid', () => {
+        const session = makeSession({
+            history: [
+                {
+                    type: 'message',
+                    id: 'message-1',
+                    role: 'user',
+                    content: 'Ping',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: 'not-a-date',
+                },
+            ],
+        })
+
+        render(
+            <SessionConversationView
+                session={session}
+                isLoadingSession={false}
+                sessionError={null}
+                isSessionNotFound={false}
+                thinkingLogsByOutputId={{}}
+                isLoadingThinkingLogs={false}
+                thinkingLogsError={null}
+            />
+        )
+
+        expect(screen.getByText('not-a-date')).toBeInTheDocument()
+    })
+
+    it('renders assistant bubble style and label for assistant messages', () => {
+        const session = makeSession({
+            history: [
+                {
+                    type: 'message',
+                    id: 'message-assistant',
+                    role: 'assistant',
+                    content: 'Jawaban dari asisten.',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:00:00Z',
+                },
+            ],
+        })
+
+        render(
+            <SessionConversationView
+                session={session}
+                isLoadingSession={false}
+                sessionError={null}
+                isSessionNotFound={false}
+                thinkingLogsByOutputId={{}}
+                isLoadingThinkingLogs={false}
+                thinkingLogsError={null}
+            />
+        )
+
+        const article = screen.getByText('Jawaban dari asisten.').closest('article')
+        expect(article).not.toBeNull()
+        expect(article).toHaveClass('justify-start')
+        expect(screen.getByText('Assistant')).toBeInTheDocument()
+    })
 })

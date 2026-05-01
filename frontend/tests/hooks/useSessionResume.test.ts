@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useSessionResume } from '../../src/hooks/useSessionResume'
 import { getSessionResume } from '../../src/services/sessions'
@@ -39,10 +39,9 @@ describe('useSessionResume', () => {
 
         const { result } = renderHook(() => useSessionResume('session-1'))
 
-        await waitFor(() => expect(result.current.isLoading).toBe(false))
+        await waitFor(() => expect(mockGetSessionResume).toHaveBeenCalledWith('session-1'))
+        await waitFor(() => expect(result.current.session).toEqual(sessionResume))
 
-        expect(mockGetSessionResume).toHaveBeenCalledWith('session-1')
-        expect(result.current.session).toEqual(sessionResume)
         expect(result.current.error).toBeNull()
         expect(result.current.isNotFound).toBe(false)
     })
@@ -52,10 +51,10 @@ describe('useSessionResume', () => {
 
         const { result } = renderHook(() => useSessionResume('session-1'))
 
-        await waitFor(() => expect(result.current.isLoading).toBe(false))
+        await waitFor(() => expect(mockGetSessionResume).toHaveBeenCalledWith('session-1'))
+        await waitFor(() => expect(result.current.isNotFound).toBe(true))
 
         expect(result.current.session).toBeNull()
-        expect(result.current.isNotFound).toBe(true)
         expect(result.current.error).toBeNull()
     })
 
@@ -64,10 +63,110 @@ describe('useSessionResume', () => {
 
         const { result } = renderHook(() => useSessionResume('session-1'))
 
-        await waitFor(() => expect(result.current.isLoading).toBe(false))
+        await waitFor(() => expect(mockGetSessionResume).toHaveBeenCalledWith('session-1'))
+        await waitFor(() => expect(result.current.error).toBe('Server down.'))
 
         expect(result.current.session).toBeNull()
         expect(result.current.isNotFound).toBe(false)
-        expect(result.current.error).toBe('Server down.')
+    })
+
+    it('stores fallback error when service rejects with non-Error value', async () => {
+        mockGetSessionResume.mockRejectedValue('unknown failure')
+
+        const { result } = renderHook(() => useSessionResume('session-1'))
+
+        await waitFor(() => expect(mockGetSessionResume).toHaveBeenCalledWith('session-1'))
+        await waitFor(() => expect(result.current.error).toBe('Failed to load session.'))
+
+        expect(result.current.session).toBeNull()
+        expect(result.current.isNotFound).toBe(false)
+    })
+
+    it('does not set state when component unmounts before request completes', async () => {
+        vi.useFakeTimers()
+        let resolveGetSession: ((value: any) => void) | null = null
+        mockGetSessionResume.mockImplementation(
+            () => new Promise((resolve) => {
+                resolveGetSession = resolve
+            })
+        )
+
+        const { unmount, result } = renderHook(() => useSessionResume('session-1'))
+        await act(async () => {
+            await vi.runAllTimersAsync()
+        })
+
+        unmount()
+
+        // Now resolve the promise after unmount
+        await act(async () => {
+            resolveGetSession?.(sessionResume)
+            await Promise.resolve()
+        })
+
+        // State should not have changed since component was unmounted
+        expect(result.current.session).toBeNull()
+        vi.useRealTimers()
+    })
+
+    it('does not set state when component unmounts during error handling', async () => {
+        vi.useFakeTimers()
+        let rejectGetSession: ((reason: any) => void) | null = null
+        mockGetSessionResume.mockImplementation(
+            () => new Promise((_, reject) => {
+                rejectGetSession = reject
+            })
+        )
+
+        const { unmount, result } = renderHook(() => useSessionResume('session-1'))
+        await act(async () => {
+            await vi.runAllTimersAsync()
+        })
+
+        unmount()
+
+        // Now reject the promise after unmount
+        await act(async () => {
+            rejectGetSession?.(new Error('Server error'))
+            await Promise.resolve()
+        })
+
+        // Error state should not have been set since component was unmounted
+        expect(result.current.error).toBeNull()
+        expect(result.current.session).toBeNull()
+        vi.useRealTimers()
+    })
+
+    it('clears timeout when component unmounts before request executes', () => {
+        mockGetSessionResume.mockResolvedValue(sessionResume)
+        const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout')
+
+        const { unmount } = renderHook(() => useSessionResume('session-1'))
+        unmount()
+
+        expect(clearTimeoutSpy).toHaveBeenCalled()
+        clearTimeoutSpy.mockRestore()
+    })
+
+    it('ignores scheduled callback when timeout runs after unmount', () => {
+        mockGetSessionResume.mockResolvedValue(sessionResume)
+        const originalSetTimeout = global.setTimeout
+        const originalClearTimeout = global.clearTimeout
+        let scheduledCallback: (() => void) | null = null
+
+        vi.stubGlobal('setTimeout', ((callback: TimerHandler) => {
+            scheduledCallback = callback as () => void
+            return 1
+        }) as typeof setTimeout)
+        vi.stubGlobal('clearTimeout', vi.fn())
+
+        const { unmount } = renderHook(() => useSessionResume('session-1'))
+        unmount()
+        scheduledCallback?.()
+
+        expect(mockGetSessionResume).not.toHaveBeenCalled()
+
+        vi.stubGlobal('setTimeout', originalSetTimeout)
+        vi.stubGlobal('clearTimeout', originalClearTimeout)
     })
 })

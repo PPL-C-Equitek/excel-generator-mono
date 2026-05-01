@@ -51,6 +51,32 @@ describe("thinking logs service", () => {
     expect(result.results[0].id).toBe("output-1");
   });
 
+  it("accepts thinking log items with string session_id and chat_id", async () => {
+    mockGetValidAccessToken.mockResolvedValue("access-token");
+    vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      count: 1,
+      page: 1,
+      page_size: 20,
+      results: [
+        {
+          id: "output-2",
+          session_id: "session-2",
+          chat_id: "chat-2",
+          thinking_log: "Langkah valid",
+          reasoning: ["step"],
+          status_processing: "completed",
+          created_at: "2026-04-10T10:01:00Z",
+        },
+      ],
+    });
+
+    const thinkingLogsService = await import("@/services/thinkingLogs");
+    const result = await thinkingLogsService.getThinkingLogsBySession("session-2");
+
+    expect(result.results[0].session_id).toBe("session-2");
+    expect(result.results[0].chat_id).toBe("chat-2");
+  });
+
   it("throws an authentication error when no access token is available", async () => {
     mockGetValidAccessToken.mockResolvedValue(null);
     const fetchSpy = vi.spyOn(api, "fetchAPI");
@@ -76,6 +102,48 @@ describe("thinking logs service", () => {
           chat_id: null,
           thinking_log: "Langkah 1",
           reasoning: [1],
+          status_processing: "completed",
+          created_at: "2026-04-10T10:01:00Z",
+        },
+      ],
+    });
+
+    const thinkingLogsService = await import("@/services/thinkingLogs");
+
+    await expect(thinkingLogsService.getThinkingLogsBySession("session-1")).rejects.toThrow(
+      "The thinking log response is invalid."
+    );
+  });
+
+  it("throws when a thinking log item is not an object", async () => {
+    mockGetValidAccessToken.mockResolvedValue("access-token");
+    vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      count: 1,
+      page: 1,
+      page_size: 20,
+      results: [null],
+    });
+
+    const thinkingLogsService = await import("@/services/thinkingLogs");
+
+    await expect(thinkingLogsService.getThinkingLogsBySession("session-1")).rejects.toThrow(
+      "The thinking log response is invalid."
+    );
+  });
+
+  it("throws when session_id has invalid type", async () => {
+    mockGetValidAccessToken.mockResolvedValue("access-token");
+    vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      count: 1,
+      page: 1,
+      page_size: 20,
+      results: [
+        {
+          id: "output-3",
+          session_id: 123,
+          chat_id: null,
+          thinking_log: "Langkah 1",
+          reasoning: ["step"],
           status_processing: "completed",
           created_at: "2026-04-10T10:01:00Z",
         },

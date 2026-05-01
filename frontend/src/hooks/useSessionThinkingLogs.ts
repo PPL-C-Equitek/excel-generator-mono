@@ -10,48 +10,56 @@ export function useSessionThinkingLogs(sessionId: string | null) {
   const [thinkingLogs, setThinkingLogs] = useState<ThinkingLogItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasSessionId = sessionId !== null;
+  const activeThinkingLogs = hasSessionId ? thinkingLogs : [];
+  const activeIsLoading = hasSessionId ? isLoading : false;
+  const activeError = hasSessionId ? error : null;
 
   useEffect(() => {
     let isActive = true;
 
     if (!sessionId) {
-      setThinkingLogs([]);
-      setIsLoading(false);
-      setError(null);
       return;
     }
 
-    setIsLoading(true);
-    setError(null);
+    const timeoutId = setTimeout(() => {
+      if (!isActive) {
+        return;
+      }
 
-    void getThinkingLogsBySession(sessionId)
-      .then((response) => {
-        if (!isActive) {
-          return;
-        }
+      setIsLoading(true);
+      setError(null);
 
-        setThinkingLogs(response.results);
-      })
-      .catch((nextError: unknown) => {
-        if (!isActive) {
-          return;
-        }
+      void getThinkingLogsBySession(sessionId)
+        .then((response) => {
+          if (!isActive) {
+            return;
+          }
 
-        setThinkingLogs([]);
-        setError(
-          nextError instanceof Error ? nextError.message : "Failed to load thinking log.",
-        );
-      })
-      .finally(() => {
-        if (isActive) {
-          setIsLoading(false);
-        }
-      });
+          setThinkingLogs(response.results);
+        })
+        .catch((nextError: unknown) => {
+          if (!isActive) {
+            return;
+          }
+
+          setThinkingLogs([]);
+          setError(
+            nextError instanceof Error ? nextError.message : "Failed to load thinking log.",
+          );
+        })
+        .finally(() => {
+          if (isActive) {
+            setIsLoading(false);
+          }
+        });
+    }, 0);
 
     return () => {
       isActive = false;
+      clearTimeout(timeoutId);
     };
-  }, [sessionId]);
+  }, [sessionId, setThinkingLogs, setIsLoading, setError]);
 
   const thinkingLogsByOutputId = useMemo(
     () =>
@@ -62,5 +70,10 @@ export function useSessionThinkingLogs(sessionId: string | null) {
     [thinkingLogs],
   );
 
-  return { thinkingLogs, thinkingLogsByOutputId, isLoading, error };
+  return {
+    thinkingLogs: activeThinkingLogs,
+    thinkingLogsByOutputId: hasSessionId ? thinkingLogsByOutputId : {},
+    isLoading: activeIsLoading,
+    error: activeError,
+  };
 }
