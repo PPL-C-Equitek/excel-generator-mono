@@ -29,18 +29,110 @@ const statusClassName =
   "flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm shadow-sm";
 const contentClassName = "space-y-3 whitespace-pre-wrap leading-6 text-slate-700";
 
+function createContentKey(
+  prefix: string,
+  value: string,
+  keyCounts: Map<string, number>,
+): string {
+  const normalizedValue = value.replace(/\s+/g, " ").trim() || "empty";
+  const baseKey = `${prefix}-${normalizedValue.slice(0, 60)}`;
+  const nextCount = (keyCounts.get(baseKey) ?? 0) + 1;
+  keyCounts.set(baseKey, nextCount);
+  return `${baseKey}-${nextCount}`;
+}
+
 function renderInlineMarkdown(text: string): ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
-    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return <strong key={`strong-${index}`}>{part.slice(2, -2)}</strong>;
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const boldStart = text.indexOf("**", cursor);
+    if (boldStart === -1) {
+      nodes.push(
+        <span key={`text-${cursor}`}>{text.slice(cursor)}</span>,
+      );
+      break;
     }
 
-    return part;
-  });
+    if (boldStart > cursor) {
+      nodes.push(
+        <span key={`text-${cursor}`}>{text.slice(cursor, boldStart)}</span>,
+      );
+    }
+
+    const boldEnd = text.indexOf("**", boldStart + 2);
+    if (boldEnd === -1) {
+      nodes.push(
+        <span key={`text-${boldStart}`}>{text.slice(boldStart)}</span>,
+      );
+      break;
+    }
+
+    const boldContent = text.slice(boldStart + 2, boldEnd);
+    if (boldContent.length > 0) {
+      nodes.push(
+        <strong key={`strong-${boldStart}`}>{boldContent}</strong>,
+      );
+      cursor = boldEnd + 2;
+      continue;
+    }
+
+    nodes.push(<span key={`text-${boldStart}`}>**</span>);
+    cursor = boldStart + 2;
+  }
+
+  return nodes;
 }
 
 function looksLikeMarkdown(content: string): boolean {
-  return /^\s*[-*]\s+/m.test(content) || /\*\*[^*]+\*\*/.test(content);
+  const lines = content.split("\n");
+  const hasListSyntax = lines.some((line) => getListItemContent(line) !== null);
+
+  return hasListSyntax || hasBoldMarkdown(content);
+}
+
+function hasBoldMarkdown(content: string): boolean {
+  let searchFrom = 0;
+
+  while (searchFrom < content.length) {
+    const boldStart = content.indexOf("**", searchFrom);
+    if (boldStart === -1) {
+      return false;
+    }
+
+    const boldEnd = content.indexOf("**", boldStart + 2);
+    if (boldEnd > boldStart + 2) {
+      return true;
+    }
+
+    searchFrom = boldStart + 2;
+  }
+
+  return false;
+}
+
+function getListItemContent(line: string): string | null {
+  const trimmedStart = line.trimStart();
+  if (
+    trimmedStart.length < 3 ||
+    (trimmedStart[0] !== "-" && trimmedStart[0] !== "*")
+  ) {
+    return null;
+  }
+
+  let contentStart = 1;
+  while (
+    contentStart < trimmedStart.length &&
+    trimmedStart[contentStart] === " "
+  ) {
+    contentStart += 1;
+  }
+
+  if (contentStart === 1 || contentStart >= trimmedStart.length) {
+    return null;
+  }
+
+  return trimmedStart.slice(contentStart);
 }
 
 function renderMarkdownContent(content: string) {
@@ -48,6 +140,7 @@ function renderMarkdownContent(content: string) {
   const blocks: ReactNode[] = [];
   let listItems: string[] = [];
   let paragraphLines: string[] = [];
+  const blockKeyCounts = new Map<string, number>();
 
   const flushParagraph = () => {
     if (paragraphLines.length === 0) {
@@ -56,7 +149,10 @@ function renderMarkdownContent(content: string) {
 
     const paragraph = paragraphLines.join("\n");
     blocks.push(
-      <p key={`paragraph-${blocks.length}`} className="whitespace-pre-wrap">
+      <p
+        key={createContentKey("paragraph", paragraph, blockKeyCounts)}
+        className="whitespace-pre-wrap"
+      >
         {renderInlineMarkdown(paragraph)}
       </p>,
     );
@@ -68,13 +164,18 @@ function renderMarkdownContent(content: string) {
       return;
     }
 
+    const listKey = createContentKey("list", listItems.join("|"), blockKeyCounts);
+    const itemKeyCounts = new Map<string, number>();
+
     blocks.push(
       <ul
-        key={`list-${blocks.length}`}
+        key={listKey}
         className="list-disc space-y-1 pl-5 text-slate-700"
       >
-        {listItems.map((item, index) => (
-          <li key={`item-${index}`}>{renderInlineMarkdown(item)}</li>
+        {listItems.map((item) => (
+          <li key={createContentKey("item", item, itemKeyCounts)}>
+            {renderInlineMarkdown(item)}
+          </li>
         ))}
       </ul>,
     );
@@ -82,11 +183,11 @@ function renderMarkdownContent(content: string) {
   };
 
   for (const line of lines) {
-    const listMatch = line.match(/^\s*[-*]\s+(.+)$/);
+    const listMatch = getListItemContent(line);
 
     if (listMatch) {
       flushParagraph();
-      listItems.push(listMatch[1]);
+      listItems.push(listMatch);
       continue;
     }
 
@@ -133,8 +234,38 @@ export default function ThinkingPanel({
   const isStreaming =
     status === THINKING_PANEL_STATUS.loading ||
     status === THINKING_PANEL_STATUS.thinking;
+  let bodyContent: ReactNode;
 
   useAutoScrollToBottom(scrollRegionRef, isStreaming, content ?? "");
+
+  if (showLoadingState) {
+    bodyContent = (
+      <p
+        data-testid="thinking-panel-content"
+        className="whitespace-pre-wrap text-slate-500"
+      >
+        Memuat proses berpikir...
+      </p>
+    );
+  } else if (showEmptyState) {
+    bodyContent = (
+      <p
+        data-testid="thinking-panel-content"
+        className="whitespace-pre-wrap text-slate-500"
+      >
+        Belum ada proses yang tersedia.
+      </p>
+    );
+  } else {
+    bodyContent = (
+      <div
+        data-testid="thinking-panel-content"
+        className={contentClassName}
+      >
+        {renderSafeContent(normalizedContent)}
+      </div>
+    );
+  }
 
   if (status === THINKING_PANEL_STATUS.error) {
     return (
@@ -178,28 +309,7 @@ export default function ThinkingPanel({
         aria-relevant="additions text"
         className={scrollRegionClassName}
       >
-        {showLoadingState ? (
-          <p
-            data-testid="thinking-panel-content"
-            className="whitespace-pre-wrap text-slate-500"
-          >
-            Memuat proses berpikir...
-          </p>
-        ) : showEmptyState ? (
-          <p
-            data-testid="thinking-panel-content"
-            className="whitespace-pre-wrap text-slate-500"
-          >
-            Belum ada proses yang tersedia.
-          </p>
-        ) : (
-          <div
-            data-testid="thinking-panel-content"
-            className={contentClassName}
-          >
-            {renderSafeContent(normalizedContent)}
-          </div>
-        )}
+        {bodyContent}
       </div>
     </section>
   );
