@@ -1,6 +1,6 @@
 'use client'
 
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEventHandler, useEffect, useMemo, useRef, useState } from 'react'
 import ThinkingPanel, { THINKING_PANEL_STATUS } from '@/components/ThinkingPanel'
 import { useSessionResume } from '@/hooks/useSessionResume'
 import {
@@ -61,13 +61,12 @@ function formatSessionDate(value: string | null): string {
 
 function SessionNotFound() {
     return (
-        <section
-            role="status"
+        <output
             aria-live="polite"
             className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-800"
         >
             <h1 className="text-lg font-semibold">Sesi Tidak Ditemukan</h1>
-        </section>
+        </output>
     )
 }
 
@@ -197,7 +196,7 @@ function SessionDetailByIdContent({ session }: Readonly<{ session: SessionResume
         return firstPrompt?.content ?? localSession.title
     }, [localSession.history, localSession.title])
 
-    const handleSendMessage = async (event: FormEvent<HTMLFormElement>) => {
+    const handleSendMessage: FormEventHandler<HTMLFormElement> = async (event) => {
         event.preventDefault()
         const trimmedMessage = draft.trim()
         if (!trimmedMessage || isSending) {
@@ -345,7 +344,7 @@ export default function SessionDetail(props: Readonly<SessionDetailProps>) {
     }
 
     if (isLoading) {
-        return <section role="status">Loading session...</section>
+        return <output aria-live="polite">Loading session...</output>
     }
 
     const shouldShowNotFound = isNotFound || isNotFoundErrorMessage(error)
