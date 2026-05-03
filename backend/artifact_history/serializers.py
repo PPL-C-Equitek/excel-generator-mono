@@ -12,6 +12,7 @@ class HistoryItemSerializer(serializers.ModelSerializer):
             "id",
             "original_name",
             "custom_name",
+            "session_id",
             "status_processing",
             "created_at",
         )

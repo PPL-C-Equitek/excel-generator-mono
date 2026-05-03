@@ -168,7 +168,7 @@ class HistoryListViewTest(BaseApiViewTest):
         self.assertIn("created_at", response.data["results"][0])
         self.assertEqual(
             set(response.data["results"][0].keys()),
-            {"id", "original_name", "custom_name", "status_processing", "created_at"},
+            {"id", "original_name", "custom_name", "session_id", "status_processing", "created_at"},
         )
 
     def test_history_list_returns_empty_results_when_user_has_no_history(self):

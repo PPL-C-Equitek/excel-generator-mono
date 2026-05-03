@@ -392,10 +392,33 @@ class ChatSessionServiceTest(TestCase):
         self.assertEqual(result.id, session.id)
         self.assertEqual(len(result.history), 1)
         self.assertEqual(result.history[0].type, "output")
+        self.assertEqual(result.history[0].thinking_log, "")
         self.assertEqual(
             result.history[0].reasoning,
             {"step1": "Only thinking log metadata is available."},
         )
+
+    def test_build_resume_context_for_user_defaults_missing_reasoning_to_empty_object(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Empty Reasoning Session",
+        )
+        GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"source_type": "Excel", "filename": "empty-reasoning.xlsx"},
+                "summary": {"total_sheets": 1, "total_rows": 0, "total_columns": 0},
+                "content_data": [],
+            },
+            created_at=timezone.now() + timezone.timedelta(minutes=1),
+        )
+
+        result = build_resume_context_for_user(self.owner, session.id)
+
+        self.assertEqual(result.id, session.id)
+        self.assertEqual(len(result.history), 1)
+        self.assertEqual(result.history[0].thinking_log, "")
+        self.assertEqual(result.history[0].reasoning, {})
 
     def test_build_resume_context_for_user_prefetches_history_without_extra_queries_after_load(self):
         session = Session.objects.create(

@@ -15,6 +15,7 @@ class ArtifactHistory(models.Model):
     )
     original_name = models.CharField(max_length=255)
     custom_name = models.CharField(max_length=255, blank=True, default="")
+    session_id = models.UUIDField(null=True, blank=True, db_index=True)
     output_json = models.JSONField()
     status_processing = models.CharField(max_length=50)
     created_at = models.DateTimeField(default=timezone.now)

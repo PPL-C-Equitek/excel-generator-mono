@@ -1,6 +1,7 @@
 from django.test import TestCase
 from django.db import IntegrityError
 from unittest.mock import patch
+import uuid
 
 from authentication.models import User
 from artifact_history.models import ArtifactHistory, HistoryExportArtifact
@@ -64,7 +65,23 @@ class ArtifactHistoryServiceTest(TestCase):
         self.assertEqual(record.owner, self.owner)
         self.assertEqual(record.original_name, "report.pdf")
         self.assertEqual(record.output_json["content_data"][0]["table_name"], "Sheet1")
+        self.assertIsNone(record.session_id)
         self.assertTrue(ArtifactHistory.objects.filter(id=record.id).exists())
+
+    def test_create_artifact_history_persists_session_id(self):
+        session_id = uuid.uuid4()
+
+        record = create_artifact_history(
+            owner=self.owner,
+            original_name="report.pdf",
+            custom_name=None,
+            output_json=make_output_json(),
+            status_processing="completed",
+            session_id=session_id,
+            created_at="2026-04-08T10:00:00Z",
+        )
+
+        self.assertEqual(record.session_id, session_id)
 
     def test_list_artifact_history_for_user_returns_only_owned_records(self):
         owned_record = ArtifactHistory.objects.create(
