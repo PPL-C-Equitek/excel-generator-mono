@@ -33,6 +33,29 @@ function invokeBeforeInputViaReactProps(target: HTMLElement, data: string | null
   return preventDefault;
 }
 
+function setNullSelectionRange(input: HTMLInputElement) {
+  const originalSelectionStart = Object.getOwnPropertyDescriptor(input, "selectionStart");
+  const originalSelectionEnd = Object.getOwnPropertyDescriptor(input, "selectionEnd");
+
+  Object.defineProperty(input, "selectionStart", {
+    configurable: true,
+    get: () => null,
+  });
+  Object.defineProperty(input, "selectionEnd", {
+    configurable: true,
+    get: () => null,
+  });
+
+  return () => {
+    if (originalSelectionStart) {
+      Object.defineProperty(input, "selectionStart", originalSelectionStart);
+    }
+    if (originalSelectionEnd) {
+      Object.defineProperty(input, "selectionEnd", originalSelectionEnd);
+    }
+  };
+}
+
 function isoDaysAgo(daysAgo: number) {
   const now = new Date();
   const date = new Date(now);
@@ -437,7 +460,7 @@ describe("HistorySidebarList", () => {
     expect(screen.queryByText("Max 120 Character")).not.toBeInTheDocument();
   });
 
-  it("shows max-length validation when beforeinput would exceed 120 characters", async () => {
+  it("blocks beforeinput when the next length would exceed 120 characters", async () => {
     render(
       <HistorySidebarList
         selectedHistoryId={historyItems[0].id}
@@ -463,6 +486,66 @@ describe("HistorySidebarList", () => {
     });
 
     expect(preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses value-length fallback for beforeinput when selection range is unavailable", async () => {
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState()}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Actions for ${historyItems[0].original_name}`,
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    const renameInput = screen.getByLabelText("File Name") as HTMLInputElement;
+    fireEvent.change(renameInput, {
+      target: { value: "A".repeat(120) },
+    });
+
+    const restoreSelectionRange = setNullSelectionRange(renameInput);
+    let preventDefault!: ReturnType<typeof vi.fn>;
+    await act(async () => {
+      preventDefault = invokeBeforeInputViaReactProps(renameInput, "B");
+    });
+    restoreSelectionRange();
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses value-length fallback for paste when selection range is unavailable", () => {
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState()}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Actions for ${historyItems[0].original_name}`,
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    const renameInput = screen.getByLabelText("File Name") as HTMLInputElement;
+    fireEvent.change(renameInput, {
+      target: { value: "A".repeat(120) },
+    });
+
+    const restoreSelectionRange = setNullSelectionRange(renameInput);
+    fireEvent.paste(renameInput, {
+      clipboardData: {
+        getData: () => "B",
+      },
+    });
+    restoreSelectionRange();
+
     expect(screen.getByText("Max 120 Character")).toBeInTheDocument();
   });
 
