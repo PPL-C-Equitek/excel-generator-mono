@@ -1,7 +1,14 @@
 'use client'
 
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import ThinkingPanel, { THINKING_PANEL_STATUS } from '@/components/ThinkingPanel'
 import { useSessionResume } from '@/hooks/useSessionResume'
-import type { SessionResume, SessionResumeHistoryItem } from '@/services/sessions'
+import {
+    appendSessionMessage,
+    getSessionResume,
+    type SessionResume,
+    type SessionResumeHistoryItem,
+} from '@/services/sessions'
 
 export interface Session {
     id: string
@@ -34,7 +41,12 @@ function isNotFoundErrorMessage(error: string | null): boolean {
     }
 
     const normalized = error.trim().toLowerCase()
-    return normalized === 'not found.' || normalized.includes('not found') || normalized.includes('404')
+    return (
+        normalized.includes('not found') ||
+        normalized.includes('404') ||
+        normalized.includes('forbidden') ||
+        normalized.includes('unauthorized')
+    )
 }
 
 function formatSessionDate(value: string | null): string {
@@ -51,36 +63,6 @@ function formatSessionDate(value: string | null): string {
         dateStyle: 'medium',
         timeStyle: 'short',
     })
-}
-
-function getPrimaryPrompt(session: SessionResume): string {
-    const firstUserMessage = session.history.find(
-        (item): item is Extract<SessionResumeHistoryItem, { type: 'message' }> =>
-            item.type === 'message' && item.role === 'user' && item.content.trim().length > 0
-    )
-
-    if (firstUserMessage) {
-        return firstUserMessage.content
-    }
-
-    return session.title
-}
-
-function buildSessionMetrics(session: SessionResume) {
-    const userPrompts = session.history.filter(
-        (item) => item.type === 'message' && item.role === 'user'
-    ).length
-    const assistantReplies = session.history.filter(
-        (item) => item.type === 'message' && item.role === 'assistant'
-    ).length
-    const outputs = session.history.filter((item) => item.type === 'output').length
-
-    return {
-        totalEvents: session.history.length,
-        userPrompts,
-        assistantReplies,
-        outputs,
-    }
 }
 
 function SessionNotFound() {
@@ -129,6 +111,7 @@ function SessionOutputBubble({
     item: Extract<SessionResumeHistoryItem, { type: 'output' }>
 }>) {
     const outputText = JSON.stringify(item.output_json, null, 2)
+    const thinkingLog = item.thinking_log.trim()
 
     return (
         <article className="flex justify-start">
@@ -136,7 +119,19 @@ function SessionOutputBubble({
                 <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
                     AI Output
                 </p>
-                <div className="break-words overflow-hidden rounded-xl border border-slate-200 bg-slate-950">
+
+                <ThinkingPanel
+                    status={
+                        thinkingLog ? THINKING_PANEL_STATUS.success : THINKING_PANEL_STATUS.loading
+                    }
+                    content={thinkingLog}
+                    animated={!thinkingLog}
+                />
+
+                <div
+                    aria-label="AI Output Content"
+                    className="mt-3 break-words overflow-hidden rounded-xl border border-slate-200 bg-slate-950"
+                >
                     <div className="max-w-full overflow-x-auto">
                         <pre className="min-w-max p-4 text-xs leading-6 text-slate-100">
                             <code className="break-words [overflow-wrap:anywhere]">{outputText}</code>
@@ -149,8 +144,8 @@ function SessionOutputBubble({
     )
 }
 
-function SessionHistoryList({ session }: Readonly<{ session: SessionResume }>) {
-    if (session.history.length === 0) {
+function SessionHistoryList({ history }: Readonly<{ history: SessionResumeHistoryItem[] }>) {
+    if (history.length === 0) {
         return (
             <section className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 No conversation history yet.
@@ -160,7 +155,7 @@ function SessionHistoryList({ session }: Readonly<{ session: SessionResume }>) {
 
     return (
         <section className="space-y-4" aria-label="Session Conversation">
-            {session.history.map((item) =>
+            {history.map((item) =>
                 item.type === 'message' ? (
                     <SessionMessageBubble key={`${item.type}-${item.id}`} item={item} />
                 ) : (
@@ -172,82 +167,127 @@ function SessionHistoryList({ session }: Readonly<{ session: SessionResume }>) {
 }
 
 function SessionDetailByIdContent({ session }: Readonly<{ session: SessionResume }>) {
-    const metrics = buildSessionMetrics(session)
-    const primaryPrompt = getPrimaryPrompt(session)
+    const [draft, setDraft] = useState('')
+    const [sendError, setSendError] = useState<string | null>(null)
+    const [isSending, setIsSending] = useState(false)
+    const [localSession, setLocalSession] = useState<SessionResume>(session)
+    const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+    const bottomAnchorRef = useRef<HTMLDivElement | null>(null)
+
+    useEffect(() => {
+        setLocalSession(session)
+    }, [session])
+
+    useEffect(() => {
+        if (bottomAnchorRef.current && typeof bottomAnchorRef.current.scrollIntoView === 'function') {
+            bottomAnchorRef.current.scrollIntoView({ block: 'end', behavior: 'smooth' })
+            return
+        }
+
+        if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
+        }
+    }, [localSession.history.length])
+
+    const canSend = draft.trim().length > 0 && !isSending
+
+    const title = useMemo(() => {
+        const firstPrompt = localSession.history.find(
+            (item) => item.type === 'message' && item.role === 'user' && item.content.trim().length > 0
+        )
+        return firstPrompt?.content ?? localSession.title
+    }, [localSession.history, localSession.title])
+
+    const handleSendMessage = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        const trimmedMessage = draft.trim()
+        if (!trimmedMessage || isSending) {
+            return
+        }
+
+        const optimisticMessage: SessionResumeHistoryItem = {
+            type: 'message',
+            id: `temp-${Date.now()}`,
+            role: 'user',
+            content: trimmedMessage,
+            thinking_log: '',
+            target_output_id: null,
+            created_at: new Date().toISOString(),
+        }
+
+        setDraft('')
+        setSendError(null)
+        setIsSending(true)
+        setLocalSession((prev) => ({
+            ...prev,
+            history: [...prev.history, optimisticMessage],
+        }))
+
+        try {
+            await appendSessionMessage(localSession.id, trimmedMessage)
+            const refreshedSession = await getSessionResume(localSession.id)
+            setLocalSession(refreshedSession)
+        } catch (error: unknown) {
+            const errorMessage =
+                error instanceof Error ? error.message : 'Failed to send follow-up message.'
+            setSendError(errorMessage)
+            setLocalSession((prev) => ({
+                ...prev,
+                history: prev.history.filter((item) => item.id !== optimisticMessage.id),
+            }))
+            setDraft(trimmedMessage)
+        } finally {
+            setIsSending(false)
+        }
+    }
 
     return (
-        <article className="space-y-5" aria-labelledby="session-detail-title">
-            <header className="space-y-1">
+        <section className="flex h-full min-h-[70vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <header className="border-b border-slate-200 px-5 py-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                    Session Detail
+                    Session Thread
                 </p>
-                <h1 id="session-detail-title" className="text-xl font-bold text-slate-900">
-                    {session.title}
-                </h1>
-                <p className="text-sm text-slate-500">{session.id}</p>
+                <h1 className="mt-1 line-clamp-2 text-lg font-bold text-slate-900">{title}</h1>
+                <p className="mt-1 text-xs text-slate-500">{localSession.id}</p>
             </header>
 
-            <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                    Prompt
-                </p>
-                <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-slate-800">
-                    {primaryPrompt}
-                </p>
-            </section>
+            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+                <SessionHistoryList history={localSession.history} />
+                <div ref={bottomAnchorRef} />
+            </div>
 
-            <section className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                        Metadata
-                    </p>
-                    <dl className="mt-2 space-y-1 text-sm text-slate-700">
-                        <div className="flex justify-between gap-3">
-                            <dt>Created At</dt>
-                            <dd>{formatSessionDate(session.created_at)}</dd>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                            <dt>Updated At</dt>
-                            <dd>{formatSessionDate(session.updated_at)}</dd>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                            <dt>Last Message</dt>
-                            <dd>{formatSessionDate(session.last_message_at)}</dd>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                            <dt>Last Output</dt>
-                            <dd>{formatSessionDate(session.last_output_at)}</dd>
-                        </div>
-                    </dl>
+            <form
+                onSubmit={handleSendMessage}
+                className="sticky bottom-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-6"
+            >
+                <label htmlFor="session-chat-input" className="sr-only">
+                    Message Input
+                </label>
+                <div className="flex items-end gap-3">
+                    <textarea
+                        id="session-chat-input"
+                        aria-label="Message Input"
+                        value={draft}
+                        onChange={(event) => {
+                            setDraft(event.target.value)
+                        }}
+                        placeholder="Ketik follow-up kamu di sini..."
+                        rows={2}
+                        className="min-h-[44px] w-full resize-y rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                        disabled={isSending}
+                    />
+                    <button
+                        type="submit"
+                        aria-label="Send Message"
+                        className="h-11 shrink-0 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={!canSend}
+                    >
+                        {isSending ? 'Sending...' : 'Send'}
+                    </button>
                 </div>
-
-                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                        Metrics
-                    </p>
-                    <dl className="mt-2 space-y-1 text-sm text-slate-700">
-                        <div className="flex justify-between gap-3">
-                            <dt>Total Events</dt>
-                            <dd>{metrics.totalEvents}</dd>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                            <dt>User Prompts</dt>
-                            <dd>{metrics.userPrompts}</dd>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                            <dt>Assistant Replies</dt>
-                            <dd>{metrics.assistantReplies}</dd>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                            <dt>AI Outputs</dt>
-                            <dd>{metrics.outputs}</dd>
-                        </div>
-                    </dl>
-                </div>
-            </section>
-
-            <SessionHistoryList session={session} />
-        </article>
+                {sendError ? <p className="mt-2 text-xs text-red-700">{sendError}</p> : null}
+            </form>
+        </section>
     )
 }
 

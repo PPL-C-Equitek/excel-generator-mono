@@ -36,6 +36,12 @@ export interface SessionResume {
   history: SessionResumeHistoryItem[];
 }
 
+export interface AppendSessionMessageResponse {
+  ok?: boolean;
+  session_id?: string | null;
+  chat_id?: string | null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -97,4 +103,29 @@ export async function getSessionResume(sessionId: string): Promise<SessionResume
   }
 
   return data;
+}
+
+export async function appendSessionMessage(
+  sessionId: string,
+  message: string
+): Promise<AppendSessionMessageResponse> {
+  const accessToken = await getValidAccessToken();
+  if (!accessToken) {
+    throw new Error("Authentication credentials were not provided.");
+  }
+
+  const data = await fetchAPI(`sessions/${sessionId}/chat/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ message }),
+  });
+
+  if (!isRecord(data)) {
+    throw new Error("The session chat response is invalid.");
+  }
+
+  return data as AppendSessionMessageResponse;
 }
