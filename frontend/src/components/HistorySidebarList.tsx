@@ -308,8 +308,7 @@ function RenameHistoryDialog({
         currentTarget: HTMLInputElement
         preventDefault: () => void
     }) => {
-        const nativeEvent = event.nativeEvent as InputEvent
-        const typedText = nativeEvent.data
+        const typedText = event.nativeEvent.data
         if (!typedText) {
             return
         }
