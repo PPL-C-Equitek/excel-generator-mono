@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState, type ClipboardEvent, type FormEventHandler } from 'react'
+import { useMemo, useState, type ClipboardEvent } from 'react'
 import type { HistoryItem } from '@/services/history'
 import { getSessionResume } from '@/services/sessions'
 
@@ -303,7 +303,11 @@ function RenameHistoryDialog({
         return null
     }
 
-    const handleBeforeInput: FormEventHandler<HTMLInputElement> = (event) => {
+    const handleBeforeInput = (event: {
+        nativeEvent: InputEvent
+        currentTarget: HTMLInputElement
+        preventDefault: () => void
+    }) => {
         const nativeEvent = event.nativeEvent as InputEvent
         const typedText = nativeEvent.data
         if (!typedText) {
