@@ -296,8 +296,7 @@ export default function ThinkingPanel({
 
   return (
     <section
-      role="status"
-      aria-live="polite"
+      role="region"
       aria-label={panelLabel}
       aria-labelledby={titleId}
       aria-busy={isStreaming}

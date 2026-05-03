@@ -75,7 +75,7 @@ describe('SessionConversationView', () => {
             />
         )
 
-        expect(screen.getByText('Session tidak ditemukan untuk history ini.')).toBeInTheDocument()
+        expect(screen.getByText('Session was not found for this history item.')).toBeInTheDocument()
 
         rerender(
             <SessionConversationView

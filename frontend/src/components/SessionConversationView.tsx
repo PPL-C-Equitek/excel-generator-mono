@@ -18,7 +18,7 @@ function formatHistoryTimestamp(value: string) {
     return value;
   }
 
-  return parsed.toLocaleString("id-ID", {
+  return parsed.toLocaleString("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
   });
@@ -157,7 +157,7 @@ export default function SessionConversationView({
   if (isSessionNotFound) {
     return (
       <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-5 text-sm text-amber-800">
-        Session tidak ditemukan untuk history ini.
+        Session was not found for this history item.
       </section>
     );
   }

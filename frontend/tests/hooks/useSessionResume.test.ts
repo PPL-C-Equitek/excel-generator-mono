@@ -84,7 +84,6 @@ describe('useSessionResume', () => {
     })
 
     it('does not set state when component unmounts before request completes', async () => {
-        vi.useFakeTimers()
         let resolveGetSession: ((value: SessionResume) => void) | null = null
         mockGetSessionResume.mockImplementation(
             () => new Promise((resolve) => {
@@ -93,9 +92,6 @@ describe('useSessionResume', () => {
         )
 
         const { unmount, result } = renderHook(() => useSessionResume('session-1'))
-        await act(async () => {
-            await vi.runAllTimersAsync()
-        })
 
         unmount()
 
@@ -107,11 +103,9 @@ describe('useSessionResume', () => {
 
         // State should not have changed since component was unmounted
         expect(result.current.session).toBeNull()
-        vi.useRealTimers()
     })
 
     it('does not set state when component unmounts during error handling', async () => {
-        vi.useFakeTimers()
         let rejectGetSession: ((reason: unknown) => void) | null = null
         mockGetSessionResume.mockImplementation(
             () => new Promise((_, reject) => {
@@ -120,9 +114,6 @@ describe('useSessionResume', () => {
         )
 
         const { unmount, result } = renderHook(() => useSessionResume('session-1'))
-        await act(async () => {
-            await vi.runAllTimersAsync()
-        })
 
         unmount()
 
@@ -135,39 +126,54 @@ describe('useSessionResume', () => {
         // Error state should not have been set since component was unmounted
         expect(result.current.error).toBeNull()
         expect(result.current.session).toBeNull()
-        vi.useRealTimers()
     })
 
-    it('clears timeout when component unmounts before request executes', () => {
-        mockGetSessionResume.mockResolvedValue(sessionResume)
-        const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout')
+    it('clears stale session data immediately when the sessionId changes', async () => {
+        let resolveFirstRequest: ((value: SessionResume) => void) | null = null
+        let resolveSecondRequest: ((value: SessionResume) => void) | null = null
 
-        const { unmount } = renderHook(() => useSessionResume('session-1'))
-        unmount()
+        mockGetSessionResume.mockImplementation((sessionId) => {
+            if (sessionId === 'session-1') {
+                return new Promise((resolve) => {
+                    resolveFirstRequest = resolve
+                })
+            }
 
-        expect(clearTimeoutSpy).toHaveBeenCalled()
-        clearTimeoutSpy.mockRestore()
-    })
+            return new Promise((resolve) => {
+                resolveSecondRequest = resolve
+            })
+        })
 
-    it('ignores scheduled callback when timeout runs after unmount', () => {
-        mockGetSessionResume.mockResolvedValue(sessionResume)
-        const originalSetTimeout = global.setTimeout
-        const originalClearTimeout = global.clearTimeout
-        let scheduledCallback: (() => void) | null = null
+        const { result, rerender } = renderHook(
+            ({ currentSessionId }) => useSessionResume(currentSessionId),
+            { initialProps: { currentSessionId: 'session-1' as string | null } },
+        )
 
-        vi.stubGlobal('setTimeout', ((callback: TimerHandler) => {
-            scheduledCallback = callback as () => void
-            return 1
-        }) as typeof setTimeout)
-        vi.stubGlobal('clearTimeout', vi.fn())
+        expect(result.current.isLoading).toBe(true)
+        expect(result.current.session).toBeNull()
 
-        const { unmount } = renderHook(() => useSessionResume('session-1'))
-        unmount()
-        scheduledCallback?.()
+        await act(async () => {
+            resolveFirstRequest?.(sessionResume)
+            await Promise.resolve()
+        })
 
-        expect(mockGetSessionResume).not.toHaveBeenCalled()
+        await waitFor(() => expect(result.current.session).toEqual(sessionResume))
 
-        vi.stubGlobal('setTimeout', originalSetTimeout)
-        vi.stubGlobal('clearTimeout', originalClearTimeout)
+        rerender({ currentSessionId: 'session-2' })
+
+        expect(result.current.session).toBeNull()
+        expect(result.current.isLoading).toBe(true)
+
+        await act(async () => {
+            resolveSecondRequest?.({
+                ...sessionResume,
+                id: 'session-2',
+            })
+            await Promise.resolve()
+        })
+
+        await waitFor(() => {
+            expect(result.current.session?.id).toBe('session-2')
+        })
     })
 })

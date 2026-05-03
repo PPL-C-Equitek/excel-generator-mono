@@ -18,47 +18,46 @@ export function useSessionResume(sessionId: string | null) {
     let isActive = true;
 
     if (!sessionId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSession(null);
+      setIsLoading(false);
+      setError(null);
+      setIsNotFound(false);
       return;
     }
 
-    const timeoutId = setTimeout(() => {
-      if (!isActive) {
-        return;
-      }
+    setSession(null);
+    setIsLoading(true);
+    setError(null);
+    setIsNotFound(false);
 
-      setIsLoading(true);
-      setError(null);
-      setIsNotFound(false);
+    void getSessionResume(sessionId)
+      .then((nextSession) => {
+        if (!isActive) {
+          return;
+        }
 
-      void getSessionResume(sessionId)
-        .then((nextSession) => {
-          if (!isActive) {
-            return;
-          }
+        setSession(nextSession);
+        setIsNotFound(false);
+      })
+      .catch((nextError: unknown) => {
+        if (!isActive) {
+          return;
+        }
 
-          setSession(nextSession);
-          setIsNotFound(false);
-        })
-        .catch((nextError: unknown) => {
-          if (!isActive) {
-            return;
-          }
-
-          const message = nextError instanceof Error ? nextError.message : "Failed to load session.";
-          setSession(null);
-          setIsNotFound(message === "Not found.");
-          setError(message === "Not found." ? null : message);
-        })
-        .finally(() => {
-          if (isActive) {
-            setIsLoading(false);
-          }
-        });
-    }, 0);
+        const message = nextError instanceof Error ? nextError.message : "Failed to load session.";
+        setSession(null);
+        setIsNotFound(message === "Not found.");
+        setError(message === "Not found." ? null : message);
+      })
+      .finally(() => {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      });
 
     return () => {
       isActive = false;
-      clearTimeout(timeoutId);
     };
   }, [sessionId]);
 

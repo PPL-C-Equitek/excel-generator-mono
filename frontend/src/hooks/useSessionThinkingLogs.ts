@@ -19,47 +19,45 @@ export function useSessionThinkingLogs(sessionId: string | null) {
     let isActive = true;
 
     if (!sessionId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setThinkingLogs([]);
+      setIsLoading(false);
+      setError(null);
       return;
     }
 
-    const timeoutId = setTimeout(() => {
-      if (!isActive) {
-        return;
-      }
+    setThinkingLogs([]);
+    setIsLoading(true);
+    setError(null);
 
-      setIsLoading(true);
-      setError(null);
+    void getThinkingLogsBySession(sessionId)
+      .then((response) => {
+        if (!isActive) {
+          return;
+        }
 
-      void getThinkingLogsBySession(sessionId)
-        .then((response) => {
-          if (!isActive) {
-            return;
-          }
+        setThinkingLogs(response.results);
+      })
+      .catch((nextError: unknown) => {
+        if (!isActive) {
+          return;
+        }
 
-          setThinkingLogs(response.results);
-        })
-        .catch((nextError: unknown) => {
-          if (!isActive) {
-            return;
-          }
-
-          setThinkingLogs([]);
-          setError(
-            nextError instanceof Error ? nextError.message : "Failed to load thinking log.",
-          );
-        })
-        .finally(() => {
-          if (isActive) {
-            setIsLoading(false);
-          }
-        });
-    }, 0);
+        setThinkingLogs([]);
+        setError(
+          nextError instanceof Error ? nextError.message : "Failed to load thinking log.",
+        );
+      })
+      .finally(() => {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      });
 
     return () => {
       isActive = false;
-      clearTimeout(timeoutId);
     };
-  }, [sessionId, setThinkingLogs, setIsLoading, setError]);
+  }, [sessionId]);
 
   const thinkingLogsByOutputId = useMemo(
     () =>

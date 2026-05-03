@@ -80,7 +80,6 @@ describe('useSessionThinkingLogs', () => {
     })
 
     it('does not update state when unmounted before request resolves', async () => {
-        vi.useFakeTimers()
         let resolveThinkingLogs: ((value: ThinkingLogListResponse) => void) | null = null
         mockGetThinkingLogsBySession.mockImplementation(
             () =>
@@ -90,9 +89,6 @@ describe('useSessionThinkingLogs', () => {
         )
 
         const { result, unmount } = renderHook(() => useSessionThinkingLogs('session-1'))
-        await act(async () => {
-            await vi.runAllTimersAsync()
-        })
         unmount()
 
         await act(async () => {
@@ -117,11 +113,9 @@ describe('useSessionThinkingLogs', () => {
 
         expect(result.current.thinkingLogs).toEqual([])
         expect(result.current.error).toBeNull()
-        vi.useRealTimers()
     })
 
     it('does not update state when unmounted before request rejects', async () => {
-        vi.useFakeTimers()
         let rejectThinkingLogs: ((reason: unknown) => void) | null = null
         mockGetThinkingLogsBySession.mockImplementation(
             () =>
@@ -131,9 +125,6 @@ describe('useSessionThinkingLogs', () => {
         )
 
         const { result, unmount } = renderHook(() => useSessionThinkingLogs('session-1'))
-        await act(async () => {
-            await vi.runAllTimersAsync()
-        })
         unmount()
 
         await act(async () => {
@@ -143,49 +134,71 @@ describe('useSessionThinkingLogs', () => {
 
         expect(result.current.thinkingLogs).toEqual([])
         expect(result.current.error).toBeNull()
-        vi.useRealTimers()
     })
 
-    it('clears timeout when unmounting before request starts', () => {
-        mockGetThinkingLogsBySession.mockResolvedValue({
-            count: 0,
+    it('clears stale logs immediately when the sessionId changes', async () => {
+        const firstResponse: ThinkingLogListResponse = {
+            count: 1,
             page: 1,
             page_size: 20,
-            results: [],
+            results: [
+                {
+                    id: 'output-1',
+                    session_id: 'session-1',
+                    chat_id: null,
+                    thinking_log: 'first',
+                    reasoning: [],
+                    status_processing: 'completed',
+                    created_at: '2026-04-10T10:01:00Z',
+                },
+            ],
+        }
+        let resolveSecondRequest: ((value: ThinkingLogListResponse) => void) | null = null
+
+        mockGetThinkingLogsBySession.mockImplementation((sessionId) => {
+            if (sessionId === 'session-1') {
+                return Promise.resolve(firstResponse)
+            }
+
+            return new Promise((resolve) => {
+                resolveSecondRequest = resolve
+            })
         })
-        const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout')
 
-        const { unmount } = renderHook(() => useSessionThinkingLogs('session-1'))
-        unmount()
+        const { result, rerender } = renderHook(
+            ({ currentSessionId }) => useSessionThinkingLogs(currentSessionId),
+            { initialProps: { currentSessionId: 'session-1' as string | null } },
+        )
 
-        expect(clearTimeoutSpy).toHaveBeenCalled()
-        clearTimeoutSpy.mockRestore()
-    })
+        await waitFor(() => expect(result.current.thinkingLogs).toHaveLength(1))
 
-    it('ignores scheduled callback when timeout runs after unmount', () => {
-        mockGetThinkingLogsBySession.mockResolvedValue({
-            count: 0,
-            page: 1,
-            page_size: 20,
-            results: [],
+        rerender({ currentSessionId: 'session-2' })
+
+        expect(result.current.thinkingLogs).toEqual([])
+        expect(result.current.isLoading).toBe(true)
+
+        await act(async () => {
+            resolveSecondRequest?.({
+                count: 1,
+                page: 1,
+                page_size: 20,
+                results: [
+                    {
+                        id: 'output-2',
+                        session_id: 'session-2',
+                        chat_id: null,
+                        thinking_log: 'second',
+                        reasoning: [],
+                        status_processing: 'completed',
+                        created_at: '2026-04-10T10:02:00Z',
+                    },
+                ],
+            })
+            await Promise.resolve()
         })
-        const originalSetTimeout = global.setTimeout
-        const originalClearTimeout = global.clearTimeout
-        let scheduledCallback: (() => void) | null = null
 
-        vi.stubGlobal('setTimeout', ((callback: TimerHandler) => {
-            scheduledCallback = callback as () => void
-            return 1
-        }) as typeof setTimeout)
-        vi.stubGlobal('clearTimeout', vi.fn())
-
-        const { unmount } = renderHook(() => useSessionThinkingLogs('session-1'))
-        unmount()
-        scheduledCallback?.()
-
-        expect(mockGetThinkingLogsBySession).not.toHaveBeenCalled()
-
-        vi.stubGlobal('setTimeout', originalSetTimeout)
-        vi.stubGlobal('clearTimeout', originalClearTimeout)
+        await waitFor(() => {
+            expect(result.current.thinkingLogs[0]?.id).toBe('output-2')
+        })
     })
 })
