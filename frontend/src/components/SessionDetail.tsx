@@ -335,13 +335,14 @@ function SessionDetailLegacyContent({
 }
 
 export default function SessionDetail(props: Readonly<SessionDetailProps>) {
+    const sessionId = 'sessionId' in props ? props.sessionId : null
+    const { session, isLoading, isNotFound, error } = useSessionResume(
+        sessionId
+    )
+
     if ('session' in props && 'isNotFound' in props) {
         return <SessionDetailLegacyContent session={props.session} isNotFound={props.isNotFound} />
     }
-
-    const { session, isLoading, isNotFound, error } = useSessionResume(
-        props.sessionId
-    )
 
     if (isLoading) {
         return <section role="status">Loading session...</section>
