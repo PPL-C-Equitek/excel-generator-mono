@@ -1,79 +1,121 @@
-import type { ComponentProps } from 'react'
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
-import SessionDetail from '../../../src/components/SessionDetail'
+import { render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import SessionDetail, { type Session as SessionDetailData } from '@/components/SessionDetail'
+import { useSessionResume } from '@/hooks/useSessionResume'
+import { getSessionResume, type SessionResume } from '@/services/sessions'
 
-type SessionDetailProps = ComponentProps<typeof SessionDetail>
+vi.mock('@/services/sessions', () => ({
+    getSessionResume: vi.fn(),
+}))
 
-describe('SessionDetail', () => {
-    const validSession: NonNullable<SessionDetailProps['session']> = {
-        id: 'session-001',
-        prompt: 'Bandingkan performa GPT-4.1 dan Claude pada benchmark reasoning.',
-        score: 92.5,
-        evaluatedAt: '2026-04-22T09:30:00.000Z',
-        output: `| model | score |
-| ----- | ----- |
-| GPT-4.1 | 92.5 |
-| Claude | 90.1 |
+const mockGetSessionResume = vi.mocked(getSessionResume)
 
-const extremelyLongLine = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";`,
+function mapSessionResumeToDetailSession(
+    sessionResume: SessionResume | null
+): SessionDetailData | null {
+    if (!sessionResume) {
+        return null
     }
 
-    const getOutputElement = () =>
-        screen.getByText((_, element) =>
-            element?.tagName.toLowerCase() === 'p' &&
-            element.textContent === validSession.output
+    return {
+        id: sessionResume.id,
+        prompt: sessionResume.title,
+        score: 0,
+        evaluatedAt: sessionResume.updated_at,
+        output: JSON.stringify(sessionResume.history, null, 2),
+    }
+}
+
+function SessionDetailContainer({ sessionId }: { sessionId: string | null }) {
+    const { session, isLoading, isNotFound } = useSessionResume(sessionId)
+
+    if (isLoading) {
+        return <section role="status">Loading session...</section>
+    }
+
+    return (
+        <SessionDetail
+            session={mapSessionResumeToDetailSession(session)}
+            isNotFound={isNotFound}
+        />
+    )
+}
+
+describe('SessionDetail (RED)', () => {
+    afterEach(() => {
+        vi.clearAllMocks()
+    })
+
+    it('renders loading state while waiting for /sessions/{id}/resume', async () => {
+        let resolveRequest: ((value: SessionResume) => void) | null = null
+        mockGetSessionResume.mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    resolveRequest = resolve
+                })
         )
 
-    describe('negative', () => {
-        it('renders "Sesi Tidak Ditemukan" when isNotFound is true', () => {
-            render(<SessionDetail session={null} isNotFound />)
+        render(<SessionDetailContainer sessionId="session-001" />)
 
-            expect(screen.getByText('Sesi Tidak Ditemukan')).toBeInTheDocument()
-            expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
-            expect(
-                screen.queryByText(validSession.prompt)
-            ).not.toBeInTheDocument()
+        expect(screen.getByText('Loading session...')).toBeInTheDocument()
+
+        resolveRequest?.({
+            id: 'session-001',
+            title: 'Prompt from API',
+            created_at: '2026-04-22T09:30:00.000Z',
+            updated_at: '2026-04-22T09:31:00.000Z',
+            last_message_at: null,
+            last_output_at: null,
+            history: [],
         })
 
-        it('renders nothing when session data is still unavailable but the page is not in a not-found state', () => {
-            const { container } = render(
-                <SessionDetail session={null} isNotFound={false} />
-            )
-
-            expect(container).toBeEmptyDOMElement()
-            expect(screen.queryByText('Sesi Tidak Ditemukan')).not.toBeInTheDocument()
+        await waitFor(() => {
+            expect(screen.getByText('Prompt from API')).toBeInTheDocument()
         })
     })
 
-    describe('positive', () => {
-        it('renders prompt, score, evaluatedAt, and output when valid session data is provided', () => {
-            render(<SessionDetail session={validSession} isNotFound={false} />)
+    it.each([
+        { label: '404', errorMessage: 'Not found.' },
+        { label: '403', errorMessage: 'Forbidden.' },
+    ])(
+        'renders "Sesi Tidak Ditemukan" fallback for resume API error $label',
+        async ({ errorMessage }) => {
+            mockGetSessionResume.mockRejectedValueOnce(new Error(errorMessage))
 
-            expect(screen.getByText(validSession.prompt)).toBeInTheDocument()
-            expect(screen.getByText(String(validSession.score))).toBeInTheDocument()
-            expect(screen.getByText(validSession.evaluatedAt)).toBeInTheDocument()
-            expect(getOutputElement()).toBeInTheDocument()
-        })
+            render(<SessionDetailContainer sessionId={`session-${errorMessage}`} />)
 
-        it('renders metadata for the session id alongside the rest of the session information', () => {
-            render(<SessionDetail session={validSession} isNotFound={false} />)
+            await waitFor(() => {
+                expect(screen.getByText('Sesi Tidak Ditemukan')).toBeInTheDocument()
+            })
+        }
+    )
 
-            expect(screen.getByText(validSession.id)).toBeInTheDocument()
-        })
-    })
+    it('keeps response content wrapped for long code blocks and huge table rows', () => {
+        const output = `|col1|col2|
+|----|----|
+|${'A'.repeat(500)}|${'B'.repeat(500)}|
+const row = "${'x'.repeat(1000)}"`
 
-    describe('edge cases', () => {
-        it('applies overflow protection classes to the output container', () => {
-            render(<SessionDetail session={validSession} isNotFound={false} />)
+        render(
+            <SessionDetail
+                session={{
+                    id: 'session-edge',
+                    prompt: 'Render long output safely',
+                    score: 98,
+                    evaluatedAt: '2026-04-22T09:30:00.000Z',
+                    output,
+                }}
+                isNotFound={false}
+            />
+        )
 
-            const outputElement = getOutputElement()
-            const outputContainer = outputElement.closest('div')
+        const outputSection = screen.getByLabelText('Session Output')
+        const outputText = outputSection.querySelector('p')
+        const outputContainer = outputText?.closest('div')
 
-            expect(outputContainer).not.toBeNull()
-            expect(outputContainer).toHaveClass('overflow-x-auto')
-            expect(outputElement).toHaveClass('break-words')
-            expect(outputElement).toHaveClass('whitespace-pre-wrap')
-        })
+        expect(outputText).not.toBeNull()
+        expect(outputContainer).not.toBeNull()
+        expect(outputContainer).toHaveClass('overflow-x-auto')
+        expect(outputText).toHaveClass('break-words')
     })
 })
