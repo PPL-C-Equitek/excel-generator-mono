@@ -1,6 +1,6 @@
 'use client'
 
-import { type FormEventHandler, useEffect, useMemo, useRef, useState } from 'react'
+import { type SubmitEventHandler, useEffect, useMemo, useRef, useState } from 'react'
 import ThinkingPanel, { THINKING_PANEL_STATUS } from '@/components/ThinkingPanel'
 import { useSessionResume } from '@/hooks/useSessionResume'
 import {
@@ -196,8 +196,7 @@ function SessionDetailByIdContent({ session }: Readonly<{ session: SessionResume
         return firstPrompt?.content ?? localSession.title
     }, [localSession.history, localSession.title])
 
-    const handleSendMessage: FormEventHandler<HTMLFormElement> = async (event) => {
-        event.preventDefault()
+    const sendMessage = async () => {
         const trimmedMessage = draft.trim()
         if (!trimmedMessage || isSending) {
             return
@@ -237,6 +236,11 @@ function SessionDetailByIdContent({ session }: Readonly<{ session: SessionResume
         } finally {
             setIsSending(false)
         }
+    }
+
+    const handleSendMessage: SubmitEventHandler<HTMLFormElement> = (event) => {
+        event.preventDefault()
+        void sendMessage()
     }
 
     return (
