@@ -139,7 +139,7 @@ export default function HistoryPage() {
                 }}
             />
             <main className="ml-56 flex min-h-screen flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-                <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md shadow-slate-200/70">
+                <div className="flex min-h-[calc(100vh-4rem)] w-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md shadow-slate-200/70">
                     <section className="flex min-h-0 flex-1 min-w-0 flex-col bg-white">
                         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5 sm:px-8 sm:py-6">
                             {actionError ? (
