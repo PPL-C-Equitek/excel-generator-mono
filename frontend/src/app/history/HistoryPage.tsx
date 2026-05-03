@@ -170,7 +170,6 @@ export default function HistoryPage() {
                                         stopEditing={stopEditing}
                                         handleRenameSubmit={handleRenameSubmit}
                                         requestDelete={setHistoryToDelete}
-                                        getDisplayName={getDisplayName}
                                         formatCreatedAt={formatCreatedAt}
                                     />
                                 </div>

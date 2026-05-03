@@ -29,12 +29,6 @@ interface SessionDetailByIdProps {
 
 export type SessionDetailProps = SessionDetailStateProps | SessionDetailByIdProps
 
-function isSessionDetailByIdProps(
-    props: Readonly<SessionDetailProps>
-): props is SessionDetailByIdProps {
-    return 'sessionId' in props
-}
-
 function isNotFoundErrorMessage(error: string | null): boolean {
     if (!error) {
         return false
@@ -166,6 +160,12 @@ function SessionHistoryList({ history }: Readonly<{ history: SessionResumeHistor
     )
 }
 
+function isNonEmptyUserMessage(
+    item: SessionResumeHistoryItem
+): item is Extract<SessionResumeHistoryItem, { type: 'message' }> {
+    return item.type === 'message' && item.role === 'user' && item.content.trim().length > 0
+}
+
 function SessionDetailByIdContent({ session }: Readonly<{ session: SessionResume }>) {
     const [draft, setDraft] = useState('')
     const [sendError, setSendError] = useState<string | null>(null)
@@ -193,9 +193,7 @@ function SessionDetailByIdContent({ session }: Readonly<{ session: SessionResume
     const canSend = draft.trim().length > 0 && !isSending
 
     const title = useMemo(() => {
-        const firstPrompt = localSession.history.find(
-            (item) => item.type === 'message' && item.role === 'user' && item.content.trim().length > 0
-        )
+        const firstPrompt = localSession.history.find(isNonEmptyUserMessage)
         return firstPrompt?.content ?? localSession.title
     }, [localSession.history, localSession.title])
 
@@ -337,14 +335,13 @@ function SessionDetailLegacyContent({
 }
 
 export default function SessionDetail(props: Readonly<SessionDetailProps>) {
-    const detailByIdProps = isSessionDetailByIdProps(props)
-    const { session, isLoading, isNotFound, error } = useSessionResume(
-        detailByIdProps ? props.sessionId : null
-    )
-
-    if (!detailByIdProps) {
+    if ('session' in props && 'isNotFound' in props) {
         return <SessionDetailLegacyContent session={props.session} isNotFound={props.isNotFound} />
     }
+
+    const { session, isLoading, isNotFound, error } = useSessionResume(
+        props.sessionId
+    )
 
     if (isLoading) {
         return <section role="status">Loading session...</section>
