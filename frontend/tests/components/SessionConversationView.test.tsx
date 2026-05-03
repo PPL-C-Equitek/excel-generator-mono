@@ -75,7 +75,7 @@ describe('SessionConversationView', () => {
             />
         )
 
-        expect(screen.getByText('Session was not found for this history item.')).toBeInTheDocument()
+        expect(screen.getByText('Sesi Tidak Ditemukan')).toBeInTheDocument()
 
         rerender(
             <SessionConversationView
@@ -122,9 +122,15 @@ describe('SessionConversationView', () => {
         )
 
         expect(screen.getByText('Resume Session')).toBeInTheDocument()
-        expect(screen.getByText('Tolong lanjutkan.')).toBeInTheDocument()
+        expect(screen.getByText('Prompt')).toBeInTheDocument()
+        expect(screen.getAllByText('Tolong lanjutkan.').length).toBeGreaterThanOrEqual(1)
         expect(screen.getByText('Server log')).toBeInTheDocument()
         expect(screen.queryByText('Session fallback log')).not.toBeInTheDocument()
+        expect(screen.getByText('Metrics')).toBeInTheDocument()
+        expect(screen.getByText('Total Events')).toBeInTheDocument()
+        expect(screen.getByText('User Prompts')).toBeInTheDocument()
+        expect(screen.getByText('Assistant Replies')).toBeInTheDocument()
+        expect(screen.getByText('AI Outputs')).toBeInTheDocument()
 
         const outputBlock = screen.getByText(/"total_rows": 1/).closest('article')
         expect(outputBlock).not.toBeNull()
