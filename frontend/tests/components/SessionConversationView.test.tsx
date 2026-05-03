@@ -96,7 +96,7 @@ describe('SessionConversationView', () => {
             />
         )
 
-        expect(screen.getByText('Sesi Tidak Ditemukan')).toBeInTheDocument()
+        expect(screen.getByText('Session Not Found')).toBeInTheDocument()
 
         rerender(
             <SessionConversationView
@@ -186,7 +186,7 @@ describe('SessionConversationView', () => {
             />
         )
 
-        expect(screen.getByText('Memuat proses berpikir...')).toBeInTheDocument()
+        expect(screen.getByText('Loading thinking process...')).toBeInTheDocument()
 
         rerender(
             <SessionConversationView
@@ -200,7 +200,7 @@ describe('SessionConversationView', () => {
             />
         )
 
-        expect(screen.getByText('Gagal memuat proses')).toBeInTheDocument()
+        expect(screen.getByText('Failed to load process')).toBeInTheDocument()
     })
 
     it('keeps raw timestamp text when history timestamp is invalid', () => {
@@ -368,7 +368,7 @@ describe('SessionConversationView', () => {
         )
 
         expect(screen.queryByText('Reasoning steps')).not.toBeInTheDocument()
-        expect(screen.getByText('Memuat proses berpikir...')).toBeInTheDocument()
+        expect(screen.getByText('Loading thinking process...')).toBeInTheDocument()
     })
 
     it('downloads output files from the output bubble actions', async () => {
@@ -436,7 +436,7 @@ describe('SessionConversationView', () => {
 
         expect(mockGenerateJson).not.toHaveBeenCalled()
         expect(
-            screen.getByText('Belum ada output untuk dijadikan konteks lanjutan chat.')
+            screen.getByText('No output is available yet to continue this chat context.')
         ).toBeInTheDocument()
     })
 
