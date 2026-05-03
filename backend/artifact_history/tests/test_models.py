@@ -66,6 +66,33 @@ class ArtifactHistoryModelTest(TestCase):
 
         self.assertEqual(artifact.custom_name, "")
 
+    def test_session_id_defaults_to_none(self):
+        artifact = ArtifactHistory.objects.create(
+            owner=self.owner,
+            original_name="report.pdf",
+            custom_name=None,
+            output_json=make_output_json(),
+            status_processing="completed",
+            created_at="2026-04-08T10:00:00Z",
+        )
+
+        self.assertIsNone(artifact.session_id)
+
+    def test_session_id_is_persisted_when_provided(self):
+        session_id = uuid.uuid4()
+
+        artifact = ArtifactHistory.objects.create(
+            owner=self.owner,
+            original_name="report.pdf",
+            custom_name=None,
+            session_id=session_id,
+            output_json=make_output_json(),
+            status_processing="completed",
+            created_at="2026-04-08T10:00:00Z",
+        )
+
+        self.assertEqual(artifact.session_id, session_id)
+
     def test_invalid_output_json_is_rejected(self):
         artifact = ArtifactHistory(
             owner=self.owner,

@@ -33,7 +33,7 @@ export interface RefinementMeta {
   final_status: "valid" | "best_effort" | "failed";
 }
 
-export interface ReasoningPayload {
+export interface LLMReasoning {
   final_answer: string;
   reasoning_steps: string[];
   thinking_log: string;
@@ -45,13 +45,20 @@ export interface LLMResponse {
   validated_json?: JsonValue;
   validation_log?: ValidationLog;
   refinement_meta?: RefinementMeta;
-  reasoning?: ReasoningPayload | null;
+  session_id?: string | null;
+  chat_id?: string | null;
+  output_id?: string | null;
+  reasoning?: LLMReasoning | null;
 }
 
 export interface ExcelExportResponse {
   file_id: string;
   file_name: string;
   artifact_type: "xlsx";
+}
+
+function isOptionalUuidLike(value: unknown): value is string | null | undefined {
+  return value == null || typeof value === "string";
 }
 
 const EXCEL_EXPORT_ERROR_MESSAGE = "The Excel export response is invalid.";
@@ -211,6 +218,14 @@ export async function generateJson(
     responseRecord["validated_json"] !== undefined &&
     responseRecord["validated_json"] !== null &&
     !isJsonObject(responseRecord["validated_json"])
+  ) {
+    throw new Error("The server returned an invalid response.");
+  }
+
+  if (
+    !isOptionalUuidLike(responseRecord["session_id"]) ||
+    !isOptionalUuidLike(responseRecord["chat_id"]) ||
+    !isOptionalUuidLike(responseRecord["output_id"])
   ) {
     throw new Error("The server returned an invalid response.");
   }
@@ -398,6 +413,36 @@ export async function downloadExcelFile(
     {
       requestErrorMessage: EXCEL_DOWNLOAD_ERROR_MESSAGE,
       passThroughInvalidFileIdError: true,
+    }
+  );
+}
+
+export async function downloadSessionOutputCsvFile(
+  sessionId: string,
+  outputId: string,
+  filename = "export.csv"
+): Promise<void> {
+  const requestUrl = `${getApiBaseOrigin()}/sessions/${sessionId}/outputs/${outputId}/download/csv/?filename=${encodeURIComponent(filename)}`;
+  await downloadBlobFileFromUrl(
+    requestUrl,
+    filename,
+    {
+      requestErrorMessage: CSV_DOWNLOAD_ERROR_MESSAGE,
+    }
+  );
+}
+
+export async function downloadSessionOutputExcelFile(
+  sessionId: string,
+  outputId: string,
+  filename = "export.xlsx"
+): Promise<void> {
+  const requestUrl = `${getApiBaseOrigin()}/sessions/${sessionId}/outputs/${outputId}/download/excel/?filename=${encodeURIComponent(filename)}`;
+  await downloadBlobFileFromUrl(
+    requestUrl,
+    filename,
+    {
+      requestErrorMessage: EXCEL_DOWNLOAD_ERROR_MESSAGE,
     }
   );
 }

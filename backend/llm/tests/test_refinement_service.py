@@ -436,6 +436,31 @@ class RefinementOrchestratorTest(SimpleTestCase):
         self.assertIn("previous_output_json", second_call_kwargs["input_json"])
         self.assertIsInstance(second_call_kwargs["refinement_instruction"], str)
 
+    def test_orchestrator_passes_chat_context_to_all_iterations(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid-1"},
+            {"status": "invalid-2"},
+        ]
+
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+        orchestrator.run(
+            input_json={"filename": "report.xlsx", "headers": ["ID"]},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=2,
+                early_exit_on_valid=False,
+            ),
+            chat_context="USER: Keep Indonesian headers",
+        )
+
+        first_call_kwargs = generation_service.generate.call_args_list[0].kwargs
+        second_call_kwargs = generation_service.generate.call_args_list[1].kwargs
+        self.assertEqual(first_call_kwargs["chat_context"], "USER: Keep Indonesian headers")
+        self.assertEqual(second_call_kwargs["chat_context"], "USER: Keep Indonesian headers")
+
     # Positive
     def test_positive_valid_payload_has_valid_verdict_on_first_iteration(self):
         generation_service = Mock()

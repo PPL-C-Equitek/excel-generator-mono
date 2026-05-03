@@ -6,12 +6,20 @@ from unittest.mock import patch
 from authentication.models import User
 from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from chat_sessions.services import (
+    _build_fallback_thinking_log,
+    _normalize_fallback_lines,
+    _select_thinking_log_confidence,
     append_assistant_message,
     append_user_message,
+    build_frontend_thinking_log_response,
     build_history_with_summary,
+    build_resume_context_for_user,
     create_generated_output,
     create_session_for_user,
     delete_session,
+    get_chat_message_for_user,
+    get_generated_output_for_user,
+    get_generated_output_for_session_user,
     get_default_session_detail_pagination,
     get_paginated_session_detail_for_user,
     get_session_for_user,
@@ -22,6 +30,9 @@ from chat_sessions.services import (
     update_session_title,
     get_summary_threshold,
     validate_session_detail_pagination_params,
+    sanitize_session_title,
+    resolve_session_title,
+    generate_session_title_from_message,
 )
 
 
@@ -127,6 +138,78 @@ class ChatSessionServiceTest(TestCase):
 
         self.assertIsNone(result)
 
+    def test_get_generated_output_for_session_user_returns_owned_output(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+        output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"document_info": {}, "summary": {}, "content_data": []},
+        )
+
+        result = get_generated_output_for_session_user(
+            self.owner,
+            session.id,
+            output.id,
+        )
+
+        self.assertEqual(result, output)
+
+    def test_get_generated_output_for_session_user_returns_none_for_non_owned_session(self):
+        session = Session.objects.create(
+            owner=self.other_user,
+            title="Other User Session",
+        )
+        output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"document_info": {}, "summary": {}, "content_data": []},
+        )
+
+        result = get_generated_output_for_session_user(
+            self.owner,
+            session.id,
+            output.id,
+        )
+
+        self.assertIsNone(result)
+
+    def test_get_generated_output_for_session_user_returns_none_when_output_belongs_to_other_session(self):
+        owned_session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+        other_owned_session = Session.objects.create(
+            owner=self.owner,
+            title="Other Owned Session",
+        )
+        output = GeneratedOutput.objects.create(
+            session=other_owned_session,
+            output_json={"document_info": {}, "summary": {}, "content_data": []},
+        )
+
+        result = get_generated_output_for_session_user(
+            self.owner,
+            owned_session.id,
+            output.id,
+        )
+
+        self.assertIsNone(result)
+
+    def test_get_generated_output_for_session_user_returns_none_when_output_missing(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+
+        result = get_generated_output_for_session_user(
+            self.owner,
+            session.id,
+            "3208d1c1-e26f-4565-a2d8-b756b7f364c7",
+        )
+
+        self.assertIsNone(result)
+
     def test_get_paginated_session_detail_for_user_returns_default_slices(self):
         session = Session.objects.create(
             owner=self.owner,
@@ -223,6 +306,152 @@ class ChatSessionServiceTest(TestCase):
         result = get_paginated_session_detail_for_user(self.owner, session.id)
 
         self.assertIsNone(result)
+
+    def test_build_resume_context_for_user_returns_owned_session_history_in_chronological_order(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Owned Session",
+        )
+        user_message = ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="Please continue this conversation.",
+            created_at=timezone.now() + timezone.timedelta(minutes=1),
+        )
+        assistant_message = ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="Here is the previous answer.",
+            thinking_log="Summarized totals before answering.",
+            created_at=timezone.now() + timezone.timedelta(minutes=2),
+        )
+        generated_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"source_type": "Excel", "filename": "resume.xlsx"},
+                "summary": {"total_sheets": 1, "total_rows": 1, "total_columns": 2},
+                "content_data": [],
+            },
+            reasoning={"step1": "Normalized columns and preserved totals."},
+            created_at=timezone.now() + timezone.timedelta(minutes=3),
+        )
+
+        result = build_resume_context_for_user(self.owner, session.id)
+
+        self.assertEqual(result.id, session.id)
+        self.assertEqual(result.title, "Owned Session")
+        self.assertEqual([item.type for item in result.history], ["message", "message", "output"])
+        self.assertEqual(result.history[0].id, user_message.id)
+        self.assertEqual(result.history[1].id, assistant_message.id)
+        self.assertEqual(
+            result.history[1].thinking_log,
+            "Summarized totals before answering.",
+        )
+        self.assertEqual(result.history[2].id, generated_output.id)
+        self.assertEqual(
+            result.history[2].reasoning,
+            {"step1": "Normalized columns and preserved totals."},
+        )
+
+    def test_build_resume_context_for_user_returns_none_for_missing_session(self):
+        result = build_resume_context_for_user(
+            self.owner,
+            "3208d1c1-e26f-4565-a2d8-b756b7f364c7",
+        )
+
+        self.assertIsNone(result)
+
+    def test_build_resume_context_for_user_returns_none_for_non_owned_session(self):
+        session = Session.objects.create(
+            owner=self.other_user,
+            title="Foreign Session",
+        )
+
+        result = build_resume_context_for_user(self.owner, session.id)
+
+        self.assertIsNone(result)
+
+    def test_build_resume_context_for_user_supports_minimal_or_partial_history(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Minimal Session",
+        )
+        GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"source_type": "Excel", "filename": "minimal.xlsx"},
+                "summary": {"total_sheets": 1, "total_rows": 0, "total_columns": 0},
+                "content_data": [],
+            },
+            reasoning={"step1": "Only thinking log metadata is available."},
+            created_at=timezone.now() + timezone.timedelta(minutes=1),
+        )
+
+        result = build_resume_context_for_user(self.owner, session.id)
+
+        self.assertEqual(result.id, session.id)
+        self.assertEqual(len(result.history), 1)
+        self.assertEqual(result.history[0].type, "output")
+        self.assertEqual(result.history[0].thinking_log, "")
+        self.assertEqual(
+            result.history[0].reasoning,
+            {"step1": "Only thinking log metadata is available."},
+        )
+
+    def test_build_resume_context_for_user_defaults_missing_reasoning_to_empty_object(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Empty Reasoning Session",
+        )
+        GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"source_type": "Excel", "filename": "empty-reasoning.xlsx"},
+                "summary": {"total_sheets": 1, "total_rows": 0, "total_columns": 0},
+                "content_data": [],
+            },
+            created_at=timezone.now() + timezone.timedelta(minutes=1),
+        )
+
+        result = build_resume_context_for_user(self.owner, session.id)
+
+        self.assertEqual(result.id, session.id)
+        self.assertEqual(len(result.history), 1)
+        self.assertEqual(result.history[0].thinking_log, "")
+        self.assertEqual(result.history[0].reasoning, {})
+
+    def test_build_resume_context_for_user_prefetches_history_without_extra_queries_after_load(self):
+        session = Session.objects.create(
+            owner=self.owner,
+            title="Prefetched Session",
+        )
+        message_created_at = timezone.now() + timezone.timedelta(minutes=1)
+        output_created_at = timezone.now() + timezone.timedelta(minutes=2)
+        ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="Halo",
+            created_at=message_created_at,
+        )
+        GeneratedOutput.objects.create(
+            session=session,
+            output_json={
+                "document_info": {"source_type": "Excel", "filename": "prefetched.xlsx"},
+                "summary": {"total_sheets": 1, "total_rows": 0, "total_columns": 0},
+                "content_data": [],
+            },
+            thinking_log="Only output context",
+            created_at=output_created_at,
+        )
+
+        with self.assertNumQueries(3):
+            result = build_resume_context_for_user(self.owner, session.id)
+
+        with self.assertNumQueries(0):
+            self.assertEqual(result.title, "Prefetched Session")
+            self.assertEqual(len(result.history), 2)
+            self.assertEqual(result.history[0].type, "message")
+            self.assertEqual(result.history[1].type, "output")
 
     def test_get_paginated_session_detail_for_user_rejects_invalid_limits(self):
         session = Session.objects.create(
@@ -338,6 +567,16 @@ class AppendUserMessageServiceTest(TestCase):
 
         self.assertEqual(msg.thinking_log, "")
 
+    def test_append_user_message_stores_target_output_when_provided(self):
+        target_output = GeneratedOutput.objects.create(
+            session=self.session,
+            output_json={"content_data": []},
+        )
+
+        msg = append_user_message(self.session, "Refine output ini", target_output=target_output)
+
+        self.assertEqual(msg.target_output, target_output)
+
     def test_append_user_message_updates_session_last_message_at(self):
         self.assertIsNone(self.session.last_message_at)
 
@@ -400,33 +639,160 @@ class CreateGeneratedOutputServiceTest(TestCase):
         )
         self.session = Session.objects.create(owner=owner)
         self.valid_output_json = {
-            "document_info": {"filename": "test.xlsx"},
-            "summary": {"total_sheets": 1},
-            "content_data": [],
+            "headers": ["A"],
+            "rows": [["1"]],
+            "final_answer": "Raw output",
+        }
+        self.valid_thinking_log = "Checked totals and aligned categories."
+        self.valid_reasoning = {
+            "final_answer": "Checked totals and aligned categories.",
+            "reasoning_steps": ["Mapped headers", "Validated row totals"],
+            "thinking_log": self.valid_thinking_log,
         }
 
     def test_create_generated_output_creates_output_with_correct_data(self):
-        output = create_generated_output(self.session, self.valid_output_json)
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+        )
 
         self.assertEqual(output.output_json, self.valid_output_json)
+        self.assertEqual(output.thinking_log, self.valid_thinking_log)
+        self.assertEqual(output.reasoning, self.valid_reasoning)
         self.assertEqual(output.session, self.session)
 
     def test_create_generated_output_persists_to_db(self):
-        output = create_generated_output(self.session, self.valid_output_json)
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+        )
 
         self.assertTrue(GeneratedOutput.objects.filter(id=output.id).exists())
 
     def test_create_generated_output_updates_session_last_output_at(self):
         self.assertIsNone(self.session.last_output_at)
 
-        create_generated_output(self.session, self.valid_output_json)
+        create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+        )
 
         self.session.refresh_from_db()
         self.assertIsNotNone(self.session.last_output_at)
 
+    def test_create_generated_output_defaults_thinking_log_to_empty_string(self):
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+        )
+
+        self.assertEqual(output.thinking_log, "")
+        self.assertEqual(output.reasoning, {})
+
+    def test_create_generated_output_supports_legacy_export_payload_as_third_positional_arg(self):
+        legacy_export_output_json = {
+            "document_info": {"source_type": "Excel"},
+            "summary": {"total_tables": 1},
+            "content_data": [],
+        }
+
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            legacy_export_output_json,
+        )
+
+        self.assertEqual(output.thinking_log, "")
+        self.assertEqual(output.reasoning, {})
+        self.assertEqual(output.export_output_json, legacy_export_output_json)
+
+    def test_create_generated_output_stores_source_message_and_parent_output(self):
+        parent_output = GeneratedOutput.objects.create(
+            session=self.session,
+            output_json={"content_data": []},
+        )
+        source_message = ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="Refine hasil sebelumnya.",
+            target_output=parent_output,
+        )
+
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+            source_message=source_message,
+            parent_output=parent_output,
+        )
+
+        self.assertEqual(output.source_message, source_message)
+        self.assertEqual(output.parent_output, parent_output)
+
     def test_create_generated_output_rejects_non_dict_output_json(self):
         with self.assertRaises(ValidationError):
-            create_generated_output(self.session, ["bukan", "dict"])
+            create_generated_output(
+                self.session,
+                ["bukan", "dict"],
+                self.valid_thinking_log,
+            )
+
+    def test_get_generated_output_for_user_returns_owned_record(self):
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+        )
+
+        fetched = get_generated_output_for_user(self.session.owner, output.id)
+
+        self.assertEqual(fetched, output)
+
+    def test_get_generated_output_for_user_returns_none_for_other_owner(self):
+        other_user = User.objects.create_user(
+            email="other-gen-output@example.com",
+            name="Other Gen Output",
+            password="secret",
+            status="verified",
+        )
+        output = create_generated_output(
+            self.session,
+            self.valid_output_json,
+            self.valid_thinking_log,
+            reasoning=self.valid_reasoning,
+        )
+
+        fetched = get_generated_output_for_user(other_user, output.id)
+
+        self.assertIsNone(fetched)
+
+    def test_get_chat_message_for_user_returns_owned_record(self):
+        message = append_user_message(self.session, "Halo")
+
+        fetched = get_chat_message_for_user(self.session.owner, message.id)
+
+        self.assertEqual(fetched, message)
+
+    def test_get_chat_message_for_user_returns_none_for_other_owner(self):
+        other_user = User.objects.create_user(
+            email="other-chat-message@example.com",
+            name="Other Chat Message",
+            password="secret",
+            status="verified",
+        )
+        message = append_user_message(self.session, "Halo")
+
+        fetched = get_chat_message_for_user(other_user, message.id)
+
+        self.assertIsNone(fetched)
 
 
 class SummarizeOldMessagesServiceTest(SimpleTestCase):
@@ -476,6 +842,193 @@ class SummarizeOldMessagesServiceTest(SimpleTestCase):
         call_args = mock_llm.call_args[0][0]
         self.assertEqual(len(call_args), 1)
         self.assertEqual(call_args[0]["role"], "user")
+
+
+class BuildFrontendThinkingLogResponseTest(SimpleTestCase):
+    def test_reuses_existing_valid_thinking_log_unchanged(self):
+        payload = {
+            "result": {"ok": True},
+            "reasoning": {
+                "final_answer": "Normalized output prepared.",
+                "reasoning_steps": ["Mapped headers", "Validated totals"],
+                "thinking_log": [
+                    "Detected headers: ID, Barang, Harga, Discount, Total.",
+                    "Grouped remaining values into rows of five columns.",
+                    "Validated row consistency.",
+                    "Confidence: High",
+                ],
+            },
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Detected headers: ID, Barang, Harga, Discount, Total.",
+                    "Grouped remaining values into rows of five columns.",
+                    "Validated row consistency.",
+                    "Confidence: High",
+                ]
+            },
+        )
+
+    def test_generates_fallback_when_existing_thinking_log_contains_blocked_pattern(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Extraction result prepared.",
+                "reasoning_steps": [
+                    "Detected headers",
+                    "Grouped rows",
+                ],
+                "thinking_log": [
+                    "I considered multiple options before choosing this format.",
+                ],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Identified available response reasoning fields.",
+                    "Summarized key transformation steps from response data.",
+                    "Aligned summary details with the final answer content.",
+                    "Validated thinking log consistency for frontend parsing.",
+                    "Prepared parser-safe thinking log output.",
+                    "Confidence: High",
+                ]
+            },
+        )
+
+    def test_returns_fail_safe_when_reasoning_fields_are_missing(self):
+        response = build_frontend_thinking_log_response({"result": {"items": []}})
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Processed available response data.",
+                    "Unable to extract detailed reasoning.",
+                    "Prepared safest structured output.",
+                    "Confidence: Low",
+                ]
+            },
+        )
+
+    def test_returns_fail_safe_when_payload_is_non_dict(self):
+        response = build_frontend_thinking_log_response(["not", "a", "dict"])
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Processed available response data.",
+                    "Unable to extract detailed reasoning.",
+                    "Prepared safest structured output.",
+                    "Confidence: Low",
+                ]
+            },
+        )
+
+    def test_generates_fallback_when_existing_thinking_log_contains_non_string_item(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Extraction result prepared.",
+                "reasoning_steps": ["Detected headers"],
+                "thinking_log": [123],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(response["thinking_log"][-1], "Confidence: High")
+
+    def test_generates_fallback_when_existing_thinking_log_contains_blank_item(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Extraction result prepared.",
+                "reasoning_steps": ["Detected headers"],
+                "thinking_log": ["   \n\t  "],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(response["thinking_log"][-1], "Confidence: High")
+
+    def test_fallback_includes_only_final_answer_path_and_sets_medium_confidence(self):
+        payload = {
+            "reasoning": {
+                "final_answer": "Only final answer is available.",
+                "reasoning_steps": [],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Identified available response reasoning fields.",
+                    "Aligned summary details with the final answer content.",
+                    "Validated thinking log consistency for frontend parsing.",
+                    "Prepared parser-safe thinking log output.",
+                    "Confidence: Medium",
+                ]
+            },
+        )
+
+    def test_fallback_normalizes_blank_reasoning_steps_and_sets_medium_confidence(self):
+        payload = {
+            "reasoning": {
+                "final_answer": None,
+                "reasoning_steps": ["", "  ", "Mapped rows"],
+            }
+        }
+
+        response = build_frontend_thinking_log_response(payload)
+
+        self.assertEqual(
+            response,
+            {
+                "thinking_log": [
+                    "Identified available response reasoning fields.",
+                    "Summarized key transformation steps from response data.",
+                    "Validated thinking log consistency for frontend parsing.",
+                    "Prepared parser-safe thinking log output.",
+                    "Confidence: Medium",
+                ]
+            },
+        )
+
+    def test_private_helpers_cover_unreachable_branches(self):
+        self.assertEqual(
+            _build_fallback_thinking_log("not-a-dict"),
+            [
+                "Processed available response data.",
+                "Unable to extract detailed reasoning.",
+                "Prepared safest structured output.",
+                "Confidence: Low",
+            ],
+        )
+        self.assertEqual(_select_thinking_log_confidence([], ""), "Low")
+        self.assertEqual(
+            _normalize_fallback_lines(
+                [
+                    "line-a",
+                    "line-a",
+                    "   ",
+                    "line-b",
+                ],
+                "Low",
+            ),
+            ["line-a", "line-b", "Confidence: Low"],
+        )
 
 
 class BuildHistoryWithSummaryServiceTest(TestCase):
@@ -611,3 +1164,88 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
         build_history_with_summary(self.session, history)
 
         mock_sum.assert_not_called()
+
+class SessionTitleHelperServiceTest(SimpleTestCase):
+    
+    def test_sanitize_session_title_trims_whitespace(self):
+        result = sanitize_session_title("   My Title   ")
+        self.assertEqual(result, "My Title")
+
+    def test_sanitize_session_title_normalizes_newlines_and_controls_to_space(self):
+        result = sanitize_session_title("Line 1\nLine 2\r\tEnd")
+        self.assertEqual(result, "Line 1 Line 2  End")
+
+    def test_sanitize_session_title_truncates_to_max_length(self):
+        long_title = "A" * 200
+        result = sanitize_session_title(long_title)
+        self.assertEqual(len(result), 120)
+        self.assertEqual(result, "A" * 120)
+
+    def test_sanitize_session_title_returns_empty_string_for_none(self):
+        self.assertEqual(sanitize_session_title(None), "")
+
+    def test_sanitize_session_title_returns_empty_string_for_empty_string(self):
+        self.assertEqual(sanitize_session_title(""), "")
+
+    def test_sanitize_session_title_returns_empty_string_for_whitespace_only(self):
+        self.assertEqual(sanitize_session_title("   \n \t "), "")
+
+    def test_sanitize_session_title_strips_wrapping_quotes_from_llm_title(self):
+        result = sanitize_session_title('   "Diskusi Bantuan Excel"   ')
+        self.assertEqual(result, "Diskusi Bantuan Excel")
+
+    def test_resolve_session_title_returns_sanitized_title_when_valid(self):
+        result = resolve_session_title("   Good Title \n ", fallback="New Chat")
+        self.assertEqual(result, "Good Title")
+
+    def test_resolve_session_title_returns_fallback_when_title_only_contains_wrapping_quotes(self):
+        result = resolve_session_title('   ""   ', fallback="New Chat")
+        self.assertEqual(result, "New Chat")
+
+    def test_resolve_session_title_returns_fallback_when_sanitized_is_empty(self):
+        result = resolve_session_title("   ", fallback="New Chat")
+        self.assertEqual(result, "New Chat")
+
+    def test_resolve_session_title_returns_fallback_when_input_is_none(self):
+        result = resolve_session_title(None, fallback="New Chat")
+        self.assertEqual(result, "New Chat")
+
+    def test_resolve_session_title_uses_default_fallback_if_not_specified(self):
+        result = resolve_session_title("")
+        self.assertEqual(result, "New Chat")
+
+
+class SessionTitleGenerationServiceTest(SimpleTestCase):
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_generate_session_title_from_message_returns_sanitized_llm_title(self, mock_generate):
+        mock_generate.return_value = '   "Diskusi Bantuan Excel"   '
+
+        result = generate_session_title_from_message("Halo tolong bantu saya excel")
+
+        self.assertEqual(result, "Diskusi Bantuan Excel")
+        mock_generate.assert_called_once()
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_generate_session_title_from_message_returns_fallback_when_llm_fails(self, mock_generate):
+        mock_generate.side_effect = RuntimeError("title generation timeout")
+
+        result = generate_session_title_from_message("Halo tolong bantu saya excel")
+
+        self.assertEqual(result, "New Chat")
+
+    @patch("chat_sessions.services.generate_chat_response")
+    def test_generate_session_title_from_message_returns_fallback_when_llm_title_is_blank(self, mock_generate):
+        mock_generate.return_value = '   ""   '
+
+        result = generate_session_title_from_message("Halo")
+
+        self.assertEqual(result, "New Chat")
+
+    def test_generate_session_title_from_message_returns_fallback_when_message_is_none(self):
+        result = generate_session_title_from_message(None)
+        self.assertEqual(result, "New Chat")
+
+    def test_generate_session_title_from_message_returns_fallback_when_message_is_blank(self):
+        result = generate_session_title_from_message("   \n\t  ")
+        self.assertEqual(result, "New Chat")

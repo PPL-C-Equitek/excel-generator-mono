@@ -58,6 +58,8 @@ class LlmGenerateRefinementRequestSerializer(serializers.Serializer):
 
 class LlmGenerateRequestSerializer(serializers.Serializer):
     input_json = serializers.JSONField()
+    session_id = serializers.UUIDField(required=False, allow_null=True)
+    chat_id = serializers.UUIDField(required=False, allow_null=True)
     custom_schema_id = serializers.UUIDField(required=False, allow_null=True)
     include_reasoning = serializers.BooleanField(required=False, default=True)
     refinement = LlmGenerateRefinementRequestSerializer(required=False)
@@ -89,6 +91,9 @@ class ReasoningPayloadSerializer(serializers.Serializer):
 
 class LlmGenerateResponseSerializer(serializers.Serializer):
     output_json = serializers.JSONField()
+    session_id = serializers.UUIDField(required=False, allow_null=True)
+    chat_id = serializers.UUIDField(required=False, allow_null=True)
+    output_id = serializers.UUIDField(required=False, allow_null=True)
     reasoning = ReasoningPayloadSerializer(required=False, allow_null=True)
     raw_json = serializers.JSONField(required=False)
     validated_json = serializers.JSONField(required=False)
@@ -191,6 +196,7 @@ class LlmGenerateResponseSerializer(serializers.Serializer):
 
 class SendMessageRequestSerializer(serializers.Serializer):
     session_id = serializers.UUIDField(required=False, allow_null=True)
+    target_output_id = serializers.UUIDField(required=False, allow_null=True)
     message = serializers.CharField(
         max_length=MAX_MESSAGE_LENGTH,
         allow_blank=False,
@@ -205,6 +211,7 @@ class SendMessageRequestSerializer(serializers.Serializer):
 
 class SendMessageResponseSerializer(serializers.Serializer):
     session_id = serializers.UUIDField()
+    chat_id = serializers.UUIDField()
     reply = serializers.CharField()
 
 
@@ -307,18 +314,38 @@ def _safe_thinking_log_summary(output_json) -> str:
 class ThinkingLogItemSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     session_id = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
-    request_id = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
+    chat_id = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
     thinking_log = serializers.CharField(read_only=True, allow_blank=True)
+    reasoning = serializers.ListField(child=serializers.CharField(), read_only=True)
     status_processing = serializers.CharField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 
     def to_representation(self, instance):
-        output_json = instance.output_json if isinstance(instance.output_json, dict) else {}
+        output_json = instance.output_json if isinstance(getattr(instance, "output_json", None), dict) else {}
+
+        session_id = getattr(instance, "session_id", None)
+        chat_id = getattr(instance, "source_message_id", None)
+        if chat_id is None:
+            chat_id = output_json.get("chat_id")
+
+        thinking_log = getattr(instance, "thinking_log", None)
+        if thinking_log is None:
+            thinking_log = _safe_thinking_log_summary(output_json)
+
+        reasoning_payload = getattr(instance, "reasoning", None)
+        if not isinstance(reasoning_payload, dict):
+            reasoning_payload = {}
+
+        reasoning_steps = reasoning_payload.get("reasoning_steps")
+        if not isinstance(reasoning_steps, list):
+            reasoning_steps = []
+
         return {
             "id": str(instance.id),
-            "session_id": output_json.get("session_id"),
-            "request_id": output_json.get("request_id"),
-            "thinking_log": _safe_thinking_log_summary(output_json),
-            "status_processing": instance.status_processing,
+            "session_id": str(session_id) if session_id is not None else None,
+            "chat_id": str(chat_id) if chat_id is not None else None,
+            "thinking_log": thinking_log,
+            "reasoning": reasoning_steps,
+            "status_processing": getattr(instance, "status_processing", "completed"),
             "created_at": instance.created_at,
         }

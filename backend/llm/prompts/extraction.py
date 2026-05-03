@@ -49,18 +49,37 @@ def _build_refinement_section(refinement_instruction: str | None) -> str | None:
     )
 
 
+def _build_chat_context_section(chat_context: str | None) -> str | None:
+    normalized = chat_context.strip() if isinstance(chat_context, str) else ""
+    if not normalized:
+        return None
+
+    return (
+        "## CHAT_CONTEXT\n"
+        "The user has provided specific instructions via chat before converting. "
+        "Apply these instructions strictly during extraction. "
+        "These instructions take priority over default behavior.\n"
+        f"{normalized}"
+    )
+
+
 def build_extraction_prompt(
     schema_hint: str | None = None,
     refinement_instruction: str | None = None,
+    chat_context: str | None = None,
 ) -> str:
-    schema_hint_section = _build_schema_hint_section(schema_hint)
-    refinement_section = _build_refinement_section(refinement_instruction)
-    if not schema_hint_section and not refinement_section:
-        return BASE_EXTRACTION_PROMPT
+    sections = [BASE_EXTRACTION_PROMPT]
 
-    prompt_sections = [BASE_EXTRACTION_PROMPT]
+    schema_hint_section = _build_schema_hint_section(schema_hint)
     if schema_hint_section:
-        prompt_sections.append(schema_hint_section.strip())
+        sections.append(schema_hint_section.strip())
+
+    chat_context_section = _build_chat_context_section(chat_context)
+    if chat_context_section:
+        sections.append(chat_context_section.strip())
+
+    refinement_section = _build_refinement_section(refinement_instruction)
     if refinement_section:
-        prompt_sections.append(refinement_section.strip())
-    return "\n\n".join(prompt_sections)
+        sections.append(refinement_section.strip())
+
+    return "\n\n".join(sections)

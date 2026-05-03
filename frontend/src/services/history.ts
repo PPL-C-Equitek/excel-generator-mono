@@ -6,6 +6,7 @@ export interface HistoryItem {
   id: string;
   original_name: string;
   custom_name: string;
+  session_id?: string | null;
   status_processing: string;
   created_at: string;
 }
@@ -131,6 +132,9 @@ function isValidHistoryItem(data: unknown): data is HistoryItem {
     typeof data.id === "string" &&
     typeof data.original_name === "string" &&
     typeof data.custom_name === "string" &&
+    (data.session_id === undefined ||
+      data.session_id === null ||
+      typeof data.session_id === "string") &&
     typeof data.status_processing === "string" &&
     typeof data.created_at === "string"
   );

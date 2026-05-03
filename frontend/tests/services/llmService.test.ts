@@ -3,7 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "@/lib/api";
 import * as auth from "@/lib/auth";
 import * as llmService from "@/services/llm";
-import { downloadCsvFile, generateJson, exportToCsv, getDownloadUrl } from "@/services/llm";
+import {
+  downloadCsvFile,
+  downloadSessionOutputCsvFile,
+  downloadSessionOutputExcelFile,
+  generateJson,
+  exportToCsv,
+  getDownloadUrl,
+} from "@/services/llm";
 import { server } from "../mocks/server";
 import {
   handler429,
@@ -84,6 +91,20 @@ describe("generateJson positive", () => {
 
     const result = await generateJson({ key: "value" });
     expect(result.validated_json).toMatchObject({ summary: "Validated" });
+    fetchSpy.mockRestore();
+  });
+
+  it("accepts optional session and output identifiers from the backend response", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      session_id: "11111111-1111-1111-1111-111111111111",
+      output_id: "22222222-2222-2222-2222-222222222222",
+    });
+
+    const result = await generateJson({ key: "value" });
+
+    expect(result.session_id).toBe("11111111-1111-1111-1111-111111111111");
+    expect(result.output_id).toBe("22222222-2222-2222-2222-222222222222");
     fetchSpy.mockRestore();
   });
 
@@ -778,6 +799,62 @@ describe("downloadExcelFile", () => {
     ).rejects.toThrow("Authentication credentials were not provided.");
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("session output downloads", () => {
+  beforeEach(() => {
+    mockGetValidAccessToken.mockResolvedValue("valid-token");
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response("file-content", {
+        status: 200,
+        headers: {
+          "Content-Disposition": 'attachment; filename="export.csv"',
+        },
+      })
+    ) as typeof fetch;
+    URL.createObjectURL = vi.fn(() => "blob:mock-url");
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("downloads CSV from the new session output endpoint", async () => {
+    await downloadSessionOutputCsvFile(
+      "11111111-1111-1111-1111-111111111111",
+      "22222222-2222-2222-2222-222222222222",
+      "report.csv"
+    );
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${API_BASE}/sessions/11111111-1111-1111-1111-111111111111/outputs/22222222-2222-2222-2222-222222222222/download/csv/?filename=report.csv`,
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          Authorization: "Bearer valid-token",
+        },
+      })
+    );
+  });
+
+  it("downloads Excel from the new session output endpoint", async () => {
+    await downloadSessionOutputExcelFile(
+      "11111111-1111-1111-1111-111111111111",
+      "22222222-2222-2222-2222-222222222222",
+      "report.xlsx"
+    );
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${API_BASE}/sessions/11111111-1111-1111-1111-111111111111/outputs/22222222-2222-2222-2222-222222222222/download/excel/?filename=report.xlsx`,
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          Authorization: "Bearer valid-token",
+        },
+      })
+    );
   });
 });
 

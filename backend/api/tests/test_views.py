@@ -1,4 +1,5 @@
 from PyPDF2 import PdfReader, PdfWriter
+import uuid
 from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
 from django.utils._os import safe_join
@@ -167,7 +168,7 @@ class HistoryListViewTest(BaseApiViewTest):
         self.assertIn("created_at", response.data["results"][0])
         self.assertEqual(
             set(response.data["results"][0].keys()),
-            {"id", "original_name", "custom_name", "status_processing", "created_at"},
+            {"id", "original_name", "custom_name", "session_id", "status_processing", "created_at"},
         )
 
     def test_history_list_returns_empty_results_when_user_has_no_history(self):
@@ -2533,6 +2534,8 @@ class SessionEndpointTests(TestCase):
             password="Test12345",
             status="unverified",
         )
+        self.session_id = "123e4567-e89b-12d3-a456-426614174000"
+        self.output_id = "123e4567-e89b-12d3-a456-426614174001"
 
     @patch("api.views.list_sessions_for_user")
     def test_session_list_requires_authentication(self, mock_list_sessions):
@@ -2952,3 +2955,720 @@ class SessionEndpointTests(TestCase):
         mock_session_delete.assert_called_once()
         self.assertEqual(mock_session_delete.call_args.args[0], self.user)
         self.assertEqual(mock_session_delete.call_args.args[1], "session-1")
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_requires_authentication(self, mock_get_output):
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        mock_get_output.assert_not_called()
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_requires_verified_user(self, mock_get_output):
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.unverified_user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        mock_get_output.assert_not_called()
+
+    @patch("api.views.open")
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_file_for_owned_output(
+        self,
+        mock_get_output,
+        mock_export_csv,
+        mock_open_file,
+    ):
+        stub_output = SimpleNamespace(
+            id=self.output_id,
+            export_output_json={
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_get_output.return_value = stub_output
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"col\n1\n")
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/?filename=report.csv"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn(
+            'attachment; filename="report.csv"',
+            response["Content-Disposition"],
+        )
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+        self.assertEqual(
+            mock_export_csv.call_args.kwargs["output_json"],
+            {
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_not_found_when_output_missing(
+        self,
+        mock_get_output,
+    ):
+        mock_get_output.return_value = None
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"detail": "Not found."})
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+
+    @patch("api.views.export_csv_to_filesystem", side_effect=OutputCSVGenerationError("boom"))
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_internal_error_when_generation_fails(
+        self,
+        mock_get_output,
+        mock_export_csv,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+        mock_export_csv.assert_called_once()
+
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_not_found_when_generated_artifact_metadata_is_unsafe(
+        self,
+        mock_get_output,
+        mock_export_csv,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf", "source_type": "PDF"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "CSV file not found.",
+            },
+        )
+
+    @patch("api.views.open", side_effect=OSError("disk error"))
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_internal_error_when_file_open_fails(
+        self,
+        mock_get_output,
+        mock_export_csv,
+        mock_open_file,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf", "source_type": "PDF"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+        mock_open_file.assert_called_once()
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_requires_authentication(self, mock_get_output):
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        mock_get_output.assert_not_called()
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_requires_verified_user(self, mock_get_output):
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+        force_authenticate(request, user=self.unverified_user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        mock_get_output.assert_not_called()
+
+    @patch("api.views.open")
+    @patch("api.views.export_excel_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_returns_file_for_owned_output(
+        self,
+        mock_get_output,
+        mock_export_excel,
+        mock_open_file,
+    ):
+        stub_output = SimpleNamespace(
+            id=self.output_id,
+            export_output_json={
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_get_output.return_value = stub_output
+        mock_export_excel.return_value = {
+            "file_id": "xlsx_token",
+            "file_name": "export_token.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 24,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"excel-bytes")
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/?filename=report.xlsx"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn(
+            'attachment; filename="report.xlsx"',
+            response["Content-Disposition"],
+        )
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+        self.assertEqual(
+            mock_export_excel.call_args.kwargs["output_json"],
+            {
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+
+    @patch("api.views.open")
+    @patch("api.views.export_excel_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_repairs_legacy_invalid_source_type_from_filename(
+        self,
+        mock_get_output,
+        mock_export_excel,
+        mock_open_file,
+    ):
+        stub_output = SimpleNamespace(
+            id=self.output_id,
+            export_output_json={
+                "document_info": {
+                    "source_type": "unknown",
+                    "filename": "invoice.pdf",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_get_output.return_value = stub_output
+        mock_export_excel.return_value = {
+            "file_id": "xlsx_token",
+            "file_name": "export_token.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 24,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        mock_open_file.return_value = BytesIO(b"excel-bytes")
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            mock_export_excel.call_args.kwargs["output_json"],
+            {
+                "document_info": {
+                    "source_type": "PDF",
+                    "filename": "invoice.pdf",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_returns_not_found_when_output_missing(
+        self,
+        mock_get_output,
+    ):
+        mock_get_output.return_value = None
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"detail": "Not found."})
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+
+    @patch("api.views.export_excel_to_filesystem", side_effect=OutputExcelGenerationError("boom"))
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_excel_returns_internal_error_when_generation_fails(
+        self,
+        mock_get_output,
+        mock_export_excel,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {
+                    "filename": "invoice.pdf",
+                    "source_type": "PDF",
+                },
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/excel/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_excel(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download Excel due to internal error.",
+            },
+        )
+        mock_get_output.assert_called_once_with(
+            self.user,
+            self.session_id,
+            self.output_id,
+        )
+        mock_export_excel.assert_called_once()
+
+    def test_normalize_session_output_export_payload_keeps_non_dict_payload_unchanged(self):
+        payload = ["not", "a", "dict"]
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json=payload)
+        )
+
+        self.assertEqual(normalized, payload)
+
+    def test_normalize_session_output_export_payload_keeps_payload_when_document_info_is_not_object(self):
+        payload = {
+            "document_info": "invalid",
+            "summary": {"table_count": 1},
+            "content_data": [],
+        }
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json=payload)
+        )
+
+        self.assertEqual(normalized, payload)
+
+    def test_normalize_session_output_export_payload_defaults_to_excel_when_source_type_invalid_without_pdf_filename(self):
+        payload = {
+            "document_info": {
+                "source_type": "unknown",
+                "filename": "invoice.xlsx",
+            },
+            "summary": {"table_count": 1},
+            "content_data": [],
+        }
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json=payload)
+        )
+
+        self.assertEqual(
+            normalized["document_info"],
+            {
+                "source_type": "Excel",
+                "filename": "invoice.xlsx",
+            },
+        )
+
+    def test_normalize_session_output_export_payload_falls_back_to_output_json_when_export_empty(self):
+        output_json = {
+            "headers": ["Unit", "Nilai"],
+            "rows": [["ICU", 100]],
+        }
+
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json={}, output_json=output_json)
+        )
+
+        self.assertIn("content_data", normalized)
+        self.assertEqual(normalized["content_data"][0]["headers"], ["Unit", "Nilai"])
+
+    def test_normalize_session_output_export_payload_returns_empty_when_both_fields_empty(self):
+        normalized = views._normalize_session_output_export_payload(
+            SimpleNamespace(export_output_json={}, output_json=None)
+        )
+
+        self.assertEqual(normalized, {})
+
+    def test_session_csv_download_helper_responses_use_expected_messages(self):
+        not_found_response = views._session_csv_download_not_found_response()
+        internal_error_response = views._session_csv_download_internal_error_response()
+
+        self.assertEqual(not_found_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            not_found_response.data,
+            {"status": "error", "message": "CSV file not found."},
+        )
+        self.assertEqual(
+            internal_error_response.status_code,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+        self.assertEqual(
+            internal_error_response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+
+    @patch("api.views.open", side_effect=RuntimeError("unexpected read failure"))
+    @patch("api.views.export_csv_to_filesystem")
+    @patch("api.views.get_generated_output_for_session_user")
+    def test_session_output_download_csv_returns_internal_error_when_file_open_raises_unexpected_exception(
+        self,
+        mock_get_output,
+        mock_export_csv,
+        mock_open_file,
+    ):
+        mock_get_output.return_value = SimpleNamespace(
+            id=self.output_id,
+            output_json={
+                "document_info": {"filename": "invoice.pdf", "source_type": "PDF"},
+                "summary": {"table_count": 1},
+                "content_data": [],
+            },
+        )
+        mock_export_csv.return_value = {
+            "file_id": "csv_token",
+            "file_name": "export_token.csv",
+            "artifact_type": "csv",
+            "size_bytes": 12,
+            "created_at": "2026-04-26T08:00:00Z",
+        }
+        request = self.factory.get(
+            f"/sessions/{self.session_id}/outputs/{self.output_id}/download/csv/"
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.session_output_download_csv(
+            request,
+            self.session_id,
+            self.output_id,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(
+            response.data,
+            {
+                "status": "error",
+                "message": "Failed to download CSV due to internal error.",
+            },
+        )
+        mock_open_file.assert_called_once()
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_requires_authentication(self, mock_build_resume_context):
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        mock_build_resume_context.assert_not_called()
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_requires_verified_user(self, mock_build_resume_context):
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.unverified_user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        mock_build_resume_context.assert_not_called()
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_returns_not_found_when_session_missing(
+        self,
+        mock_build_resume_context,
+    ):
+        mock_build_resume_context.return_value = None
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"detail": "Not found."})
+        mock_build_resume_context.assert_called_once_with(self.user, self.session_id)
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_returns_serialized_history_when_found(
+        self,
+        mock_build_resume_context,
+    ):
+        created_at = timezone.now()
+        mock_build_resume_context.return_value = SimpleNamespace(
+            id=self.session_id,
+            title="Resume Session",
+            created_at=created_at,
+            updated_at=created_at,
+            last_message_at=created_at,
+            last_output_at=created_at,
+            history=[
+                SimpleNamespace(
+                    type="message",
+                    id=uuid.uuid4(),
+                    role="assistant",
+                    content="Resume me",
+                    thinking_log="Reasoned reply",
+                    created_at=created_at,
+                ),
+                SimpleNamespace(
+                    type="output",
+                    id=uuid.uuid4(),
+                    output_json={"document_info": {}, "summary": {}, "content_data": []},
+                    thinking_log="Mapped workbook structure",
+                    created_at=created_at,
+                ),
+            ],
+        )
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["id"], str(self.session_id))
+        self.assertEqual(response.data["title"], "Resume Session")
+        self.assertEqual(len(response.data["history"]), 2)
+        self.assertEqual(response.data["history"][0]["type"], "message")
+        self.assertEqual(response.data["history"][0]["thinking_log"], "Reasoned reply")
+        self.assertEqual(response.data["history"][1]["type"], "output")
+        self.assertEqual(
+            response.data["history"][1]["thinking_log"],
+            "Mapped workbook structure",
+        )
+        mock_build_resume_context.assert_called_once_with(self.user, self.session_id)
+
+    @patch("api.views.build_resume_context_for_user")
+    def test_session_resume_supports_minimal_or_partial_history(
+        self,
+        mock_build_resume_context,
+    ):
+        created_at = timezone.now()
+        mock_build_resume_context.return_value = SimpleNamespace(
+            id=self.session_id,
+            title="Partial Session",
+            created_at=created_at,
+            updated_at=created_at,
+            last_message_at=None,
+            last_output_at=created_at,
+            history=[
+                SimpleNamespace(
+                    type="output",
+                    id=uuid.uuid4(),
+                    output_json={"document_info": {}, "summary": {}, "content_data": []},
+                    thinking_log="Only output context",
+                    created_at=created_at,
+                )
+            ],
+        )
+        request = self.factory.get(f"/sessions/{self.session_id}/resume/")
+        force_authenticate(request, user=self.user)
+
+        response = views.session_resume(request, self.session_id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["history"]), 1)
+        self.assertEqual(response.data["history"][0]["type"], "output")
+        self.assertEqual(
+            response.data["history"][0]["thinking_log"],
+            "Only output context",
+        )

@@ -72,6 +72,44 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("model", serializer.errors)
 
+    def test_generate_request_serializer_accepts_valid_session_id(self):
+        session_id = uuid4()
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}, "session_id": str(session_id)}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["session_id"], session_id)
+
+    def test_generate_request_serializer_allows_missing_session_id(self):
+        serializer = LlmGenerateRequestSerializer(data={"input_json": {"sheet": "Sheet1"}})
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertNotIn("session_id", serializer.validated_data)
+
+    def test_generate_request_serializer_rejects_invalid_session_id(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}, "session_id": "not-a-uuid"}
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("session_id", serializer.errors)
+
+    def test_generate_response_serializer_accepts_session_and_output_ids(self):
+        chat_id = uuid4()
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"sheet": "Sheet1"},
+                "session_id": str(uuid4()),
+                "chat_id": str(chat_id),
+                "output_id": str(uuid4()),
+                "reasoning": None,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.data["chat_id"], str(chat_id))
+
     def test_generate_request_serializer_accepts_include_reasoning(self):
         serializer = LlmGenerateRequestSerializer(
             data={"input_json": {"sheet": "Sheet1"}, "include_reasoning": False}
@@ -157,7 +195,6 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         serializer = LlmGenerateResponseSerializer(
             data={"output_json": [["row-1"]], "reasoning": None}
         )
-
         self.assertTrue(serializer.is_valid(), serializer.errors)
 
     def test_generate_response_serializer_accepts_refinement_fields(self):
@@ -552,7 +589,7 @@ class ThinkingLogSerializerTest(SimpleTestCase):
         serializer = ThinkingLogItemSerializer(instance)
 
         self.assertIsNone(serializer.data["session_id"])
-        self.assertIsNone(serializer.data["request_id"])
+        self.assertNotIn("request_id", serializer.data)
         self.assertEqual(serializer.data["thinking_log"], "")
 
 
@@ -568,3 +605,62 @@ class SendMessageSerializerTest(SimpleTestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("message", serializer.errors)
+
+    def test_thinking_log_item_serializer_omits_request_id_even_if_present_in_output_json(self):
+        instance = SimpleNamespace(
+            id=uuid4(),
+            session_id=uuid4(),
+            source_message_id=uuid4(),
+            output_json={"request_id": "req-123"},
+            thinking_log="Structured summary",
+            status_processing="completed",
+            created_at=timezone.now(),
+        )
+
+        serializer = ThinkingLogItemSerializer(instance)
+
+        self.assertEqual(serializer.data["chat_id"], str(instance.source_message_id))
+        self.assertNotIn("request_id", serializer.data)
+
+    def test_thinking_log_item_serializer_does_not_classify_output_json_session_id_as_chat(self):
+        instance = SimpleNamespace(
+            id=uuid4(),
+            output_json={"session_id": str(uuid4()), "request_id": "req-456"},
+            thinking_log="Structured summary",
+            status_processing="completed",
+            created_at=timezone.now(),
+        )
+
+        serializer = ThinkingLogItemSerializer(instance)
+
+        self.assertIsNone(serializer.data["session_id"])
+        self.assertIsNone(serializer.data["chat_id"])
+        self.assertNotIn("request_id", serializer.data)
+
+    def test_thinking_log_item_serializer_returns_empty_reasoning_when_reasoning_steps_is_not_list(self):
+        instance = SimpleNamespace(
+            id=uuid4(),
+            output_json={},
+            thinking_log="Structured summary",
+            reasoning={"reasoning_steps": "single-step-string"},
+            status_processing="completed",
+            created_at=timezone.now(),
+        )
+
+        serializer = ThinkingLogItemSerializer(instance)
+
+        self.assertEqual(serializer.data["reasoning"], [])
+
+    def test_thinking_log_item_serializer_returns_reasoning_steps_when_list(self):
+        instance = SimpleNamespace(
+            id=uuid4(),
+            output_json={},
+            thinking_log="Structured summary",
+            reasoning={"reasoning_steps": ["Step one", "Step two"]},
+            status_processing="completed",
+            created_at=timezone.now(),
+        )
+
+        serializer = ThinkingLogItemSerializer(instance)
+
+        self.assertEqual(serializer.data["reasoning"], ["Step one", "Step two"])

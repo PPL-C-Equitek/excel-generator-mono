@@ -28,6 +28,7 @@ describe("history service", () => {
             id: "history-1",
             original_name: "invoice.pdf",
             custom_name: "",
+            session_id: "11111111-1111-1111-1111-111111111111",
             status_processing: "completed",
             created_at: "2026-04-10T13:00:00Z",
           },
@@ -53,6 +54,7 @@ describe("history service", () => {
             id: "history-1",
             original_name: "invoice.pdf",
             custom_name: "",
+            session_id: "11111111-1111-1111-1111-111111111111",
             status_processing: "completed",
             created_at: "2026-04-10T13:00:00Z",
           },
@@ -103,6 +105,7 @@ describe("history service", () => {
         "The history response is invalid."
       );
     });
+
 
     it("throws an error when the history list response is null", async () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
@@ -548,6 +551,31 @@ describe("history service", () => {
       expect(result.custom_name).toBe("Renamed Invoice");
     });
 
+    it("renames a history item successfully when session_id is null", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          id: "history-2",
+          original_name: "invoice.pdf",
+          custom_name: "Renamed Invoice",
+          session_id: null,
+          status_processing: "completed",
+          created_at: "2026-04-10T13:00:00Z",
+        }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+      const result = await historyService.renameHistoryFile(
+        "history-2",
+        "Renamed Invoice"
+      );
+
+      expect(result.session_id).toBeNull();
+    });
+
     it("throws an authentication error when renaming without a token", async () => {
       mockGetValidAccessToken.mockResolvedValue(null);
       const fetchMock = vi.fn();
@@ -645,6 +673,51 @@ describe("history service", () => {
 
       await expect(
         historyService.renameHistoryFile("history-1", "Renamed Invoice")
+      ).rejects.toThrow("The history response is invalid.");
+    });
+
+    it("throws an error when rename response id is not a string", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          id: 123,
+          original_name: "invoice.pdf",
+          custom_name: "Renamed Invoice",
+          status_processing: "completed",
+          created_at: "2026-04-10T13:00:00Z",
+        }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(
+        historyService.renameHistoryFile("history-1", "Renamed Invoice")
+      ).rejects.toThrow("The history response is invalid.");
+    });
+
+    it("throws an error when rename response session_id type is invalid", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          id: "history-3",
+          original_name: "invoice.pdf",
+          custom_name: "Renamed Invoice",
+          session_id: 42,
+          status_processing: "completed",
+          created_at: "2026-04-10T13:00:00Z",
+        }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(
+        historyService.renameHistoryFile("history-3", "Renamed Invoice")
       ).rejects.toThrow("The history response is invalid.");
     });
 

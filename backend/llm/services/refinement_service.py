@@ -265,6 +265,7 @@ class RefinementOrchestrator:
         custom_schema_id,
         include_reasoning: bool,
         refinement_config: RefinementConfig,
+        chat_context: str | None = None,
         file_name: str = "unknown",
         document_type: str = "unknown",
     ) -> dict[str, Any]:
@@ -299,6 +300,7 @@ class RefinementOrchestrator:
                 input_json=current_input_json,
                 custom_schema_id=custom_schema_id,
                 refinement_instruction=refinement_instruction,
+                chat_context=chat_context,
             )
             sanitized_candidate = _sanitize_reasoning_meta_keys(generated_candidate)
             if first_candidate is None:

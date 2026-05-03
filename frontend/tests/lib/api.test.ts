@@ -319,6 +319,19 @@ describe("uploadFile", () => {
         await expect(uploadFile(file)).rejects.toThrow("PDF file is corrupted or invalid.");
     });
 
+    it("maps PDF invalid structure error when message does not include exact corrupt phrase", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "PDF parser encountered invalid structure in cross-reference table." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "invalid.pdf", { type: "application/pdf" });
+
+        await expect(uploadFile(file)).rejects.toThrow("PDF file is corrupted or invalid.");
+    });
+
     it("maps corrupted Word error to dedicated FE message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
@@ -328,6 +341,21 @@ describe("uploadFile", () => {
         vi.stubGlobal("fetch", mockedFetch);
 
         const file = new File(["file-content"], "corrupt.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Word file is corrupt or has an invalid structure.");
+    });
+
+    it("maps Word invalid structure error when message does not include corrupt keyword", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Word parser error: invalid structure detected." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "invalid.docx", {
             type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         });
 
@@ -423,6 +451,23 @@ describe("uploadFile", () => {
 
         await expect(uploadFile(file)).rejects.toThrow(
             "Rate limit exceeded. Please try again later."
+        );
+    });
+
+    it("maps generic password-protected error when file type is unspecified", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "This file is password-protected." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "archive.bin", {
+            type: "application/octet-stream",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow(
+            "File is password-protected. Please remove the password and try again."
         );
     });
 

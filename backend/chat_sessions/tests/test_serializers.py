@@ -8,6 +8,8 @@ from chat_sessions.serializers import (
     PaginatedChatMessageCollectionSerializer,
     PaginatedCollectionSerializer,
     PaginatedGeneratedOutputCollectionSerializer,
+    ResumeHistoryItemSerializer,
+    SessionResumeSerializer,
     SessionDetailSerializer,
     SessionListItemSerializer,
     SessionTitleUpdateSerializer,
@@ -49,6 +51,7 @@ class ChatSessionSerializerTest(SimpleTestCase):
                     role="user",
                     content="Transform this file",
                     thinking_log="",
+                    target_output_id=None,
                     created_at=datetime(2026, 4, 21, 10, 1, tzinfo=timezone.utc),
                 )
             ],
@@ -60,11 +63,15 @@ class ChatSessionSerializerTest(SimpleTestCase):
             "results": [
                 SimpleNamespace(
                     id="output-1",
+                    source_message_id="message-1",
+                    parent_output_id=None,
                     output_json={
                         "document_info": {"source_type": "Excel", "filename": "example.xlsx"},
                         "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
                         "content_data": [],
                     },
+                    thinking_log="Normalized columns and preserved totals.",
+                    reasoning={"step1": "Normalized columns and preserved totals."},
                     created_at=datetime(2026, 4, 21, 10, 2, tzinfo=timezone.utc),
                 )
             ],
@@ -74,9 +81,22 @@ class ChatSessionSerializerTest(SimpleTestCase):
 
         self.assertEqual(serializer.data["id"], "session-1")
         self.assertEqual(serializer.data["messages"]["results"][0]["role"], "user")
+        self.assertIsNone(serializer.data["messages"]["results"][0]["target_output_id"])
         self.assertEqual(
             serializer.data["generated_outputs"]["results"][0]["output_json"]["document_info"]["filename"],
             "example.xlsx",
+        )
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["chat_id"],
+            "message-1",
+        )
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["thinking_log"],
+            "Normalized columns and preserved totals.",
+        )
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["reasoning"],
+            {"step1": "Normalized columns and preserved totals."},
         )
 
     def test_session_detail_serializer_returns_paginated_messages_and_outputs(self):
@@ -91,6 +111,7 @@ class ChatSessionSerializerTest(SimpleTestCase):
                     role="assistant",
                     content="Here is the result",
                     thinking_log="Reasoning summary",
+                    target_output_id="output-0",
                     created_at=datetime(2026, 4, 21, 10, 3, tzinfo=timezone.utc),
                 )
             ],
@@ -102,11 +123,15 @@ class ChatSessionSerializerTest(SimpleTestCase):
             "results": [
                 SimpleNamespace(
                     id="output-1",
+                    source_message_id="message-2",
+                    parent_output_id="output-0",
                     output_json={
                         "document_info": {"source_type": "Excel", "filename": "example.xlsx"},
                         "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
                         "content_data": [],
                     },
+                    thinking_log="Kept row grouping stable.",
+                    reasoning={"step1": "Kept row grouping stable."},
                     created_at=datetime(2026, 4, 21, 10, 4, tzinfo=timezone.utc),
                 )
             ],
@@ -118,10 +143,23 @@ class ChatSessionSerializerTest(SimpleTestCase):
         self.assertEqual(serializer.data["messages"]["limit"], 1)
         self.assertEqual(serializer.data["messages"]["offset"], 1)
         self.assertEqual(serializer.data["messages"]["results"][0]["role"], "assistant")
+        self.assertEqual(serializer.data["messages"]["results"][0]["target_output_id"], "output-0")
         self.assertEqual(serializer.data["generated_outputs"]["count"], 1)
         self.assertEqual(
             serializer.data["generated_outputs"]["results"][0]["output_json"]["document_info"]["filename"],
             "example.xlsx",
+        )
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["chat_id"],
+            "message-2",
+        )
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["thinking_log"],
+            "Kept row grouping stable.",
+        )
+        self.assertEqual(
+            serializer.data["generated_outputs"]["results"][0]["reasoning"],
+            {"step1": "Kept row grouping stable."},
         )
 
     def test_session_detail_serializer_supports_empty_paginated_collections(self):
@@ -136,6 +174,82 @@ class ChatSessionSerializerTest(SimpleTestCase):
             serializer.data["generated_outputs"],
             {"count": 0, "limit": 10, "offset": 0, "results": []},
         )
+
+    def test_session_resume_serializer_includes_chat_history_and_thinking_logs(self):
+        session = self._session_stub()
+        session.history = [
+            SimpleNamespace(
+                type="message",
+                id="message-1",
+                role="assistant",
+                content="Here is the summary.",
+                thinking_log="Grouped expense rows before answering.",
+                target_output_id="output-0",
+                created_at=datetime(2026, 4, 21, 10, 3, tzinfo=timezone.utc),
+            ),
+            SimpleNamespace(
+                type="output",
+                id="output-1",
+                source_message_id="message-1",
+                parent_output_id="output-0",
+                output_json={
+                    "document_info": {"source_type": "Excel", "filename": "example.xlsx"},
+                    "summary": {"total_sheets": 1, "total_rows": 2, "total_columns": 5},
+                    "content_data": [],
+                },
+                thinking_log="Normalized columns and preserved totals.",
+                reasoning={"step1": "Normalized columns and preserved totals."},
+                created_at=datetime(2026, 4, 21, 10, 4, tzinfo=timezone.utc),
+            ),
+        ]
+
+        serializer = SessionResumeSerializer(session)
+
+        self.assertEqual(serializer.data["id"], "session-1")
+        self.assertEqual(len(serializer.data["history"]), 2)
+        self.assertEqual(serializer.data["history"][0]["type"], "message")
+        self.assertEqual(serializer.data["history"][0]["role"], "assistant")
+        self.assertEqual(serializer.data["history"][0]["target_output_id"], "output-0")
+        self.assertEqual(
+            serializer.data["history"][0]["thinking_log"],
+            "Grouped expense rows before answering.",
+        )
+        self.assertEqual(serializer.data["history"][1]["type"], "output")
+        self.assertEqual(serializer.data["history"][1]["chat_id"], "message-1")
+        self.assertEqual(serializer.data["history"][1]["parent_output_id"], "output-0")
+        self.assertEqual(
+            serializer.data["history"][1]["output_json"]["document_info"]["filename"],
+            "example.xlsx",
+        )
+        self.assertEqual(
+            serializer.data["history"][1]["thinking_log"],
+            "Normalized columns and preserved totals.",
+        )
+        self.assertEqual(
+            serializer.data["history"][1]["reasoning"],
+            {"step1": "Normalized columns and preserved totals."},
+        )
+
+    def test_session_resume_serializer_supports_empty_history(self):
+        session = self._session_stub()
+        session.history = []
+
+        serializer = SessionResumeSerializer(session)
+
+        self.assertEqual(serializer.data["id"], "session-1")
+        self.assertEqual(serializer.data["history"], [])
+
+    def test_resume_history_item_serializer_rejects_unsupported_item_type(self):
+        serializer = ResumeHistoryItemSerializer()
+
+        with self.assertRaises(serializers.ValidationError):
+            serializer.to_representation(
+                SimpleNamespace(
+                    type="metadata",
+                    id="meta-1",
+                    created_at=datetime(2026, 4, 21, 10, 4, tzinfo=timezone.utc),
+                )
+            )
 
     def test_paginated_collection_serializer_defines_shared_pagination_fields(self):
         serializer = PaginatedCollectionSerializer(data={"count": 1, "limit": 10, "offset": 0})
