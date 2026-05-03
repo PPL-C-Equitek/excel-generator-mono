@@ -86,7 +86,7 @@ describe("ThinkingPanel", () => {
     const panel = screen.getByLabelText("Proses berpikir");
 
     expect(panel).toHaveTextContent("Memuat proses berpikir...");
-    expect(panel).toHaveAttribute("role", "region");
+    expect(panel.tagName).toBe("SECTION");
     expect(panel).toHaveClass("animate-pulse");
   });
 
