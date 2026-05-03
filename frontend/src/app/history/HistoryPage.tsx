@@ -17,14 +17,6 @@ function getDisplayName(customName: string, originalName: string): string {
     return customName.trim() || originalName
 }
 
-function getCsvFilename(displayName: string): string {
-    return `${displayName.replace(/\.[^.]+$/, '')}.csv`
-}
-
-function getXlsxFilename(displayName: string): string {
-    return `${displayName.replace(/\.[^.]+$/, '')}.xlsx`
-}
-
 function formatCreatedAt(value: string): string {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) {
@@ -56,13 +48,10 @@ export default function HistoryPage() {
         isLoading,
         renamingHistoryId,
         deletingHistoryId,
-        isDownloading,
         reloadHistory,
         loadError,
         downloadError,
         mutationError,
-        downloadCsv,
-        downloadExcel,
         renameHistory,
         deleteHistory,
     } = useHistoryFiles({ loadAll: true, pageSize: 50 })
@@ -149,10 +138,10 @@ export default function HistoryPage() {
                     deleteHistory,
                 }}
             />
-            <main className="ml-56 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-                <div className="mx-auto h-[calc(100vh-4rem)] max-w-6xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md shadow-slate-200/70">
-                    <section className="h-full min-h-0 min-w-0 bg-white">
-                        <div className="h-full overflow-y-auto px-5 py-5 sm:px-8 sm:py-6">
+            <main className="ml-56 flex min-h-screen flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+                <div className="flex min-h-[calc(100vh-4rem)] w-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md shadow-slate-200/70">
+                    <section className="flex min-h-0 flex-1 min-w-0 flex-col bg-white">
+                        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5 sm:px-8 sm:py-6">
                             {actionError ? (
                                 <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                                     {actionError}
@@ -160,34 +149,30 @@ export default function HistoryPage() {
                             ) : null}
 
                             {selectedHistoryItem ? (
-                                <HistoryItemDetail
-                                    item={selectedHistoryItem}
-                                    editingHistoryId={editingHistoryId}
-                                    renamingHistoryId={renamingHistoryId}
-                                    deletingHistoryId={deletingHistoryId}
-                                    renameValue={renameValue}
-                                    historyFileNameMaxLength={HISTORY_FILE_NAME_MAX_LENGTH}
-                                    selectedSessionId={selectedSessionId}
-                                    session={session}
-                                    isLoadingSession={isLoadingSession}
-                                    sessionError={sessionError}
-                                    isSessionNotFound={isSessionNotFound}
-                                    thinkingLogsByOutputId={thinkingLogsByOutputId}
-                                    isLoadingThinkingLogs={isLoadingThinkingLogs}
-                                    thinkingLogsError={thinkingLogsError}
-                                    setRenameValue={setRenameValue}
-                                    startEditing={startEditing}
-                                    stopEditing={stopEditing}
-                                    handleRenameSubmit={handleRenameSubmit}
-                                    requestDelete={setHistoryToDelete}
-                                    downloadCsv={downloadCsv}
-                                    downloadExcel={downloadExcel}
-                                    isDownloading={isDownloading}
-                                    getDisplayName={getDisplayName}
-                                    getCsvFilename={getCsvFilename}
-                                    getXlsxFilename={getXlsxFilename}
-                                    formatCreatedAt={formatCreatedAt}
-                                />
+                                <div className="flex min-h-0 flex-1 flex-col">
+                                    <HistoryItemDetail
+                                        item={selectedHistoryItem}
+                                        editingHistoryId={editingHistoryId}
+                                        renamingHistoryId={renamingHistoryId}
+                                        deletingHistoryId={deletingHistoryId}
+                                        renameValue={renameValue}
+                                        historyFileNameMaxLength={HISTORY_FILE_NAME_MAX_LENGTH}
+                                        selectedSessionId={selectedSessionId}
+                                        session={session}
+                                        isLoadingSession={isLoadingSession}
+                                        sessionError={sessionError}
+                                        isSessionNotFound={isSessionNotFound}
+                                        thinkingLogsByOutputId={thinkingLogsByOutputId}
+                                        isLoadingThinkingLogs={isLoadingThinkingLogs}
+                                        thinkingLogsError={thinkingLogsError}
+                                        setRenameValue={setRenameValue}
+                                        startEditing={startEditing}
+                                        stopEditing={stopEditing}
+                                        handleRenameSubmit={handleRenameSubmit}
+                                        requestDelete={setHistoryToDelete}
+                                        formatCreatedAt={formatCreatedAt}
+                                    />
+                                </div>
                             ) : (
                                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-5 text-sm text-slate-600">
                                     {noSelectionMessage}

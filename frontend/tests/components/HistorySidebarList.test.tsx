@@ -1,6 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import HistorySidebarList from "@/components/HistorySidebarList";
+import { getSessionResume } from "@/services/sessions";
+
+vi.mock("@/services/sessions", () => ({
+  getSessionResume: vi.fn(),
+}));
+
+const mockGetSessionResume = vi.mocked(getSessionResume);
 
 function isoDaysAgo(daysAgo: number) {
   const now = new Date();
@@ -56,6 +63,15 @@ describe("HistorySidebarList", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetSessionResume.mockResolvedValue({
+      id: "session-1",
+      title: "Session",
+      created_at: "2026-04-10T10:00:00Z",
+      updated_at: "2026-04-10T10:00:00Z",
+      last_message_at: null,
+      last_output_at: null,
+      history: [],
+    });
     listState = makeListState();
   });
 
@@ -115,6 +131,49 @@ describe("HistorySidebarList", () => {
     );
   });
 
+  it("does not prefetch resume when a history item has no session id", () => {
+    render(<HistorySidebarList selectedHistoryId={historyItems[0].id} {...listState} />);
+
+    fireEvent.click(screen.getByRole("link", { name: historyItems[0].original_name }));
+
+    expect(mockGetSessionResume).not.toHaveBeenCalled();
+  });
+
+  it("prefetches resume when a history item has session id", async () => {
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[1].id}
+        {...makeListState({
+          items: [{ ...historyItems[1], session_id: "session-prefetch-1" }],
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: historyItems[1].custom_name }));
+
+    await waitFor(() => {
+      expect(mockGetSessionResume).toHaveBeenCalledWith("session-prefetch-1");
+    });
+  });
+
+  it("swallows resume prefetch errors from history item click", async () => {
+    mockGetSessionResume.mockRejectedValueOnce(new Error("prefetch failed"));
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[1].id}
+        {...makeListState({
+          items: [{ ...historyItems[1], session_id: "session-prefetch-error" }],
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: historyItems[1].custom_name }));
+
+    await waitFor(() => {
+      expect(mockGetSessionResume).toHaveBeenCalledWith("session-prefetch-error");
+    });
+  });
+
   it("shows loading, load error, empty and no matches states", async () => {
     const reloadHistory = vi.fn().mockResolvedValue(undefined);
     const { rerender } = render(
@@ -142,7 +201,7 @@ describe("HistorySidebarList", () => {
     rerender(
       <HistorySidebarList selectedHistoryId={null} {...makeListState({ items: [] })} />
     );
-    expect(screen.getByText("No history yet.")).toBeInTheDocument();
+    expect(screen.getByText("No history yet")).toBeInTheDocument();
 
     rerender(<HistorySidebarList selectedHistoryId={historyItems[0].id} {...makeListState()} />);
     fireEvent.change(screen.getByRole("searchbox", { name: "Search history" }), {

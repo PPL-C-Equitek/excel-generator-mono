@@ -14,7 +14,7 @@ export function useSessionResume(sessionId: string | null) {
   const activeIsLoading = hasSessionId ? isLoading : false;
   const activeIsNotFound = hasSessionId ? isNotFound : false;
 
-  useEffect(() => {
+    useEffect(() => {
     let isActive = true;
 
     if (!sessionId) {
@@ -46,9 +46,16 @@ export function useSessionResume(sessionId: string | null) {
         }
 
         const message = nextError instanceof Error ? nextError.message : "Failed to load session.";
+        const normalizedMessage = message.trim().toLowerCase();
+        const shouldShowNotFound =
+          normalizedMessage === "not found." ||
+          normalizedMessage.includes("not found") ||
+          normalizedMessage.includes("forbidden") ||
+          normalizedMessage.includes("unauthorized") ||
+          normalizedMessage.includes("authentication credentials were not provided");
         setSession(null);
-        setIsNotFound(message === "Not found.");
-        setError(message === "Not found." ? null : message);
+        setIsNotFound(shouldShowNotFound);
+        setError(shouldShowNotFound ? null : message);
       })
       .finally(() => {
         if (isActive) {

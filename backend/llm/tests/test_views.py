@@ -19,9 +19,13 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
 )
 from llm.views import (
+    _build_compact_file_context,
     _build_generate_bootstrap_message,
+    _build_table_context_lines,
     build_export_output_json,
     _extract_document_type,
+    _extract_follow_up_prompt,
+    _inject_file_context_if_available,
     _sanitize_output_json,
     _to_scalar_cell,
     build_llm_generation_service,
@@ -133,6 +137,73 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(file_type_result, "xlsx")
         self.assertEqual(format_result, "csv")
+
+    def test_build_table_context_lines_skips_headers_when_empty_and_includes_row_samples(self):
+        lines = _build_table_context_lines(
+            {
+                "table_name": "SheetA",
+                "headers": [],
+                "rows": [
+                    {"unit": "ICU", "value": 100, "meta": "x"},
+                    ["ignored-non-dict-row"],
+                ],
+            }
+        )
+
+        self.assertEqual(lines[0], "Table 'SheetA': 0 columns, 2 rows")
+        self.assertTrue(any(line.startswith("  Row 1: ") for line in lines))
+        self.assertFalse(any(line.startswith("  Headers: ") for line in lines))
+
+    def test_build_compact_file_context_handles_non_object_sections_and_non_dict_tables(self):
+        context = _build_compact_file_context(
+            {
+                "document_info": "invalid-doc-info",
+                "summary": {},
+                "content_data": [
+                    "non-dict-table-entry",
+                    {
+                        "table_name": "Summary",
+                        "headers": ["unit"],
+                        "rows": [{"unit": "ER"}],
+                    },
+                ],
+            }
+        )
+
+        self.assertIn("[CONVERTED_FILE_CONTEXT]", context)
+        self.assertIn("Table 'Summary': 1 columns, 1 rows", context)
+        self.assertNotIn("File:", context)
+        self.assertNotIn("Summary:", context)
+
+    def test_build_compact_file_context_handles_non_list_content_data(self):
+        context = _build_compact_file_context(
+            {
+                "document_info": {"filename": "report.xlsx", "source_type": "Excel"},
+                "summary": {"total_tables": 1},
+                "content_data": "not-a-list",
+            }
+        )
+
+        self.assertIn("File: report.xlsx (Excel)", context)
+        self.assertIn("Summary: total_tables=1", context)
+        self.assertNotIn("Table '", context)
+
+    def test_inject_file_context_returns_history_when_export_payload_cannot_be_built(self):
+        history = [{"role": "user", "content": "Halo"}]
+        last_output = SimpleNamespace(export_output_json={}, output_json={})
+        session = SimpleNamespace(
+            generated_outputs=SimpleNamespace(
+                order_by=lambda *_args, **_kwargs: SimpleNamespace(first=lambda: last_output)
+            )
+        )
+
+        result = _inject_file_context_if_available(session, history)
+
+        self.assertEqual(result, history)
+        self.assertIs(result, history)
+
+    def test_extract_follow_up_prompt_returns_empty_for_non_object_payload(self):
+        self.assertEqual(_extract_follow_up_prompt(["not-an-object"]), "")
 
     def test_sanitize_output_json_removes_reasoning_meta_keys_from_object(self):
         sanitized = _sanitize_output_json(
@@ -1528,6 +1599,79 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             [{"unit": "ICU", "value": 1000}],
         )
         self.assertTrue(ArtifactHistory.objects.exists())
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_appends_follow_up_user_prompt_to_existing_session(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        session = Session.objects.create(owner=self.user, title="Existing Session")
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "session_id": str(session.id),
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "user_prompt": "Lanjutkan untuk sheet berikutnya.",
+                },
+                "include_reasoning": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["session_id"], str(session.id))
+        self.assertIsNotNone(response.data["chat_id"])
+        self.assertEqual(Session.objects.count(), 1)
+
+        user_messages = list(
+            ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_USER).order_by("created_at")
+        )
+        self.assertEqual(len(user_messages), 1)
+        self.assertEqual(user_messages[0].content, "Lanjutkan untuk sheet berikutnya.")
+        self.assertEqual(str(user_messages[0].id), response.data["chat_id"])
+
+        generated_output = GeneratedOutput.objects.get(session=session)
+        self.assertEqual(generated_output.source_message_id, user_messages[0].id)
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_does_not_append_follow_up_when_user_prompt_blank(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        session = Session.objects.create(owner=self.user, title="Existing Session")
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "session_id": str(session.id),
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "user_prompt": "   ",
+                },
+                "include_reasoning": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["session_id"], str(session.id))
+        self.assertIsNone(response.data["chat_id"])
+        self.assertEqual(
+            ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_USER).count(),
+            0,
+        )
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_updates_session_last_output_at(self, mock_build_service):
