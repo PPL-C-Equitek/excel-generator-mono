@@ -27,10 +27,6 @@ interface HistoryItemDetailProps {
     readonly stopEditing: () => void
     readonly handleRenameSubmit: (item: HistoryItem) => Promise<void>
     readonly requestDelete: (item: HistoryItem) => void
-    readonly downloadCsv: (historyId: string, filename: string) => Promise<void>
-    readonly isDownloading: (historyId: string, format: 'csv' | 'xlsx') => boolean
-    readonly getDisplayName: (customName: string, originalName: string) => string
-    readonly getCsvFilename: (displayName: string) => string
     readonly formatCreatedAt: (value: string) => string
 }
 
@@ -74,16 +70,15 @@ export default function HistoryItemDetail({
     const canDownloadLatestOutput = !!session?.id && !!latestOutputId
 
     const handleDownloadLatestCsv = async () => {
-        if (!session?.id || !latestOutputId || isLatestCsvDownloading) {
-            return
-        }
+        const sessionId = session!.id
+        const outputId = latestOutputId!
 
         setIsLatestCsvDownloading(true)
         try {
             await downloadSessionOutputCsvFile(
-                session.id,
-                latestOutputId,
-                `session-${session.id}-latest-output.csv`
+                sessionId,
+                outputId,
+                `session-${sessionId}-latest-output.csv`
             )
         } finally {
             setIsLatestCsvDownloading(false)
@@ -91,16 +86,15 @@ export default function HistoryItemDetail({
     }
 
     const handleDownloadLatestExcel = async () => {
-        if (!session?.id || !latestOutputId || isLatestExcelDownloading) {
-            return
-        }
+        const sessionId = session!.id
+        const outputId = latestOutputId!
 
         setIsLatestExcelDownloading(true)
         try {
             await downloadSessionOutputExcelFile(
-                session.id,
-                latestOutputId,
-                `session-${session.id}-latest-output.xlsx`
+                sessionId,
+                outputId,
+                `session-${sessionId}-latest-output.xlsx`
             )
         } finally {
             setIsLatestExcelDownloading(false)

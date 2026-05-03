@@ -17,10 +17,6 @@ function getDisplayName(customName: string, originalName: string): string {
     return customName.trim() || originalName
 }
 
-function getCsvFilename(displayName: string): string {
-    return `${displayName.replace(/\.[^.]+$/, '')}.csv`
-}
-
 function formatCreatedAt(value: string): string {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) {
@@ -52,12 +48,10 @@ export default function HistoryPage() {
         isLoading,
         renamingHistoryId,
         deletingHistoryId,
-        isDownloading,
         reloadHistory,
         loadError,
         downloadError,
         mutationError,
-        downloadCsv,
         renameHistory,
         deleteHistory,
     } = useHistoryFiles({ loadAll: true, pageSize: 50 })
@@ -176,10 +170,7 @@ export default function HistoryPage() {
                                         stopEditing={stopEditing}
                                         handleRenameSubmit={handleRenameSubmit}
                                         requestDelete={setHistoryToDelete}
-                                        downloadCsv={downloadCsv}
-                                        isDownloading={isDownloading}
                                         getDisplayName={getDisplayName}
-                                        getCsvFilename={getCsvFilename}
                                         formatCreatedAt={formatCreatedAt}
                                     />
                                 </div>

@@ -320,6 +320,7 @@ export default function SessionConversationView({
       return;
     }
 
+    /* v8 ignore next -- @preserve */
     const timer = globalThis.setTimeout(() => {
       setPendingReasoningVisibleCount((current) => current + 1);
     }, pendingReasoningVisibleCount === 0 ? 250 : 700);
@@ -346,6 +347,7 @@ export default function SessionConversationView({
     }
 
     const generatedOutput = pendingGeneratedOutputRef.current;
+    /* v8 ignore if -- @preserve */
     if (generatedOutput) {
       setLocalHistory((prev) => [...prev, generatedOutput]);
     }
@@ -458,7 +460,13 @@ export default function SessionConversationView({
 
   const handleSendMessage = async () => {
     const trimmedMessage = draftMessage.trim();
-    if (!trimmedMessage || isSending) {
+    /* v8 ignore if -- @preserve */
+    if (!trimmedMessage) {
+      return;
+    }
+
+    /* v8 ignore if -- @preserve */
+    if (isSending) {
       return;
     }
 

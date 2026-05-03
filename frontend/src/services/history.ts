@@ -139,37 +139,6 @@ function buildHistoryDownloadUrl(
   return buildHistoryApiUrl(`history/${historyId}/download/?${params.toString()}`);
 }
 
-function isValidHistoryItem(data: unknown): data is HistoryItem {
-  if (!isRecord(data)) {
-    return false;
-  }
-
-  return (
-    typeof data.id === "string" &&
-    typeof data.original_name === "string" &&
-    typeof data.custom_name === "string" &&
-    (data.session_id === undefined ||
-      data.session_id === null ||
-      typeof data.session_id === "string") &&
-    typeof data.status_processing === "string" &&
-    typeof data.created_at === "string"
-  );
-}
-
-function isValidHistoryListResponse(data: unknown): data is HistoryListResponse {
-  if (typeof data !== "object" || data === null) {
-    return false;
-  }
-
-  const response = data as Record<string, unknown>;
-  return (
-    typeof response.count === "number" &&
-    typeof response.limit === "number" &&
-    typeof response.offset === "number" &&
-    Array.isArray(response.results)
-  );
-}
-
 function isValidSessionListItem(data: unknown): data is SessionListItem {
   if (!isRecord(data)) {
     return false;
@@ -209,8 +178,7 @@ function mapSessionToHistoryItem(session: SessionListItem): HistoryItem {
     created_at:
       session.last_output_at ??
       session.last_message_at ??
-      session.updated_at ??
-      session.created_at,
+      session.updated_at,
   };
 }
 

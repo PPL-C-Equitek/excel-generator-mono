@@ -107,7 +107,7 @@ describe('useHistoryFiles', () => {
 
         await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-        expect(fetchApiSpy).toHaveBeenCalledWith('history/?limit=10&offset=0', expect.any(Object))
+        expect(fetchApiSpy).toHaveBeenCalledWith('sessions/?limit=10&offset=0', expect.any(Object))
     })
 
     it('supports options-only signature via built-in service', async () => {
@@ -125,7 +125,7 @@ describe('useHistoryFiles', () => {
 
         await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-        expect(fetchApiSpy).toHaveBeenCalledWith('history/?limit=3&offset=0', expect.any(Object))
+        expect(fetchApiSpy).toHaveBeenCalledWith('sessions/?limit=3&offset=0', expect.any(Object))
     })
 
     it('loads history items on mount', async () => {

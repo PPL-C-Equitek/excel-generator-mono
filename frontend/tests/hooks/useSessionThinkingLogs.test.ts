@@ -55,6 +55,36 @@ describe('useSessionThinkingLogs', () => {
         expect(result.current.error).toBeNull()
     })
 
+    it('indexes thinking logs by chat_id when available', async () => {
+        mockGetThinkingLogsBySession.mockResolvedValue({
+            count: 1,
+            page: 1,
+            page_size: 20,
+            results: [
+                {
+                    id: 'output-2',
+                    session_id: 'session-1',
+                    chat_id: 'chat-2',
+                    thinking_log: 'log by chat id',
+                    reasoning: [],
+                    status_processing: 'completed',
+                    created_at: '2026-04-10T10:03:00Z',
+                },
+            ],
+        })
+
+        const { result } = renderHook(() => useSessionThinkingLogs('session-1'))
+
+        await waitFor(() => expect(result.current.thinkingLogs).toHaveLength(1))
+
+        expect(result.current.thinkingLogsByOutputId['output-2']?.thinking_log).toBe(
+            'log by chat id'
+        )
+        expect(result.current.thinkingLogsByOutputId['chat-2']?.thinking_log).toBe(
+            'log by chat id'
+        )
+    })
+
     it('stores an error when loading thinking logs fails', async () => {
         mockGetThinkingLogsBySession.mockRejectedValue(new Error('Failed to load thinking log.'))
 
