@@ -1,121 +1,211 @@
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import SessionDetail, { type Session as SessionDetailData } from '@/components/SessionDetail'
+import SessionDetail from '@/components/SessionDetail'
 import { useSessionResume } from '@/hooks/useSessionResume'
-import { getSessionResume, type SessionResume } from '@/services/sessions'
+import { appendSessionMessage, getSessionResume, type SessionResume } from '@/services/sessions'
 
-vi.mock('@/services/sessions', () => ({
-    getSessionResume: vi.fn(),
+vi.mock('@/hooks/useSessionResume', () => ({
+    useSessionResume: vi.fn(),
 }))
 
+vi.mock('@/services/sessions', async () => {
+    const actual = await vi.importActual<typeof import('@/services/sessions')>('@/services/sessions')
+    return {
+        ...actual,
+        appendSessionMessage: vi.fn(),
+        getSessionResume: vi.fn(),
+    }
+})
+
+const mockUseSessionResume = vi.mocked(useSessionResume)
+const mockAppendSessionMessage = vi.mocked(appendSessionMessage)
 const mockGetSessionResume = vi.mocked(getSessionResume)
 
-function mapSessionResumeToDetailSession(
-    sessionResume: SessionResume | null
-): SessionDetailData | null {
-    if (!sessionResume) {
-        return null
-    }
-
+function makeSession(overrides: Partial<SessionResume> = {}): SessionResume {
     return {
-        id: sessionResume.id,
-        prompt: sessionResume.title,
-        score: 0,
-        evaluatedAt: sessionResume.updated_at,
-        output: JSON.stringify(sessionResume.history, null, 2),
+        id: 'session-001',
+        title: 'Analisis Data April',
+        created_at: '2026-05-03T08:00:00.000Z',
+        updated_at: '2026-05-03T08:10:00.000Z',
+        last_message_at: '2026-05-03T08:09:00.000Z',
+        last_output_at: '2026-05-03T08:10:00.000Z',
+        history: [
+            {
+                type: 'message',
+                id: 'message-1',
+                role: 'user',
+                content: 'Tolong rangkum data ini.',
+                thinking_log: '',
+                target_output_id: null,
+                created_at: '2026-05-03T08:00:00.000Z',
+            },
+            {
+                type: 'message',
+                id: 'message-2',
+                role: 'assistant',
+                content: 'Baik, saya rangkum dulu poin utamanya.',
+                thinking_log: '',
+                target_output_id: null,
+                created_at: '2026-05-03T08:01:00.000Z',
+            },
+            {
+                type: 'output',
+                id: 'output-1',
+                chat_id: 'chat-001',
+                parent_output_id: null,
+                output_json: { result: { total_rows: 123 } },
+                thinking_log: 'Membaca tabel dan mengecek kolom.',
+                reasoning: { step1: 'Normalisasi data mentah' },
+                created_at: '2026-05-03T08:02:00.000Z',
+            },
+        ],
+        ...overrides,
     }
 }
 
-function SessionDetailContainer({ sessionId }: { sessionId: string | null }) {
-    const { session, isLoading, isNotFound } = useSessionResume(sessionId)
-
-    if (isLoading) {
-        return <section role="status">Loading session...</section>
-    }
-
-    return (
-        <SessionDetail
-            session={mapSessionResumeToDetailSession(session)}
-            isNotFound={isNotFound}
-        />
-    )
-}
-
-describe('SessionDetail (RED)', () => {
+describe('SessionDetail Chat Thread', () => {
     afterEach(() => {
         vi.clearAllMocks()
     })
 
-    it('renders loading state while waiting for /sessions/{id}/resume', async () => {
-        let resolveRequest: ((value: SessionResume) => void) | null = null
-        mockGetSessionResume.mockImplementation(
-            () =>
-                new Promise((resolve) => {
-                    resolveRequest = resolve
-                })
-        )
+    it('renders loading state while waiting for /sessions/{id}/resume', () => {
+        mockUseSessionResume.mockReturnValue({
+            session: null,
+            isLoading: true,
+            isNotFound: false,
+            error: null,
+        })
 
-        render(<SessionDetailContainer sessionId="session-001" />)
+        render(<SessionDetail sessionId="session-001" />)
 
         expect(screen.getByText('Loading session...')).toBeInTheDocument()
-
-        resolveRequest?.({
-            id: 'session-001',
-            title: 'Prompt from API',
-            created_at: '2026-04-22T09:30:00.000Z',
-            updated_at: '2026-04-22T09:31:00.000Z',
-            last_message_at: null,
-            last_output_at: null,
-            history: [],
-        })
-
-        await waitFor(() => {
-            expect(screen.getByText('Prompt from API')).toBeInTheDocument()
-        })
     })
 
     it.each([
-        { label: '404', errorMessage: 'Not found.' },
-        { label: '403', errorMessage: 'Forbidden.' },
-    ])(
-        'renders "Sesi Tidak Ditemukan" fallback for resume API error $label',
-        async ({ errorMessage }) => {
-            mockGetSessionResume.mockRejectedValueOnce(new Error(errorMessage))
+        { label: '404', payload: { isNotFound: true, error: null } },
+        { label: '403', payload: { isNotFound: false, error: 'Forbidden.' } },
+    ])('renders "Sesi Tidak Ditemukan" for $label session error state', ({ payload }) => {
+        mockUseSessionResume.mockReturnValue({
+            session: null,
+            isLoading: false,
+            isNotFound: payload.isNotFound,
+            error: payload.error,
+        })
 
-            render(<SessionDetailContainer sessionId={`session-${errorMessage}`} />)
+        render(<SessionDetail sessionId="session-404" />)
 
-            await waitFor(() => {
-                expect(screen.getByText('Sesi Tidak Ditemukan')).toBeInTheDocument()
-            })
-        }
-    )
+        expect(screen.getByText('Sesi Tidak Ditemukan')).toBeInTheDocument()
+    })
 
-    it('keeps response content wrapped for long code blocks and huge table rows', () => {
-        const output = `|col1|col2|
-|----|----|
-|${'A'.repeat(500)}|${'B'.repeat(500)}|
-const row = "${'x'.repeat(1000)}"`
+    it('renders full chat history thread with user and AI messages', () => {
+        mockUseSessionResume.mockReturnValue({
+            session: makeSession(),
+            isLoading: false,
+            isNotFound: false,
+            error: null,
+        })
 
-        render(
-            <SessionDetail
-                session={{
-                    id: 'session-edge',
-                    prompt: 'Render long output safely',
-                    score: 98,
-                    evaluatedAt: '2026-04-22T09:30:00.000Z',
-                    output,
-                }}
-                isNotFound={false}
-            />
-        )
+        render(<SessionDetail sessionId="session-001" />)
 
-        const outputSection = screen.getByLabelText('Session Output')
-        const outputText = outputSection.querySelector('p')
-        const outputContainer = outputText?.closest('div')
+        expect(screen.getAllByText('Tolong rangkum data ini.').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getByText('Baik, saya rangkum dulu poin utamanya.')).toBeInTheDocument()
+        expect(screen.getByText('AI Output')).toBeInTheDocument()
+    })
 
-        expect(outputText).not.toBeNull()
-        expect(outputContainer).not.toBeNull()
-        expect(outputContainer).toHaveClass('overflow-x-auto')
-        expect(outputText).toHaveClass('break-words')
+    it('renders chat input form at the bottom area of the session view', () => {
+        mockUseSessionResume.mockReturnValue({
+            session: makeSession(),
+            isLoading: false,
+            isNotFound: false,
+            error: null,
+        })
+
+        render(<SessionDetail sessionId="session-001" />)
+
+        expect(screen.getByRole('textbox', { name: 'Message Input' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Send Message' })).toBeInTheDocument()
+    })
+
+    it('keeps AI output wrapped for long code blocks and huge rows', () => {
+        const longChunk = 'X'.repeat(800)
+        mockUseSessionResume.mockReturnValue({
+            session: makeSession({
+                history: [
+                    {
+                        type: 'output',
+                        id: 'output-edge',
+                        chat_id: 'chat-edge',
+                        parent_output_id: null,
+                        output_json: {
+                            markdown: `|header|value|\n|---|---|\n|${longChunk}|${longChunk}|`,
+                            code: `const payload="${longChunk}"`,
+                        },
+                        thinking_log: '',
+                        reasoning: {},
+                        created_at: '2026-05-03T08:02:00.000Z',
+                    },
+                ],
+            }),
+            isLoading: false,
+            isNotFound: false,
+            error: null,
+        })
+
+        render(<SessionDetail sessionId="session-edge" />)
+
+        const outputRegion = screen.getByLabelText('AI Output Content')
+        const horizontalScrollContainer = outputRegion.querySelector('.overflow-x-auto')
+        const codeNode = outputRegion.querySelector('code')
+
+        expect(horizontalScrollContainer).not.toBeNull()
+        expect(codeNode).not.toBeNull()
+        expect(codeNode).toHaveClass('break-words')
+    })
+
+    it('sends follow-up message to current sessionId and appends refreshed history', async () => {
+        const initialSession = makeSession()
+        const refreshedSession = makeSession({
+            history: [
+                ...initialSession.history,
+                {
+                    type: 'message',
+                    id: 'message-3',
+                    role: 'user',
+                    content: 'Lanjutkan ke unit Radiologi ya.',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-05-03T08:11:00.000Z',
+                },
+            ],
+        })
+
+        mockUseSessionResume.mockReturnValue({
+            session: initialSession,
+            isLoading: false,
+            isNotFound: false,
+            error: null,
+        })
+        mockAppendSessionMessage.mockResolvedValue({
+            ok: true,
+            session_id: 'session-001',
+            chat_id: 'chat-001',
+        })
+        mockGetSessionResume.mockResolvedValue(refreshedSession)
+
+        const user = userEvent.setup()
+        render(<SessionDetail sessionId="session-001" />)
+
+        await user.type(screen.getByRole('textbox', { name: 'Message Input' }), 'Lanjutkan ke unit Radiologi ya.')
+        await user.click(screen.getByRole('button', { name: 'Send Message' }))
+
+        await waitFor(() => {
+            expect(mockAppendSessionMessage).toHaveBeenCalledWith(
+                'session-001',
+                'Lanjutkan ke unit Radiologi ya.'
+            )
+            expect(mockGetSessionResume).toHaveBeenCalledWith('session-001')
+            expect(screen.getByText('Lanjutkan ke unit Radiologi ya.')).toBeInTheDocument()
+        })
     })
 })
