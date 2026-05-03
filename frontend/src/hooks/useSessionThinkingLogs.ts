@@ -63,6 +63,9 @@ export function useSessionThinkingLogs(sessionId: string | null) {
     () =>
       thinkingLogs.reduce<Record<string, ThinkingLogItem>>((acc, item) => {
         acc[item.id] = item;
+        if (item.chat_id) {
+          acc[item.chat_id] = item;
+        }
         return acc;
       }, {}),
     [thinkingLogs],

@@ -1,6 +1,16 @@
-import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import SessionConversationView from '../../src/components/SessionConversationView'
+import { generateJson } from '@/services/llm'
+
+vi.mock('@/services/llm', () => ({
+    generateJson: vi.fn(),
+    downloadSessionOutputCsvFile: vi.fn(),
+    downloadSessionOutputExcelFile: vi.fn(),
+}))
+
+const mockGenerateJson = vi.mocked(generateJson)
 
 function makeSession(overrides = {}) {
     return {
@@ -48,6 +58,10 @@ const thinkingLogsByOutputId = {
 }
 
 describe('SessionConversationView', () => {
+    afterEach(() => {
+        vi.clearAllMocks()
+    })
+
     it('renders loading, not found, and error states', () => {
         const { rerender } = render(
             <SessionConversationView
@@ -122,19 +136,19 @@ describe('SessionConversationView', () => {
         )
 
         expect(screen.getByText('Resume Session')).toBeInTheDocument()
-        expect(screen.getByText('Prompt')).toBeInTheDocument()
+        expect(screen.getByText('Session Info')).toBeInTheDocument()
         expect(screen.getAllByText('Tolong lanjutkan.').length).toBeGreaterThanOrEqual(1)
         expect(screen.getByText('Server log')).toBeInTheDocument()
         expect(screen.queryByText('Session fallback log')).not.toBeInTheDocument()
-        expect(screen.getByText('Metrics')).toBeInTheDocument()
         expect(screen.getByText('Total Events')).toBeInTheDocument()
         expect(screen.getByText('User Prompts')).toBeInTheDocument()
-        expect(screen.getByText('Assistant Replies')).toBeInTheDocument()
         expect(screen.getByText('AI Outputs')).toBeInTheDocument()
 
-        const outputBlock = screen.getByText(/"total_rows": 1/).closest('article')
+        const outputBlock = screen.getByText('AI Output').closest('article')
         expect(outputBlock).not.toBeNull()
-        expect(within(outputBlock as HTMLElement).getByText('AI Output')).toBeInTheDocument()
+        expect(within(outputBlock as HTMLElement).getByText('Your file is ready.')).toBeInTheDocument()
+        expect(within(outputBlock as HTMLElement).getByText('Download CSV')).toBeInTheDocument()
+        expect(within(outputBlock as HTMLElement).getByText('Download Excel')).toBeInTheDocument()
     })
 
     it('shows loading and error states for output thinking logs when no content is available', () => {
@@ -243,5 +257,49 @@ describe('SessionConversationView', () => {
         expect(article).not.toBeNull()
         expect(article).toHaveClass('justify-start')
         expect(screen.getByText('Assistant')).toBeInTheDocument()
+    })
+
+    it('renders follow-up composer and sends message via LLM generate with current session context', async () => {
+        mockGenerateJson.mockResolvedValueOnce({
+            output_json: { summary: { status: 'done' } },
+            session_id: 'session-1',
+            chat_id: 'chat-2',
+            output_id: 'output-2',
+            reasoning: {
+                final_answer: 'Done',
+                reasoning_steps: ['step-1'],
+                thinking_log: 'Thinking follow up',
+            },
+        })
+
+        const user = userEvent.setup()
+        render(
+            <SessionConversationView
+                session={makeSession()}
+                isLoadingSession={false}
+                sessionError={null}
+                isSessionNotFound={false}
+                thinkingLogsByOutputId={thinkingLogsByOutputId}
+                isLoadingThinkingLogs={false}
+                thinkingLogsError={null}
+            />
+        )
+
+        await user.type(screen.getByRole('textbox', { name: 'Follow-up message' }), 'Lanjutkan analisisnya')
+        await user.click(screen.getByRole('button', { name: 'Send' }))
+
+        await waitFor(() => {
+            expect(mockGenerateJson).toHaveBeenCalledWith(
+                {
+                    previous_output: { summary: { total_rows: 1 } },
+                    user_prompt: 'Lanjutkan analisisnya',
+                },
+                undefined,
+                undefined,
+                { sessionId: 'session-1' }
+            )
+            expect(screen.getByText('Lanjutkan analisisnya')).toBeInTheDocument()
+            expect(screen.getByText('Thinking follow up')).toBeInTheDocument()
+        })
     })
 })
