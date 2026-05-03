@@ -806,6 +806,17 @@ def _build_generate_bootstrap_message(input_json, title):
     return "Uploaded file for conversion"
 
 
+def _extract_follow_up_prompt(input_json):
+    if not isinstance(input_json, dict):
+        return ""
+
+    prompt = input_json.get("user_prompt")
+    if not isinstance(prompt, str):
+        return ""
+
+    return prompt.strip()
+
+
 def _build_generate_success_response(output_json, session_id, chat_id, output_id, reasoning):
     response_serializer = LlmGenerateResponseSerializer(
         data={
@@ -877,6 +888,18 @@ def llm_generate(request):
         raw_thinking_log = reasoning_response.get("thinking_log")
         if isinstance(raw_thinking_log, str):
             thinking_log = raw_thinking_log
+
+    follow_up_prompt = _extract_follow_up_prompt(input_json)
+    if (
+        session is not None
+        and source_message is None
+        and follow_up_prompt
+        and getattr(request.user, "is_authenticated", False)
+    ):
+        source_message = append_user_message(
+            session,
+            follow_up_prompt,
+        )
 
     response_session_id, response_output_id, response_chat_id, error_response = _persist_generate_output_for_authenticated_user(
         request.user,

@@ -18,6 +18,22 @@ export interface HistoryListResponse {
   results: HistoryItem[];
 }
 
+interface SessionListItem {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  last_message_at: string | null;
+  last_output_at: string | null;
+}
+
+interface SessionListResponse {
+  count: number;
+  limit: number;
+  offset: number;
+  results: SessionListItem[];
+}
+
 const HISTORY_DOWNLOAD_ERROR_MESSAGE = "Failed to download file.";
 const HISTORY_RENAME_ERROR_MESSAGE = "Failed to rename history item.";
 const HISTORY_DELETE_ERROR_MESSAGE = "Failed to delete history item.";
@@ -154,6 +170,50 @@ function isValidHistoryListResponse(data: unknown): data is HistoryListResponse 
   );
 }
 
+function isValidSessionListItem(data: unknown): data is SessionListItem {
+  if (!isRecord(data)) {
+    return false;
+  }
+
+  return (
+    typeof data.id === "string" &&
+    typeof data.title === "string" &&
+    typeof data.created_at === "string" &&
+    typeof data.updated_at === "string" &&
+    (typeof data.last_message_at === "string" || data.last_message_at === null) &&
+    (typeof data.last_output_at === "string" || data.last_output_at === null)
+  );
+}
+
+function isValidSessionListResponse(data: unknown): data is SessionListResponse {
+  if (!isRecord(data)) {
+    return false;
+  }
+
+  return (
+    typeof data.count === "number" &&
+    typeof data.limit === "number" &&
+    typeof data.offset === "number" &&
+    Array.isArray(data.results) &&
+    data.results.every(isValidSessionListItem)
+  );
+}
+
+function mapSessionToHistoryItem(session: SessionListItem): HistoryItem {
+  return {
+    id: session.id,
+    original_name: session.title,
+    custom_name: "",
+    session_id: session.id,
+    status_processing: "completed",
+    created_at:
+      session.last_output_at ??
+      session.last_message_at ??
+      session.updated_at ??
+      session.created_at,
+  };
+}
+
 function assertValidHistoryPagination(limit: number, offset: number): void {
   if (!Number.isInteger(limit) || limit <= 0) {
     throw new Error("The history request is invalid.");
@@ -254,7 +314,7 @@ export async function getHistoryFiles(
     throw new Error("Authentication credentials were not provided.");
   }
 
-  const data = await fetchAPI(`history/?limit=${limit}&offset=${offset}`, {
+  const data = await fetchAPI(`sessions/?limit=${limit}&offset=${offset}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
@@ -262,11 +322,16 @@ export async function getHistoryFiles(
     },
   });
 
-  if (!isValidHistoryListResponse(data)) {
-    throw new Error("The history response is invalid.");
+  if (!isValidSessionListResponse(data)) {
+    throw new Error("The sessions response is invalid.");
   }
 
-  return data;
+  return {
+    count: data.count,
+    limit: data.limit,
+    offset: data.offset,
+    results: data.results.map(mapSessionToHistoryItem),
+  };
 }
 
 export async function downloadHistoryFile(
@@ -338,20 +403,20 @@ export async function renameHistoryFile(
   }
 
   const data = await requestHistoryApi<unknown>(
-    `history/${historyId}/rename/`,
+    `sessions/${historyId}/`,
     accessToken,
     {
       method: "PATCH",
-      body: JSON.stringify({ custom_name: customName }),
+      body: JSON.stringify({ title: customName }),
     },
     HISTORY_RENAME_ERROR_MESSAGE
   );
 
-  if (!isValidHistoryItem(data)) {
+  if (!isValidSessionListItem(data)) {
     throw new Error("The history response is invalid.");
   }
 
-  return data;
+  return mapSessionToHistoryItem(data);
 }
 
 export async function deleteHistoryFile(historyId: string): Promise<void> {
@@ -361,7 +426,7 @@ export async function deleteHistoryFile(historyId: string): Promise<void> {
   }
 
   await requestHistoryApi<void>(
-    `history/${historyId}/delete/`,
+    `sessions/${historyId}/`,
     accessToken,
     {
       method: "DELETE",

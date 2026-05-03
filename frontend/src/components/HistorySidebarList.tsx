@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import type { HistoryItem } from '@/services/history'
+import { getSessionResume } from '@/services/sessions'
 
 const HISTORY_FILE_NAME_MAX_LENGTH = 120
 
@@ -126,6 +127,7 @@ function HistorySidebarItemRow({
             },
         }
         : `/history?historyId=${item.id}`
+    const sessionId = item.session_id ?? null
 
     return (
         <div
@@ -141,6 +143,15 @@ function HistorySidebarItemRow({
                     href={historyHref}
                     className="min-w-0 flex-1 rounded-md px-2 py-1 text-left transition focus:outline-none"
                     title={historyName}
+                    onClick={() => {
+                        if (!sessionId) {
+                            return
+                        }
+
+                        void Promise.resolve(getSessionResume(sessionId)).catch(() => {
+                            // SessionDetail handles final fallback state.
+                        })
+                    }}
                 >
                     <p className="truncate text-sm font-semibold">{historyName}</p>
                 </Link>
@@ -250,7 +261,7 @@ function HistorySidebarContent({
             ) : null}
 
             {shouldShowEmptyState ? (
-                <p className="px-4 text-sm text-white/75">No history yet.</p>
+                <p className="px-4 text-sm text-white/75">No history yet</p>
             ) : null}
 
             {shouldShowNoMatches ? (

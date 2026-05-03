@@ -5,7 +5,11 @@ export interface ILLMService {
     generate: (
         inputJson: JsonValue,
         customSchemaId?: string | null,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        context?: {
+            sessionId?: string | null;
+            chatId?: string | null;
+        }
     ) => Promise<LLMResponse>;
     exportToCsv?: (
         outputJson: JsonValue,

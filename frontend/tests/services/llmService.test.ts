@@ -172,6 +172,37 @@ describe("generateJson positive", () => {
 
     fetchSpy.mockRestore();
   });
+
+  it("sends session_id and chat_id for follow-up generation when context is provided", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      session_id: "11111111-1111-1111-1111-111111111111",
+      chat_id: "33333333-3333-3333-3333-333333333333",
+      output_id: "22222222-2222-2222-2222-222222222222",
+    });
+
+    await generateJson(
+      { key: "value" },
+      undefined,
+      undefined,
+      {
+        sessionId: "11111111-1111-1111-1111-111111111111",
+        chatId: "33333333-3333-3333-3333-333333333333",
+      }
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "llm/generate/",
+      expect.objectContaining({
+        body: JSON.stringify({
+          input_json: { key: "value" },
+          session_id: "11111111-1111-1111-1111-111111111111",
+          chat_id: "33333333-3333-3333-3333-333333333333",
+        }),
+      })
+    );
+    fetchSpy.mockRestore();
+  });
 });
 
 describe("generateJson negative (HTTP errors)", () => {

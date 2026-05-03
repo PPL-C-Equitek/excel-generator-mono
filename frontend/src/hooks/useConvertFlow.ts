@@ -427,6 +427,10 @@ export interface UseConvertFlowReturn {
     llmService: ILLMService
 }
 
+interface FollowUpContext {
+    sessionId: string | null
+}
+
 export function useConvertFlow(
     llmService: ILLMService = defaultService
 ): UseConvertFlowReturn {
@@ -515,14 +519,24 @@ export function useConvertFlow(
         signal: AbortSignal,
         customSchemaId?: string | null,
         userPrompt?: string | null,
-        previousOutput?: JsonValue | null
+        previousOutput?: JsonValue | null,
+        followUpContext?: FollowUpContext | null
     ) => {
         try {
             const generationInput = buildGenerationInput(uploadResult, userPrompt, previousOutput)
-            const llmResult =
+            const sessionContext =
+                followUpContext?.sessionId
+                    ? {
+                        sessionId: followUpContext.sessionId,
+                    }
+                    : undefined
+            const selectedSchemaId =
                 typeof customSchemaId === 'string' && customSchemaId.length > 0
-                    ? await llmService.generate(generationInput, customSchemaId, signal)
-                    : await llmService.generate(generationInput, undefined, signal)
+                    ? customSchemaId
+                    : undefined
+            const llmResult = sessionContext
+                ? await llmService.generate(generationInput, selectedSchemaId, signal, sessionContext)
+                : await llmService.generate(generationInput, selectedSchemaId, signal)
             if (signal.aborted) return
 
             const reasoning = llmResult.reasoning
@@ -560,6 +574,12 @@ export function useConvertFlow(
         const isFollowUpPrompt = trimmedPrompt.length > 0
         const previousOutput = isFollowUpPrompt ? generatedOutput : null
         const cachedUploadResult = isFollowUpPrompt ? uploadResultForExport : null
+        const activeSessionId = isFollowUpPrompt ? generatedSessionId : null
+        const followUpContext = isFollowUpPrompt
+            ? {
+                sessionId: activeSessionId,
+            }
+            : null
 
         resetConversionState()
         setIsConverting(true)
@@ -572,7 +592,8 @@ export function useConvertFlow(
                 signal,
                 customSchemaId,
                 userPrompt,
-                previousOutput
+                previousOutput,
+                followUpContext
             )
             return
         }
@@ -597,7 +618,8 @@ export function useConvertFlow(
             signal,
             customSchemaId,
             userPrompt,
-            previousOutput
+            previousOutput,
+            followUpContext
         )
     }
 

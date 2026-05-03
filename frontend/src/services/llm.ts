@@ -10,6 +10,8 @@ export type { JsonValue } from "@/utils/schemaValidator";
 export interface LLMRequest {
   input_json: JsonValue;
   custom_schema_id?: string;
+  session_id?: string;
+  chat_id?: string;
 }
 
 export interface LLMReasoning {
@@ -21,6 +23,7 @@ export interface LLMReasoning {
 export interface LLMResponse {
   output_json: JsonValue;
   session_id?: string | null;
+  chat_id?: string | null;
   output_id?: string | null;
   reasoning?: LLMReasoning | null;
 }
@@ -157,7 +160,11 @@ async function postJsonRequest(
 export async function generateJson(
   inputJson: JsonValue,
   customSchemaId?: string | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  context?: {
+    sessionId?: string | null;
+    chatId?: string | null;
+  }
 ): Promise<LLMResponse> {
   const isEmpty = Array.isArray(inputJson)
     ? inputJson.length === 0
@@ -171,6 +178,12 @@ export async function generateJson(
   if (typeof customSchemaId === "string" && customSchemaId.trim().length > 0) {
     requestBody.custom_schema_id = customSchemaId;
   }
+  if (typeof context?.sessionId === "string" && context.sessionId.trim().length > 0) {
+    requestBody.session_id = context.sessionId;
+  }
+  if (typeof context?.chatId === "string" && context.chatId.trim().length > 0) {
+    requestBody.chat_id = context.chatId;
+  }
 
   const data = await postJsonRequest("llm/generate/", requestBody, {
     signal,
@@ -183,6 +196,7 @@ export async function generateJson(
     !("output_json" in data) ||
     !isJsonObject((data as Record<string, unknown>)["output_json"]) ||
     !isOptionalUuidLike((data as Record<string, unknown>)["session_id"]) ||
+    !isOptionalUuidLike((data as Record<string, unknown>)["chat_id"]) ||
     !isOptionalUuidLike((data as Record<string, unknown>)["output_id"])
   ) {
     throw new Error("The server returned an invalid response.");
