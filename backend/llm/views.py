@@ -1144,3 +1144,4 @@ def thinking_log_detail(request, output_id):
         return _thinking_log_not_found_response()
 
     return Response(ThinkingLogItemSerializer(record).data, status=200)
+
