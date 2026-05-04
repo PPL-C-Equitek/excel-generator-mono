@@ -1,0 +1,130 @@
+import { render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import MonitoringRoleGuard from '@/components/MonitoringRoleGuard'
+
+const { mockReplace, mockGetMonitoringAccess } = vi.hoisted(() => ({
+    mockReplace: vi.fn(),
+    mockGetMonitoringAccess: vi.fn(),
+}))
+
+vi.mock('next/navigation', () => ({
+    useRouter: () => ({
+        replace: mockReplace,
+    }),
+}))
+
+vi.mock('@/services/monitoring', () => ({
+    getMonitoringAccess: () => mockGetMonitoringAccess(),
+}))
+
+describe('MonitoringRoleGuard', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mockGetMonitoringAccess.mockResolvedValue({
+            allowed: true,
+            reason: 'ok',
+        })
+    })
+
+    it('renders children when monitoring access is allowed', async () => {
+        render(
+            <MonitoringRoleGuard>
+                <div data-testid="monitoring-content">Monitoring Content</div>
+            </MonitoringRoleGuard>
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('monitoring-content')).toBeInTheDocument()
+        })
+
+        expect(mockReplace).not.toHaveBeenCalled()
+    })
+
+    it('redirects to /convert and hides children when monitoring access is denied', async () => {
+        mockGetMonitoringAccess.mockResolvedValue({
+            allowed: false,
+            reason: 'no_account',
+        })
+
+        render(
+            <MonitoringRoleGuard>
+                <div data-testid="monitoring-content">Monitoring Content</div>
+            </MonitoringRoleGuard>
+        )
+
+        await waitFor(() => {
+            expect(mockReplace).toHaveBeenCalledWith('/convert')
+        })
+
+        expect(screen.queryByTestId('monitoring-content')).not.toBeInTheDocument()
+    })
+
+    it('redirects to /convert when the monitoring access check fails', async () => {
+        mockGetMonitoringAccess.mockRejectedValue(new Error('network down'))
+
+        render(
+            <MonitoringRoleGuard>
+                <div data-testid="monitoring-content">Monitoring Content</div>
+            </MonitoringRoleGuard>
+        )
+
+        await waitFor(() => {
+            expect(mockReplace).toHaveBeenCalledWith('/convert')
+        })
+
+        expect(screen.queryByTestId('monitoring-content')).not.toBeInTheDocument()
+    })
+
+    it('supports custom redirect and loading fallback', async () => {
+        let resolveAccess: ((value: { allowed: boolean; reason: string }) => void) | undefined
+        mockGetMonitoringAccess.mockReturnValue(
+            new Promise((resolve) => {
+                resolveAccess = resolve
+            })
+        )
+
+        render(
+            <MonitoringRoleGuard
+                redirectTo="/custom-convert"
+                loadingFallback={<div data-testid="loading">Checking monitoring access</div>}
+            >
+                <div data-testid="monitoring-content">Monitoring Content</div>
+            </MonitoringRoleGuard>
+        )
+
+        expect(screen.getByTestId('loading')).toBeInTheDocument()
+
+        resolveAccess?.({
+            allowed: false,
+            reason: 'inactive',
+        })
+
+        await waitFor(() => {
+            expect(mockReplace).toHaveBeenCalledWith('/custom-convert')
+        })
+    })
+
+    it('does not redirect after unmount when the access check resolves late', async () => {
+        let resolveAccess: ((value: { allowed: boolean; reason: string }) => void) | undefined
+        mockGetMonitoringAccess.mockReturnValue(
+            new Promise((resolve) => {
+                resolveAccess = resolve
+            })
+        )
+
+        const { unmount } = render(
+            <MonitoringRoleGuard>
+                <div data-testid="monitoring-content">Monitoring Content</div>
+            </MonitoringRoleGuard>
+        )
+
+        unmount()
+        resolveAccess?.({
+            allowed: false,
+            reason: 'no_account',
+        })
+        await Promise.resolve()
+
+        expect(mockReplace).not.toHaveBeenCalled()
+    })
+})
