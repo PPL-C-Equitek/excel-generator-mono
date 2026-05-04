@@ -50,6 +50,9 @@ interface UseHistoryFilesOptions {
 }
 
 const DEFAULT_LIMIT = 10
+const HISTORY_TITLE_MAX_LENGTH = 120
+const HISTORY_TITLE_EMPTY_ERROR_MESSAGE = 'Title cannot be empty.'
+const HISTORY_TITLE_MAX_LENGTH_ERROR_MESSAGE = 'Max 120 Character'
 
 const historyService: HistoryService = {
     getHistoryFiles,
@@ -237,11 +240,22 @@ export function useHistoryFiles(
         historyId: string,
         customName: string
     ): Promise<boolean> => {
+        const normalizedCustomName = customName.trim()
+        if (!normalizedCustomName) {
+            setMutationError(HISTORY_TITLE_EMPTY_ERROR_MESSAGE)
+            return false
+        }
+
+        if (normalizedCustomName.length > HISTORY_TITLE_MAX_LENGTH) {
+            setMutationError(HISTORY_TITLE_MAX_LENGTH_ERROR_MESSAGE)
+            return false
+        }
+
         setMutationError(null)
         setRenamingHistoryId(historyId)
 
         try {
-            const updatedHistory = await service.renameHistoryFile(historyId, customName)
+            const updatedHistory = await service.renameHistoryFile(historyId, normalizedCustomName)
             setItems((current) =>
                 current.map((item) =>
                     item.id === historyId ? updatedHistory : item

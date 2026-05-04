@@ -53,7 +53,7 @@ function formatSessionDate(value: string | null): string {
         return value
     }
 
-    return parsed.toLocaleString('id-ID', {
+    return parsed.toLocaleString('en-US', {
         dateStyle: 'medium',
         timeStyle: 'short',
     })
@@ -65,7 +65,7 @@ function SessionNotFound() {
             aria-live="polite"
             className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-800"
         >
-            <h1 className="text-lg font-semibold">Sesi Tidak Ditemukan</h1>
+            <h1 className="text-lg font-semibold">Session Not Found</h1>
         </output>
     )
 }
@@ -273,7 +273,7 @@ function SessionDetailByIdContent({ session }: Readonly<{ session: SessionResume
                         onChange={(event) => {
                             setDraft(event.target.value)
                         }}
-                        placeholder="Ketik follow-up kamu di sini..."
+                        placeholder="Type your follow-up here..."
                         rows={2}
                         className="min-h-[44px] w-full resize-y rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                         disabled={isSending}

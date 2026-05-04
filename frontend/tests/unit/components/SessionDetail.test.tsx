@@ -97,7 +97,7 @@ describe('SessionDetail Chat Thread', () => {
         { label: 'not found message', payload: { isNotFound: false, error: 'Session not found.' } },
         { label: 'unauthorized', payload: { isNotFound: false, error: 'Unauthorized.' } },
         { label: '404 message', payload: { isNotFound: false, error: '404 not found' } },
-    ])('renders "Sesi Tidak Ditemukan" for $label session error state', ({ payload }) => {
+    ])('renders "Session Not Found" for $label session error state', ({ payload }) => {
         mockUseSessionResume.mockReturnValue({
             session: null,
             isLoading: false,
@@ -107,7 +107,7 @@ describe('SessionDetail Chat Thread', () => {
 
         render(<SessionDetail sessionId="session-404" />)
 
-        expect(screen.getByText('Sesi Tidak Ditemukan')).toBeInTheDocument()
+        expect(screen.getByText('Session Not Found')).toBeInTheDocument()
     })
 
     it('renders full chat history thread with user and AI messages', () => {
@@ -393,7 +393,7 @@ describe('SessionDetail Chat Thread', () => {
         expect(screen.getByText('invalid-evaluated-at')).toBeInTheDocument()
 
         rerender(<SessionDetail session={null} isNotFound={true} />)
-        expect(screen.getByText('Sesi Tidak Ditemukan')).toBeInTheDocument()
+        expect(screen.getByText('Session Not Found')).toBeInTheDocument()
 
         rerender(<SessionDetail session={null} isNotFound={false} />)
         expect(container).toBeEmptyDOMElement()

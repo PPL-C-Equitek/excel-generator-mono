@@ -37,7 +37,7 @@ function formatSessionDate(value: string | null) {
     return value;
   }
 
-  return parsed.toLocaleString("id-ID", {
+  return parsed.toLocaleString("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
   });
@@ -230,7 +230,7 @@ function SessionHistoryBubble({
             </button>
           </div>
           <p className="mt-3 text-xs text-slate-500">
-            Output terstruktur tersedia untuk diunduh dalam format CSV atau Excel.
+            Structured output is available for download as CSV or Excel.
           </p>
         </div>
 
@@ -441,7 +441,7 @@ export default function SessionConversationView({
   if (isSessionNotFound) {
     return (
       <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-5 text-sm text-amber-800">
-        Sesi Tidak Ditemukan
+        Session Not Found
       </section>
     );
   }
@@ -471,7 +471,7 @@ export default function SessionConversationView({
     }
 
     if (!latestOutput) {
-      setSendError("Belum ada output untuk dijadikan konteks lanjutan chat.");
+      setSendError("No output is available yet to continue this chat context.");
       return;
     }
 
@@ -636,7 +636,7 @@ export default function SessionConversationView({
             value={draftMessage}
             onChange={(event) => setDraftMessage(event.target.value)}
             rows={2}
-            placeholder="Lanjutkan percakapan sesi ini..."
+            placeholder="Continue this session conversation..."
             disabled={isSending}
             className="min-h-12 flex-1 resize-none rounded-2xl border border-slate-300 px-4 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
           />

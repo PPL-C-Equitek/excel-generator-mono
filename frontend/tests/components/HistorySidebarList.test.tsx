@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import HistorySidebarList from "@/components/HistorySidebarList";
 import { getSessionResume } from "@/services/sessions";
@@ -8,6 +8,53 @@ vi.mock("@/services/sessions", () => ({
 }));
 
 const mockGetSessionResume = vi.mocked(getSessionResume);
+
+function invokeBeforeInputViaReactProps(target: HTMLElement, data: string | null) {
+  const reactPropsKey = Object.keys(target).find((key) => key.startsWith("__reactProps$"));
+  if (!reactPropsKey) {
+    throw new Error("React props key was not found on target element.");
+  }
+
+  const reactProps = (target as unknown as Record<string, unknown>)[reactPropsKey] as {
+    onBeforeInput?: (event: {
+      nativeEvent: { data: string | null };
+      currentTarget: HTMLInputElement;
+      preventDefault: () => void;
+    }) => void;
+  };
+  const preventDefault = vi.fn();
+
+  reactProps.onBeforeInput?.({
+    nativeEvent: { data },
+    currentTarget: target as HTMLInputElement,
+    preventDefault,
+  });
+
+  return preventDefault;
+}
+
+function setNullSelectionRange(input: HTMLInputElement) {
+  const originalSelectionStart = Object.getOwnPropertyDescriptor(input, "selectionStart");
+  const originalSelectionEnd = Object.getOwnPropertyDescriptor(input, "selectionEnd");
+
+  Object.defineProperty(input, "selectionStart", {
+    configurable: true,
+    get: () => null,
+  });
+  Object.defineProperty(input, "selectionEnd", {
+    configurable: true,
+    get: () => null,
+  });
+
+  return () => {
+    if (originalSelectionStart) {
+      Object.defineProperty(input, "selectionStart", originalSelectionStart);
+    }
+    if (originalSelectionEnd) {
+      Object.defineProperty(input, "selectionEnd", originalSelectionEnd);
+    }
+  };
+}
 
 function isoDaysAgo(daysAgo: number) {
   const now = new Date();
@@ -330,6 +377,209 @@ describe("HistorySidebarList", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("does not submit rename when title is empty and shows validation message", async () => {
+    const renameHistory = vi.fn().mockResolvedValue(true);
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({ renameHistory })}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Actions for ${historyItems[0].original_name}`,
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    fireEvent.change(screen.getByLabelText("File Name"), {
+      target: { value: "   " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(renameHistory).not.toHaveBeenCalled();
+      expect(screen.getByText("Title cannot be empty.")).toBeInTheDocument();
+    });
+  });
+
+  it("shows max length validation when user attempts to paste more than 120 characters", async () => {
+    const renameHistory = vi.fn().mockResolvedValue(true);
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({ renameHistory })}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Actions for ${historyItems[0].original_name}`,
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    const renameInput = screen.getByLabelText("File Name");
+    fireEvent.paste(renameInput, {
+      clipboardData: {
+        getData: () => "A".repeat(121),
+      },
+    });
+
+    expect(screen.getByText("Max 120 Character")).toBeInTheDocument();
+    expect(renameHistory).not.toHaveBeenCalled();
+  });
+
+  it("ignores empty beforeinput and empty paste payload without triggering max-length error", () => {
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState()}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Actions for ${historyItems[0].original_name}`,
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    const renameInput = screen.getByLabelText("File Name");
+    const preventDefault = invokeBeforeInputViaReactProps(renameInput as HTMLInputElement, null);
+    fireEvent.paste(renameInput, {
+      clipboardData: {
+        getData: () => "",
+      },
+    });
+
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(screen.queryByText("Max 120 Character")).not.toBeInTheDocument();
+  });
+
+  it("blocks beforeinput when the next length would exceed 120 characters", async () => {
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState()}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Actions for ${historyItems[0].original_name}`,
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    const renameInput = screen.getByLabelText("File Name");
+    fireEvent.change(renameInput, {
+      target: { value: "A".repeat(120) },
+    });
+
+    let preventDefault!: ReturnType<typeof vi.fn>;
+    await act(async () => {
+      preventDefault = invokeBeforeInputViaReactProps(renameInput as HTMLInputElement, "B");
+    });
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses value-length fallback for beforeinput when selection range is unavailable", async () => {
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState()}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Actions for ${historyItems[0].original_name}`,
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    const renameInput = screen.getByLabelText("File Name") as HTMLInputElement;
+    fireEvent.change(renameInput, {
+      target: { value: "A".repeat(120) },
+    });
+
+    const restoreSelectionRange = setNullSelectionRange(renameInput);
+    let preventDefault!: ReturnType<typeof vi.fn>;
+    await act(async () => {
+      preventDefault = invokeBeforeInputViaReactProps(renameInput, "B");
+    });
+    restoreSelectionRange();
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses value-length fallback for paste when selection range is unavailable", () => {
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState()}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Actions for ${historyItems[0].original_name}`,
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    const renameInput = screen.getByLabelText("File Name") as HTMLInputElement;
+    fireEvent.change(renameInput, {
+      target: { value: "A".repeat(120) },
+    });
+
+    const restoreSelectionRange = setNullSelectionRange(renameInput);
+    fireEvent.paste(renameInput, {
+      clipboardData: {
+        getData: () => "B",
+      },
+    });
+    restoreSelectionRange();
+
+    expect(screen.getByText("Max 120 Character")).toBeInTheDocument();
+  });
+
+  it("keeps max-length validation on over-limit submit and clears it on next input change", async () => {
+    const renameHistory = vi.fn().mockResolvedValue(true);
+    render(
+      <HistorySidebarList
+        selectedHistoryId={historyItems[0].id}
+        {...makeListState({ renameHistory })}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Actions for ${historyItems[0].original_name}`,
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    const renameInput = screen.getByLabelText("File Name");
+    fireEvent.change(renameInput, {
+      target: { value: "A".repeat(121) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Max 120 Character")).toBeInTheDocument();
+    });
+    expect(renameHistory).not.toHaveBeenCalled();
+
+    fireEvent.change(renameInput, {
+      target: { value: "Valid Title" },
+    });
+    expect(screen.queryByText("Max 120 Character")).not.toBeInTheDocument();
   });
 
   it("shows rename dialog pending state when rename is in progress", () => {
