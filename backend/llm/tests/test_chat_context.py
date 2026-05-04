@@ -433,7 +433,7 @@ class InjectFileContextTest(SimpleTestCase):
 
 class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
     def test_positive_uses_content_data_directly_when_llm_returns_export_format(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
 
         content_data = [
             {"table_name": "Sheet1", "headers": ["Nama", "Nilai"], "rows": []}
@@ -449,7 +449,7 @@ class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
         self.assertEqual(result, content_data)
 
     def test_positive_export_format_not_treated_as_heuristic_flat_table(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
 
         output_json = {
             "document_info": {"source_type": "Excel"},
@@ -465,7 +465,7 @@ class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
         self.assertNotIn("content_data", headers)
 
     def test_positive_still_handles_simple_headers_rows_format(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
 
         output_json = {"headers": ["A", "B"], "rows": [["x", "y"]]}
         result = _build_content_data_from_output(output_json)
@@ -475,7 +475,7 @@ class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
         self.assertIn("B", result[0]["headers"])
 
     def test_negative_empty_content_data_list_falls_through_to_heuristic(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
         output_json = {
             "document_info": {},
             "content_data": [],
@@ -485,14 +485,14 @@ class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
         self.assertIsInstance(result, list)
 
     def test_negative_non_list_content_data_falls_through_to_heuristic(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
 
         output_json = {"content_data": "invalid"}
         result = _build_content_data_from_output(output_json)
         self.assertIsInstance(result, list)
 
     def test_edge_multiple_tables_in_content_data_all_returned(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
 
         content_data = [
             {"table_name": "T1", "headers": ["X"], "rows": []},
