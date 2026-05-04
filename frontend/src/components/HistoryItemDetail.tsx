@@ -192,6 +192,7 @@ export default function HistoryItemDetail({
                         disabled={isDeleting || isRenaming}
                     >
                         {isDeleting ? 'Deleting...' : 'Delete'}
+                        
                     </button>
                 </div>
             )}
