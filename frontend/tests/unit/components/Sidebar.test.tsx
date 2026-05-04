@@ -68,12 +68,36 @@ describe('Sidebar', () => {
         expect(screen.getByText('EQUITEK')).toHaveAttribute('href', '/')
     })
 
-    it('renders non-monitoring menus by default', () => {
+    it('keeps Monitoring hidden when monitoring access is denied', async () => {
         render(<Sidebar activeMenu="convert" />)
         expect(screen.getByText('Convert')).toBeInTheDocument()
         expect(screen.getByText('Schema')).toBeInTheDocument()
         expect(screen.getByText('Change Password')).toBeInTheDocument()
         expect(screen.queryByText('Monitoring')).not.toBeInTheDocument()
+
+        await waitFor(() => {
+            expect(mockGetMonitoringAccess).toHaveBeenCalledTimes(1)
+        })
+        expect(screen.queryByText('Monitoring')).not.toBeInTheDocument()
+    })
+
+    it('keeps Monitoring hidden while monitoring access is still loading', () => {
+        mockGetMonitoringAccess.mockReturnValue(new Promise(() => undefined))
+
+        render(<Sidebar activeMenu="convert" />)
+
+        expect(screen.queryByRole('link', { name: 'Monitoring' })).not.toBeInTheDocument()
+    })
+
+    it('keeps Monitoring hidden when monitoring access cannot be checked', async () => {
+        mockGetMonitoringAccess.mockRejectedValue(new Error('monitoring access unavailable'))
+
+        render(<Sidebar activeMenu="convert" />)
+
+        await waitFor(() => {
+            expect(mockGetMonitoringAccess).toHaveBeenCalledTimes(1)
+        })
+        expect(screen.queryByRole('link', { name: 'Monitoring' })).not.toBeInTheDocument()
     })
 
     it('renders Monitoring menu when the user has monitoring access', async () => {
@@ -85,8 +109,9 @@ describe('Sidebar', () => {
         render(<Sidebar activeMenu="convert" />)
 
         await waitFor(() => {
-            expect(screen.getByText('Monitoring')).toBeInTheDocument()
+            expect(screen.getByRole('link', { name: 'Monitoring' })).toHaveAttribute('href', '/monitoring')
         })
+        expect(mockGetMonitoringAccess).toHaveBeenCalledTimes(1)
     })
 
     it('does not render History as a separate top menu label', () => {
