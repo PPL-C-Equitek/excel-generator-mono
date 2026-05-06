@@ -50,6 +50,18 @@ _REDIS_ROUTE_SNAPSHOT_FIELDS = (
     REDIS_FIELD_TOTAL_LATENCY_MS,
     REDIS_FIELD_MAX_LATENCY_MS,
 )
+_REDIS_SET_ROUTE_MAX_LATENCY_SCRIPT = """
+    local current = tonumber(redis.call('HGET', KEYS[1], ARGV[1]))
+    local candidate = tonumber(ARGV[2])
+    if not candidate then
+        return 0
+    end
+    if not current or candidate > current then
+        redis.call('HSET', KEYS[1], ARGV[1], candidate)
+        return 1
+    end
+    return 0
+"""
 
 
 @dataclass
@@ -655,6 +667,10 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         )
         namespace_settings = key_namespace_settings or RedisNamespaceSettings()
         self._key_prefix = self._build_key_prefix(namespace_settings)
+        self._routes_index_key = f"{self._key_prefix}:routes"
+        self._events_key = f"{self._key_prefix}:events"
+        self._realtime_key = f"{self._key_prefix}:realtime"
+        self._route_rankings_key = f"{self._key_prefix}:routes_by_volume"
         self._key_ttl_seconds = self._resolve_optional_positive_int(key_ttl_seconds)
         self._redis = self._create_redis_client(
             redis_client=redis_client,
@@ -711,22 +727,6 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
             socket_timeout=connection_settings.socket_timeout_seconds,
             socket_connect_timeout=connection_settings.connect_timeout_seconds,
         )
-
-    @property
-    def _routes_index_key(self) -> str:
-        return f"{self._key_prefix}:routes"
-
-    @property
-    def _events_key(self) -> str:
-        return f"{self._key_prefix}:events"
-
-    @property
-    def _realtime_key(self) -> str:
-        return f"{self._key_prefix}:realtime"
-
-    @property
-    def _route_rankings_key(self) -> str:
-        return f"{self._key_prefix}:routes_by_volume"
 
     def _route_latency_samples_key(self, route_hash_key: str) -> str:
         return f"{route_hash_key}:latency_samples"
@@ -894,19 +894,13 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         route_hash_key: str,
         duration_ms: float,
     ) -> None:
-        script = """
-            local current = tonumber(redis.call('HGET', KEYS[1], ARGV[1]))
-            local candidate = tonumber(ARGV[2])
-            if not candidate then
-                return 0
-            end
-            if not current or candidate > current then
-                redis.call('HSET', KEYS[1], ARGV[1], candidate)
-                return 1
-            end
-            return 0
-        """
-        pipeline.eval(script, 1, route_hash_key, REDIS_FIELD_MAX_LATENCY_MS, duration_ms)
+        pipeline.eval(
+            _REDIS_SET_ROUTE_MAX_LATENCY_SCRIPT,
+            1,
+            route_hash_key,
+            REDIS_FIELD_MAX_LATENCY_MS,
+            duration_ms,
+        )
 
     def _invalidate_snapshot_cache(self) -> None:
         self._snapshot_cache = None

@@ -14,6 +14,8 @@ from monitoring.infrastructure.repositories import (
     RedisConnectionSettings,
     _SnapshotFactory,
     _REDIS_ROUTE_SNAPSHOT_FIELDS,
+    _REDIS_SET_ROUTE_MAX_LATENCY_SCRIPT,
+    REDIS_FIELD_MAX_LATENCY_MS,
     REDIS_KEY_SEPARATOR,
     RedisMetricsRepository,
 )
@@ -1243,6 +1245,42 @@ class RedisMetricsRepositoryTest(SimpleTestCase):
             realtime_bucket_seconds=10,
             max_realtime_records=100,
             max_route_latency_samples=4,
+        )
+
+    def test_hot_path_redis_key_names_are_cached_on_init(self):
+        self.assertEqual(self.repo._routes_index_key, "monitoring_test:v2:routes")
+        self.assertEqual(self.repo._events_key, "monitoring_test:v2:events")
+        self.assertEqual(self.repo._realtime_key, "monitoring_test:v2:realtime")
+        self.assertEqual(
+            self.repo._route_rankings_key,
+            "monitoring_test:v2:routes_by_volume",
+        )
+
+        self.repo._key_prefix = "changed"
+
+        self.assertEqual(self.repo._routes_index_key, "monitoring_test:v2:routes")
+        self.assertEqual(self.repo._events_key, "monitoring_test:v2:events")
+        self.assertEqual(self.repo._realtime_key, "monitoring_test:v2:realtime")
+        self.assertEqual(
+            self.repo._route_rankings_key,
+            "monitoring_test:v2:routes_by_volume",
+        )
+
+    def test_queue_set_route_max_latency_reuses_shared_script(self):
+        pipeline = Mock()
+
+        self.repo._queue_set_route_max_latency(
+            pipeline=pipeline,
+            route_hash_key="route-key",
+            duration_ms=25.0,
+        )
+
+        pipeline.eval.assert_called_once_with(
+            _REDIS_SET_ROUTE_MAX_LATENCY_SCRIPT,
+            1,
+            "route-key",
+            REDIS_FIELD_MAX_LATENCY_MS,
+            25.0,
         )
 
     def _event(
