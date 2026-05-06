@@ -112,7 +112,7 @@ function AttachedFileCard({ file, variant = 'light' }: Readonly<{ file: File; va
     const isDark = variant === 'dark'
 
     return (
-        <div className={`flex items-center gap-3 rounded-xl p-3 text-left ${isDark ? 'bg-white/15 ring-1 ring-white/20' : 'border border-gray-200 bg-white shadow-sm'}`}>
+        <div className={`flex items-center gap-3 rounded-xl p-3 text-left ${isDark ? 'bg-white/15 ring-1 ring-white/20' : 'border border-gray-200 bg-white shadow-md'}`}>
             <FileIcon className="h-10 w-10 shrink-0" />
             <div className="min-w-0 flex-1">
                 <p className={`break-all text-sm font-semibold leading-snug ${isDark ? 'text-white' : 'text-gray-900'}`}>
@@ -255,7 +255,7 @@ function ChatMessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
         return (
             <div className="flex w-full items-start justify-start gap-3">
                 <AssistantAvatar />
-                <div className="max-w-2xl rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-gray-700 shadow-sm ring-1 ring-gray-200 lg:max-w-3xl">
+                <div className="max-w-2xl rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-gray-700 shadow-md ring-1 ring-gray-200 lg:max-w-3xl">
                     {message.content}
                 </div>
             </div>
@@ -276,7 +276,7 @@ function AssistantResultBubble({ resultContent }: Readonly<{ resultContent: Reac
     return (
         <div className="flex w-full items-start justify-start gap-3">
             <AssistantAvatar />
-            <div className="max-w-2xl rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-gray-700 shadow-sm ring-1 ring-gray-200 lg:max-w-3xl">
+            <div className="max-w-2xl rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-gray-700 shadow-md ring-1 ring-gray-200 lg:max-w-3xl">
                 {resultContent}
             </div>
         </div>

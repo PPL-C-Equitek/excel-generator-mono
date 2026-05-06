@@ -139,11 +139,11 @@ export default function HistoryPage() {
                 }}
             />
             <main className="ml-56 flex min-h-screen flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-                <div className="flex min-h-[calc(100vh-4rem)] w-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md shadow-slate-200/70">
+                <div className="flex min-h-[calc(100vh-4rem)] w-full flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
                     <section className="flex min-h-0 flex-1 min-w-0 flex-col bg-white">
                         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5 sm:px-8 sm:py-6">
                             {actionError ? (
-                                <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                                <div role="alert" className="mb-5 rounded-lg border border-red-400 bg-red-50 px-4 py-3 text-sm text-red-700">
                                     {actionError}
                                 </div>
                             ) : null}
@@ -174,7 +174,7 @@ export default function HistoryPage() {
                                     />
                                 </div>
                             ) : (
-                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-5 text-sm text-slate-600">
+                                <div className="rounded-2xl border border-gray-200 bg-gray-50 px-5 py-5 text-sm text-gray-600">
                                     {noSelectionMessage}
                                 </div>
                             )}
@@ -185,24 +185,24 @@ export default function HistoryPage() {
 
             {isDeleteDialogOpen && deleteDialogHistory ? (
                 <>
-                    <div className="fixed inset-0 z-40 bg-slate-900/70" />
+                    <div className="fixed inset-0 z-40 bg-gray-900/70" />
                     <dialog
                         open
                         aria-labelledby="delete-history-title"
-                        className="fixed inset-0 z-50 m-auto w-full max-w-md rounded-3xl border border-red-100 bg-white p-6 shadow-2xl shadow-slate-900/15"
+                        className="fixed inset-0 z-50 m-auto w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl"
                     >
                         <span className="inline-flex rounded-full bg-red-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-red-700">
                             Delete History
                         </span>
                         <h2
                             id="delete-history-title"
-                            className="mt-4 text-xl font-bold text-slate-900"
+                            className="mt-4 text-xl font-bold text-gray-900"
                         >
                             Delete this history item?
                         </h2>
-                        <p className="mt-3 text-sm leading-relaxed text-slate-600">
+                        <p className="mt-3 text-sm leading-relaxed text-gray-600">
                             This will remove{' '}
-                            <span className="font-semibold text-slate-900">
+                            <span className="font-semibold text-gray-900">
                                 {getDisplayName(
                                     deleteDialogHistory.custom_name,
                                     deleteDialogHistory.original_name
@@ -213,7 +213,7 @@ export default function HistoryPage() {
                         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                             <button
                                 type="button"
-                                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                                 onClick={() => {
                                     setHistoryToDelete(null)
                                 }}
@@ -223,7 +223,7 @@ export default function HistoryPage() {
                             </button>
                             <button
                                 type="button"
-                                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="rounded-xl bg-red-700 px-4 py-2 text-sm font-bold text-white shadow-md transition-all duration-150 hover:bg-red-800 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                                 onClick={() => {
                                     void handleDeleteConfirm(deleteDialogHistory)
                                 }}
