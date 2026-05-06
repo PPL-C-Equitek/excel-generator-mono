@@ -53,13 +53,13 @@ from .services.openai_client import (
     generate_chat_response,
 )
 from .services.query_service import (
-    _thinking_log_not_found_response,
-    _invalid_thinking_log_pagination_response,
-    _invalid_thinking_log_identifier_response,
-    _parse_thinking_log_positive_int,
-    _parse_thinking_log_page_size,
-    _parse_thinking_log_identifier,
-    _build_thinking_log_queryset_for_user,
+    build_thinking_log_queryset_for_user,
+    invalid_thinking_log_identifier_response,
+    invalid_thinking_log_pagination_response,
+    parse_thinking_log_identifier,
+    parse_thinking_log_page_size,
+    parse_thinking_log_positive_int,
+    thinking_log_not_found_response,
 )
 
 logger = logging.getLogger(__name__)
@@ -991,26 +991,26 @@ def llm_reasoning(request):
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def thinking_log_list(request):
     try:
-        page = _parse_thinking_log_positive_int(request.query_params.get("page"), default=1)
-        page_size = _parse_thinking_log_page_size(
+        page = parse_thinking_log_positive_int(request.query_params.get("page"), default=1)
+        page_size = parse_thinking_log_page_size(
             request.query_params.get("page_size"),
             default=10,
         )
     except (TypeError, ValueError):
-        return _invalid_thinking_log_pagination_response()
+        return invalid_thinking_log_pagination_response()
 
     session_id = request.query_params.get("session_id")
     chat_id = request.query_params.get("chat_id")
     request_id = request.query_params.get("request_id")
 
     try:
-        parsed_session_id = _parse_thinking_log_identifier(session_id, "session_id")
-        parsed_chat_id = _parse_thinking_log_identifier(chat_id, "chat_id")
-        parsed_request_id = _parse_thinking_log_identifier(request_id, "request_id")
+        parsed_session_id = parse_thinking_log_identifier(session_id, "session_id")
+        parsed_chat_id = parse_thinking_log_identifier(chat_id, "chat_id")
+        parsed_request_id = parse_thinking_log_identifier(request_id, "request_id")
     except ValueError as exc:
-        return _invalid_thinking_log_identifier_response(str(exc))
+        return invalid_thinking_log_identifier_response(str(exc))
 
-    queryset = _build_thinking_log_queryset_for_user(
+    queryset = build_thinking_log_queryset_for_user(
         user=request.user,
         session_id=parsed_session_id,
         chat_id=parsed_chat_id,
@@ -1037,15 +1037,15 @@ def thinking_log_list(request):
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def thinking_log_session_list(request, session_id):
     try:
-        page = _parse_thinking_log_positive_int(request.query_params.get("page"), default=1)
-        page_size = _parse_thinking_log_page_size(
+        page = parse_thinking_log_positive_int(request.query_params.get("page"), default=1)
+        page_size = parse_thinking_log_page_size(
             request.query_params.get("page_size"),
             default=10,
         )
     except (TypeError, ValueError):
-        return _invalid_thinking_log_pagination_response()
+        return invalid_thinking_log_pagination_response()
 
-    queryset = _build_thinking_log_queryset_for_user(
+    queryset = build_thinking_log_queryset_for_user(
         user=request.user,
         session_id=session_id,
     )
@@ -1069,12 +1069,12 @@ def thinking_log_session_list(request, session_id):
 @require_http_methods(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def thinking_log_detail(request, output_id):
-    record = _build_thinking_log_queryset_for_user(
+    record = build_thinking_log_queryset_for_user(
         user=request.user,
         request_id=output_id,
     ).first()
     if record is None:
-        return _thinking_log_not_found_response()
+        return thinking_log_not_found_response()
 
     return Response(ThinkingLogItemSerializer(record).data, status=200)
 

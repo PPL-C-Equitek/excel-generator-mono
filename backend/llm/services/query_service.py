@@ -11,11 +11,11 @@ THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 MAX_THINKING_LOG_PAGE_SIZE = 100
 
 
-def _thinking_log_not_found_response():
+def thinking_log_not_found_response():
     return Response({"detail": THINKING_LOG_NOT_FOUND_DETAIL}, status=404)
 
 
-def _invalid_thinking_log_pagination_response():
+def invalid_thinking_log_pagination_response():
     return Response(
         {
             "detail": INVALID_REQUEST_DETAIL,
@@ -25,14 +25,14 @@ def _invalid_thinking_log_pagination_response():
     )
 
 
-def _invalid_thinking_log_identifier_response(field_name: str):
+def invalid_thinking_log_identifier_response(field_name: str):
     return Response(
         {"detail": INVALID_REQUEST_DETAIL, "errors": {field_name: [INVALID_THINKING_LOG_IDENTIFIER_DETAIL]}},
         status=400,
     )
 
 
-def _parse_thinking_log_positive_int(value, default, minimum=1):
+def parse_thinking_log_positive_int(value, default, minimum=1):
     if value is None:
         return default
 
@@ -42,14 +42,14 @@ def _parse_thinking_log_positive_int(value, default, minimum=1):
     return parsed
 
 
-def _parse_thinking_log_page_size(value, default=10):
-    parsed = _parse_thinking_log_positive_int(value, default=default)
+def parse_thinking_log_page_size(value, default=10):
+    parsed = parse_thinking_log_positive_int(value, default=default)
     if parsed > MAX_THINKING_LOG_PAGE_SIZE:
         raise ValueError
     return parsed
 
 
-def _parse_thinking_log_identifier(value, field_name: str):
+def parse_thinking_log_identifier(value, field_name: str):
     normalized_value = value.strip() if isinstance(value, str) else ""
     if not normalized_value:
         return None
@@ -60,7 +60,7 @@ def _parse_thinking_log_identifier(value, field_name: str):
         raise ValueError(field_name) from exc
 
 
-def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, request_id=None):
+def build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, request_id=None):
     queryset = get_thinking_log_queryset_for_user(user)
 
     if session_id:
