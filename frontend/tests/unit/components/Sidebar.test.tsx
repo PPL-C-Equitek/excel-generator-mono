@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import * as auth from '@/lib/auth'
 import Sidebar from '../../../src/components/Sidebar'
 import { useHistoryFiles } from '@/hooks/useHistoryFiles'
+import { getMonitoringAccess } from '@/services/monitoring'
 
 vi.mock('@/hooks/useHistoryFiles', () => ({
     useHistoryFiles: vi.fn(),
@@ -16,7 +17,12 @@ vi.mock('@/components/HistorySidebarList', () => ({
     default: () => <div data-testid="history-sidebar-list">History Sidebar List</div>,
 }))
 
+vi.mock('@/services/monitoring', () => ({
+    getMonitoringAccess: vi.fn(),
+}))
+
 const mockUseHistoryFiles = vi.mocked(useHistoryFiles)
+const mockGetMonitoringAccess = vi.mocked(getMonitoringAccess)
 
 function makeHistoryHookState() {
     return {
@@ -44,7 +50,12 @@ function makeHistoryHookState() {
 
 describe('Sidebar', () => {
     beforeEach(() => {
+        vi.clearAllMocks()
         mockUseHistoryFiles.mockReturnValue(makeHistoryHookState())
+        mockGetMonitoringAccess.mockResolvedValue({
+            allowed: false,
+            reason: 'no_account',
+        })
     })
 
     it('renders brand name EQUITEK', () => {
@@ -57,12 +68,87 @@ describe('Sidebar', () => {
         expect(screen.getByText('EQUITEK')).toHaveAttribute('href', '/')
     })
 
-    it('renders Convert, Schema, Monitoring, and Change Password menu', () => {
+    it('keeps Monitoring hidden when monitoring access is denied', async () => {
         render(<Sidebar activeMenu="convert" />)
         expect(screen.getByText('Convert')).toBeInTheDocument()
         expect(screen.getByText('Schema')).toBeInTheDocument()
-        expect(screen.getByText('Monitoring')).toBeInTheDocument()
         expect(screen.getByText('Change Password')).toBeInTheDocument()
+        expect(screen.queryByText('Monitoring')).not.toBeInTheDocument()
+
+        await waitFor(() => {
+            expect(mockGetMonitoringAccess).toHaveBeenCalledTimes(1)
+        })
+        expect(screen.queryByText('Monitoring')).not.toBeInTheDocument()
+    })
+
+    it('keeps Monitoring hidden while monitoring access is still loading', () => {
+        mockGetMonitoringAccess.mockReturnValue(new Promise(() => undefined))
+
+        render(<Sidebar activeMenu="convert" />)
+
+        expect(screen.queryByRole('link', { name: 'Monitoring' })).not.toBeInTheDocument()
+    })
+
+    it('keeps Monitoring hidden when monitoring access cannot be checked', async () => {
+        mockGetMonitoringAccess.mockRejectedValue(new Error('monitoring access unavailable'))
+
+        render(<Sidebar activeMenu="convert" />)
+
+        await waitFor(() => {
+            expect(mockGetMonitoringAccess).toHaveBeenCalledTimes(1)
+        })
+        expect(screen.queryByRole('link', { name: 'Monitoring' })).not.toBeInTheDocument()
+    })
+
+    it('does not update Monitoring visibility after unmount when access resolves late', async () => {
+        let resolveAccess: ((value: { allowed: boolean; reason: string }) => void) | undefined
+        mockGetMonitoringAccess.mockReturnValue(
+            new Promise((resolve) => {
+                resolveAccess = resolve
+            })
+        )
+
+        const { unmount } = render(<Sidebar activeMenu="convert" />)
+
+        unmount()
+        resolveAccess?.({
+            allowed: true,
+            reason: 'ok',
+        })
+        await Promise.resolve()
+
+        expect(mockGetMonitoringAccess).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not update Monitoring visibility after unmount when access rejects late', async () => {
+        let rejectAccess: ((reason?: unknown) => void) | undefined
+        mockGetMonitoringAccess.mockReturnValue(
+            new Promise((_, reject) => {
+                rejectAccess = reject
+            })
+        )
+
+        const { unmount } = render(<Sidebar activeMenu="convert" />)
+
+        unmount()
+        rejectAccess?.(new Error('late monitoring access failure'))
+        await Promise.resolve()
+
+        expect(mockGetMonitoringAccess).toHaveBeenCalledTimes(1)
+    })
+
+    it('renders Monitoring menu when the user has monitoring access', async () => {
+        mockGetMonitoringAccess.mockResolvedValue({
+            allowed: true,
+            reason: 'ok',
+        })
+
+        render(<Sidebar activeMenu="convert" />)
+
+        await waitFor(() => {
+            expect(screen.getByRole('link', { name: 'Monitoring' })).toHaveAttribute('href', '/monitoring')
+        })
+        expect(mockGetMonitoringAccess).toHaveBeenCalledTimes(1)
     })
 
     it('does not render History as a separate top menu label', () => {
@@ -95,9 +181,17 @@ describe('Sidebar', () => {
         expect(screen.getByText('Change Password').closest('a')).toHaveClass('bg-white')
     })
 
-    it('marks Monitoring as active when activeMenu is monitoring', () => {
+    it('marks Monitoring as active when activeMenu is monitoring and access is allowed', async () => {
+        mockGetMonitoringAccess.mockResolvedValue({
+            allowed: true,
+            reason: 'ok',
+        })
+
         render(<Sidebar activeMenu="monitoring" />)
-        expect(screen.getByText('Monitoring').closest('a')).toHaveClass('bg-white')
+
+        await waitFor(() => {
+            expect(screen.getByText('Monitoring').closest('a')).toHaveClass('bg-white')
+        })
     })
 
     it('renders stored user name at the bottom', () => {
