@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import services
 from . import session_history
 from . import session_queries
 from . import thinking_log
@@ -25,14 +24,12 @@ class SessionFacade:
 
     def __init__(
         self,
-        service_module: Any = services,
         query_module: Any = session_queries,
         write_module: Any = session_writes,
         title_module: Any = session_titles,
         thinking_module: Any = thinking_log,
         history_module: Any = session_history,
     ) -> None:
-        self._services = service_module
         self._queries = query_module
         self._writes = write_module
         self._titles = title_module
@@ -78,9 +75,9 @@ class SessionFacade:
         self,
         user: Any,
         session_id: Any,
-        messages_limit: int = services.SESSION_DETAIL_MESSAGES_DEFAULT_LIMIT,
+        messages_limit: int = session_queries.SESSION_DETAIL_MESSAGES_DEFAULT_LIMIT,
         messages_offset: int = 0,
-        outputs_limit: int = services.SESSION_DETAIL_OUTPUTS_DEFAULT_LIMIT,
+        outputs_limit: int = session_queries.SESSION_DETAIL_OUTPUTS_DEFAULT_LIMIT,
         outputs_offset: int = 0,
     ) -> Any:
         return self._queries.get_paginated_session_detail_for_user(
