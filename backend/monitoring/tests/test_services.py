@@ -363,6 +363,29 @@ class MonitoringServiceTest(SimpleTestCase):
         self.assertEqual(third_payload["status"], "ok")
         self.assertEqual(readiness.run_calls, 2)
 
+    def test_snapshot_readiness_skips_cache_when_ttl_is_zero(self):
+        readiness = _ReadinessSequenceDouble(
+            [
+                (503, {"status": "down", "checks": [{"name": "db", "status": "error"}]}),
+                (200, {"status": "ok", "checks": []}),
+            ]
+        )
+        service = MonitoringService(
+            readiness_service=readiness,
+            metrics_repository=self.repo,
+            now=self.now,
+            snapshot_readiness_cache_ttl_seconds=0,
+        )
+
+        first_status, first_payload = service.snapshot_readiness()
+        second_status, second_payload = service.snapshot_readiness()
+
+        self.assertEqual(first_status, 503)
+        self.assertEqual(first_payload["status"], "down")
+        self.assertEqual(second_status, 200)
+        self.assertEqual(second_payload["status"], "ok")
+        self.assertEqual(readiness.run_calls, 2)
+
     def test_readiness_bypasses_snapshot_readiness_cache(self):
         readiness = _ReadinessSequenceDouble(
             [

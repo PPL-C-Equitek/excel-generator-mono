@@ -1,3 +1,4 @@
+from collections import deque
 from datetime import datetime, timezone
 from unittest.mock import Mock, call, patch
 
@@ -54,6 +55,17 @@ class RouteAccumulatorTest(SimpleTestCase):
 
         self.assertEqual(list(accumulator.latency_samples), [20.0, 30.0])
         self.assertEqual(accumulator.latency_samples.maxlen, 2)
+
+    def test_post_init_keeps_matching_latency_sample_window(self):
+        samples = deque([12.0], maxlen=3)
+
+        accumulator = _RouteAccumulator(
+            max_latency_samples=3,
+            latency_samples=samples,
+        )
+
+        self.assertIs(accumulator.latency_samples, samples)
+        self.assertEqual(accumulator.latency_samples.maxlen, 3)
 
     def test_to_snapshot_reuses_cached_percentiles_until_next_sample(self):
         accumulator = _RouteAccumulator(max_latency_samples=4)
