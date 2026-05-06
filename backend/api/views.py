@@ -296,6 +296,113 @@ class ExportEndpointConfig:
     invalid_metadata_message: str
 
 
+@dataclass(frozen=True)
+class ExportDownloadEndpointConfig:
+    resolve_artifact_callable: callable
+    resolve_identifier_field: str
+    storage_dir: str
+    not_found_message: str
+    internal_error_message: str
+    resolver_error_response_builder: callable
+    unexpected_resolver_log_message: str
+    unsafe_metadata_log_message: str
+    read_failure_log_message: str
+    unexpected_prepare_log_message: str
+
+
+def _build_csv_download_resolver_error_response(error):
+    if not isinstance(error, OutputCSVDownloadLookupError):
+        return None
+
+    logger.warning("CSV download file not found or invalid file_id.", exc_info=True)
+    return _build_download_error_response(
+        CSV_FILE_NOT_FOUND_MESSAGE,
+        status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _build_excel_download_resolver_error_response(error):
+    if isinstance(error, OutputExcelDownloadLookupError):
+        if _is_invalid_excel_download_id_error(error):
+            logger.warning("Excel download received invalid export_id.", exc_info=True)
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Invalid Excel export id.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        logger.warning("Excel download file not found.", exc_info=True)
+        return _excel_download_not_found_response()
+
+    if isinstance(error, OutputExcelDownloadStorageError):
+        logger.exception("Excel download storage is unavailable.")
+        return _excel_download_internal_error_response()
+
+    return None
+
+
+def _handle_export_download_endpoint(
+    *,
+    request,
+    export_id,
+    config: ExportDownloadEndpointConfig,
+):
+    try:
+        artifact = config.resolve_artifact_callable(
+            **{
+                config.resolve_identifier_field: export_id,
+                "storage_dir": config.storage_dir,
+            }
+        )
+    except Exception as exc:
+        resolver_error_response = config.resolver_error_response_builder(exc)
+        if resolver_error_response is not None:
+            return resolver_error_response
+
+        logger.exception(config.unexpected_resolver_log_message)
+        return _build_download_error_response(
+            config.internal_error_message,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    try:
+        safe_file_path = safe_join(config.storage_dir, artifact["file_name"])
+        file_handle = open(safe_file_path, "rb")
+    except (KeyError, SuspiciousFileOperation, ValueError):
+        logger.warning(config.unsafe_metadata_log_message, exc_info=True)
+        return _build_download_error_response(
+            config.not_found_message,
+            status.HTTP_404_NOT_FOUND,
+        )
+    except OSError:
+        logger.exception(config.read_failure_log_message)
+        return _build_download_error_response(
+            config.internal_error_message,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    except Exception:
+        logger.exception(config.unexpected_prepare_log_message)
+        return _build_download_error_response(
+            config.internal_error_message,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    download_name = _resolve_download_filename(
+        requested_name=request.query_params.get("filename"),
+        default_name=artifact["file_name"],
+        artifact_type=artifact["artifact_type"],
+    )
+
+    return FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=download_name,
+        content_type=artifact["content_type"],
+    )
+
+
 def _history_not_found_response():
     return Response(
         {
@@ -840,51 +947,29 @@ def export_excel(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def download_csv(request, file_id):
-    try:
-        artifact = resolve_csv_download_artifact(
-            file_id=file_id,
+    return _handle_export_download_endpoint(
+        request=request,
+        export_id=file_id,
+        config=ExportDownloadEndpointConfig(
+            resolve_artifact_callable=resolve_csv_download_artifact,
+            resolve_identifier_field="file_id",
             storage_dir=settings.CSV_EXPORT_DIR,
-        )
-    except OutputCSVDownloadLookupError:
-        logger.warning("CSV download file not found or invalid file_id.", exc_info=True)
-        return _build_download_error_response(
-            CSV_FILE_NOT_FOUND_MESSAGE,
-            status.HTTP_404_NOT_FOUND,
-        )
-
-    try:
-        safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
-        file_handle = open(safe_file_path, "rb")
-    except (KeyError, SuspiciousFileOperation, ValueError):
-        logger.warning("CSV download resolved unsafe artifact metadata.", exc_info=True)
-        return _build_download_error_response(
-            CSV_FILE_NOT_FOUND_MESSAGE,
-            status.HTTP_404_NOT_FOUND,
-        )
-    except OSError:
-        logger.exception("CSV download failed while reading generated artifact.")
-        return _build_download_error_response(
-            CSV_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-    except Exception:
-        logger.exception("Unexpected error while preparing CSV download.")
-        return _build_download_error_response(
-            CSV_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-
-    download_name = _resolve_download_filename(
-        requested_name=request.query_params.get("filename"),
-        default_name=artifact["file_name"],
-        artifact_type=artifact["artifact_type"],
-    )
-
-    return FileResponse(
-        file_handle,
-        as_attachment=True,
-        filename=download_name,
-        content_type=artifact["content_type"],
+            not_found_message=CSV_FILE_NOT_FOUND_MESSAGE,
+            internal_error_message=CSV_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
+            resolver_error_response_builder=_build_csv_download_resolver_error_response,
+            unexpected_resolver_log_message=(
+                "Unexpected error while resolving CSV download artifact."
+            ),
+            unsafe_metadata_log_message=(
+                "CSV download resolved unsafe artifact metadata."
+            ),
+            read_failure_log_message=(
+                "CSV download failed while reading generated artifact."
+            ),
+            unexpected_prepare_log_message=(
+                "Unexpected error while preparing CSV download."
+            ),
+        ),
     )
 
 
@@ -1180,52 +1265,27 @@ class SessionResourceView(APIView):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def download_excel(request, export_id):
-    try:
-        artifact = resolve_excel_download_artifact(
-            export_id=export_id,
+    return _handle_export_download_endpoint(
+        request=request,
+        export_id=export_id,
+        config=ExportDownloadEndpointConfig(
+            resolve_artifact_callable=resolve_excel_download_artifact,
+            resolve_identifier_field="export_id",
             storage_dir=settings.EXCEL_EXPORT_DIR,
-        )
-    except OutputExcelDownloadLookupError as exc:
-        if _is_invalid_excel_download_id_error(exc):
-            logger.warning("Excel download received invalid export_id.", exc_info=True)
-            return Response(
-                {
-                    "status": "error",
-                    "message": "Invalid Excel export id.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        logger.warning("Excel download file not found.", exc_info=True)
-        return _excel_download_not_found_response()
-    except OutputExcelDownloadStorageError:
-        logger.exception("Excel download storage is unavailable.")
-        return _excel_download_internal_error_response()
-    except Exception:
-        logger.exception("Unexpected error while resolving Excel download artifact.")
-        return _excel_download_internal_error_response()
-
-    try:
-        safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
-        file_handle = open(safe_file_path, "rb")
-    except (KeyError, SuspiciousFileOperation, ValueError):
-        logger.warning("Excel download resolved unsafe artifact metadata.", exc_info=True)
-        return _excel_download_not_found_response()
-    except OSError:
-        logger.exception("Excel download failed while reading generated artifact.")
-        return _excel_download_internal_error_response()
-    except Exception:
-        logger.exception("Unexpected error while preparing Excel download.")
-        return _excel_download_internal_error_response()
-    download_name = _resolve_download_filename(
-        requested_name=request.query_params.get("filename"),
-        default_name=artifact["file_name"],
-        artifact_type=artifact["artifact_type"],
-    )
-
-    return FileResponse(
-        file_handle,
-        as_attachment=True,
-        filename=download_name,
-        content_type=artifact["content_type"],
+            not_found_message=EXCEL_FILE_NOT_FOUND_MESSAGE,
+            internal_error_message=EXCEL_DOWNLOAD_INTERNAL_ERROR_MESSAGE,
+            resolver_error_response_builder=_build_excel_download_resolver_error_response,
+            unexpected_resolver_log_message=(
+                "Unexpected error while resolving Excel download artifact."
+            ),
+            unsafe_metadata_log_message=(
+                "Excel download resolved unsafe artifact metadata."
+            ),
+            read_failure_log_message=(
+                "Excel download failed while reading generated artifact."
+            ),
+            unexpected_prepare_log_message=(
+                "Unexpected error while preparing Excel download."
+            ),
+        ),
     )
