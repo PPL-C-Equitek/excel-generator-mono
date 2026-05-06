@@ -58,10 +58,8 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
         realtimeWindowSeconds,
         realtimeBucketSeconds,
         realtimeTotals,
-        eventRows,
-        maxEventCount,
-        visibleRoutes,
-        maxRouteRequests,
+        authEventSummaryRows,
+        routeSummaryRows,
         latencySeries,
         latencyChart,
         errorRateMeter,
@@ -86,13 +84,11 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
                         readinessMeter={readinessMeter}
                     />
                     <MonitoringRoutesAndReadinessSection
-                        visibleRoutes={visibleRoutes}
-                        maxRouteRequests={maxRouteRequests}
+                        routeSummaryRows={routeSummaryRows}
                         readyPayload={readyPayload}
                     />
                     <MonitoringAuthEventsSection
-                        eventRows={eventRows}
-                        maxEventCount={maxEventCount}
+                        authEventSummaryRows={authEventSummaryRows}
                     />
                 </section>
             )

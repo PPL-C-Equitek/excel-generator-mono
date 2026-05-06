@@ -10,12 +10,14 @@ import type {
 } from '@/services/monitoring'
 import { clamp, formatTimeLabel } from './monitoringUi'
 import type {
+    AuthEventSummaryRow,
     ErrorRateMeter,
     EventRow,
     LatencyChartModel,
     LatencySeriesPoint,
     ReadinessMeter,
     RealtimeTotals,
+    RouteSummaryRow,
 } from './monitoringViewModelTypes'
 import { getMonitoringAuthToken, MONITORING_STREAM_UNEXPECTED_CLOSE_MESSAGE } from '@/services/monitoring'
 import { monitoringRouteVisibilityPolicy } from './monitoringRoutePolicy'
@@ -27,6 +29,13 @@ const RETRY_BASE_DELAY_MS = 2000
 const RETRY_MAX_DELAY_MS = 30000
 const RETRY_TICK_INTERVAL_MS = 1000
 const MAX_REALTIME_LATENCY_TICKS = 6
+const MAX_ROUTE_SUMMARY_ROWS = 6
+const MAX_AUTH_EVENT_SUMMARY_ROWS = 8
+const LATENCY_CHART_WIDTH = 520
+const LATENCY_CHART_HEIGHT = 220
+const LATENCY_CHART_PADDING_X = 26
+const LATENCY_CHART_TOP_PADDING = 16
+const LATENCY_CHART_BOTTOM_PADDING = 30
 
 export type MonitoringDashboardService = {
     getMonitoringLive: () => Promise<MonitoringLivePayload>
@@ -55,8 +64,10 @@ export type MonitoringDashboardViewModel = {
     realtimeBucketSeconds: number
     realtimeTotals: RealtimeTotals
     eventRows: EventRow[]
+    authEventSummaryRows: AuthEventSummaryRow[]
     maxEventCount: number
     visibleRoutes: MonitoringStatsPayload['routes']
+    routeSummaryRows: RouteSummaryRow[]
     maxRouteRequests: number
     latencySeries: LatencySeriesPoint[]
     latencyChart: LatencyChartModel
@@ -75,6 +86,24 @@ function calculateRetryDelayMs(consecutiveFailures: number): number {
         RETRY_MAX_DELAY_MS,
         RETRY_BASE_DELAY_MS * (2 ** Math.max(0, consecutiveFailures - 1))
     )
+}
+
+function calculateBarWidth(value: number, maxValue: number): string {
+    return `${Math.max(8, Math.round((value / maxValue) * 100))}%`
+}
+
+function shouldShowLatencyPointLabel(
+    seriesLength: number,
+    index: number,
+    isLastEntry: boolean,
+): boolean {
+    if (seriesLength <= 6) {
+        return true
+    }
+    if (isLastEntry) {
+        return true
+    }
+    return index % 2 === 0
 }
 
 export function getIsPageVisible(): boolean {
@@ -124,6 +153,9 @@ export function useMonitoringDashboardModel({
             monitoringStreamRef.current.close()
             monitoringStreamRef.current = null
         }
+        if (!isMountedRef.current) {
+            return
+        }
         setHasActiveStatsStream(false)
     }, [])
 
@@ -143,6 +175,10 @@ export function useMonitoringDashboardModel({
             getMonitoringAuthenticatedSnapshot(),
         ])
 
+        if (!isMountedRef.current) {
+            return snapshot.accessDecision
+        }
+
         setLivePayload(liveResponse)
         setAccessDecision(snapshot.accessDecision)
         setReadyPayload(snapshot.readyPayload)
@@ -159,6 +195,10 @@ export function useMonitoringDashboardModel({
             monitoringService.getMonitoringAccess(monitoringAuthToken),
         ])
 
+        if (!isMountedRef.current) {
+            return ''
+        }
+
         setLivePayload(liveResponse)
         setAccessDecision(accessResponse)
 
@@ -171,6 +211,10 @@ export function useMonitoringDashboardModel({
         }
 
         const readyResponse = await monitoringService.getMonitoringReady(monitoringAuthToken)
+        if (!isMountedRef.current) {
+            return ''
+        }
+
         setReadyPayload(readyResponse)
 
         return monitoringAuthToken
@@ -184,6 +228,9 @@ export function useMonitoringDashboardModel({
             accessToken: monitoringAuthToken,
             intervalSeconds: autoRefreshIntervalMs / 1000,
             onPayload: (payload) => {
+                if (!isMountedRef.current) {
+                    return
+                }
                 setStatsPayload(payload)
                 markSuccessfulLoad(Date.now())
             },
@@ -197,12 +244,20 @@ export function useMonitoringDashboardModel({
                 scheduleRetry(Date.now())
             },
         })
+        if (!isMountedRef.current) {
+            streamPayloads.close()
+            return
+        }
         monitoringStreamRef.current = streamPayloads
         setHasActiveStatsStream(true)
     }, [autoRefreshIntervalMs, markSuccessfulLoad, scheduleRetry, stopMonitoringStatsStream])
 
     const loadMonitoringStatsSnapshot = useCallback(async (monitoringAuthToken: string) => {
         const statsResponse = await monitoringService.getMonitoringStats(monitoringAuthToken)
+        if (!isMountedRef.current) {
+            return
+        }
+
         setStatsPayload(statsResponse)
     }, [monitoringService])
 
@@ -225,6 +280,9 @@ export function useMonitoringDashboardModel({
 
         const accessFromSnapshot = await loadWithAuthenticatedSnapshot(getMonitoringAuthenticatedSnapshot)
         hasBootstrappedSnapshotRef.current = true
+        if (!isMountedRef.current) {
+            return true
+        }
         if (!accessFromSnapshot.allowed) {
             return true
         }
@@ -266,7 +324,7 @@ export function useMonitoringDashboardModel({
             setErrorMessage(null)
             setLoadingStateForRequest(isBackgroundRefresh)
 
-        try {
+            try {
                 const bootstrappedWithSnapshot = await tryBootstrapWithSnapshot(isBackgroundRefresh)
                 if (bootstrappedWithSnapshot) {
                     return
@@ -277,9 +335,16 @@ export function useMonitoringDashboardModel({
                     return
                 }
                 await loadStatsForAuthorizedRequest(monitoringAuthToken)
+                if (!isMountedRef.current) {
+                    return
+                }
 
                 markSuccessfulLoad(Date.now())
             } catch (error) {
+                if (!isMountedRef.current) {
+                    return
+                }
+
                 const failedAtMs = Date.now()
                 setReadyPayload(null)
                 setStatsPayload(null)
@@ -287,8 +352,10 @@ export function useMonitoringDashboardModel({
                 setErrorMessage(error instanceof Error ? error.message : 'Failed to load monitoring data.')
                 scheduleRetry(failedAtMs)
             } finally {
-                setIsLoading(false)
-                setIsRefreshing(false)
+                if (isMountedRef.current) {
+                    setIsLoading(false)
+                    setIsRefreshing(false)
+                }
                 isDashboardRequestInFlightRef.current = false
             }
         },
@@ -416,9 +483,9 @@ export function useMonitoringDashboardModel({
             return 1
         }
 
-        return Math.max(
-            1,
-            ...visibleRoutes.map((routeRow) => routeRow.total_requests)
+        return visibleRoutes.reduce(
+            (maxRequests, routeRow) => Math.max(maxRequests, routeRow.total_requests),
+            1
         )
     }, [visibleRoutes])
 
@@ -427,8 +494,33 @@ export function useMonitoringDashboardModel({
             return 1
         }
 
-        return Math.max(1, ...eventRows.map((eventRow) => eventRow.count))
+        return eventRows.reduce(
+            (maxCount, eventRow) => Math.max(maxCount, eventRow.count),
+            1
+        )
     }, [eventRows])
+
+    const routeSummaryRows = useMemo<RouteSummaryRow[]>(() => (
+        visibleRoutes
+            .slice(0, MAX_ROUTE_SUMMARY_ROWS)
+            .map((routeRow) => ({
+                route: routeRow.route,
+                method: routeRow.method,
+                totalRequests: routeRow.total_requests,
+                totalErrors: routeRow.total_errors,
+                avgLatencyMs: routeRow.avg_latency_ms,
+                requestWidth: calculateBarWidth(routeRow.total_requests, maxRouteRequests),
+            }))
+    ), [maxRouteRequests, visibleRoutes])
+
+    const authEventSummaryRows = useMemo<AuthEventSummaryRow[]>(() => (
+        eventRows
+            .slice(0, MAX_AUTH_EVENT_SUMMARY_ROWS)
+            .map((eventRow) => ({
+                ...eventRow,
+                eventWidth: calculateBarWidth(eventRow.count, maxEventCount),
+            }))
+    ), [eventRows, maxEventCount])
 
     const timeseriesPoints = useMemo(() => {
         const points = statsPayload?.timeseries?.points ?? []
@@ -456,12 +548,17 @@ export function useMonitoringDashboardModel({
         if (timeseriesPoints.length === 0) {
             return null
         }
-        const requests = timeseriesPoints.reduce((sum, point) => sum + point.requests, 0)
-        const errors = timeseriesPoints.reduce((sum, point) => sum + point.errors, 0)
+        const totals = timeseriesPoints.reduce(
+            (nextTotals, point) => ({
+                requests: nextTotals.requests + point.requests,
+                errors: nextTotals.errors + point.errors,
+            }),
+            { requests: 0, errors: 0 }
+        )
         return {
-            requests,
-            errors,
-            errorRate: requests > 0 ? errors / requests : 0,
+            requests: totals.requests,
+            errors: totals.errors,
+            errorRate: totals.requests > 0 ? totals.errors / totals.requests : 0,
         }
     }, [timeseriesPoints])
 
@@ -495,39 +592,54 @@ export function useMonitoringDashboardModel({
                 linePoints: '',
                 areaPath: '',
                 maxLatency: 0,
+                maxRequests: 0,
+                points: [],
             }
         }
 
-        const width = 520
-        const height = 220
-        const paddingX = 26
-        const topPadding = 16
-        const bottomPadding = 30
-        const plotWidth = width - paddingX * 2
-        const plotHeight = height - topPadding - bottomPadding
-        const maxLatency = Math.max(1, ...latencySeries.map((entry) => entry.value))
+        const plotWidth = LATENCY_CHART_WIDTH - LATENCY_CHART_PADDING_X * 2
+        const plotHeight = LATENCY_CHART_HEIGHT - LATENCY_CHART_TOP_PADDING - LATENCY_CHART_BOTTOM_PADDING
+        const maxLatency = latencySeries.reduce(
+            (nextMaxLatency, entry) => Math.max(nextMaxLatency, entry.value),
+            1
+        )
+        const maxRequests = latencySeries.reduce(
+            (nextMaxRequests, entry) => Math.max(nextMaxRequests, entry.requests ?? 0),
+            0
+        )
 
         const points = latencySeries.map((entry, index) => {
             const normalizedX = latencySeries.length === 1 ? 0.5 : index / (latencySeries.length - 1)
             const normalizedY = clamp(entry.value / maxLatency, 0, 1)
 
-            const x = paddingX + normalizedX * plotWidth
-            const y = topPadding + (1 - normalizedY) * plotHeight
-            return { x, y }
+            const x = LATENCY_CHART_PADDING_X + normalizedX * plotWidth
+            const y = LATENCY_CHART_TOP_PADDING + (1 - normalizedY) * plotHeight
+            const isLastEntry = index === latencySeries.length - 1
+
+            return {
+                id: entry.id,
+                x,
+                y,
+                xLabel: hasRealtimeSeries ? entry.label : String(entry.id),
+                showLabel: shouldShowLatencyPointLabel(latencySeries.length, index, isLastEntry),
+            }
         })
 
         const linePoints = points.map((point) => `${point.x},${point.y}`).join(' ')
         const firstPoint = points.at(0)!
         const lastPoint = points.at(-1)!
         const polylinePoints = points.map((point) => `${point.x} ${point.y}`).join(' L ')
-        const areaPath = `M ${firstPoint.x} ${height - bottomPadding} L ${polylinePoints} L ${lastPoint.x} ${height - bottomPadding} Z`
+        const baselineY = LATENCY_CHART_HEIGHT - LATENCY_CHART_BOTTOM_PADDING
+        const areaPath = `M ${firstPoint.x} ${baselineY} L ${polylinePoints} L ${lastPoint.x} ${baselineY} Z`
 
         return {
             linePoints,
             areaPath,
             maxLatency,
+            maxRequests,
+            points,
         }
-    }, [latencySeries])
+    }, [hasRealtimeSeries, latencySeries])
 
     const errorRateMeter = useMemo<ErrorRateMeter>(() => {
         const sourceErrorRate = realtimeTotals?.errorRate ?? statsPayload?.totals.error_rate ?? 0
@@ -624,8 +736,10 @@ export function useMonitoringDashboardModel({
         realtimeBucketSeconds,
         realtimeTotals,
         eventRows,
+        authEventSummaryRows,
         maxEventCount,
         visibleRoutes,
+        routeSummaryRows,
         maxRouteRequests,
         latencySeries,
         latencyChart,

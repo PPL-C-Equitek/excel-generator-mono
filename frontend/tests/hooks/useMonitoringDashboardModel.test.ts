@@ -307,6 +307,10 @@ describe('useMonitoringDashboardModel', () => {
             'event_a',
             'event_b',
         ])
+        expect(result.current.authEventSummaryRows).toEqual([
+            { eventName: 'event_a', outcome: 'success', count: 5, eventWidth: '100%' },
+            { eventName: 'event_b', outcome: 'success', count: 3, eventWidth: '60%' },
+        ])
     })
 
     it('limits realtime latency series to the latest six buckets', async () => {
@@ -346,6 +350,13 @@ describe('useMonitoringDashboardModel', () => {
         })
 
         expect(result.current.latencySeries.map((item) => item.value)).toEqual([30, 40, 50, 60, 70, 80])
+        expect(result.current.latencyChart.maxRequests).toBe(8)
+        expect(result.current.latencyChart.points).toHaveLength(6)
+        expect(result.current.latencyChart.points[0]).toMatchObject({
+            id: 1,
+            xLabel: result.current.latencySeries[0]?.label,
+            showLabel: true,
+        })
         expect(result.current.realtimeTotals).toEqual({
             requests: 33,
             errors: 0,
@@ -583,6 +594,7 @@ describe('useMonitoringDashboardModel', () => {
             errorRate: 0,
         })
         expect(result.current.eventRows.map((row) => row.eventName)).toEqual(['event_a', 'event_b'])
+        expect(result.current.authEventSummaryRows.map((row) => row.eventWidth)).toEqual(['100%', '100%'])
         expect(result.current.latencyChart.linePoints).not.toBe('')
     })
 
@@ -685,6 +697,24 @@ describe('useMonitoringDashboardModel', () => {
         expect(result.current.hasRealtimeSeries).toBe(false)
         expect(result.current.visibleRoutes.map((routeRow) => routeRow.route)).toEqual(['/history/', '/health'])
         expect(result.current.maxRouteRequests).toBe(15)
+        expect(result.current.routeSummaryRows).toEqual([
+            {
+                route: '/history/',
+                method: 'GET',
+                totalRequests: 15,
+                totalErrors: 1,
+                avgLatencyMs: 120,
+                requestWidth: '100%',
+            },
+            {
+                route: '/health',
+                method: 'GET',
+                totalRequests: 5,
+                totalErrors: 0,
+                avgLatencyMs: 60,
+                requestWidth: '33%',
+            },
+        ])
         expect(result.current.latencySeries).toHaveLength(2)
         expect(result.current.latencySeries[0]?.label).toBe('/history/')
         expect(result.current.latencySeries[0]?.id).toBe(1)
@@ -694,6 +724,61 @@ describe('useMonitoringDashboardModel', () => {
         ])
         expect(result.current.latencyChart.maxLatency).toBe(120)
         expect(result.current.latencyChart.linePoints).toContain(',')
+    })
+
+    it('prepares bounded route and auth-event summary rows for rendering', async () => {
+        const service = createMonitoringService({
+            getMonitoringStats: vi.fn().mockResolvedValue({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 100, errors: 0, error_rate: 0 },
+                routes: Array.from({ length: 8 }, (_, index) => ({
+                    route: `/route-${index + 1}/`,
+                    method: 'GET',
+                    total_requests: 100 - index * 10,
+                    total_errors: index,
+                    error_rate: 0,
+                    avg_latency_ms: 20 + index,
+                    max_latency_ms: 40 + index,
+                })),
+                events: Object.fromEntries(
+                    Array.from({ length: 10 }, (_, index) => [
+                        `event_${index + 1}`,
+                        { success: 10 - index },
+                    ])
+                ),
+            }),
+        })
+
+        const { result } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.routeSummaryRows).toHaveLength(6)
+        expect(result.current.routeSummaryRows[0]).toMatchObject({
+            route: '/route-1/',
+            requestWidth: '100%',
+        })
+        expect(result.current.routeSummaryRows.at(-1)).toMatchObject({
+            route: '/route-6/',
+            requestWidth: '50%',
+        })
+        expect(result.current.authEventSummaryRows).toHaveLength(8)
+        expect(result.current.authEventSummaryRows[0]).toMatchObject({
+            eventName: 'event_1',
+            eventWidth: '100%',
+        })
+        expect(result.current.authEventSummaryRows.at(-1)).toMatchObject({
+            eventName: 'event_8',
+            eventWidth: '30%',
+        })
     })
 
     it('uses authenticated snapshot service when available to avoid extra per-endpoint orchestration', async () => {
@@ -904,6 +989,41 @@ describe('useMonitoringDashboardModel', () => {
         expect(result.current.statsPayload?.totals.requests).toBe(200)
 
         unmount()
+        expect(streamClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('closes a delayed stream handle when the hook unmounts before stream setup resolves', async () => {
+        const streamClose = vi.fn()
+        const deferredStream = createDeferred<{ close: () => void }>()
+        let capturedPayload: ((payload: MonitoringStatsPayload) => void) | undefined
+        const service = createMonitoringService({
+            getMonitoringStatsStream: vi.fn().mockImplementation(async ({ onPayload }) => {
+                capturedPayload = onPayload
+                return deferredStream.promise
+            }),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringStatsStream).toHaveBeenCalledTimes(1)
+        })
+
+        unmount()
+
+        await act(async () => {
+            capturedPayload?.(makeStreamStatsPayload())
+            deferredStream.resolve({ close: streamClose })
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
         expect(streamClose).toHaveBeenCalledTimes(1)
     })
 
