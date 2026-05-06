@@ -1,6 +1,6 @@
-from io import StringIO
-
 from rest_framework import serializers
+
+from llm.validators import ThinkingLogValidator
 
 MAX_MESSAGE_LENGTH = 4096
 
@@ -93,19 +93,6 @@ class LlmReasoningResponseSerializer(ReasoningPayloadSerializer):
     pass
 
 
-THINKING_LOG_MAX_CHARS = 2000
-_THINKING_LOG_BLOCKED_MARKERS = (
-    "chain-of-thought",
-    "internal prompt",
-    "system prompt",
-    "api key",
-    "secret",
-    "token",
-    "debug",
-    "traceback",
-    "stack trace",
-)
-
 
 def _extract_normalized_thinking_log(output_json) -> str:
     if not isinstance(output_json, dict):
@@ -118,61 +105,13 @@ def _extract_normalized_thinking_log(output_json) -> str:
     return raw_thinking_log.strip()
 
 
-def _is_safe_thinking_log_line(line: str) -> bool:
-    lowered_line = line.lower()
-    return not any(marker in lowered_line for marker in _THINKING_LOG_BLOCKED_MARKERS)
-
-
-def _append_safe_line_with_limit(
-    safe_lines: list[str],
-    current_length: int,
-    line: str,
-) -> tuple[int, bool]:
-    separator_length = 1 if safe_lines else 0
-    remaining_chars = THINKING_LOG_MAX_CHARS - current_length - separator_length
-    if remaining_chars <= 0:
-        return current_length, False
-
-    if len(line) > remaining_chars:
-        safe_lines.append(line[:remaining_chars])
-        return current_length, False
-
-    if separator_length:
-        current_length += 1
-
-    safe_lines.append(line)
-    current_length += len(line)
-    return current_length, True
-
-
 def _safe_thinking_log_summary(output_json) -> str:
+    """Sanitize thinking log from output JSON."""
     normalized = _extract_normalized_thinking_log(output_json)
     if not normalized:
         return ""
 
-    safe_lines = []
-    current_length = 0
-    for line in StringIO(normalized):
-        trimmed_line = line.strip()
-        if not trimmed_line:
-            continue
-
-        if not _is_safe_thinking_log_line(trimmed_line):
-            continue
-
-        current_length, should_continue = _append_safe_line_with_limit(
-            safe_lines=safe_lines,
-            current_length=current_length,
-            line=trimmed_line,
-        )
-        if not should_continue:
-            break
-
-    if not safe_lines:
-        return ""
-
-    return "\n".join(safe_lines)
-
+    return ThinkingLogValidator.sanitize(normalized)
 
 class ThinkingLogItemSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
