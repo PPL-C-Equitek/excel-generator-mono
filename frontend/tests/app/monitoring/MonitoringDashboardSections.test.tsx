@@ -1,7 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { MonitoringReadyPayload, MonitoringStatsPayload } from '../../../src/services/monitoring'
-import type { LatencySeriesPoint } from '../../../src/app/monitoring/monitoringViewModelTypes'
+import type {
+    LatencyChartModel,
+    LatencySeriesPoint,
+    RouteSummaryRow,
+} from '../../../src/app/monitoring/monitoringViewModelTypes'
 import {
     MonitoringAccessRequiredSection,
     MonitoringAuthEventsSection,
@@ -54,6 +58,60 @@ const baseReadyPayload: MonitoringReadyPayload = {
             message: 'healthy',
         },
     ],
+}
+
+const emptyLatencyChart: LatencyChartModel = {
+    linePoints: '',
+    areaPath: '',
+    maxLatency: 0,
+    maxRequests: 0,
+    points: [],
+}
+
+function makeLatencyChart(
+    latencySeries: LatencySeriesPoint[],
+    options: Readonly<{
+        hasRealtimeSeries?: boolean
+        maxLatency?: number
+    }> = {},
+): LatencyChartModel {
+    const { hasRealtimeSeries = true } = options
+    const maxLatency = options.maxLatency ?? latencySeries.reduce(
+        (nextMaxLatency, entry) => Math.max(nextMaxLatency, entry.value),
+        1
+    )
+    const points = latencySeries.map((entry, index) => ({
+        id: entry.id,
+        x: 26 + index * 54,
+        y: 120,
+        xLabel: hasRealtimeSeries ? entry.label : String(entry.id),
+        showLabel: latencySeries.length <= 6 || index % 2 === 0 || index === latencySeries.length - 1,
+    }))
+
+    return {
+        linePoints: points.map((point) => `${point.x},${point.y}`).join(' '),
+        areaPath: points.length === 0 ? '' : `M ${points[0]!.x} 190 L ${points.map((point) => `${point.x} ${point.y}`).join(' L ')} L ${points.at(-1)!.x} 190 Z`,
+        maxLatency,
+        maxRequests: latencySeries.reduce(
+            (nextMaxRequests, entry) => Math.max(nextMaxRequests, entry.requests ?? 0),
+            0
+        ),
+        points,
+    }
+}
+
+function makeRouteSummaryRows(
+    routes: MonitoringStatsPayload['routes'],
+    maxRouteRequests = 60,
+): RouteSummaryRow[] {
+    return routes.map((routeRow) => ({
+        route: routeRow.route,
+        method: routeRow.method,
+        totalRequests: routeRow.total_requests,
+        totalErrors: routeRow.total_errors,
+        avgLatencyMs: routeRow.avg_latency_ms,
+        requestWidth: `${Math.max(8, Math.round((routeRow.total_requests / maxRouteRequests) * 100))}%`,
+    }))
 }
 
 describe('MonitoringDashboardSections', () => {
@@ -257,7 +315,7 @@ describe('MonitoringDashboardSections', () => {
         render(
             <MonitoringLatencyAndMetersSection
                 latencySeries={[]}
-                latencyChart={{ linePoints: '', areaPath: '', maxLatency: 0 }}
+                latencyChart={emptyLatencyChart}
                 hasRealtimeSeries={false}
                 realtimeWindowSeconds={0}
                 realtimeBucketSeconds={0}
@@ -277,12 +335,14 @@ describe('MonitoringDashboardSections', () => {
     })
 
     it('renders latency chart for a single realtime bucket', () => {
+        const latencySeries: LatencySeriesPoint[] = [
+            { id: 1, label: '10:00:00', value: 40, requests: 3 },
+        ]
+
         render(
             <MonitoringLatencyAndMetersSection
-                latencySeries={[
-                    { id: 1, label: '10:00:00', value: 40, requests: 3 },
-                ]}
-                latencyChart={{ linePoints: '26,120', areaPath: 'M 26 190 L 26 120 L 26 190 Z', maxLatency: 40 }}
+                latencySeries={latencySeries}
+                latencyChart={makeLatencyChart(latencySeries, { maxLatency: 40 })}
                 hasRealtimeSeries={true}
                 realtimeWindowSeconds={10}
                 realtimeBucketSeconds={5}
@@ -321,6 +381,7 @@ describe('MonitoringDashboardSections', () => {
             <MonitoringLatencyAndMetersSection
                 latencySeries={latencySeries}
                 latencyChart={{
+                    ...makeLatencyChart(latencySeries, { maxLatency: 50 }),
                     linePoints: '26,120 80,100 130,110',
                     areaPath: 'M 26 190 L 26 120 L 80 100 L 130 110 L 130 190 Z',
                     maxLatency: 50,
@@ -362,6 +423,7 @@ describe('MonitoringDashboardSections', () => {
             <MonitoringLatencyAndMetersSection
                 latencySeries={longLatencySeries}
                 latencyChart={{
+                    ...makeLatencyChart(longLatencySeries, { maxLatency: 60 }),
                     linePoints: '',
                     areaPath: '',
                     maxLatency: 60,
@@ -369,11 +431,11 @@ describe('MonitoringDashboardSections', () => {
                 hasRealtimeSeries={true}
                 realtimeWindowSeconds={60}
                 realtimeBucketSeconds={10}
-                errorRateMeter={{ percentText: '10.00%', progressLength: 25.12, valueClassName: 'text-blue-600' }}
+                errorRateMeter={{ percentText: '10.00%', progressLength: 25.12, colorClass: 'text-blue-600' }}
                 readinessMeter={{
                     percentText: '100%',
                     progressLength: 251.2,
-                    valueClassName: 'text-blue-600',
+                    colorClass: 'text-blue-600',
                     healthyChecks: 1,
                     totalChecks: 1,
                 }}
@@ -386,13 +448,16 @@ describe('MonitoringDashboardSections', () => {
     })
 
     it('renders latency snapshot fallback labels when realtime is unavailable', () => {
+        const latencySeries: LatencySeriesPoint[] = [
+            { id: 1, label: '/history/', value: 40, requests: 4 },
+            { id: 2, label: '/auth/login/', value: 50, requests: 2 },
+        ]
+
         render(
             <MonitoringLatencyAndMetersSection
-                latencySeries={[
-                    { id: 1, label: '/history/', value: 40, requests: 4 },
-                    { id: 2, label: '/auth/login/', value: 50, requests: 2 },
-                ]}
+                latencySeries={latencySeries}
                 latencyChart={{
+                    ...makeLatencyChart(latencySeries, { hasRealtimeSeries: false, maxLatency: 50 }),
                     linePoints: '',
                     areaPath: '',
                     maxLatency: 50,
@@ -419,8 +484,7 @@ describe('MonitoringDashboardSections', () => {
     it('renders routes empty state and readiness fallback', () => {
         render(
             <MonitoringRoutesAndReadinessSection
-                statsPayload={{ ...baseStatsPayload, routes: [] }}
-                maxRouteRequests={1}
+                routeSummaryRows={[]}
                 readyPayload={null}
             />
         )
@@ -429,38 +493,21 @@ describe('MonitoringDashboardSections', () => {
         expect(screen.getByText('Readiness data is available only for monitoring-enabled accounts.')).toBeInTheDocument()
     })
 
-    it('excludes monitoring routes from top routes rendering', () => {
+    it('renders visible routes supplied by the dashboard model', () => {
         render(
             <MonitoringRoutesAndReadinessSection
-                statsPayload={{
-                    ...baseStatsPayload,
-                    routes: [
-                        {
-                            route: '/monitoring/stats/',
-                            method: 'GET',
-                            total_requests: 99,
-                            total_errors: 0,
-                            error_rate: 0,
-                            avg_latency_ms: 11,
-                            max_latency_ms: 15,
-                        },
-                        ...baseStatsPayload.routes,
-                    ],
-                }}
-                maxRouteRequests={60}
+                routeSummaryRows={makeRouteSummaryRows(baseStatsPayload.routes)}
                 readyPayload={null}
             />
         )
 
-        expect(screen.queryByText('/monitoring/stats/')).not.toBeInTheDocument()
         expect(screen.getByText('/history/')).toBeInTheDocument()
     })
 
     it('renders readiness checks with optional check messages', () => {
         render(
             <MonitoringRoutesAndReadinessSection
-                statsPayload={baseStatsPayload}
-                maxRouteRequests={60}
+                routeSummaryRows={makeRouteSummaryRows(baseStatsPayload.routes)}
                 readyPayload={baseReadyPayload}
             />
         )
@@ -474,8 +521,7 @@ describe('MonitoringDashboardSections', () => {
     it('maps configured readiness check names to friendly labels', () => {
         render(
             <MonitoringRoutesAndReadinessSection
-                statsPayload={baseStatsPayload}
-                maxRouteRequests={60}
+                routeSummaryRows={makeRouteSummaryRows(baseStatsPayload.routes)}
                 readyPayload={{
                     status: 'ok',
                     timestamp: '2026-04-24T10:00:05Z',
@@ -494,8 +540,7 @@ describe('MonitoringDashboardSections', () => {
     it('renders readiness checks when message is omitted', () => {
         render(
             <MonitoringRoutesAndReadinessSection
-                statsPayload={baseStatsPayload}
-                maxRouteRequests={60}
+                routeSummaryRows={makeRouteSummaryRows(baseStatsPayload.routes)}
                 readyPayload={{
                     status: 'healthy',
                     timestamp: '2026-04-24T10:00:05Z',
@@ -516,7 +561,7 @@ describe('MonitoringDashboardSections', () => {
     })
 
     it('renders auth events empty state', () => {
-        render(<MonitoringAuthEventsSection eventRows={[]} maxEventCount={1} />)
+        render(<MonitoringAuthEventsSection authEventSummaryRows={[]} />)
 
         expect(screen.getByText('No auth event metrics available yet.')).toBeInTheDocument()
     })
@@ -524,10 +569,9 @@ describe('MonitoringDashboardSections', () => {
     it('renders auth events metrics list', () => {
         render(
             <MonitoringAuthEventsSection
-                maxEventCount={10}
-                eventRows={[
-                    { eventName: 'auth.login', outcome: 'success', count: 12 },
-                    { eventName: 'auth.refresh', outcome: 'error', count: 8 },
+                authEventSummaryRows={[
+                    { eventName: 'auth.login', outcome: 'success', count: 12, eventWidth: '100%' },
+                    { eventName: 'auth.refresh', outcome: 'error', count: 8, eventWidth: '80%' },
                 ]}
             />
         )
