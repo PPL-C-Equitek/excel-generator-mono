@@ -588,75 +588,17 @@ def _generate_optional_reasoning(include_reasoning, input_json, output_json):
         logger.exception("Unexpected error while generating automatic reasoning.")
         return None
 
-
-def _thinking_log_not_found_response():
-    return Response({"detail": THINKING_LOG_NOT_FOUND_DETAIL}, status=404)
-
-
-def _invalid_thinking_log_pagination_response():
-    return Response(
-        {
-            "detail": INVALID_REQUEST_DETAIL,
-            "errors": {
-                "pagination": [INVALID_THINKING_LOG_PAGINATION_DETAIL],
-            },
-        },
-        status=400,
-    )
-
-
-def _invalid_thinking_log_identifier_response(field_name: str):
-    return Response(
-        {
-            "detail": INVALID_REQUEST_DETAIL,
-            "errors": {
-                field_name: [INVALID_THINKING_LOG_IDENTIFIER_DETAIL],
-            },
-        },
-        status=400,
-    )
-
-
-def _parse_thinking_log_positive_int(value, default, minimum=1):
-    if value is None:
-        return default
-
-    parsed = int(value)
-    if parsed < minimum:
-        raise ValueError
-    return parsed
-
-
-def _parse_thinking_log_page_size(value, default=10):
-    parsed = _parse_thinking_log_positive_int(value, default=default)
-    if parsed > MAX_THINKING_LOG_PAGE_SIZE:
-        raise ValueError
-    return parsed
-
-
-def _parse_thinking_log_identifier(value, field_name: str):
-    normalized_value = value.strip() if isinstance(value, str) else ""
-    if not normalized_value:
-        return None
-
-    try:
-        return UUID(normalized_value)
-    except (TypeError, ValueError, AttributeError) as exc:
-        raise ValueError(field_name) from exc
-
-
-def _build_thinking_log_queryset_for_user(user, session_id=None, chat_id=None, request_id=None):
-    queryset = GeneratedOutput.objects.filter(session__owner=user).exclude(thinking_log="")
-
-    if session_id:
-        queryset = queryset.filter(session_id=session_id)
-
-    if chat_id:
-        queryset = queryset.filter(source_message_id=chat_id)
-    elif request_id:
-        queryset = queryset.filter(id=request_id)
-
-    return queryset.defer("export_output_json").order_by("-created_at", "-id")
+# Thinking-log query helpers moved to `llm.query_service` to centralize
+# pagination, identifier parsing and queryset construction.
+from .services.query_service import (
+    _thinking_log_not_found_response,
+    _invalid_thinking_log_pagination_response,
+    _invalid_thinking_log_identifier_response,
+    _parse_thinking_log_positive_int,
+    _parse_thinking_log_page_size,
+    _parse_thinking_log_identifier,
+    _build_thinking_log_queryset_for_user,
+)
 
 
 def _resolve_generate_session(user, session_id):
