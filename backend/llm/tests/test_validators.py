@@ -191,3 +191,60 @@ class TestThinkingLogValidatorEdgeCases(TestCase):
         """Empty blocked pattern text doesn't cause issues."""
         # Should not fail even with edge cases
         assert ThinkingLogValidator.contains_blocked_pattern("") is False
+
+
+class TestThinkingLogValidatorInternalHelpers(TestCase):
+    """Test internal sanitization helpers for branch coverage."""
+
+    def test_normalize_thinking_log_returns_empty_for_non_string(self):
+        assert ThinkingLogValidator._normalize_thinking_log(None) == ""
+        assert ThinkingLogValidator._normalize_thinking_log(123) == ""
+
+    def test_normalize_thinking_log_strips_string(self):
+        assert ThinkingLogValidator._normalize_thinking_log("  Hello  ") == "Hello"
+
+    def test_is_safe_thinking_log_line_rejects_empty_and_blocked(self):
+        assert ThinkingLogValidator._is_safe_thinking_log_line("") is False
+        assert (
+            ThinkingLogValidator._is_safe_thinking_log_line("I thought about this")
+            is False
+        )
+        assert ThinkingLogValidator._is_safe_thinking_log_line("Safe line") is True
+
+    def test_append_safe_thinking_log_line_truncates_partial_line(self):
+        safe_lines = ["abc"]
+        appended_line, current_length = ThinkingLogValidator._append_safe_thinking_log_line(
+            safe_lines=safe_lines,
+            current_length=3,
+            line="defgh",
+            max_chars=6,
+        )
+
+        assert appended_line == "de"
+        assert current_length == 6
+
+    def test_append_safe_thinking_log_line_returns_none_when_no_space_left(self):
+        appended_line, current_length = ThinkingLogValidator._append_safe_thinking_log_line(
+            safe_lines=["abc"],
+            current_length=6,
+            line="def",
+            max_chars=6,
+        )
+
+        assert appended_line is None
+        assert current_length == 6
+
+    def test_sanitize_skips_empty_appended_line(self):
+        with self.mock_append_helper():
+            result = ThinkingLogValidator.sanitize("Line 1\nLine 2")
+
+        assert result == ""
+
+    def mock_append_helper(self):
+        from unittest.mock import patch
+
+        return patch.object(
+            ThinkingLogValidator,
+            "_append_safe_thinking_log_line",
+            return_value=("", 0),
+        )
