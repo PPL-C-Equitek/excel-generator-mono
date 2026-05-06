@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from llm.services.openai_client import generate_chat_response
+from llm.validators import ThinkingLogValidator
 
 
 SESSION_LIST_MAX_LIMIT = 50
@@ -35,18 +36,6 @@ SESSION_LIST_FIELDS = (
 )
 
 
-_THINKING_LOG_BLOCKED_PATTERNS = (
-    "i thought",
-    "i considered",
-    "i examined",
-    "started by",
-    "first i think",
-    "my reasoning was",
-    "let me think",
-    "i will analyze",
-    "internal step",
-)
-
 _FAIL_SAFE_THINKING_LOG = [
     "Processed available response data.",
     "Unable to extract detailed reasoning.",
@@ -59,7 +48,7 @@ def build_frontend_thinking_log_response(payload):
     reasoning_payload = _extract_reasoning_payload(payload)
 
     existing_thinking_log = reasoning_payload.get("thinking_log")
-    if _is_valid_existing_thinking_log(existing_thinking_log):
+    if ThinkingLogValidator.is_valid_list(existing_thinking_log):
         return {"thinking_log": list(existing_thinking_log)}
 
     return {"thinking_log": _build_fallback_thinking_log(reasoning_payload)}
@@ -75,28 +64,6 @@ def _extract_reasoning_payload(payload):
 
     return reasoning_payload
 
-
-def _is_valid_existing_thinking_log(value):
-    if not isinstance(value, list) or len(value) < 1:
-        return False
-
-    for line in value:
-        if not isinstance(line, str):
-            return False
-
-        trimmed_line = line.strip()
-        if not trimmed_line:
-            return False
-
-        if _contains_blocked_thinking_log_pattern(trimmed_line):
-            return False
-
-    return True
-
-
-def _contains_blocked_thinking_log_pattern(line):
-    lowered_line = line.lower()
-    return any(pattern in lowered_line for pattern in _THINKING_LOG_BLOCKED_PATTERNS)
 
 
 def _build_fallback_thinking_log(reasoning_payload):
