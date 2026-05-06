@@ -2215,6 +2215,23 @@ class DownloadCSVViewTest(APISimpleTestCase):
         self.assertEqual(response_data.get("message"), "CSV file not found.")
 
     @patch("api.views.resolve_csv_download_artifact", create=True)
+    def test_download_csv_endpoint_returns_500_for_unexpected_service_error(
+        self,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_resolver.side_effect = RuntimeError("unexpected resolver failure")
+
+        response = self.client.get("/export/csv/csv_abc123/download")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download CSV due to internal error.",
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
     @patch("api.views.open", create=True)
     def test_download_csv_endpoint_returns_404_for_unsafe_artifact_filename(
         self,

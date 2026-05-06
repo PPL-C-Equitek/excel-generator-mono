@@ -6,7 +6,13 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 
-from .export_pipeline import CsvExportPipeline, ExcelExportPipeline
+from .export_pipeline import (
+    CsvExportPipeline,
+    ExcelExportPipeline,
+    ExportNamingConfig,
+    ExportPipelineDependencies,
+    ExportRuntimeOptions,
+)
 
 
 class OutputLLMValidationError(Exception):
@@ -446,21 +452,27 @@ def export_csv_to_filesystem(
     filename_policy=None,
 ):
     pipeline = CsvExportPipeline(
-        token_generator=token_generator,
-        now_provider=now_provider,
-        sanitization_policy=sanitization_policy,
-        filename_policy=filename_policy,
-        validate_output=validate_output_llm,
-        map_output=map_output_csv,
-        build_download_artifact=generate_csv_download_artifact,
-        resolve_storage_dir=_resolve_storage_dir,
-        resolve_export_token=_resolve_export_token,
-        build_safe_file_path=_build_safe_file_path,
-        resolve_created_at=_resolve_created_at,
-        error_class=OutputCSVGenerationError,
-        open_file=open,
-        file_id_prefix="csv_",
-        file_name_prefix="export_",
+        dependencies=ExportPipelineDependencies(
+            validate_output=validate_output_llm,
+            map_output=map_output_csv,
+            build_download_artifact=generate_csv_download_artifact,
+            resolve_storage_dir=_resolve_storage_dir,
+            resolve_export_token=_resolve_export_token,
+            build_safe_file_path=_build_safe_file_path,
+            resolve_created_at=_resolve_created_at,
+            error_class=OutputCSVGenerationError,
+            open_file=open,
+        ),
+        runtime_options=ExportRuntimeOptions(
+            token_generator=token_generator,
+            now_provider=now_provider,
+            sanitization_policy=sanitization_policy,
+            filename_policy=filename_policy,
+        ),
+        naming=ExportNamingConfig(
+            file_id_prefix="csv_",
+            file_name_prefix="export_",
+        ),
     )
     return pipeline.export_to_filesystem(output_json, storage_dir)
 
@@ -473,22 +485,28 @@ def export_excel_to_filesystem(
     sanitization_policy=None,
 ):
     pipeline = ExcelExportPipeline(
-        token_generator=token_generator,
-        now_provider=now_provider,
-        sanitization_policy=sanitization_policy,
-        validate_output=validate_output_llm,
-        map_output=map_output_csv,
-        build_download_artifact=_generate_excel_download_artifact,
-        resolve_storage_dir=_resolve_storage_dir,
-        resolve_export_token=_resolve_export_token,
-        build_safe_file_path=_build_safe_file_path,
-        resolve_created_at=_resolve_created_at,
-        error_class=OutputExcelGenerationError,
-        open_file=open,
-        file_id_prefix=_EXCEL_FILE_ID_PREFIX,
-        file_name_prefix=_EXCEL_FILE_NAME_PREFIX,
-        file_extension=_EXCEL_FILE_EXTENSION,
-        artifact_type=_EXCEL_ARTIFACT_TYPE,
+        dependencies=ExportPipelineDependencies(
+            validate_output=validate_output_llm,
+            map_output=map_output_csv,
+            build_download_artifact=_generate_excel_download_artifact,
+            resolve_storage_dir=_resolve_storage_dir,
+            resolve_export_token=_resolve_export_token,
+            build_safe_file_path=_build_safe_file_path,
+            resolve_created_at=_resolve_created_at,
+            error_class=OutputExcelGenerationError,
+            open_file=open,
+        ),
+        runtime_options=ExportRuntimeOptions(
+            token_generator=token_generator,
+            now_provider=now_provider,
+            sanitization_policy=sanitization_policy,
+        ),
+        naming=ExportNamingConfig(
+            file_id_prefix=_EXCEL_FILE_ID_PREFIX,
+            file_name_prefix=_EXCEL_FILE_NAME_PREFIX,
+            file_extension=_EXCEL_FILE_EXTENSION,
+            artifact_type=_EXCEL_ARTIFACT_TYPE,
+        ),
     )
     return pipeline.export_to_filesystem(output_json, storage_dir)
 

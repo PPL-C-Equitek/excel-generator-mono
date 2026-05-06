@@ -75,3 +75,12 @@ class ConcreteExportPipelineContractTest(SimpleTestCase):
         pipeline = ExcelExportPipeline()
 
         self.assertIsInstance(pipeline, BaseExportPipeline)
+
+    def test_csv_export_pipeline_fails_fast_when_dependencies_are_missing(self):
+        pipeline = CsvExportPipeline()
+
+        with self.assertRaisesMessage(
+            RuntimeError,
+            "validate_output dependency is not configured.",
+        ):
+            pipeline.export_to_filesystem({}, "/tmp/exports")

@@ -3,7 +3,43 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Callable
+
+
+@dataclass(frozen=True)
+class ExportPipelineDependencies:
+    validate_output: Callable[[Any], Any] | None = None
+    map_output: Callable[[Any], Any] | None = None
+    build_download_artifact: Callable[..., dict[str, Any]] | None = None
+    resolve_storage_dir: Callable[[str, type[Exception]], str] | None = None
+    resolve_export_token: Callable[
+        [Callable[[], str] | None, type[Exception]],
+        str,
+    ] | None = None
+    build_safe_file_path: Callable[[str, str, type[Exception]], str] | None = None
+    resolve_created_at: Callable[
+        [Callable[[], str] | None, type[Exception]],
+        str,
+    ] | None = None
+    error_class: type[Exception] = RuntimeError
+    open_file: Callable[..., Any] = open
+
+
+@dataclass(frozen=True)
+class ExportRuntimeOptions:
+    token_generator: Callable[[], str] | None = None
+    now_provider: Callable[[], str] | None = None
+    sanitization_policy: Any = None
+    filename_policy: Any = None
+
+
+@dataclass(frozen=True)
+class ExportNamingConfig:
+    file_id_prefix: str
+    file_name_prefix: str = "export_"
+    file_extension: str | None = None
+    artifact_type: str | None = None
 
 
 def _require_dependency(dependency: Any, name: str) -> Any:
@@ -42,223 +78,165 @@ class BaseExportPipeline(ABC):
         """Return public metadata for a persisted artifact."""
 
 
-class CsvExportPipeline(BaseExportPipeline):
+class FilesystemExportPipeline(BaseExportPipeline):
+    """Shared filesystem behavior for format-specific export pipelines."""
+
+    def __init__(
+        self,
+        *,
+        dependencies: ExportPipelineDependencies | None = None,
+        runtime_options: ExportRuntimeOptions | None = None,
+        naming: ExportNamingConfig,
+    ) -> None:
+        self._dependencies = dependencies or ExportPipelineDependencies()
+        self._runtime_options = runtime_options or ExportRuntimeOptions()
+        self._naming = naming
+
+    def validate_output(self, output_json: Any) -> Any:
+        validate_output = _require_dependency(
+            self._dependencies.validate_output,
+            "validate_output",
+        )
+        return validate_output(output_json)
+
+    def _map_output(self, validated_output: Any) -> Any:
+        map_output = _require_dependency(
+            self._dependencies.map_output,
+            "map_output",
+        )
+        return map_output(validated_output)
+
+    def _build_download_artifact(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        build_download_artifact = _require_dependency(
+            self._dependencies.build_download_artifact,
+            "build_download_artifact",
+        )
+        return build_download_artifact(*args, **kwargs)
+
+    def _persist_artifact(
+        self,
+        artifact: Any,
+        storage_dir: str,
+        *,
+        extension: str,
+        artifact_type: str,
+        error_message: str,
+    ) -> dict[str, Any]:
+        resolve_storage_dir = _require_dependency(
+            self._dependencies.resolve_storage_dir,
+            "resolve_storage_dir",
+        )
+        resolve_export_token = _require_dependency(
+            self._dependencies.resolve_export_token,
+            "resolve_export_token",
+        )
+        build_safe_file_path = _require_dependency(
+            self._dependencies.build_safe_file_path,
+            "build_safe_file_path",
+        )
+        resolve_created_at = _require_dependency(
+            self._dependencies.resolve_created_at,
+            "resolve_created_at",
+        )
+
+        error_class = self._dependencies.error_class
+        token = resolve_export_token(
+            self._runtime_options.token_generator,
+            error_class,
+        )
+        file_name = f"{self._naming.file_name_prefix}{token}.{extension}"
+        base_dir = resolve_storage_dir(storage_dir, error_class)
+        file_path = build_safe_file_path(base_dir, file_name, error_class)
+
+        try:
+            with self._dependencies.open_file(file_path, "wb") as destination:
+                destination.write(artifact["content"])
+        except OSError as exc:
+            raise error_class(error_message) from exc
+
+        return {
+            "file_id": f"{self._naming.file_id_prefix}{token}",
+            "file_name": file_name,
+            "artifact_type": artifact_type,
+            "size_bytes": len(artifact["content"]),
+            "created_at": resolve_created_at(
+                self._runtime_options.now_provider,
+                error_class,
+            ),
+        }
+
+    def format_metadata(self, persisted_artifact: Any) -> dict[str, Any]:
+        return persisted_artifact
+
+
+class CsvExportPipeline(FilesystemExportPipeline):
     """CSV-specific pipeline strategy."""
 
     def __init__(
         self,
         *,
-        token_generator: Callable[[], str] | None = None,
-        now_provider: Callable[[], str] | None = None,
-        sanitization_policy: Any = None,
-        filename_policy: Any = None,
-        validate_output: Callable[[Any], Any] | None = None,
-        map_output: Callable[[Any], Any] | None = None,
-        build_download_artifact: Callable[..., dict[str, Any]] | None = None,
-        resolve_storage_dir: Callable[[str, type[Exception]], str] | None = None,
-        resolve_export_token: Callable[
-            [Callable[[], str] | None, type[Exception]],
-            str,
-        ]
-        | None = None,
-        build_safe_file_path: Callable[[str, str, type[Exception]], str] | None = None,
-        resolve_created_at: Callable[
-            [Callable[[], str] | None, type[Exception]],
-            str,
-        ]
-        | None = None,
-        error_class: type[Exception] = RuntimeError,
-        open_file: Callable[..., Any] = open,
-        file_id_prefix: str = "csv_",
-        file_name_prefix: str = "export_",
+        dependencies: ExportPipelineDependencies | None = None,
+        runtime_options: ExportRuntimeOptions | None = None,
+        naming: ExportNamingConfig | None = None,
     ) -> None:
-        self._token_generator = token_generator
-        self._now_provider = now_provider
-        self._sanitization_policy = sanitization_policy
-        self._filename_policy = filename_policy
-        self._validate_output = validate_output
-        self._map_output = map_output
-        self._build_download_artifact = build_download_artifact
-        self._resolve_storage_dir = resolve_storage_dir
-        self._resolve_export_token = resolve_export_token
-        self._build_safe_file_path = build_safe_file_path
-        self._resolve_created_at = resolve_created_at
-        self._error_class = error_class
-        self._open_file = open_file
-        self._file_id_prefix = file_id_prefix
-        self._file_name_prefix = file_name_prefix
-
-    def validate_output(self, output_json: Any) -> Any:
-        validate_output = _require_dependency(
-            self._validate_output,
-            "validate_output",
+        super().__init__(
+            dependencies=dependencies,
+            runtime_options=runtime_options,
+            naming=naming or ExportNamingConfig(file_id_prefix="csv_"),
         )
-        return validate_output(output_json)
 
     def build_artifact(self, validated_output: Any) -> Any:
-        map_output = _require_dependency(self._map_output, "map_output")
-        build_download_artifact = _require_dependency(
-            self._build_download_artifact,
-            "build_download_artifact",
-        )
-        mapped_output = map_output(validated_output)
-        return build_download_artifact(
+        mapped_output = self._map_output(validated_output)
+        return self._build_download_artifact(
             mapped_output,
-            sanitization_policy=self._sanitization_policy,
-            filename_policy=self._filename_policy,
+            sanitization_policy=self._runtime_options.sanitization_policy,
+            filename_policy=self._runtime_options.filename_policy,
         )
 
     def persist_artifact(self, artifact: Any, storage_dir: str) -> Any:
-        resolve_storage_dir = _require_dependency(
-            self._resolve_storage_dir,
-            "resolve_storage_dir",
-        )
-        resolve_export_token = _require_dependency(
-            self._resolve_export_token,
-            "resolve_export_token",
-        )
-        build_safe_file_path = _require_dependency(
-            self._build_safe_file_path,
-            "build_safe_file_path",
-        )
-        resolve_created_at = _require_dependency(
-            self._resolve_created_at,
-            "resolve_created_at",
-        )
-
-        base_dir = resolve_storage_dir(storage_dir, self._error_class)
-        token = resolve_export_token(self._token_generator, self._error_class)
         extension = "zip" if artifact["type"] == "zip" else "csv"
-        file_name = f"{self._file_name_prefix}{token}.{extension}"
-        file_path = build_safe_file_path(base_dir, file_name, self._error_class)
-
-        try:
-            with self._open_file(file_path, "wb") as destination:
-                destination.write(artifact["content"])
-        except OSError as exc:
-            raise self._error_class("Failed to save generated CSV artifact.") from exc
-
-        return {
-            "file_id": f"{self._file_id_prefix}{token}",
-            "file_name": file_name,
-            "artifact_type": artifact["type"],
-            "size_bytes": len(artifact["content"]),
-            "created_at": resolve_created_at(
-                self._now_provider,
-                self._error_class,
-            ),
-        }
-
-    def format_metadata(self, persisted_artifact: Any) -> dict[str, Any]:
-        return persisted_artifact
+        return self._persist_artifact(
+            artifact,
+            storage_dir,
+            extension=extension,
+            artifact_type=artifact["type"],
+            error_message="Failed to save generated CSV artifact.",
+        )
 
 
-class ExcelExportPipeline(BaseExportPipeline):
+class ExcelExportPipeline(FilesystemExportPipeline):
     """Excel-specific pipeline strategy."""
 
     def __init__(
         self,
         *,
-        token_generator: Callable[[], str] | None = None,
-        now_provider: Callable[[], str] | None = None,
-        sanitization_policy: Any = None,
-        validate_output: Callable[[Any], Any] | None = None,
-        map_output: Callable[[Any], Any] | None = None,
-        build_download_artifact: Callable[..., dict[str, Any]] | None = None,
-        resolve_storage_dir: Callable[[str, type[Exception]], str] | None = None,
-        resolve_export_token: Callable[
-            [Callable[[], str] | None, type[Exception]],
-            str,
-        ]
-        | None = None,
-        build_safe_file_path: Callable[[str, str, type[Exception]], str] | None = None,
-        resolve_created_at: Callable[
-            [Callable[[], str] | None, type[Exception]],
-            str,
-        ]
-        | None = None,
-        error_class: type[Exception] = RuntimeError,
-        open_file: Callable[..., Any] = open,
-        file_id_prefix: str = "xlsx_",
-        file_name_prefix: str = "export_",
-        file_extension: str = "xlsx",
-        artifact_type: str = "xlsx",
+        dependencies: ExportPipelineDependencies | None = None,
+        runtime_options: ExportRuntimeOptions | None = None,
+        naming: ExportNamingConfig | None = None,
     ) -> None:
-        self._token_generator = token_generator
-        self._now_provider = now_provider
-        self._sanitization_policy = sanitization_policy
-        self._validate_output = validate_output
-        self._map_output = map_output
-        self._build_download_artifact = build_download_artifact
-        self._resolve_storage_dir = resolve_storage_dir
-        self._resolve_export_token = resolve_export_token
-        self._build_safe_file_path = build_safe_file_path
-        self._resolve_created_at = resolve_created_at
-        self._error_class = error_class
-        self._open_file = open_file
-        self._file_id_prefix = file_id_prefix
-        self._file_name_prefix = file_name_prefix
-        self._file_extension = file_extension
-        self._artifact_type = artifact_type
-
-    def validate_output(self, output_json: Any) -> Any:
-        validate_output = _require_dependency(
-            self._validate_output,
-            "validate_output",
+        super().__init__(
+            dependencies=dependencies,
+            runtime_options=runtime_options,
+            naming=naming
+            or ExportNamingConfig(
+                file_id_prefix="xlsx_",
+                file_extension="xlsx",
+                artifact_type="xlsx",
+            ),
         )
-        return validate_output(output_json)
 
     def build_artifact(self, validated_output: Any) -> Any:
-        map_output = _require_dependency(self._map_output, "map_output")
-        build_download_artifact = _require_dependency(
-            self._build_download_artifact,
-            "build_download_artifact",
-        )
-        mapped_output = map_output(validated_output)
-        return build_download_artifact(
+        mapped_output = self._map_output(validated_output)
+        return self._build_download_artifact(
             mapped_output,
-            sanitization_policy=self._sanitization_policy,
+            sanitization_policy=self._runtime_options.sanitization_policy,
         )
 
     def persist_artifact(self, artifact: Any, storage_dir: str) -> Any:
-        resolve_storage_dir = _require_dependency(
-            self._resolve_storage_dir,
-            "resolve_storage_dir",
+        return self._persist_artifact(
+            artifact,
+            storage_dir,
+            extension=self._naming.file_extension or "xlsx",
+            artifact_type=self._naming.artifact_type or "xlsx",
+            error_message="Failed to save generated Excel artifact.",
         )
-        resolve_export_token = _require_dependency(
-            self._resolve_export_token,
-            "resolve_export_token",
-        )
-        build_safe_file_path = _require_dependency(
-            self._build_safe_file_path,
-            "build_safe_file_path",
-        )
-        resolve_created_at = _require_dependency(
-            self._resolve_created_at,
-            "resolve_created_at",
-        )
-
-        base_dir = resolve_storage_dir(storage_dir, self._error_class)
-        token = resolve_export_token(self._token_generator, self._error_class)
-        file_name = f"{self._file_name_prefix}{token}.{self._file_extension}"
-        file_path = build_safe_file_path(base_dir, file_name, self._error_class)
-
-        try:
-            with self._open_file(file_path, "wb") as destination:
-                destination.write(artifact["content"])
-        except OSError as exc:
-            raise self._error_class("Failed to save generated Excel artifact.") from exc
-
-        return {
-            "file_id": f"{self._file_id_prefix}{token}",
-            "file_name": file_name,
-            "artifact_type": self._artifact_type,
-            "size_bytes": len(artifact["content"]),
-            "created_at": resolve_created_at(
-                self._now_provider,
-                self._error_class,
-            ),
-        }
-
-    def format_metadata(self, persisted_artifact: Any) -> dict[str, Any]:
-        return persisted_artifact
