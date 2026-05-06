@@ -44,4 +44,15 @@ describe('monitoring route visibility policy', () => {
         expect(policy.isSystemRoute('/admin/tools/flush-cache')).toBe(true)
         expect(policy.shouldShowRoute('/admin/tooling')).toBe(true)
     })
+
+    it('normalizes long slash-padded routes without regex backtracking risk', () => {
+        const slashPadding = '/'.repeat(5000)
+
+        expect(
+            monitoringRouteVisibilityPolicy.isSystemRoute(`${slashPadding}Monitoring/STREAM${slashPadding}`)
+        ).toBe(true)
+        expect(
+            monitoringRouteVisibilityPolicy.shouldShowRoute(`${slashPadding}monitoring-health${slashPadding}`)
+        ).toBe(true)
+    })
 })

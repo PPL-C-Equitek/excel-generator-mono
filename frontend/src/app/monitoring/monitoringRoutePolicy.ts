@@ -15,7 +15,20 @@ type NormalizedRoutePrefix = Readonly<{
 }>
 
 function normalizeRoute(route: string): string {
-    return route.trim().replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase()
+    const trimmedRoute = route.trim()
+    let startIndex = 0
+    let endIndex = trimmedRoute.length
+
+    // Keep normalization linear for untrusted route strings; avoid regex backtracking entirely.
+    while (startIndex < endIndex && trimmedRoute[startIndex] === '/') {
+        startIndex += 1
+    }
+
+    while (endIndex > startIndex && trimmedRoute[endIndex - 1] === '/') {
+        endIndex -= 1
+    }
+
+    return trimmedRoute.slice(startIndex, endIndex).toLowerCase()
 }
 
 function routeMatchesPrefix(normalizedRoute: string, prefix: NormalizedRoutePrefix): boolean {
