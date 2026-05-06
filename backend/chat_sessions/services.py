@@ -4,13 +4,10 @@ This module remains the source of truth during the initial facade migration.
 `SessionFacade` delegates to these functions in Step 1 to preserve behavior.
 """
 
-import re
-
 from django.conf import settings
-from django.utils import timezone
 
-from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from llm.services.openai_client import generate_chat_response
+from . import session_titles as _session_titles
 from .session_queries import (
     SESSION_DETAIL_LIMIT_FIELDS,
     SESSION_DETAIL_MAX_LIMIT,
@@ -28,6 +25,15 @@ from .session_queries import (
     get_session_for_user,
     list_sessions_for_user,
     validate_session_detail_pagination_params,
+)
+from .session_titles import resolve_session_title, sanitize_session_title
+from .session_writes import (
+    append_assistant_message,
+    append_user_message,
+    create_generated_output,
+    create_session_for_user,
+    delete_session,
+    update_session_title,
 )
 
 
@@ -165,120 +171,14 @@ def _normalize_fallback_lines(lines, confidence):
     return normalized_lines
 
 
-def create_session_for_user(owner, title=""):
-    return Session.objects.create(
-        owner=owner,
-        title=(title or "").strip(),
-    )
-
-
-def update_session_title(session, title):
-    session.title = (title or "").strip()
-    session.save(update_fields=["title", "updated_at"])
-    return session
-
-
-def sanitize_session_title(title):
-    if not title:
-        return ""
-
-    stripped = title.strip()
-    if not stripped:
-        return ""
-
-    normalized = re.sub(r"[\r\n\t]", " ", stripped)
-
-    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
-        normalized = normalized[1:-1].strip()
-
-    return normalized[:120]
-
-
-def resolve_session_title(candidate_title, fallback="New Chat"):
-    sanitized = sanitize_session_title(candidate_title)
-    if not sanitized:
-        return fallback
-    return sanitized
-
-
 def generate_session_title_from_message(message, fallback="New Chat"):
-    if not message or not message.strip():
-        return fallback
-
-    title_prompt = (
-        "Berikan judul singkat maksimal 3-5 kata untuk chat berikut. "
-        "Abaikan sapaan, ambil konteks utama. Jangan gunakan karakter newline, "
-        f"cukup 1 kalimat: {message}"
+    # Keep dependency injection at service boundary so existing tests that patch
+    # `chat_sessions.services.generate_chat_response` stay valid.
+    return _session_titles.generate_session_title_from_message(
+        message,
+        fallback=fallback,
+        title_generator=generate_chat_response,
     )
-
-    try:
-        title_suggestion = generate_chat_response(
-            [{"role": "user", "content": title_prompt}]
-        )
-    except Exception:
-        return fallback
-
-    return resolve_session_title(title_suggestion, fallback=fallback)
-
-
-def delete_session(session):
-    session.delete()
-
-
-def append_user_message(session, content, target_output=None):
-    now = timezone.now()
-    msg = ChatMessage.objects.create(
-        session=session,
-        role=ChatMessage.ROLE_USER,
-        content=content,
-        target_output=target_output,
-    )
-    session.last_message_at = now
-    session.save(update_fields=["last_message_at", "updated_at"])
-    return msg
-
-
-def append_assistant_message(session, content, thinking_log=None):
-    now = timezone.now()
-    msg = ChatMessage.objects.create(
-        session=session,
-        role=ChatMessage.ROLE_ASSISTANT,
-        content=content,
-        thinking_log=thinking_log or "",
-    )
-    session.last_message_at = now
-    session.save(update_fields=["last_message_at", "updated_at"])
-    return msg
-
-
-def create_generated_output(
-    session,
-    output_json,
-    thinking_log="",
-    export_output_json=None,
-    reasoning=None,
-    source_message=None,
-    parent_output=None,
-):
-    now = timezone.now()
-    # Temporary compatibility shim while callers are migrated away from
-    # export_output_json-as-third-positional-arg.
-    if export_output_json is None and isinstance(thinking_log, dict):
-        export_output_json = thinking_log
-        thinking_log = ""
-
-    output = GeneratedOutput.objects.create(
-        session=session,
-        source_message=source_message,
-        parent_output=parent_output,
-        output_json=output_json,
-        thinking_log=thinking_log or "",
-        reasoning=reasoning if isinstance(reasoning, dict) else {},
-        export_output_json=export_output_json or {},
-    )
-    session.last_output_at = now
-    session.save(update_fields=["last_output_at", "updated_at"])
-    return output
 
 
 SUMMARY_RECENT_MESSAGES_KEEP = 10

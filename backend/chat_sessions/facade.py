@@ -11,6 +11,8 @@ from typing import Any
 
 from . import services
 from . import session_queries
+from . import session_titles
+from . import session_writes
 
 
 class SessionFacade:
@@ -20,15 +22,19 @@ class SessionFacade:
         self,
         service_module: Any = services,
         query_module: Any = session_queries,
+        write_module: Any = session_writes,
+        title_module: Any = session_titles,
     ) -> None:
         self._services = service_module
         self._queries = query_module
+        self._writes = write_module
+        self._titles = title_module
 
     def build_frontend_thinking_log_response(self, payload: Any) -> dict[str, Any]:
         return self._services.build_frontend_thinking_log_response(payload)
 
     def create_session_for_user(self, owner: Any, title: str = "") -> Any:
-        return self._services.create_session_for_user(owner, title=title)
+        return self._writes.create_session_for_user(owner, title=title)
 
     def list_sessions_for_user(
         self,
@@ -90,17 +96,17 @@ class SessionFacade:
         self._queries.validate_session_detail_pagination_params(pagination)
 
     def update_session_title(self, session: Any, title: str) -> Any:
-        return self._services.update_session_title(session, title)
+        return self._writes.update_session_title(session, title)
 
     def sanitize_session_title(self, title: str) -> str:
-        return self._services.sanitize_session_title(title)
+        return self._titles.sanitize_session_title(title)
 
     def resolve_session_title(
         self,
         candidate_title: str,
         fallback: str = "New Chat",
     ) -> str:
-        return self._services.resolve_session_title(
+        return self._titles.resolve_session_title(
             candidate_title,
             fallback=fallback,
         )
@@ -110,13 +116,13 @@ class SessionFacade:
         message: str,
         fallback: str = "New Chat",
     ) -> str:
-        return self._services.generate_session_title_from_message(
+        return self._titles.generate_session_title_from_message(
             message,
             fallback=fallback,
         )
 
     def delete_session(self, session: Any) -> None:
-        self._services.delete_session(session)
+        self._writes.delete_session(session)
 
     def append_user_message(
         self,
@@ -124,7 +130,7 @@ class SessionFacade:
         content: str,
         target_output: Any = None,
     ) -> Any:
-        return self._services.append_user_message(
+        return self._writes.append_user_message(
             session,
             content,
             target_output=target_output,
@@ -136,7 +142,7 @@ class SessionFacade:
         content: str,
         thinking_log: str | None = None,
     ) -> Any:
-        return self._services.append_assistant_message(
+        return self._writes.append_assistant_message(
             session,
             content,
             thinking_log=thinking_log,
@@ -152,7 +158,7 @@ class SessionFacade:
         source_message: Any = None,
         parent_output: Any = None,
     ) -> Any:
-        return self._services.create_generated_output(
+        return self._writes.create_generated_output(
             session,
             output_json,
             thinking_log=thinking_log,
