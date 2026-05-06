@@ -18,6 +18,7 @@ import type {
     RealtimeTotals,
 } from './monitoringViewModelTypes'
 import { getMonitoringAuthToken, MONITORING_STREAM_UNEXPECTED_CLOSE_MESSAGE } from '@/services/monitoring'
+import { monitoringRouteVisibilityPolicy } from './monitoringRoutePolicy'
 
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 5000
 const STALE_THRESHOLD_MULTIPLIER = 3
@@ -26,7 +27,6 @@ const RETRY_BASE_DELAY_MS = 2000
 const RETRY_MAX_DELAY_MS = 30000
 const RETRY_TICK_INTERVAL_MS = 1000
 const MAX_REALTIME_LATENCY_TICKS = 6
-const MONITORING_ROUTE_PREFIX = 'monitoring/'
 
 export type MonitoringDashboardService = {
     getMonitoringLive: () => Promise<MonitoringLivePayload>
@@ -74,11 +74,6 @@ function calculateRetryDelayMs(consecutiveFailures: number): number {
         RETRY_MAX_DELAY_MS,
         RETRY_BASE_DELAY_MS * (2 ** Math.max(0, consecutiveFailures - 1))
     )
-}
-
-function isMonitoringRoute(route: string): boolean {
-    const normalizedRoute = route.trim().replace(/^\/+/, '').toLowerCase()
-    return normalizedRoute.startsWith(MONITORING_ROUTE_PREFIX)
 }
 
 export function getIsPageVisible(): boolean {
@@ -410,7 +405,9 @@ export function useMonitoringDashboardModel({
     }, [statsPayload])
 
     const maxRouteRequests = useMemo(() => {
-        const visibleRoutes = statsPayload?.routes.filter((routeRow) => !isMonitoringRoute(routeRow.route)) ?? []
+        const visibleRoutes = statsPayload
+            ? monitoringRouteVisibilityPolicy.filterVisibleRoutes(statsPayload.routes)
+            : []
         if (visibleRoutes.length === 0) {
             return 1
         }
@@ -478,8 +475,8 @@ export function useMonitoringDashboardModel({
             return []
         }
 
-        return statsPayload.routes
-            .filter((routeRow) => !isMonitoringRoute(routeRow.route))
+        return monitoringRouteVisibilityPolicy
+            .filterVisibleRoutes(statsPayload.routes)
             .slice(0, 8)
             .map((routeRow, index) => ({
                 id: index + 1,
