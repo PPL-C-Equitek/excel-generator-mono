@@ -6,6 +6,7 @@ vi.mock('@/lib/auth', () => ({
 import { getValidAccessToken } from '@/lib/auth'
 import type {
     MonitoringAccessDecision,
+    MonitoringAuthenticatedSnapshot,
     MonitoringLivePayload,
     MonitoringReadyPayload,
     MonitoringStatsPayload,
@@ -490,6 +491,197 @@ describe('useMonitoringDashboardModel', () => {
             await Promise.resolve()
             await Promise.resolve()
         })
+    })
+
+    it('ignores authenticated snapshot completion after unmount', async () => {
+        const deferredLive = createDeferred<MonitoringLivePayload>()
+        const deferredSnapshot = createDeferred<MonitoringAuthenticatedSnapshot>()
+        const getMonitoringStatsStream = vi.fn()
+        const service: MonitoringDashboardService = {
+            getMonitoringLive: vi.fn().mockReturnValue(deferredLive.promise),
+            getMonitoringAccess: vi.fn(),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+            getMonitoringAuthenticatedSnapshot: vi.fn().mockReturnValue(deferredSnapshot.promise),
+            getMonitoringStatsStream,
+        }
+
+        const { unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringAuthenticatedSnapshot).toHaveBeenCalledTimes(1)
+        })
+
+        unmount()
+
+        await act(async () => {
+            deferredLive.resolve({
+                status: 'ok',
+                timestamp: '2026-04-24T10:00:00Z',
+            })
+            deferredSnapshot.resolve({
+                accessDecision: { allowed: true, reason: 'ok' },
+                readyPayload: {
+                    status: 'ok',
+                    timestamp: '2026-04-24T10:00:01Z',
+                    checks: [{ name: 'database', status: 'ok', latency_ms: 3, is_critical: true }],
+                },
+                statsPayload: {
+                    status: 'ok',
+                    generated_at: '2026-04-24T10:00:02Z',
+                    totals: { requests: 1, errors: 0, error_rate: 0 },
+                    routes: [],
+                    events: {},
+                },
+            })
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(getMonitoringStatsStream).not.toHaveBeenCalled()
+        expect(service.getMonitoringAccess).not.toHaveBeenCalled()
+        expect(service.getMonitoringReady).not.toHaveBeenCalled()
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+    })
+
+    it('ignores non-snapshot access completion after unmount', async () => {
+        const deferredLive = createDeferred<MonitoringLivePayload>()
+        const deferredAccess = createDeferred<MonitoringAccessDecision>()
+        const service = createMonitoringService({
+            getMonitoringLive: vi.fn().mockReturnValue(deferredLive.promise),
+            getMonitoringAccess: vi.fn().mockReturnValue(deferredAccess.promise),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringAccess).toHaveBeenCalledTimes(1)
+        })
+
+        unmount()
+
+        await act(async () => {
+            deferredLive.resolve({
+                status: 'ok',
+                timestamp: '2026-04-24T10:00:00Z',
+            })
+            deferredAccess.resolve({ allowed: true, reason: 'ok' })
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(service.getMonitoringReady).not.toHaveBeenCalled()
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+    })
+
+    it('ignores readiness completion after unmount before stats load', async () => {
+        const deferredReady = createDeferred<MonitoringReadyPayload>()
+        const service = createMonitoringService({
+            getMonitoringReady: vi.fn().mockReturnValue(deferredReady.promise),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringReady).toHaveBeenCalledTimes(1)
+        })
+
+        unmount()
+
+        await act(async () => {
+            deferredReady.resolve({
+                status: 'ok',
+                timestamp: '2026-04-24T10:00:01Z',
+                checks: [{ name: 'database', status: 'ok', latency_ms: 3, is_critical: true }],
+            })
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
+    })
+
+    it('ignores stats snapshot completion after unmount', async () => {
+        const deferredStats = createDeferred<MonitoringStatsPayload>()
+        const service = createMonitoringService({
+            getMonitoringStats: vi.fn().mockReturnValue(deferredStats.promise),
+        })
+
+        const { unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringStats).toHaveBeenCalledTimes(1)
+        })
+
+        unmount()
+
+        await act(async () => {
+            deferredStats.resolve({
+                status: 'ok',
+                generated_at: '2026-04-24T10:00:02Z',
+                totals: { requests: 1, errors: 0, error_rate: 0 },
+                routes: [],
+                events: {},
+            })
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(service.getMonitoringStats).toHaveBeenCalledTimes(1)
+    })
+
+    it('ignores request failures that settle after unmount', async () => {
+        const deferredLive = createDeferred<MonitoringLivePayload>()
+        const service = createMonitoringService({
+            getMonitoringLive: vi.fn().mockReturnValue(deferredLive.promise),
+            getMonitoringReady: vi.fn(),
+            getMonitoringStats: vi.fn(),
+        })
+
+        const { unmount } = renderHook(() =>
+            useMonitoringDashboardModel({
+                monitoringService: service,
+                autoRefreshIntervalMs: 60000,
+            })
+        )
+
+        await waitFor(() => {
+            expect(service.getMonitoringLive).toHaveBeenCalledTimes(1)
+        })
+
+        unmount()
+
+        await act(async () => {
+            deferredLive.reject(new Error('late failure'))
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+
+        expect(service.getMonitoringReady).not.toHaveBeenCalled()
+        expect(service.getMonitoringStats).not.toHaveBeenCalled()
     })
 
     it('skips polling interval refresh while retry backoff window is still active', async () => {
