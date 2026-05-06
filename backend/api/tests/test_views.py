@@ -1612,6 +1612,53 @@ class ExportCSVViewTest(APISimpleTestCase):
             status="unverified",
         )
 
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_delegates_to_shared_export_helper_positive(
+        self,
+        mocked_export,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_export.return_value = {
+            "file_id": "csv_abc123",
+            "file_name": "export_abc123.csv",
+            "artifact_type": "csv",
+            "size_bytes": 128,
+            "created_at": "2026-03-07T10:00:00Z",
+        }
+        payload = {"output_json": self._valid_output_json()}
+        helper_response = Response(
+            {"status": "ok", "delegated_by": "shared-export-helper"},
+            status=status.HTTP_200_OK,
+        )
+
+        with patch("api.views._handle_export_endpoint", create=True) as mocked_helper:
+            mocked_helper.return_value = helper_response
+
+            response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.get("delegated_by"), "shared-export-helper")
+        mocked_helper.assert_called_once()
+        mocked_export.assert_not_called()
+
+    def test_export_csv_endpoint_delegates_invalid_payload_handling_to_shared_helper_edge(
+        self,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        helper_response = Response(
+            {"status": "error", "message": "delegated validation error"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+        with patch("api.views._handle_export_endpoint", create=True) as mocked_helper:
+            mocked_helper.return_value = helper_response
+
+            response = self.client.post("/export/csv", data={}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data.get("message"), "delegated validation error")
+        mocked_helper.assert_called_once()
+
     def test_export_csv_endpoint_rejects_get_method(self):
         response = self.client.get("/export/csv")
         self.assertEqual(response.status_code, 405)
@@ -1768,6 +1815,35 @@ class ExportExcelViewTest(APISimpleTestCase):
             is_authenticated=True,
             status="unverified",
         )
+
+    @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_delegates_error_response_to_shared_export_helper_negative(
+        self,
+        mocked_export,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_export.return_value = {
+            "file_id": "xlsx_abc123",
+            "file_name": "export_abc123.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 512,
+            "created_at": "2026-03-29T10:00:00Z",
+        }
+        payload = {"output_json": self._valid_output_json()}
+        helper_response = Response(
+            {"status": "error", "message": "delegated internal error"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+        with patch("api.views._handle_export_endpoint", create=True) as mocked_helper:
+            mocked_helper.return_value = helper_response
+
+            response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data.get("message"), "delegated internal error")
+        mocked_helper.assert_called_once()
+        mocked_export.assert_not_called()
 
     def test_export_excel_endpoint_rejects_get_method(self):
         response = self.client.get("/export/excel")
