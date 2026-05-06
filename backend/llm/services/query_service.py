@@ -1,12 +1,9 @@
 from uuid import UUID
-from typing import Any
 
 from rest_framework.response import Response
 
 from ..repositories import get_thinking_log_queryset_for_user
 
-
-# Local copies of messages to avoid import cycles with views
 INVALID_REQUEST_DETAIL = "Invalid request payload."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
 INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."

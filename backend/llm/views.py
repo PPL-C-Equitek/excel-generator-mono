@@ -1,9 +1,7 @@
 import json
 import logging
 from typing import Any, cast
-from uuid import UUID
 
-from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
 from django.conf import settings
 from django.db import transaction
@@ -54,6 +52,15 @@ from .services.openai_client import (
     OpenAIUpstreamError,
     generate_chat_response,
 )
+from .services.query_service import (
+    _thinking_log_not_found_response,
+    _invalid_thinking_log_pagination_response,
+    _invalid_thinking_log_identifier_response,
+    _parse_thinking_log_positive_int,
+    _parse_thinking_log_page_size,
+    _parse_thinking_log_identifier,
+    _build_thinking_log_queryset_for_user,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +76,6 @@ INVALID_PROMPT_DETAIL = "Invalid prompt payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
 REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
 SESSION_NOT_FOUND_DETAIL = "Session not found."
-THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
-INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
-INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."
-MAX_THINKING_LOG_PAGE_SIZE = 100
 
 
 def get_authenticated_user_id(user) -> object | None:
@@ -587,18 +590,6 @@ def _generate_optional_reasoning(include_reasoning, input_json, output_json):
     except Exception:
         logger.exception("Unexpected error while generating automatic reasoning.")
         return None
-
-# Thinking-log query helpers moved to `llm.query_service` to centralize
-# pagination, identifier parsing and queryset construction.
-from .services.query_service import (
-    _thinking_log_not_found_response,
-    _invalid_thinking_log_pagination_response,
-    _invalid_thinking_log_identifier_response,
-    _parse_thinking_log_positive_int,
-    _parse_thinking_log_page_size,
-    _parse_thinking_log_identifier,
-    _build_thinking_log_queryset_for_user,
-)
 
 
 def _resolve_generate_session(user, session_id):
