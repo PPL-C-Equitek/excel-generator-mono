@@ -1612,6 +1612,53 @@ class ExportCSVViewTest(APISimpleTestCase):
             status="unverified",
         )
 
+    @patch("api.views.export_csv_to_filesystem")
+    def test_export_csv_endpoint_delegates_to_shared_export_helper_positive(
+        self,
+        mocked_export,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_export.return_value = {
+            "file_id": "csv_abc123",
+            "file_name": "export_abc123.csv",
+            "artifact_type": "csv",
+            "size_bytes": 128,
+            "created_at": "2026-03-07T10:00:00Z",
+        }
+        payload = {"output_json": self._valid_output_json()}
+        helper_response = Response(
+            {"status": "ok", "delegated_by": "shared-export-helper"},
+            status=status.HTTP_200_OK,
+        )
+
+        with patch("api.views._handle_export_endpoint", create=True) as mocked_helper:
+            mocked_helper.return_value = helper_response
+
+            response = self.client.post("/export/csv", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.get("delegated_by"), "shared-export-helper")
+        mocked_helper.assert_called_once()
+        mocked_export.assert_not_called()
+
+    def test_export_csv_endpoint_delegates_invalid_payload_handling_to_shared_helper_edge(
+        self,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        helper_response = Response(
+            {"status": "error", "message": "delegated validation error"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+        with patch("api.views._handle_export_endpoint", create=True) as mocked_helper:
+            mocked_helper.return_value = helper_response
+
+            response = self.client.post("/export/csv", data={}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data.get("message"), "delegated validation error")
+        mocked_helper.assert_called_once()
+
     def test_export_csv_endpoint_rejects_get_method(self):
         response = self.client.get("/export/csv")
         self.assertEqual(response.status_code, 405)
@@ -1768,6 +1815,35 @@ class ExportExcelViewTest(APISimpleTestCase):
             is_authenticated=True,
             status="unverified",
         )
+
+    @patch("api.views.export_excel_to_filesystem")
+    def test_export_excel_endpoint_delegates_error_response_to_shared_export_helper_negative(
+        self,
+        mocked_export,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_export.return_value = {
+            "file_id": "xlsx_abc123",
+            "file_name": "export_abc123.xlsx",
+            "artifact_type": "xlsx",
+            "size_bytes": 512,
+            "created_at": "2026-03-29T10:00:00Z",
+        }
+        payload = {"output_json": self._valid_output_json()}
+        helper_response = Response(
+            {"status": "error", "message": "delegated internal error"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+        with patch("api.views._handle_export_endpoint", create=True) as mocked_helper:
+            mocked_helper.return_value = helper_response
+
+            response = self.client.post("/export/excel", data=payload, format="json")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data.get("message"), "delegated internal error")
+        mocked_helper.assert_called_once()
+        mocked_export.assert_not_called()
 
     def test_export_excel_endpoint_rejects_get_method(self):
         response = self.client.get("/export/excel")
@@ -1930,6 +2006,60 @@ class DownloadCSVViewTest(APISimpleTestCase):
         )
 
     @patch("api.views.resolve_csv_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_csv_endpoint_delegates_to_shared_download_helper_positive(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.csv",
+            "artifact_type": "csv",
+            "content_type": "text/csv",
+        }
+        mocked_open.return_value.__enter__.return_value = b"name,age\r\nZufar,21\r\n"
+        helper_response = Response(
+            {"status": "ok", "delegated_by": "shared-download-helper"},
+            status=status.HTTP_200_OK,
+        )
+
+        with patch("api.views._handle_export_download_endpoint", create=True) as mocked_helper:
+            mocked_helper.return_value = helper_response
+
+            response = self.client.get("/export/csv/csv_abc123/download")
+            response_data = self._response_data(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response_data.get("delegated_by"), "shared-download-helper")
+        mocked_helper.assert_called_once()
+        mocked_resolver.assert_not_called()
+        mocked_open.assert_not_called()
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
+    def test_download_csv_endpoint_delegates_not_found_edge_to_shared_download_helper(
+        self,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_resolver.side_effect = OutputCSVDownloadLookupError("missing file")
+        helper_response = Response(
+            {"status": "error", "message": "delegated csv not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+        with patch("api.views._handle_export_download_endpoint", create=True) as mocked_helper:
+            mocked_helper.return_value = helper_response
+
+            response = self.client.get("/export/csv/csv_bad-token/download")
+            response_data = self._response_data(response)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response_data.get("message"), "delegated csv not found")
+        mocked_helper.assert_called_once()
+        mocked_resolver.assert_not_called()
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
     def test_download_csv_endpoint_returns_401_for_unauthenticated_user(
         self,
         mocked_resolver,
@@ -2085,6 +2215,23 @@ class DownloadCSVViewTest(APISimpleTestCase):
         self.assertEqual(response_data.get("message"), "CSV file not found.")
 
     @patch("api.views.resolve_csv_download_artifact", create=True)
+    def test_download_csv_endpoint_returns_500_for_unexpected_service_error(
+        self,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_resolver.side_effect = RuntimeError("unexpected resolver failure")
+
+        response = self.client.get("/export/csv/csv_abc123/download")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "error")
+        self.assertEqual(
+            response.data["message"],
+            "Failed to download CSV due to internal error.",
+        )
+
+    @patch("api.views.resolve_csv_download_artifact", create=True)
     @patch("api.views.open", create=True)
     def test_download_csv_endpoint_returns_404_for_unsafe_artifact_filename(
         self,
@@ -2181,6 +2328,39 @@ class DownloadExcelViewTest(APISimpleTestCase):
             is_authenticated=True,
             status="unverified",
         )
+
+    @patch("api.views.resolve_excel_download_artifact", create=True)
+    @patch("api.views.open", create=True)
+    def test_download_excel_endpoint_delegates_internal_error_to_shared_download_helper_negative(
+        self,
+        mocked_open,
+        mocked_resolver,
+    ):
+        self.client.force_authenticate(user=self._verified_user())
+        mocked_resolver.return_value = {
+            "file_name": "export_abc123.xlsx",
+            "artifact_type": "xlsx",
+            "content_type": (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        }
+        mocked_open.return_value = BytesIO(b"fake xlsx bytes")
+        helper_response = Response(
+            {"status": "error", "message": "delegated excel internal error"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+        with patch("api.views._handle_export_download_endpoint", create=True) as mocked_helper:
+            mocked_helper.return_value = helper_response
+
+            response = self.client.get("/export/excel/xlsx_abc123/download")
+            response_data = self._response_data(response)
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response_data.get("message"), "delegated excel internal error")
+        mocked_helper.assert_called_once()
+        mocked_resolver.assert_not_called()
+        mocked_open.assert_not_called()
 
     @patch("api.views.resolve_excel_download_artifact", create=True)
     def test_download_excel_endpoint_returns_401_for_unauthenticated_user(

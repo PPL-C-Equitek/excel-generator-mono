@@ -875,6 +875,82 @@ class ExportCSVToFilesystemTest(unittest.TestCase):
             "export_csv_to_filesystem must be implemented in export_service.",
         )
 
+    def test_export_csv_to_filesystem_delegates_to_csv_pipeline(self):
+        output_json = self._build_valid_output_json()
+        expected = {"file_id": "csv_pipeline_result"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch(
+                "file_processing.services.export_service.CsvExportPipeline",
+                create=True,
+            ) as mocked_pipeline_class:
+                mocked_pipeline = mocked_pipeline_class.return_value
+                mocked_pipeline.export_to_filesystem.return_value = expected
+
+                result = export_service.export_csv_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                    token_generator=lambda: "abc123",
+                    now_provider=lambda: "2026-03-07T10:00:00Z",
+                )
+
+        mocked_pipeline_class.assert_called_once()
+        mocked_pipeline.export_to_filesystem.assert_called_once_with(
+            output_json,
+            temp_dir,
+        )
+        self.assertEqual(result, expected)
+
+    def test_export_csv_to_filesystem_propagates_pipeline_error(self):
+        output_json = self._build_valid_output_json()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch(
+                "file_processing.services.export_service.CsvExportPipeline",
+                create=True,
+            ) as mocked_pipeline_class:
+                mocked_pipeline = mocked_pipeline_class.return_value
+                mocked_pipeline.export_to_filesystem.side_effect = export_service.OutputCSVGenerationError(
+                    "pipeline failed"
+                )
+
+                with self.assertRaises(export_service.OutputCSVGenerationError):
+                    export_service.export_csv_to_filesystem(
+                        output_json=output_json,
+                        storage_dir=temp_dir,
+                    )
+
+        mocked_pipeline_class.assert_called_once()
+        mocked_pipeline.export_to_filesystem.assert_called_once_with(
+            output_json,
+            temp_dir,
+        )
+
+    def test_export_csv_to_filesystem_delegation_edge_empty_rows_payload(self):
+        output_json = self._build_valid_output_json()
+        output_json["content_data"][0]["rows"] = []
+        expected = {"file_id": "csv_edge_pipeline_result"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch(
+                "file_processing.services.export_service.CsvExportPipeline",
+                create=True,
+            ) as mocked_pipeline_class:
+                mocked_pipeline = mocked_pipeline_class.return_value
+                mocked_pipeline.export_to_filesystem.return_value = expected
+
+                result = export_service.export_csv_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                )
+
+        mocked_pipeline_class.assert_called_once()
+        mocked_pipeline.export_to_filesystem.assert_called_once_with(
+            output_json,
+            temp_dir,
+        )
+        self.assertEqual(result, expected)
+
     def test_export_csv_to_filesystem_saves_single_sheet_as_csv(self):
         output_json = self._build_valid_output_json()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1096,6 +1172,83 @@ class ExportExcelToFilesystemTest(unittest.TestCase):
             hasattr(export_service, "OutputExcelGenerationError"),
             "OutputExcelGenerationError must be implemented in export_service.",
         )
+
+    def test_export_excel_to_filesystem_delegates_to_excel_pipeline(self):
+        output_json = self._build_valid_output_json()
+        expected = {"file_id": "xlsx_pipeline_result"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch(
+                "file_processing.services.export_service.ExcelExportPipeline",
+                create=True,
+            ) as mocked_pipeline_class:
+                mocked_pipeline = mocked_pipeline_class.return_value
+                mocked_pipeline.export_to_filesystem.return_value = expected
+
+                result = export_service.export_excel_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                    token_generator=lambda: "abc123",
+                    now_provider=lambda: "2026-03-08T10:00:00Z",
+                )
+
+        mocked_pipeline_class.assert_called_once()
+        mocked_pipeline.export_to_filesystem.assert_called_once_with(
+            output_json,
+            temp_dir,
+        )
+        self.assertEqual(result, expected)
+
+    def test_export_excel_to_filesystem_propagates_pipeline_error(self):
+        output_json = self._build_valid_output_json()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch(
+                "file_processing.services.export_service.ExcelExportPipeline",
+                create=True,
+            ) as mocked_pipeline_class:
+                mocked_pipeline = mocked_pipeline_class.return_value
+                mocked_pipeline.export_to_filesystem.side_effect = export_service.OutputExcelGenerationError(
+                    "pipeline failed"
+                )
+
+                with self.assertRaises(export_service.OutputExcelGenerationError):
+                    export_service.export_excel_to_filesystem(
+                        output_json=output_json,
+                        storage_dir=temp_dir,
+                    )
+
+        mocked_pipeline_class.assert_called_once()
+        mocked_pipeline.export_to_filesystem.assert_called_once_with(
+            output_json,
+            temp_dir,
+        )
+
+    def test_export_excel_to_filesystem_delegation_edge_empty_rows_payload(self):
+        output_json = self._build_valid_output_json()
+        output_json["content_data"][0]["rows"] = []
+        output_json["content_data"][1]["rows"] = []
+        expected = {"file_id": "xlsx_edge_pipeline_result"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch(
+                "file_processing.services.export_service.ExcelExportPipeline",
+                create=True,
+            ) as mocked_pipeline_class:
+                mocked_pipeline = mocked_pipeline_class.return_value
+                mocked_pipeline.export_to_filesystem.return_value = expected
+
+                result = export_service.export_excel_to_filesystem(
+                    output_json=output_json,
+                    storage_dir=temp_dir,
+                )
+
+        mocked_pipeline_class.assert_called_once()
+        mocked_pipeline.export_to_filesystem.assert_called_once_with(
+            output_json,
+            temp_dir,
+        )
+        self.assertEqual(result, expected)
 
     def test_export_excel_to_filesystem_saves_multi_sheet_as_single_xlsx(self):
         output_json = self._build_valid_output_json()

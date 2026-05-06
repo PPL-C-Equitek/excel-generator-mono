@@ -6,6 +6,14 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 
+from .export_pipeline import (
+    CsvExportPipeline,
+    ExcelExportPipeline,
+    ExportNamingConfig,
+    ExportPipelineDependencies,
+    ExportRuntimeOptions,
+)
+
 
 class OutputLLMValidationError(Exception):
     """Raised when LLM output does not satisfy CSV validation contract."""
@@ -443,33 +451,30 @@ def export_csv_to_filesystem(
     sanitization_policy=None,
     filename_policy=None,
 ):
-    validated = validate_output_llm(output_json)
-    mapped = map_output_csv(validated)
-    artifact = generate_csv_download_artifact(
-        mapped,
-        sanitization_policy=sanitization_policy,
-        filename_policy=filename_policy,
+    pipeline = CsvExportPipeline(
+        dependencies=ExportPipelineDependencies(
+            validate_output=validate_output_llm,
+            map_output=map_output_csv,
+            build_download_artifact=generate_csv_download_artifact,
+            resolve_storage_dir=_resolve_storage_dir,
+            resolve_export_token=_resolve_export_token,
+            build_safe_file_path=_build_safe_file_path,
+            resolve_created_at=_resolve_created_at,
+            error_class=OutputCSVGenerationError,
+            open_file=open,
+        ),
+        runtime_options=ExportRuntimeOptions(
+            token_generator=token_generator,
+            now_provider=now_provider,
+            sanitization_policy=sanitization_policy,
+            filename_policy=filename_policy,
+        ),
+        naming=ExportNamingConfig(
+            file_id_prefix="csv_",
+            file_name_prefix="export_",
+        ),
     )
-
-    base_dir = _resolve_storage_dir(storage_dir, OutputCSVGenerationError)
-    token = _resolve_export_token(token_generator, OutputCSVGenerationError)
-    extension = "zip" if artifact["type"] == "zip" else "csv"
-    file_name = f"export_{token}.{extension}"
-    file_path = _build_safe_file_path(base_dir, file_name, OutputCSVGenerationError)
-
-    try:
-        with open(file_path, "wb") as destination:
-            destination.write(artifact["content"])
-    except OSError as exc:
-        raise OutputCSVGenerationError("Failed to save generated CSV artifact.") from exc
-
-    return {
-        "file_id": f"csv_{token}",
-        "file_name": file_name,
-        "artifact_type": artifact["type"],
-        "size_bytes": len(artifact["content"]),
-        "created_at": _resolve_created_at(now_provider, OutputCSVGenerationError),
-    }
+    return pipeline.export_to_filesystem(output_json, storage_dir)
 
 
 def export_excel_to_filesystem(
@@ -479,34 +484,31 @@ def export_excel_to_filesystem(
     now_provider=None,
     sanitization_policy=None,
 ):
-    validated = validate_output_llm(output_json)
-    mapped = map_output_csv(validated)
-    artifact = _generate_excel_download_artifact(
-        mapped,
-        sanitization_policy=sanitization_policy,
+    pipeline = ExcelExportPipeline(
+        dependencies=ExportPipelineDependencies(
+            validate_output=validate_output_llm,
+            map_output=map_output_csv,
+            build_download_artifact=_generate_excel_download_artifact,
+            resolve_storage_dir=_resolve_storage_dir,
+            resolve_export_token=_resolve_export_token,
+            build_safe_file_path=_build_safe_file_path,
+            resolve_created_at=_resolve_created_at,
+            error_class=OutputExcelGenerationError,
+            open_file=open,
+        ),
+        runtime_options=ExportRuntimeOptions(
+            token_generator=token_generator,
+            now_provider=now_provider,
+            sanitization_policy=sanitization_policy,
+        ),
+        naming=ExportNamingConfig(
+            file_id_prefix=_EXCEL_FILE_ID_PREFIX,
+            file_name_prefix=_EXCEL_FILE_NAME_PREFIX,
+            file_extension=_EXCEL_FILE_EXTENSION,
+            artifact_type=_EXCEL_ARTIFACT_TYPE,
+        ),
     )
-
-    token, file_name, file_path, created_at = _resolve_excel_export_context(
-        storage_dir=storage_dir,
-        token_generator=token_generator,
-        now_provider=now_provider,
-    )
-
-    try:
-        with open(file_path, "wb") as destination:
-            destination.write(artifact["content"])
-    except OSError as exc:
-        raise OutputExcelGenerationError(
-            "Failed to save generated Excel artifact."
-        ) from exc
-
-    return {
-        "file_id": f"{_EXCEL_FILE_ID_PREFIX}{token}",
-        "file_name": file_name,
-        "artifact_type": _EXCEL_ARTIFACT_TYPE,
-        "size_bytes": len(artifact["content"]),
-        "created_at": created_at,
-    }
+    return pipeline.export_to_filesystem(output_json, storage_dir)
 
 
 def _generate_excel_download_artifact(mapped_output, sanitization_policy=None):
