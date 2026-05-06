@@ -16,7 +16,7 @@ from monitoring.infrastructure.repositories import (
     _REDIS_ROUTE_SNAPSHOT_FIELDS,
     _REDIS_SET_ROUTE_MAX_LATENCY_SCRIPT,
     REDIS_FIELD_MAX_LATENCY_MS,
-    REDIS_KEY_SEPARATOR,
+    REDIS_REALTIME_FIELD_REQUESTS,
     RedisMetricsRepository,
 )
 from monitoring.repositories import (
@@ -749,18 +749,51 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
             max_route_latency_samples=4,
         )
 
-    def test_decode_realtime_member_invalid_payload(self):
-        is_error, duration_ms = self.repo._decode_realtime_member("invalid")
+    def test_realtime_bucket_specs_align_exact_boundary_to_previous_bucket(self):
+        now_epoch = self.repo._realtime_series_builder.to_epoch_seconds(
+            datetime(2026, 4, 20, 12, 0, 0)
+        )
 
-        self.assertFalse(is_error)
-        self.assertEqual(duration_ms, 0.0)
+        specs = self.repo._build_realtime_bucket_specs(now_epoch=now_epoch)
 
-    def test_encode_and_decode_realtime_member_round_trip(self):
-        member = self.repo._encode_realtime_member(is_error=True, duration_ms=12.5)
-        is_error, duration_ms = self.repo._decode_realtime_member(member)
+        self.assertEqual(len(specs), 6)
+        self.assertEqual(specs[0].timestamp, datetime(2026, 4, 20, 11, 59, 10))
+        self.assertEqual(specs[-1].timestamp, datetime(2026, 4, 20, 12, 0, 0))
+        self.assertTrue(specs[0].key.startswith("monitoring:v1:realtime_bucket:"))
 
-        self.assertTrue(is_error)
-        self.assertAlmostEqual(duration_ms, 12.5, places=4)
+    def test_record_bucket_start_clamps_exact_now_to_visible_bucket(self):
+        now_epoch = self.repo._realtime_series_builder.to_epoch_seconds(
+            datetime(2026, 4, 20, 12, 0, 0)
+        )
+
+        bucket_start = self.repo._resolve_record_bucket_start_epoch(
+            created_epoch=now_epoch,
+            now_epoch=now_epoch,
+        )
+
+        self.assertEqual(
+            self.repo._realtime_series_builder.utc_datetime_from_epoch(bucket_start),
+            datetime(2026, 4, 20, 11, 59, 50),
+        )
+
+    def test_build_realtime_points_from_buckets_handles_sparse_rows(self):
+        now_epoch = self.repo._realtime_series_builder.to_epoch_seconds(
+            datetime(2026, 4, 20, 12, 0, 0)
+        )
+        specs = self.repo._build_realtime_bucket_specs(now_epoch=now_epoch)
+
+        points = self.repo._build_realtime_points_from_buckets(
+            bucket_specs=specs,
+            raw_bucket_rows=[
+                [2, 1, 300.0],
+                "broken-row",
+            ],
+        )
+
+        self.assertEqual(points[0].requests, 2)
+        self.assertEqual(points[0].errors, 1)
+        self.assertEqual(points[0].avg_latency_ms, 150.0)
+        self.assertTrue(all(point.requests == 0 for point in points[1:]))
 
     def test_build_route_items_skips_non_dict_payload(self):
         pipeline = Mock()
@@ -774,7 +807,7 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         self.assertEqual(items, [])
         pipeline.hmget.assert_called_once_with("route-key", *_REDIS_ROUTE_SNAPSHOT_FIELDS)
 
-    def test_record_request_does_not_run_separate_trim_commands(self):
+    def test_record_request_aggregates_realtime_bucket_without_capacity_trim(self):
         redis_client = Mock()
         redis_client.pipeline.return_value = pipeline = Mock()
         pipeline.execute.return_value = []
@@ -803,10 +836,28 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         self.assertEqual(redis_client.zcard.call_count, 0)
         self.assertEqual(redis_client.zremrangebyrank.call_count, 0)
         self.assertEqual(redis_client.ltrim.call_count, 0)
-        pipeline.zremrangebyrank.assert_called_once_with(
+        pipeline.zremrangebyrank.assert_not_called()
+        created_epoch = repository._realtime_series_builder.to_epoch_seconds(
+            datetime(2026, 4, 20, 11, 59, 0)
+        )
+        now_epoch = repository._realtime_series_builder.to_epoch_seconds(
+            datetime(2026, 4, 20, 12, 0, 0)
+        )
+        bucket_key = repository._realtime_bucket_key(
+            repository._resolve_record_bucket_start_epoch(
+                created_epoch=created_epoch,
+                now_epoch=now_epoch,
+            )
+        )
+        pipeline.hincrby.assert_any_call(
+            bucket_key,
+            REDIS_REALTIME_FIELD_REQUESTS,
+            1,
+        )
+        pipeline.zremrangebyscore.assert_called_once_with(
             repository._realtime_key,
-            0,
-            -repository._max_realtime_records - 1,
+            "-inf",
+            f"({repository._oldest_realtime_bucket_start_epoch(now_epoch)}",
         )
         pipeline.eval.assert_called_once()
 
@@ -867,7 +918,7 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
             repository._route_hash_key(route="/monitoring", method="GET"),
         )
 
-    def test_record_request_skips_realtime_capacity_trim_when_limit_zero(self):
+    def test_record_request_prunes_realtime_bucket_index(self):
         redis_client = Mock()
         redis_client.pipeline.return_value = pipeline = Mock()
         pipeline.execute.return_value = []
@@ -880,7 +931,6 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
             max_realtime_records=100,
             max_route_latency_samples=4,
         )
-        repository._max_realtime_records = 0
 
         repository.record_request(
             RequestMetricEvent(
@@ -893,6 +943,7 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         )
 
         pipeline.zremrangebyrank.assert_not_called()
+        pipeline.zremrangebyscore.assert_called_once()
 
     def test_limit_route_hash_keys_from_index_returns_empty_when_index_is_empty(self):
         redis_client = Mock()
@@ -1055,38 +1106,12 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         self.assertEqual(self.repo._to_int("not-number"), 0)
         self.assertEqual(self.repo._to_int({}, default=10), 10)
 
-    def test_build_realtime_records_keeps_invalid_members(self):
-        records = self.repo._build_realtime_records([("broken", 1713607200.0)])
-
-        self.assertEqual(len(records), 1)
-        self.assertFalse(records[0].is_error)
-        self.assertEqual(records[0].duration_ms, 0.0)
-
-    def test_build_realtime_records_keeps_invalid_members_and_parses_score(self):
-        sep = REDIS_KEY_SEPARATOR
-        records = self.repo._build_realtime_records(
-            [
-                (f"c3cf{sep}1{sep}12.500000", 1713607200.5),
-                ("invalid|tuple", 1713607201.5),
-                (f"9a1d{sep}0{sep}9.250000", 1713607202.0),
-            ]
-        )
-
-        self.assertEqual(len(records), 3)
-        self.assertTrue(records[0].is_error)
-        self.assertAlmostEqual(records[0].duration_ms, 12.5, places=4)
-        self.assertFalse(records[1].is_error)
-        self.assertEqual(records[1].duration_ms, 0.0)
-        self.assertFalse(records[2].is_error)
-        self.assertAlmostEqual(records[2].duration_ms, 9.25, places=4)
-
-    def test_trim_functions_skip_if_not_overflow(self):
+    def test_trim_route_latency_samples_skips_if_not_overflow(self):
         redis_mock = self.repo._redis
-        redis_mock.zcard.return_value = 5
         redis_mock.llen.return_value = 3
-        self.repo._trim_realtime_records()
+
         self.repo._trim_route_latency_samples(route_latency_samples_key="route:latency")
-        redis_mock.zremrangebyrank.assert_not_called()
+
         redis_mock.ltrim.assert_not_called()
 
     def test_queue_expire_respects_disabled_ttl(self):
@@ -1100,20 +1125,12 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
         self.repo._queue_expire(pipeline, "example-key")
         pipeline.expire.assert_called_once_with("example-key", original_ttl)
 
-    def test_trim_functions_trim_when_over_capacity(self):
-        self.repo._redis.zcard.return_value = 25
+    def test_trim_route_latency_samples_trims_when_over_capacity(self):
         self.repo._redis.llen.return_value = 6
-        self.repo._max_realtime_records = 10
         self.repo._max_route_latency_samples = 4
 
-        self.repo._trim_realtime_records()
         self.repo._trim_route_latency_samples(route_latency_samples_key="route:latency")
 
-        self.repo._redis.zremrangebyrank.assert_called_once_with(
-            self.repo._realtime_key,
-            0,
-            14,
-        )
         self.repo._redis.ltrim.assert_called_once_with(
             "route:latency",
             0,
@@ -1141,16 +1158,12 @@ class RedisMetricsRepositoryInternalTest(SimpleTestCase):
             "monitoring:v1:routes_by_volume",
         )
 
-    def test_trim_functions_skip_when_not_over_capacity(self):
-        self.repo._redis.zcard.return_value = 4
+    def test_trim_route_latency_samples_skips_when_not_over_capacity(self):
         self.repo._redis.llen.return_value = 2
-        self.repo._max_realtime_records = 10
         self.repo._max_route_latency_samples = 4
 
-        self.repo._trim_realtime_records()
         self.repo._trim_route_latency_samples(route_latency_samples_key="route:latency")
 
-        self.repo._redis.zremrangebyrank.assert_not_called()
         self.repo._redis.ltrim.assert_not_called()
 
     def test_init_uses_redis_url_when_client_not_provided(self):
@@ -1252,6 +1265,10 @@ class RedisMetricsRepositoryTest(SimpleTestCase):
         self.assertEqual(self.repo._events_key, "monitoring_test:v2:events")
         self.assertEqual(self.repo._realtime_key, "monitoring_test:v2:realtime")
         self.assertEqual(
+            self.repo._realtime_bucket_key_prefix,
+            "monitoring_test:v2:realtime_bucket:",
+        )
+        self.assertEqual(
             self.repo._route_rankings_key,
             "monitoring_test:v2:routes_by_volume",
         )
@@ -1261,6 +1278,10 @@ class RedisMetricsRepositoryTest(SimpleTestCase):
         self.assertEqual(self.repo._routes_index_key, "monitoring_test:v2:routes")
         self.assertEqual(self.repo._events_key, "monitoring_test:v2:events")
         self.assertEqual(self.repo._realtime_key, "monitoring_test:v2:realtime")
+        self.assertEqual(
+            self.repo._realtime_bucket_key_prefix,
+            "monitoring_test:v2:realtime_bucket:",
+        )
         self.assertEqual(
             self.repo._route_rankings_key,
             "monitoring_test:v2:routes_by_volume",
@@ -1335,6 +1356,30 @@ class RedisMetricsRepositoryTest(SimpleTestCase):
             2,
         )
         self.assertTrue(any(key.startswith("monitoring_test:v2:") for key in self.redis_client._expirations))
+
+    def test_realtime_requests_are_preaggregated_into_bucket_hashes(self):
+        for _ in range(25):
+            self.repo.record_request(self._event(duration_ms=20.0))
+
+        realtime_bucket_keys = [
+            key for key in self.redis_client._hashes
+            if key.startswith("monitoring_test:v2:realtime_bucket:")
+        ]
+        snapshot = self.repo.get_snapshot()
+
+        self.assertEqual(len(realtime_bucket_keys), 1)
+        self.assertEqual(
+            len(self.redis_client._zsets[self.repo._realtime_key]),
+            1,
+        )
+        self.assertEqual(
+            sum(point.requests for point in snapshot.timeseries),
+            25,
+        )
+        self.assertEqual(
+            max(point.avg_latency_ms for point in snapshot.timeseries),
+            20.0,
+        )
 
     def test_record_request_counts_client_errors_in_route_totals(self):
         self.repo.record_request(self._event(status_code=401, duration_ms=90.0))
