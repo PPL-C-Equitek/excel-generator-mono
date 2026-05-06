@@ -24,27 +24,19 @@ from artifact_history.services import (
     update_artifact_history_custom_name,
 )
 from authentication.permissions import IsVerifiedUser
+from chat_sessions import default_session_facade
+from chat_sessions.session_queries import (
+    SESSION_DETAIL_LIMIT_FIELDS,
+    SESSION_DETAIL_MAX_LIMIT,
+    SESSION_DETAIL_OFFSET_FIELDS,
+    SESSION_LIST_DEFAULT_LIMIT,
+    SESSION_LIST_MAX_LIMIT,
+)
 from chat_sessions.serializers import (
     SessionDetailSerializer,
     SessionListItemSerializer,
     SessionResumeSerializer,
     SessionTitleUpdateSerializer,
-)
-from chat_sessions.services import (
-    build_resume_context_for_user,
-    delete_session,
-    get_generated_output_for_session_user,
-    get_default_session_detail_pagination,
-    get_paginated_session_detail_for_user,
-    get_session_for_user,
-    list_sessions_for_user,
-    SESSION_DETAIL_MAX_LIMIT,
-    SESSION_DETAIL_LIMIT_FIELDS,
-    SESSION_DETAIL_OFFSET_FIELDS,
-    SESSION_LIST_DEFAULT_LIMIT,
-    SESSION_LIST_MAX_LIMIT,
-    update_session_title,
-    validate_session_detail_pagination_params as validate_session_detail_pagination_params_service,
 )
 from file_processing.services.upload_service import (
     FILE_TOO_LARGE_ERROR,
@@ -71,6 +63,25 @@ from file_processing.services.export_service import (
     resolve_excel_download_artifact,
 )
 from llm.views import build_export_output_json
+
+session_facade = default_session_facade
+
+# Backward-compatible aliases to preserve existing test patch targets.
+build_resume_context_for_user = session_facade.build_resume_context_for_user
+delete_session = session_facade.delete_session
+get_generated_output_for_session_user = session_facade.get_generated_output_for_session_user
+get_default_session_detail_pagination = (
+    session_facade.get_default_session_detail_pagination
+)
+get_paginated_session_detail_for_user = (
+    session_facade.get_paginated_session_detail_for_user
+)
+get_session_for_user = session_facade.get_session_for_user
+list_sessions_for_user = session_facade.list_sessions_for_user
+update_session_title = session_facade.update_session_title
+validate_session_detail_pagination_params_service = (
+    session_facade.validate_session_detail_pagination_params
+)
 
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries
