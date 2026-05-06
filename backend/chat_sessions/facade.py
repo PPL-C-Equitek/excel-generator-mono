@@ -10,13 +10,19 @@ from __future__ import annotations
 from typing import Any
 
 from . import services
+from . import session_queries
 
 
 class SessionFacade:
     """Facade API for chat session use cases."""
 
-    def __init__(self, service_module: Any = services) -> None:
+    def __init__(
+        self,
+        service_module: Any = services,
+        query_module: Any = session_queries,
+    ) -> None:
         self._services = service_module
+        self._queries = query_module
 
     def build_frontend_thinking_log_response(self, payload: Any) -> dict[str, Any]:
         return self._services.build_frontend_thinking_log_response(payload)
@@ -30,10 +36,10 @@ class SessionFacade:
         limit: int | None = None,
         offset: int = 0,
     ) -> Any:
-        return self._services.list_sessions_for_user(user, limit=limit, offset=offset)
+        return self._queries.list_sessions_for_user(user, limit=limit, offset=offset)
 
     def get_session_for_user(self, user: Any, session_id: Any) -> Any:
-        return self._services.get_session_for_user(user, session_id)
+        return self._queries.get_session_for_user(user, session_id)
 
     def get_generated_output_for_session_user(
         self,
@@ -41,17 +47,17 @@ class SessionFacade:
         session_id: Any,
         output_id: Any,
     ) -> Any:
-        return self._services.get_generated_output_for_session_user(
+        return self._queries.get_generated_output_for_session_user(
             user,
             session_id,
             output_id,
         )
 
     def get_generated_output_for_user(self, user: Any, output_id: Any) -> Any:
-        return self._services.get_generated_output_for_user(user, output_id)
+        return self._queries.get_generated_output_for_user(user, output_id)
 
     def get_chat_message_for_user(self, user: Any, message_id: Any) -> Any:
-        return self._services.get_chat_message_for_user(user, message_id)
+        return self._queries.get_chat_message_for_user(user, message_id)
 
     def get_paginated_session_detail_for_user(
         self,
@@ -62,7 +68,7 @@ class SessionFacade:
         outputs_limit: int = services.SESSION_DETAIL_OUTPUTS_DEFAULT_LIMIT,
         outputs_offset: int = 0,
     ) -> Any:
-        return self._services.get_paginated_session_detail_for_user(
+        return self._queries.get_paginated_session_detail_for_user(
             user,
             session_id,
             messages_limit=messages_limit,
@@ -72,16 +78,16 @@ class SessionFacade:
         )
 
     def build_resume_context_for_user(self, user: Any, session_id: Any) -> Any:
-        return self._services.build_resume_context_for_user(user, session_id)
+        return self._queries.build_resume_context_for_user(user, session_id)
 
     def get_default_session_detail_pagination(self) -> dict[str, int]:
-        return self._services.get_default_session_detail_pagination()
+        return self._queries.get_default_session_detail_pagination()
 
     def validate_session_detail_pagination_params(
         self,
         pagination: dict[str, int],
     ) -> None:
-        self._services.validate_session_detail_pagination_params(pagination)
+        self._queries.validate_session_detail_pagination_params(pagination)
 
     def update_session_title(self, session: Any, title: str) -> Any:
         return self._services.update_session_title(session, title)
@@ -169,4 +175,3 @@ def create_session_facade() -> SessionFacade:
 
 
 default_session_facade = create_session_facade()
-
