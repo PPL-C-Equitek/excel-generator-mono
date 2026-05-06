@@ -56,6 +56,7 @@ export type MonitoringDashboardViewModel = {
     realtimeTotals: RealtimeTotals
     eventRows: EventRow[]
     maxEventCount: number
+    visibleRoutes: MonitoringStatsPayload['routes']
     maxRouteRequests: number
     latencySeries: LatencySeriesPoint[]
     latencyChart: LatencyChartModel
@@ -404,10 +405,13 @@ export function useMonitoringDashboardModel({
         return flattened
     }, [statsPayload])
 
-    const maxRouteRequests = useMemo(() => {
-        const visibleRoutes = statsPayload
+    const visibleRoutes = useMemo(() => (
+        statsPayload
             ? monitoringRouteVisibilityPolicy.filterVisibleRoutes(statsPayload.routes)
             : []
+    ), [statsPayload])
+
+    const maxRouteRequests = useMemo(() => {
         if (visibleRoutes.length === 0) {
             return 1
         }
@@ -416,7 +420,7 @@ export function useMonitoringDashboardModel({
             1,
             ...visibleRoutes.map((routeRow) => routeRow.total_requests)
         )
-    }, [statsPayload])
+    }, [visibleRoutes])
 
     const maxEventCount = useMemo(() => {
         if (eventRows.length === 0) {
@@ -475,8 +479,7 @@ export function useMonitoringDashboardModel({
             return []
         }
 
-        return monitoringRouteVisibilityPolicy
-            .filterVisibleRoutes(statsPayload.routes)
+        return visibleRoutes
             .slice(0, 8)
             .map((routeRow, index) => ({
                 id: index + 1,
@@ -484,7 +487,7 @@ export function useMonitoringDashboardModel({
                 value: routeRow.avg_latency_ms,
                 requests: routeRow.total_requests,
             }))
-    }, [statsPayload, timeseriesPoints])
+    }, [statsPayload, timeseriesPoints, visibleRoutes])
 
     const latencyChart = useMemo<LatencyChartModel>(() => {
         if (latencySeries.length === 0) {
@@ -622,6 +625,7 @@ export function useMonitoringDashboardModel({
         realtimeTotals,
         eventRows,
         maxEventCount,
+        visibleRoutes,
         maxRouteRequests,
         latencySeries,
         latencyChart,

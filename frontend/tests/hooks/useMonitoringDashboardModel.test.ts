@@ -636,6 +636,15 @@ describe('useMonitoringDashboardModel', () => {
                 totals: { requests: 10, errors: 0, error_rate: 0 },
                 routes: [
                     {
+                        route: '/monitoring/stats/',
+                        method: 'GET',
+                        total_requests: 999,
+                        total_errors: 0,
+                        error_rate: 0,
+                        avg_latency_ms: 5,
+                        max_latency_ms: 10,
+                    },
+                    {
                         route: '/history/',
                         method: 'GET',
                         total_requests: 15,
@@ -674,6 +683,8 @@ describe('useMonitoringDashboardModel', () => {
         })
 
         expect(result.current.hasRealtimeSeries).toBe(false)
+        expect(result.current.visibleRoutes.map((routeRow) => routeRow.route)).toEqual(['/history/', '/health'])
+        expect(result.current.maxRouteRequests).toBe(15)
         expect(result.current.latencySeries).toHaveLength(2)
         expect(result.current.latencySeries[0]?.label).toBe('/history/')
         expect(result.current.latencySeries[0]?.id).toBe(1)

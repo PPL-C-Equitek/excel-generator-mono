@@ -60,6 +60,7 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
         realtimeTotals,
         eventRows,
         maxEventCount,
+        visibleRoutes,
         maxRouteRequests,
         latencySeries,
         latencyChart,
@@ -85,7 +86,7 @@ export default function MonitoringPage({ monitoringService = defaultMonitoringSe
                         readinessMeter={readinessMeter}
                     />
                     <MonitoringRoutesAndReadinessSection
-                        statsPayload={statsPayload}
+                        visibleRoutes={visibleRoutes}
                         maxRouteRequests={maxRouteRequests}
                         readyPayload={readyPayload}
                     />

@@ -419,7 +419,7 @@ describe('MonitoringDashboardSections', () => {
     it('renders routes empty state and readiness fallback', () => {
         render(
             <MonitoringRoutesAndReadinessSection
-                statsPayload={{ ...baseStatsPayload, routes: [] }}
+                visibleRoutes={[]}
                 maxRouteRequests={1}
                 readyPayload={null}
             />
@@ -429,37 +429,22 @@ describe('MonitoringDashboardSections', () => {
         expect(screen.getByText('Readiness data is available only for monitoring-enabled accounts.')).toBeInTheDocument()
     })
 
-    it('excludes monitoring routes from top routes rendering', () => {
+    it('renders visible routes supplied by the dashboard model', () => {
         render(
             <MonitoringRoutesAndReadinessSection
-                statsPayload={{
-                    ...baseStatsPayload,
-                    routes: [
-                        {
-                            route: '/monitoring/stats/',
-                            method: 'GET',
-                            total_requests: 99,
-                            total_errors: 0,
-                            error_rate: 0,
-                            avg_latency_ms: 11,
-                            max_latency_ms: 15,
-                        },
-                        ...baseStatsPayload.routes,
-                    ],
-                }}
+                visibleRoutes={baseStatsPayload.routes}
                 maxRouteRequests={60}
                 readyPayload={null}
             />
         )
 
-        expect(screen.queryByText('/monitoring/stats/')).not.toBeInTheDocument()
         expect(screen.getByText('/history/')).toBeInTheDocument()
     })
 
     it('renders readiness checks with optional check messages', () => {
         render(
             <MonitoringRoutesAndReadinessSection
-                statsPayload={baseStatsPayload}
+                visibleRoutes={baseStatsPayload.routes}
                 maxRouteRequests={60}
                 readyPayload={baseReadyPayload}
             />
@@ -474,7 +459,7 @@ describe('MonitoringDashboardSections', () => {
     it('maps configured readiness check names to friendly labels', () => {
         render(
             <MonitoringRoutesAndReadinessSection
-                statsPayload={baseStatsPayload}
+                visibleRoutes={baseStatsPayload.routes}
                 maxRouteRequests={60}
                 readyPayload={{
                     status: 'ok',
@@ -494,7 +479,7 @@ describe('MonitoringDashboardSections', () => {
     it('renders readiness checks when message is omitted', () => {
         render(
             <MonitoringRoutesAndReadinessSection
-                statsPayload={baseStatsPayload}
+                visibleRoutes={baseStatsPayload.routes}
                 maxRouteRequests={60}
                 readyPayload={{
                     status: 'healthy',

@@ -36,4 +36,12 @@ describe('monitoring route visibility policy', () => {
         expect(policy.isSystemRoute('/admin/tools/flush-cache')).toBe(true)
         expect(policy.shouldShowRoute('/admin/users')).toBe(true)
     })
+
+    it('normalizes custom prefixes so callers can pass human-friendly config values', () => {
+        const policy = createMonitoringRouteVisibilityPolicy([' /INTERNAL/ ', 'Admin/Tools/'])
+
+        expect(policy.isSystemRoute('/internal/jobs/')).toBe(true)
+        expect(policy.isSystemRoute('/admin/tools/flush-cache')).toBe(true)
+        expect(policy.shouldShowRoute('/admin/tooling')).toBe(true)
+    })
 })

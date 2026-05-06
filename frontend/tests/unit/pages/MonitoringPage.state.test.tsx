@@ -55,6 +55,7 @@ function buildViewModel(overrides: Partial<MonitoringDashboardViewModel> = {}): 
         realtimeTotals: null,
         eventRows: [],
         maxEventCount: 1,
+        visibleRoutes: [],
         maxRouteRequests: 1,
         latencySeries: [],
         latencyChart: { linePoints: '', areaPath: '', maxLatency: 0 },

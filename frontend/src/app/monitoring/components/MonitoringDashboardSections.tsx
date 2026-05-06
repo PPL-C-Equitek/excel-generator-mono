@@ -20,7 +20,6 @@ import type {
     ReadinessMeter,
     RealtimeTotals,
 } from '../monitoringViewModelTypes'
-import { monitoringRouteVisibilityPolicy } from '../monitoringRoutePolicy'
 import { GaugeMeter, MetricCard, StatusBadge } from './primitives/MonitoringPrimitives'
 
 type MonitoringHeroSectionProps = Readonly<{
@@ -447,18 +446,16 @@ export function MonitoringLatencyAndMetersSection({
 }
 
 type MonitoringRoutesAndReadinessSectionProps = Readonly<{
-    statsPayload: MonitoringStatsPayload
+    visibleRoutes: MonitoringStatsPayload['routes']
     maxRouteRequests: number
     readyPayload: MonitoringReadyPayload | null
 }>
 
 export function MonitoringRoutesAndReadinessSection({
-    statsPayload,
+    visibleRoutes,
     maxRouteRequests,
     readyPayload,
 }: MonitoringRoutesAndReadinessSectionProps) {
-    const visibleRoutes = monitoringRouteVisibilityPolicy.filterVisibleRoutes(statsPayload.routes)
-
     return (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
             <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-8">

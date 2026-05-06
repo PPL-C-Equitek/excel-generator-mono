@@ -9,24 +9,35 @@ export type MonitoringRouteVisibilityPolicy = Readonly<{
 }>
 
 const DEFAULT_HIDDEN_ROUTE_PREFIXES = ['monitoring'] as const
+type NormalizedRoutePrefix = Readonly<{
+    exact: string
+    nested: string
+}>
 
 function normalizeRoute(route: string): string {
     return route.trim().replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase()
 }
 
-function routeMatchesPrefix(route: string, prefix: string): boolean {
-    const normalizedRoute = normalizeRoute(route)
-    const normalizedPrefix = normalizeRoute(prefix)
-
-    return normalizedRoute === normalizedPrefix || normalizedRoute.startsWith(`${normalizedPrefix}/`)
+function routeMatchesPrefix(normalizedRoute: string, prefix: NormalizedRoutePrefix): boolean {
+    return normalizedRoute === prefix.exact || normalizedRoute.startsWith(prefix.nested)
 }
 
 export function createMonitoringRouteVisibilityPolicy(
     hiddenRoutePrefixes: readonly string[] = DEFAULT_HIDDEN_ROUTE_PREFIXES,
 ): MonitoringRouteVisibilityPolicy {
-    const isSystemRoute = (route: string): boolean => (
-        hiddenRoutePrefixes.some((prefix) => routeMatchesPrefix(route, prefix))
-    )
+    const normalizedHiddenRoutePrefixes = hiddenRoutePrefixes.map((prefix) => {
+        const normalizedPrefix = normalizeRoute(prefix)
+        return {
+            exact: normalizedPrefix,
+            nested: `${normalizedPrefix}/`,
+        }
+    })
+
+    const isSystemRoute = (route: string): boolean => {
+        const normalizedRoute = normalizeRoute(route)
+
+        return normalizedHiddenRoutePrefixes.some((prefix) => routeMatchesPrefix(normalizedRoute, prefix))
+    }
 
     const shouldShowRoute = (route: string): boolean => !isSystemRoute(route)
 
