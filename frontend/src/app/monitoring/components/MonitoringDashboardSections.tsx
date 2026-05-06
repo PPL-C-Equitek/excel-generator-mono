@@ -13,21 +13,15 @@ import {
     resolveAccessMessage,
 } from '../monitoringUi'
 import type {
+    AuthEventSummaryRow,
     ErrorRateMeter,
-    EventRow,
     LatencyChartModel,
     LatencySeriesPoint,
     ReadinessMeter,
     RealtimeTotals,
+    RouteSummaryRow,
 } from '../monitoringViewModelTypes'
 import { GaugeMeter, MetricCard, StatusBadge } from './primitives/MonitoringPrimitives'
-
-const MONITORING_ROUTE_PREFIX = 'monitoring/'
-
-function isMonitoringRoute(route: string): boolean {
-    const normalizedRoute = route.trim().replace(/^\/+/, '').toLowerCase()
-    return normalizedRoute.startsWith(MONITORING_ROUTE_PREFIX)
-}
 
 type MonitoringHeroSectionProps = Readonly<{
     lastSync: string
@@ -248,20 +242,6 @@ function resolveLatencyChartDescription(
     return `Latency trend over ${realtimeWindowSeconds} seconds, grouped every ${realtimeBucketSeconds} seconds.`
 }
 
-function shouldShowLatencyPointLabel(
-    seriesLength: number,
-    index: number,
-    isLastEntry: boolean,
-): boolean {
-    if (seriesLength <= 6) {
-        return true
-    }
-    if (isLastEntry) {
-        return true
-    }
-    return index % 2 === 0
-}
-
 function LatencyChartPanel({
     latencySeries,
     latencyChart,
@@ -277,7 +257,7 @@ function LatencyChartPanel({
         realtimeBucketSeconds,
     )
     const latestLatencyPoint = latencySeries.at(-1)
-    const maxRequestsInSeries = Math.max(0, ...latencySeries.map((entry) => entry.requests ?? 0))
+    const maxRequestsInSeries = latencyChart.maxRequests
     const yAxisTopMs = Math.max(1, latencyChart.maxLatency)
     const yAxisMidMs = yAxisTopMs / 2
     const yAxisTopLabel = formatLatencyAxisLabel(yAxisTopMs)
@@ -340,36 +320,20 @@ function LatencyChartPanel({
                                     strokeLinejoin="round"
                                 />
                             ) : null}
-                            {latencySeries.map((entry, index) => {
-                                const normalizedX = latencySeries.length === 1 ? 0.5 : index / (latencySeries.length - 1)
-                                const normalizedY = Math.min(
-                                    1,
-                                    Math.max(0, entry.value / Math.max(1, latencyChart.maxLatency))
-                                )
-                                const x = 26 + normalizedX * (520 - 52)
-                                const y = 16 + (1 - normalizedY) * (220 - 46)
-                                const showLabel = shouldShowLatencyPointLabel(
-                                    latencySeries.length,
-                                    index,
-                                    entry === latestLatencyPoint,
-                                )
-                                const xLabel = hasRealtimeSeries ? entry.label : String(entry.id)
-
-                                return (
-                                    <g key={entry.id}>
-                                        <circle cx={x} cy={y} r="4" fill="#2563eb" />
-                                        <text
-                                            x={x}
-                                            y="208"
-                                            textAnchor="middle"
-                                            fontSize="11"
-                                            fill="#6b7280"
-                                        >
-                                            {showLabel ? xLabel : ''}
-                                        </text>
-                                    </g>
-                                )
-                            })}
+                            {latencyChart.points.map((point) => (
+                                <g key={point.id}>
+                                    <circle cx={point.x} cy={point.y} r="4" fill="#2563eb" />
+                                    <text
+                                        x={point.x}
+                                        y="208"
+                                        textAnchor="middle"
+                                        fontSize="11"
+                                        fill="#6b7280"
+                                    >
+                                        {point.showLabel ? point.xLabel : ''}
+                                    </text>
+                                </g>
+                            ))}
                         </svg>
                     </div>
 
@@ -453,55 +417,44 @@ export function MonitoringLatencyAndMetersSection({
 }
 
 type MonitoringRoutesAndReadinessSectionProps = Readonly<{
-    statsPayload: MonitoringStatsPayload
-    maxRouteRequests: number
+    routeSummaryRows: RouteSummaryRow[]
     readyPayload: MonitoringReadyPayload | null
 }>
 
 export function MonitoringRoutesAndReadinessSection({
-    statsPayload,
-    maxRouteRequests,
+    routeSummaryRows,
     readyPayload,
 }: MonitoringRoutesAndReadinessSectionProps) {
-    const visibleRoutes = statsPayload.routes.filter((routeRow) => !isMonitoringRoute(routeRow.route))
-
     return (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
             <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md lg:col-span-8">
                 <h3 className="text-base font-semibold text-gray-900">Top Routes</h3>
-                {visibleRoutes.length === 0 ? (
+                {routeSummaryRows.length === 0 ? (
                     <p className="mt-3 text-sm text-gray-600">No route metrics available yet.</p>
                 ) : (
                     <div className="mt-4 space-y-3">
-                        {visibleRoutes.slice(0, 6).map((routeRow) => {
-                            const requestWidth = `${Math.max(
-                                8,
-                                Math.round((routeRow.total_requests / maxRouteRequests) * 100)
-                            )}%`
-
-                            return (
-                                <div key={`${routeRow.route}:${routeRow.method}`} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                        <div>
-                                            <p className="font-semibold text-gray-900">{routeRow.route}</p>
-                                            <p className="text-xs text-gray-500">
-                                                {routeRow.method} - avg latency {routeRow.avg_latency_ms.toFixed(2)} ms
-                                            </p>
-                                        </div>
-                                        <div className="text-right text-sm">
-                                            <p className="font-semibold text-gray-900">{routeRow.total_requests} req</p>
-                                            <p className="text-red-700">{routeRow.total_errors} errors</p>
-                                        </div>
+                        {routeSummaryRows.map((routeRow) => (
+                            <div key={`${routeRow.route}:${routeRow.method}`} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <p className="font-semibold text-gray-900">{routeRow.route}</p>
+                                        <p className="text-xs text-gray-500">
+                                            {routeRow.method} - avg latency {routeRow.avgLatencyMs.toFixed(2)} ms
+                                        </p>
                                     </div>
-                                    <div className="mt-3 h-2 rounded-full bg-gray-200">
-                                        <div
-                                            className="h-2 rounded-full bg-blue-600 transition-all duration-300"
-                                            style={{ width: requestWidth }}
-                                        />
+                                    <div className="text-right text-sm">
+                                        <p className="font-semibold text-gray-900">{routeRow.totalRequests} req</p>
+                                        <p className="text-red-700">{routeRow.totalErrors} errors</p>
                                     </div>
                                 </div>
-                            )
-                        })}
+                                <div className="mt-3 h-2 rounded-full bg-gray-200">
+                                    <div
+                                        className="h-2 rounded-full bg-blue-600 transition-all duration-300"
+                                        style={{ width: routeRow.requestWidth }}
+                                    />
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 )}
             </article>
@@ -547,47 +500,39 @@ export function MonitoringRoutesAndReadinessSection({
 }
 
 type MonitoringAuthEventsSectionProps = Readonly<{
-    eventRows: EventRow[]
-    maxEventCount: number
+    authEventSummaryRows: AuthEventSummaryRow[]
 }>
 
-export function MonitoringAuthEventsSection({ eventRows, maxEventCount }: MonitoringAuthEventsSectionProps) {
+export function MonitoringAuthEventsSection({ authEventSummaryRows }: MonitoringAuthEventsSectionProps) {
     return (
         <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md">
             <h3 className="text-base font-semibold text-gray-900">Auth Events</h3>
-            {eventRows.length === 0 ? (
+            {authEventSummaryRows.length === 0 ? (
                 <p className="mt-3 text-sm text-gray-600">No auth event metrics available yet.</p>
             ) : (
                 <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-                    {eventRows.slice(0, 8).map((eventRow) => {
-                        const eventWidth = `${Math.max(
-                            8,
-                            Math.round((eventRow.count / maxEventCount) * 100)
-                        )}%`
-
-                        return (
-                            <div
-                                key={`${eventRow.eventName}:${eventRow.outcome}`}
-                                className="rounded-xl border border-gray-200 bg-gray-50 p-3"
-                            >
-                                <div className="flex items-center justify-between text-sm">
-                                    <div>
-                                        <p className="font-semibold text-gray-900">{eventRow.eventName}</p>
-                                        <p className="text-xs text-gray-500">Outcome: {eventRow.outcome}</p>
-                                    </div>
-                                    <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-                                        {eventRow.count}
-                                    </span>
+                    {authEventSummaryRows.map((eventRow) => (
+                        <div
+                            key={`${eventRow.eventName}:${eventRow.outcome}`}
+                            className="rounded-xl border border-gray-200 bg-gray-50 p-3"
+                        >
+                            <div className="flex items-center justify-between text-sm">
+                                <div>
+                                    <p className="font-semibold text-gray-900">{eventRow.eventName}</p>
+                                    <p className="text-xs text-gray-500">Outcome: {eventRow.outcome}</p>
                                 </div>
-                                <div className="mt-3 h-2 rounded-full bg-gray-200">
-                                    <div
-                                        className="h-2 rounded-full bg-red-700 transition-all duration-300"
-                                        style={{ width: eventWidth }}
-                                    />
-                                </div>
+                                <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+                                    {eventRow.count}
+                                </span>
                             </div>
-                        )
-                    })}
+                            <div className="mt-3 h-2 rounded-full bg-gray-200">
+                                <div
+                                    className="h-2 rounded-full bg-red-700 transition-all duration-300"
+                                    style={{ width: eventRow.eventWidth }}
+                                />
+                            </div>
+                        </div>
+                    ))}
                 </div>
             )}
         </article>

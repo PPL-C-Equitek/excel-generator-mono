@@ -11,10 +11,20 @@ export type LatencySeriesPoint = {
     requests: number
 }
 
+export type LatencyChartPoint = {
+    id: number
+    x: number
+    y: number
+    xLabel: string
+    showLabel: boolean
+}
+
 export type LatencyChartModel = {
     linePoints: string
     areaPath: string
     maxLatency: number
+    maxRequests: number
+    points: LatencyChartPoint[]
 }
 
 export type ErrorRateMeter = {
@@ -37,3 +47,15 @@ export type EventRow = {
     count: number
 }
 
+export type AuthEventSummaryRow = EventRow & {
+    eventWidth: string
+}
+
+export type RouteSummaryRow = {
+    route: string
+    method: string
+    totalRequests: number
+    totalErrors: number
+    avgLatencyMs: number
+    requestWidth: string
+}
