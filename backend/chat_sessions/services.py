@@ -1,3 +1,9 @@
+"""Legacy session services.
+
+This module remains the source of truth during the initial facade migration.
+`SessionFacade` delegates to these functions in Step 1 to preserve behavior.
+"""
+
 import re
 from heapq import merge
 from types import SimpleNamespace
