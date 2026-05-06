@@ -3,6 +3,7 @@ import logging
 from typing import Any, cast
 from uuid import UUID
 
+from chat_sessions import default_session_facade
 from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
 from django.conf import settings
@@ -13,19 +14,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from chat_sessions.models import ChatMessage
-from chat_sessions.services import (
-    append_assistant_message,
-    append_user_message,
-    build_history_with_summary,
-    create_generated_output,
-    create_session_for_user,
-    generate_session_title_from_message,
-    get_chat_message_for_user,
-    get_generated_output_for_user,
-    get_session_for_user,
-    resolve_session_title,
-    sanitize_session_title,
-)
 from authentication.permissions import IsVerifiedUser
 from .serializers import (
     LlmGenerateRequestSerializer,
@@ -54,6 +42,23 @@ from .services.openai_client import (
     OpenAIUpstreamError,
     generate_chat_response,
 )
+
+session_facade = default_session_facade
+
+# Backward-compatible aliases to preserve existing test patch targets.
+append_assistant_message = session_facade.append_assistant_message
+append_user_message = session_facade.append_user_message
+build_history_with_summary = session_facade.build_history_with_summary
+create_generated_output = session_facade.create_generated_output
+create_session_for_user = session_facade.create_session_for_user
+generate_session_title_from_message = (
+    session_facade.generate_session_title_from_message
+)
+get_chat_message_for_user = session_facade.get_chat_message_for_user
+get_generated_output_for_user = session_facade.get_generated_output_for_user
+get_session_for_user = session_facade.get_session_for_user
+resolve_session_title = session_facade.resolve_session_title
+sanitize_session_title = session_facade.sanitize_session_title
 
 logger = logging.getLogger(__name__)
 
@@ -1144,4 +1149,3 @@ def thinking_log_detail(request, output_id):
         return _thinking_log_not_found_response()
 
     return Response(ThinkingLogItemSerializer(record).data, status=200)
-
