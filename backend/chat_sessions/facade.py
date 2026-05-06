@@ -1,8 +1,11 @@
 """Use-case level facade for session operations.
 
-Step 1 scope:
-- Introduce a facade entry point.
-- Keep behavior unchanged by delegating to `chat_sessions.services`.
+Facade delegates by concern module:
+- query operations -> `session_queries`
+- write operations -> `session_writes`
+- title operations -> `session_titles`
+- thinking log operations -> `thinking_log`
+- history summary operations -> `session_history`
 """
 
 from __future__ import annotations
@@ -10,7 +13,9 @@ from __future__ import annotations
 from typing import Any
 
 from . import services
+from . import session_history
 from . import session_queries
+from . import thinking_log
 from . import session_titles
 from . import session_writes
 
@@ -24,14 +29,18 @@ class SessionFacade:
         query_module: Any = session_queries,
         write_module: Any = session_writes,
         title_module: Any = session_titles,
+        thinking_module: Any = thinking_log,
+        history_module: Any = session_history,
     ) -> None:
         self._services = service_module
         self._queries = query_module
         self._writes = write_module
         self._titles = title_module
+        self._thinking = thinking_module
+        self._history = history_module
 
     def build_frontend_thinking_log_response(self, payload: Any) -> dict[str, Any]:
-        return self._services.build_frontend_thinking_log_response(payload)
+        return self._thinking.build_frontend_thinking_log_response(payload)
 
     def create_session_for_user(self, owner: Any, title: str = "") -> Any:
         return self._writes.create_session_for_user(owner, title=title)
@@ -173,7 +182,7 @@ class SessionFacade:
         session: Any,
         full_history: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        return self._services.build_history_with_summary(session, full_history)
+        return self._history.build_history_with_summary(session, full_history)
 
 
 def create_session_facade() -> SessionFacade:
