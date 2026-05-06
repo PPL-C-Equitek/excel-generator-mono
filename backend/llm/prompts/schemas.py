@@ -41,7 +41,8 @@ If extraction is ambiguous or insufficient:
 - keep the same required output contract
 - never switch to free-form text
 - do not invent values
-- use conservative scalar values and empty collections only when truly unsupported by the input
+- use conservative scalar values such as null only for optional fields when needed
+- keep required tables and required arrays populated from the source instead of fabricating empty placeholders
 """
 
 MESSY_RECOVERABLE_CASE_SECTION = """## MESSY_BUT_RECOVERABLE
