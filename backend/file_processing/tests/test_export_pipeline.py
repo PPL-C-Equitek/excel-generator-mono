@@ -1,6 +1,10 @@
 from django.test import SimpleTestCase
 
-from file_processing.services.export_pipeline import BaseExportPipeline
+from file_processing.services.export_pipeline import (
+    BaseExportPipeline,
+    CsvExportPipeline,
+    ExcelExportPipeline,
+)
 
 
 class RecordingExportPipeline(BaseExportPipeline):
@@ -59,3 +63,15 @@ class BaseExportPipelineTest(SimpleTestCase):
                 "artifact_type": "custom",
             },
         )
+
+
+class ConcreteExportPipelineContractTest(SimpleTestCase):
+    def test_csv_export_pipeline_is_base_export_pipeline(self):
+        pipeline = CsvExportPipeline()
+
+        self.assertIsInstance(pipeline, BaseExportPipeline)
+
+    def test_excel_export_pipeline_is_base_export_pipeline(self):
+        pipeline = ExcelExportPipeline()
+
+        self.assertIsInstance(pipeline, BaseExportPipeline)
