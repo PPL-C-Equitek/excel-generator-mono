@@ -79,6 +79,35 @@ class SessionFacadeTest(SimpleTestCase):
         )
         self.assertEqual(result, "detail")
 
+    def test_get_generated_output_for_session_user_delegates_to_query_module(self):
+        facade, query_module, _, _, _, _ = self._build_facade()
+        query_module.get_generated_output_for_session_user.return_value = "output"
+
+        result = facade.get_generated_output_for_session_user(
+            "user-id",
+            "session-id",
+            "output-id",
+        )
+
+        query_module.get_generated_output_for_session_user.assert_called_once_with(
+            "user-id",
+            "session-id",
+            "output-id",
+        )
+        self.assertEqual(result, "output")
+
+    def test_build_resume_context_delegates_to_query_module(self):
+        facade, query_module, _, _, _, _ = self._build_facade()
+        query_module.build_resume_context_for_user.return_value = {"history": []}
+
+        result = facade.build_resume_context_for_user("user-id", "session-id")
+
+        query_module.build_resume_context_for_user.assert_called_once_with(
+            "user-id",
+            "session-id",
+        )
+        self.assertEqual(result, {"history": []})
+
     def test_write_methods_delegate_to_write_module(self):
         facade, _, write_module, _, _, _ = self._build_facade()
         write_module.append_user_message.return_value = "user-message"
@@ -132,6 +161,20 @@ class SessionFacadeTest(SimpleTestCase):
             parent_output="parent-id",
         )
         self.assertEqual(result, "generated-output")
+
+    def test_update_and_delete_session_delegate_to_write_module(self):
+        facade, _, write_module, _, _, _ = self._build_facade()
+        write_module.update_session_title.return_value = "updated-session"
+
+        updated = facade.update_session_title("session-id", "Renamed")
+        facade.delete_session("session-id")
+
+        write_module.update_session_title.assert_called_once_with(
+            "session-id",
+            "Renamed",
+        )
+        write_module.delete_session.assert_called_once_with("session-id")
+        self.assertEqual(updated, "updated-session")
 
     def test_title_methods_delegate_to_title_module(self):
         facade, _, _, title_module, _, _ = self._build_facade()
