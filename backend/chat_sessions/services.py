@@ -50,8 +50,49 @@ from .thinking_log import (
 )
 
 
-# Query-related constants/functions are re-exported from session_queries
-# for backward compatibility while callers are migrated incrementally.
+__all__ = [
+    "SESSION_DETAIL_LIMIT_FIELDS",
+    "SESSION_DETAIL_MAX_LIMIT",
+    "SESSION_DETAIL_MESSAGES_DEFAULT_LIMIT",
+    "SESSION_DETAIL_OFFSET_FIELDS",
+    "SESSION_DETAIL_OUTPUTS_DEFAULT_LIMIT",
+    "SESSION_LIST_DEFAULT_LIMIT",
+    "SESSION_LIST_MAX_LIMIT",
+    "SUMMARY_RECENT_MESSAGES_KEEP",
+    "SUMMARY_REFRESH_THRESHOLD",
+    "_FAIL_SAFE_THINKING_LOG",
+    "_THINKING_LOG_BLOCKED_PATTERNS",
+    "_build_fallback_thinking_log",
+    "_contains_blocked_thinking_log_pattern",
+    "_extract_reasoning_payload",
+    "_is_valid_existing_thinking_log",
+    "_normalize_fallback_lines",
+    "_normalize_reasoning_steps",
+    "_normalize_text",
+    "_select_thinking_log_confidence",
+    "append_assistant_message",
+    "append_user_message",
+    "build_frontend_thinking_log_response",
+    "build_history_with_summary",
+    "build_resume_context_for_user",
+    "create_generated_output",
+    "create_session_for_user",
+    "delete_session",
+    "generate_session_title_from_message",
+    "get_chat_message_for_user",
+    "get_default_session_detail_pagination",
+    "get_generated_output_for_session_user",
+    "get_generated_output_for_user",
+    "get_paginated_session_detail_for_user",
+    "get_session_for_user",
+    "get_summary_threshold",
+    "list_sessions_for_user",
+    "resolve_session_title",
+    "sanitize_session_title",
+    "summarize_old_messages",
+    "update_session_title",
+    "validate_session_detail_pagination_params",
+]
 
 
 def generate_session_title_from_message(message, fallback="New Chat"):
