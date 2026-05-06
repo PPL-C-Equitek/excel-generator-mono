@@ -63,14 +63,22 @@ class _RouteAccumulator:
     precomputed_p95_latency_ms: float | None = None
     precomputed_p99_latency_ms: float | None = None
 
+    def __post_init__(self) -> None:
+        self.max_latency_samples = _normalize_max_latency_samples(
+            self.max_latency_samples
+        )
+        if self.latency_samples.maxlen != self.max_latency_samples:
+            self.latency_samples = deque(
+                self.latency_samples,
+                maxlen=self.max_latency_samples,
+            )
+
     def register(self, event: RequestMetricEvent) -> None:
         duration_ms = max(0.0, float(event.duration_ms))
         self.total_requests += 1
         self.total_latency_ms += duration_ms
         self.max_latency_ms = max(self.max_latency_ms, duration_ms)
         self.latency_samples.append(duration_ms)
-        while len(self.latency_samples) > self.max_latency_samples:
-            self.latency_samples.popleft()
         self.precomputed_p95_latency_ms = None
         self.precomputed_p99_latency_ms = None
         if event.status_code >= 400:
@@ -107,10 +115,15 @@ class _RouteAccumulator:
             return 0.0, 0.0
 
         sorted_samples = sorted(self.latency_samples)
-        return (
-            self._percentile(sorted_samples=sorted_samples, percentile=0.95),
-            self._percentile(sorted_samples=sorted_samples, percentile=0.99),
+        self.precomputed_p95_latency_ms = self._percentile(
+            sorted_samples=sorted_samples,
+            percentile=0.95,
         )
+        self.precomputed_p99_latency_ms = self._percentile(
+            sorted_samples=sorted_samples,
+            percentile=0.99,
+        )
+        return self.precomputed_p95_latency_ms, self.precomputed_p99_latency_ms
 
     @staticmethod
     def _percentile(*, sorted_samples: list[float], percentile: float) -> float:
@@ -140,6 +153,7 @@ class _RealtimeRequestRecord:
     created_at: datetime
     is_error: bool
     duration_ms: float
+    created_epoch: float | None = None
 
 
 @dataclass
@@ -259,48 +273,30 @@ class _MetricKeyNormalizerMixin:
 
 class _SnapshotFactory:
     @staticmethod
-    def _build_sorted_snapshots(
-        *,
-        items: list[tuple[tuple[str, str], object]],
-        build_snapshot,
-        sort_key,
-    ) -> list:
-        snapshots = [
-            build_snapshot(
-                item_key=item_key,
-                item_payload=item_payload,
-            )
-            for item_key, item_payload in items
-        ]
-        snapshots.sort(key=sort_key)
-        return snapshots
-
-    @staticmethod
     def build_route_snapshots(
         items: list[tuple[tuple[str, str], _RouteAccumulator]]
     ) -> list[RouteMetricSnapshot]:
-        return _SnapshotFactory._build_sorted_snapshots(
-            items=items,
-            build_snapshot=lambda *, item_key, item_payload: item_payload.to_snapshot(
-                route=item_key[0],
-                method=item_key[1],
-            ),
-            sort_key=lambda item: (-item.total_requests, item.route, item.method),
-        )
+        snapshots = [
+            accumulator.to_snapshot(route=route, method=method)
+            for (route, method), accumulator in items
+        ]
+        snapshots.sort(key=lambda item: (-item.total_requests, item.route, item.method))
+        return snapshots
 
     @staticmethod
     def build_event_snapshots(
         event_items: list[tuple[tuple[str, str], int]]
     ) -> list[EventMetricSnapshot]:
-        return _SnapshotFactory._build_sorted_snapshots(
-            items=event_items,
-            build_snapshot=lambda *, item_key, item_payload: EventMetricSnapshot(
-                event_name=item_key[0],
-                outcome=item_key[1],
-                count=item_payload,
-            ),
-            sort_key=lambda item: (-item.count, item.event_name, item.outcome),
-        )
+        snapshots = [
+            EventMetricSnapshot(
+                event_name=event_name,
+                outcome=outcome,
+                count=count,
+            )
+            for (event_name, outcome), count in event_items
+        ]
+        snapshots.sort(key=lambda item: (-item.count, item.event_name, item.outcome))
+        return snapshots
 
 
 class _RealtimeSeriesBuilder:
@@ -322,27 +318,32 @@ class _RealtimeSeriesBuilder:
         records: Iterable[_RealtimeRequestRecord],
         now_epoch: float,
     ) -> list[RealtimeMetricPoint]:
+        bucket_seconds = self._bucket_seconds
         bucket_count = max(
             1,
-            int(math.ceil(self._window_seconds / self._bucket_seconds)),
+            int(math.ceil(self._window_seconds / bucket_seconds)),
         )
-        effective_window_seconds = bucket_count * self._bucket_seconds
+        effective_window_seconds = bucket_count * bucket_seconds
         window_start_epoch = now_epoch - effective_window_seconds
         buckets = [_RealtimeBucketAccumulator() for _ in range(bucket_count)]
 
         for record in records:
-            record_epoch = self.to_epoch_seconds(record.created_at)
+            record_epoch = (
+                record.created_epoch
+                if record.created_epoch is not None
+                else self.to_epoch_seconds(record.created_at)
+            )
             if record_epoch < window_start_epoch:
                 continue
 
-            index = int((record_epoch - window_start_epoch) // self._bucket_seconds)
+            index = int((record_epoch - window_start_epoch) // bucket_seconds)
             if index >= bucket_count:
                 index = bucket_count - 1
             buckets[index].register(record)
 
         points: list[RealtimeMetricPoint] = []
         for index, bucket in enumerate(buckets):
-            bucket_end_epoch = window_start_epoch + (index + 1) * self._bucket_seconds
+            bucket_end_epoch = window_start_epoch + (index + 1) * bucket_seconds
             points.append(
                 bucket.to_snapshot(
                     bucket_timestamp=self.utc_datetime_from_epoch(bucket_end_epoch)
@@ -496,6 +497,7 @@ class InMemoryMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMi
     def record_request(self, event: RequestMetricEvent) -> None:
         key = self._route_key_from_event(event)
         now_epoch = self._realtime_series_builder.to_epoch_seconds(self._now())
+        created_epoch = self._realtime_series_builder.to_epoch_seconds(event.created_at)
         with self._lock:
             accumulator = self._routes.get(key)
             if accumulator is None:
@@ -504,7 +506,7 @@ class InMemoryMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMi
                 )
                 self._routes[key] = accumulator
             accumulator.register(event)
-            self._append_realtime_record(event)
+            self._append_realtime_record(event, created_epoch=created_epoch)
             self._prune_realtime_records(now_epoch=now_epoch)
 
     def record_event(self, event: AuthMetricEvent) -> None:
@@ -534,12 +536,18 @@ class InMemoryMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMi
             self._events.clear()
             self._recent_requests.clear()
 
-    def _append_realtime_record(self, event: RequestMetricEvent) -> None:
+    def _append_realtime_record(
+        self,
+        event: RequestMetricEvent,
+        *,
+        created_epoch: float,
+    ) -> None:
         self._recent_requests.append(
             _RealtimeRequestRecord(
                 created_at=event.created_at,
                 is_error=event.status_code >= 400,
                 duration_ms=max(0.0, float(event.duration_ms)),
+                created_epoch=created_epoch,
             )
         )
         while len(self._recent_requests) > self._max_realtime_records:
@@ -549,7 +557,12 @@ class InMemoryMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMi
         min_epoch = now_epoch - self._realtime_window_seconds
         while self._recent_requests:
             oldest = self._recent_requests[0]
-            if self._realtime_series_builder.to_epoch_seconds(oldest.created_at) >= min_epoch:
+            oldest_epoch = (
+                oldest.created_epoch
+                if oldest.created_epoch is not None
+                else self._realtime_series_builder.to_epoch_seconds(oldest.created_at)
+            )
+            if oldest_epoch >= min_epoch:
                 break
             self._recent_requests.popleft()
 
@@ -1004,11 +1017,15 @@ class RedisMetricsRepository(_MetricKeyNormalizerMixin, _RepositoryRealtimeMixin
         records: list[_RealtimeRequestRecord] = []
         for member, score in raw_realtime:
             is_error, duration_ms = self._decode_realtime_member(member)
+            created_epoch = float(score)
             records.append(
                 _RealtimeRequestRecord(
-                    created_at=self._realtime_series_builder.utc_datetime_from_epoch(float(score)),
+                    created_at=self._realtime_series_builder.utc_datetime_from_epoch(
+                        created_epoch
+                    ),
                     is_error=is_error,
                     duration_ms=duration_ms,
+                    created_epoch=created_epoch,
                 )
             )
         return records

@@ -24,6 +24,15 @@ from monitoring.repositories import (
 
 
 class RouteAccumulatorTest(SimpleTestCase):
+    def _event(self, *, duration_ms: float) -> RequestMetricEvent:
+        return RequestMetricEvent(
+            route="/upload",
+            method="POST",
+            status_code=200,
+            duration_ms=duration_ms,
+            created_at=datetime(2026, 4, 20, 10, 0, 0),
+        )
+
     def test_to_snapshot_uses_zero_average_when_no_requests(self):
         accumulator = _RouteAccumulator()
         snapshot = accumulator.to_snapshot(route="/health", method="GET")
@@ -33,6 +42,34 @@ class RouteAccumulatorTest(SimpleTestCase):
         self.assertEqual(snapshot.max_latency_ms, 0.0)
         self.assertEqual(snapshot.p95_latency_ms, 0.0)
         self.assertEqual(snapshot.p99_latency_ms, 0.0)
+
+    def test_register_keeps_latency_samples_bounded_without_manual_prune(self):
+        accumulator = _RouteAccumulator(max_latency_samples=2)
+
+        accumulator.register(self._event(duration_ms=10.0))
+        accumulator.register(self._event(duration_ms=20.0))
+        accumulator.register(self._event(duration_ms=30.0))
+
+        self.assertEqual(list(accumulator.latency_samples), [20.0, 30.0])
+        self.assertEqual(accumulator.latency_samples.maxlen, 2)
+
+    def test_to_snapshot_reuses_cached_percentiles_until_next_sample(self):
+        accumulator = _RouteAccumulator(max_latency_samples=4)
+        accumulator.register(self._event(duration_ms=10.0))
+        accumulator.register(self._event(duration_ms=20.0))
+        original_sorted = sorted
+
+        with patch("builtins.sorted", wraps=original_sorted) as sorted_mock:
+            accumulator.to_snapshot(route="/upload", method="POST")
+            accumulator.to_snapshot(route="/upload", method="POST")
+
+        self.assertEqual(sorted_mock.call_count, 1)
+
+        accumulator.register(self._event(duration_ms=30.0))
+        with patch("builtins.sorted", wraps=original_sorted) as sorted_mock:
+            accumulator.to_snapshot(route="/upload", method="POST")
+
+        self.assertEqual(sorted_mock.call_count, 1)
 
 
 class SnapshotFactoryTest(SimpleTestCase):
@@ -76,6 +113,22 @@ class SnapshotFactoryTest(SimpleTestCase):
         )
         self.assertEqual(builder.window_seconds, 20)
         self.assertEqual(builder.bucket_seconds, 10)
+
+    def test_realtime_series_builder_prefers_cached_record_epoch(self):
+        builder = _RealtimeSeriesBuilder(
+            window_seconds=20,
+            bucket_seconds=10,
+        )
+        record = _RealtimeRequestRecord(
+            created_at=builder.utc_datetime_from_epoch(1000.0),
+            is_error=False,
+            duration_ms=10.0,
+            created_epoch=195.0,
+        )
+
+        points = builder.build_points(records=(record,), now_epoch=200.0)
+
+        self.assertEqual(sum(point.requests for point in points), 1)
 
     def test_percentile_bounds_are_clamped(self):
         self.assertEqual(_RouteAccumulator._percentile(sorted_samples=[], percentile=0.5), 0.0)
