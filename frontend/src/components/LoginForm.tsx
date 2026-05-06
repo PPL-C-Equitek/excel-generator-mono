@@ -69,8 +69,7 @@ export default function LoginForm({
             )}
 
             {successMessage && (
-                <div
-                    role="status"
+                <output
                     className="mb-4 flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
                     style={{
                         backgroundColor: 'var(--success-bg)',
@@ -89,7 +88,7 @@ export default function LoginForm({
                             ×
                         </button>
                     ) : null}
-                </div>
+                </output>
             )}
 
             <form

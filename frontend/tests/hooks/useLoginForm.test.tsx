@@ -146,6 +146,64 @@ describe('useLoginForm', () => {
         expect(result.current.success).toBeNull()
     })
 
+    it('uses fallback message when login throws Error with empty message', async () => {
+        vi.mocked(api.login).mockRejectedValueOnce(new Error(''))
+
+        const { result } = renderHook(() => useLoginForm())
+
+        act(() => {
+            result.current.handleEmailChange('test@example.com')
+            result.current.handlePasswordChange('secret123')
+        })
+
+        await act(async () => {
+            await result.current.handleLogin()
+        })
+
+        expect(result.current.error).toBe('Login failed. Please try again.')
+        expect(result.current.isLoading).toBe(false)
+    })
+
+    it('uses generic fallback when login throws non-Error value', async () => {
+        vi.mocked(api.login).mockRejectedValueOnce('network down')
+
+        const { result } = renderHook(() => useLoginForm())
+
+        act(() => {
+            result.current.handleEmailChange('test@example.com')
+            result.current.handlePasswordChange('secret123')
+        })
+
+        await act(async () => {
+            await result.current.handleLogin()
+        })
+
+        expect(result.current.error).toBe('Something went wrong')
+        expect(result.current.isLoading).toBe(false)
+    })
+
+    it('handles successful login response without user profile payload', async () => {
+        vi.mocked(api.login).mockResolvedValueOnce({
+            access_token: 'access-no-user',
+            refresh_token: 'refresh-no-user',
+        } as never)
+
+        const { result } = renderHook(() => useLoginForm())
+
+        act(() => {
+            result.current.handleEmailChange('test@example.com')
+            result.current.handlePasswordChange('secret123')
+        })
+
+        await act(async () => {
+            await result.current.handleLogin()
+        })
+
+        expect(mockStoreAuthTokens).toHaveBeenCalledWith('access-no-user', 'refresh-no-user')
+        expect(window.localStorage.getItem('user_name')).toBeNull()
+        expect(window.localStorage.getItem('user_email')).toBeNull()
+    })
+
     it('shows Google config error when client id is missing', () => {
         delete process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
 
@@ -183,6 +241,57 @@ describe('useLoginForm', () => {
 
         expect(api.loginWithGoogle).toHaveBeenCalledWith('google-token')
         expect(mockStoreAuthTokens).toHaveBeenCalledWith('google-access', 'google-refresh')
+    })
+
+    it('calls googleSignIn when client id is configured', () => {
+        const { result } = renderHook(() => useLoginForm())
+
+        act(() => {
+            result.current.triggerGoogleSignIn()
+        })
+
+        expect(mockGoogleSignIn).toHaveBeenCalledTimes(1)
+    })
+
+    it('sets cancellation error when google oauth onError is fired', async () => {
+        let googleOptions: {
+            onError?: () => void
+        } = {}
+
+        mockUseGoogleLogin.mockImplementation((options) => {
+            googleOptions = options as typeof googleOptions
+            return mockGoogleSignIn
+        })
+
+        const { result } = renderHook(() => useLoginForm())
+
+        await act(async () => {
+            googleOptions.onError?.()
+        })
+
+        expect(result.current.error).toBe('Google sign-in cancelled or failed')
+    })
+
+    it('surfaces google sign-in API error when oauth success callback fails', async () => {
+        let googleOptions: {
+            onSuccess?: (tokenResponse: { access_token: string }) => void | Promise<void>
+        } = {}
+
+        mockUseGoogleLogin.mockImplementation((options) => {
+            googleOptions = options as typeof googleOptions
+            return mockGoogleSignIn
+        })
+
+        vi.mocked(api.loginWithGoogle).mockRejectedValueOnce(new Error('Google auth failed'))
+
+        const { result } = renderHook(() => useLoginForm())
+
+        await act(async () => {
+            await googleOptions.onSuccess?.({ access_token: 'google-token' })
+        })
+
+        expect(result.current.error).toBe('Google auth failed')
+        expect(result.current.isLoading).toBe(false)
     })
 
     it('clears feedback through dismiss handlers', async () => {

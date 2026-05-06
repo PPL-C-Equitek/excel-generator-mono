@@ -80,6 +80,18 @@ describe('LoginForm', () => {
         expect(screen.getByText('Welcome back!')).toBeInTheDocument()
     })
 
+    it('does not render dismiss buttons when dismiss handlers are not provided', () => {
+        renderLoginForm({
+            errorMessage: 'Invalid credentials',
+            successMessage: 'Welcome back!',
+            onDismissError: undefined,
+            onDismissSuccess: undefined,
+        })
+
+        expect(screen.queryByLabelText('Dismiss error')).not.toBeInTheDocument()
+        expect(screen.queryByLabelText('Dismiss success')).not.toBeInTheDocument()
+    })
+
     it('disables inputs and buttons when disabled', () => {
         renderLoginForm({ isDisabled: true })
 
