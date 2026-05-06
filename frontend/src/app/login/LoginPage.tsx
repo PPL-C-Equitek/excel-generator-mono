@@ -6,11 +6,16 @@ import useLoginForm from '@/hooks/useLoginForm'
 
 export default function LoginPage() {
     const {
+        email,
+        password,
         error,
         success,
         isLoading,
+        isFormDisabled,
         handleLogin,
         triggerGoogleSignIn,
+        handleEmailChange,
+        handlePasswordChange,
         dismissError,
         dismissSuccess,
     } = useLoginForm()
@@ -20,6 +25,10 @@ export default function LoginPage() {
             <Navbar links={LANDING_NAV_LINKS} activePage="login" />
             <main className="flex flex-1 items-center justify-center px-4 py-12">
                 <LoginForm
+                    email={email}
+                    password={password}
+                    onEmailChange={handleEmailChange}
+                    onPasswordChange={handlePasswordChange}
                     onSubmit={handleLogin}
                     onGoogleSignIn={triggerGoogleSignIn}
                     errorMessage={error}
@@ -27,6 +36,7 @@ export default function LoginPage() {
                     successMessage={success}
                     onDismissSuccess={dismissSuccess}
                     isLoading={isLoading}
+                    isDisabled={isFormDisabled}
                 />
             </main>
         </div>

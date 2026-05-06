@@ -9,6 +9,8 @@ interface AuthenticatedUser {
     email: string
 }
 
+const EMAIL_REGEX = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$/
+
 function persistUser(user?: AuthenticatedUser): void {
     if (!user || globalThis.localStorage === undefined) {
         return
@@ -20,6 +22,8 @@ function persistUser(user?: AuthenticatedUser): void {
 
 export default function useLoginForm() {
     const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    const [email, setEmail] = useState('')
+    const [password, setPassword] = useState('')
     const [error, setError] = useState<string | null>(null)
     const [success, setSuccess] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
@@ -63,11 +67,30 @@ export default function useLoginForm() {
         setError('Something went wrong')
     }
 
-    const handleLogin = async (data: LoginFormData) => {
+    const validateForm = (): LoginFormData | null => {
+        if (!email || email.length > 254 || !EMAIL_REGEX.test(email)) {
+            setError('Please enter a valid email address.')
+            return null
+        }
+
+        if (!password.trim()) {
+            setError('Password is required.')
+            return null
+        }
+
+        return { email, password }
+    }
+
+    const handleLogin = async () => {
+        const formData = validateForm()
+        if (!formData) {
+            return
+        }
+
         try {
             beginLoginAttempt()
 
-            const response = await login(data.email, data.password)
+            const response = await login(formData.email, formData.password)
             setSuccess(`Welcome back! You're being redirected to your workspace...`)
             saveTokensAndRedirect(response.access_token, response.refresh_token, response.user)
         } catch (nextError: unknown) {
@@ -103,11 +126,20 @@ export default function useLoginForm() {
     }
 
     return {
+        email,
+        password,
         error,
         success,
         isLoading,
+        isFormDisabled: isLoading || !!success,
         handleLogin,
         triggerGoogleSignIn,
+        handleEmailChange: (value: string) => {
+            setEmail(value)
+        },
+        handlePasswordChange: (value: string) => {
+            setPassword(value)
+        },
         dismissError: () => setError(null),
         dismissSuccess: () => setSuccess(null),
     }
