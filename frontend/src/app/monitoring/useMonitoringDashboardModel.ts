@@ -8,19 +8,11 @@ import type {
     MonitoringStatsStreamHandle,
     MonitoringStatsStreamOptions,
 } from '@/services/monitoring'
-import { clamp, formatTimeLabel } from './monitoringUi'
-import type {
-    AuthEventSummaryRow,
-    ErrorRateMeter,
-    EventRow,
-    LatencyChartModel,
-    LatencySeriesPoint,
-    ReadinessMeter,
-    RealtimeTotals,
-    RouteSummaryRow,
-} from './monitoringViewModelTypes'
 import { getMonitoringAuthToken, MONITORING_STREAM_UNEXPECTED_CLOSE_MESSAGE } from '@/services/monitoring'
-import { monitoringRouteVisibilityPolicy } from './monitoringRoutePolicy'
+import {
+    createMonitoringDashboardProjection,
+    type MonitoringDashboardProjection,
+} from './monitoringDashboardProjection'
 
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 5000
 const STALE_THRESHOLD_MULTIPLIER = 3
@@ -28,14 +20,6 @@ const MIN_STALE_THRESHOLD_MS = 15000
 const RETRY_BASE_DELAY_MS = 2000
 const RETRY_MAX_DELAY_MS = 30000
 const RETRY_TICK_INTERVAL_MS = 1000
-const MAX_REALTIME_LATENCY_TICKS = 6
-const MAX_ROUTE_SUMMARY_ROWS = 6
-const MAX_AUTH_EVENT_SUMMARY_ROWS = 8
-const LATENCY_CHART_WIDTH = 520
-const LATENCY_CHART_HEIGHT = 220
-const LATENCY_CHART_PADDING_X = 26
-const LATENCY_CHART_TOP_PADDING = 16
-const LATENCY_CHART_BOTTOM_PADDING = 30
 
 export type MonitoringDashboardService = {
     getMonitoringLive: () => Promise<MonitoringLivePayload>
@@ -46,7 +30,7 @@ export type MonitoringDashboardService = {
     getMonitoringAuthenticatedSnapshot?: () => Promise<MonitoringAuthenticatedSnapshot>
 }
 
-export type MonitoringDashboardViewModel = {
+export type MonitoringDashboardViewModel = MonitoringDashboardProjection & {
     livePayload: MonitoringLivePayload | null
     accessDecision: MonitoringAccessDecision | null
     readyPayload: MonitoringReadyPayload | null
@@ -59,20 +43,6 @@ export type MonitoringDashboardViewModel = {
     nextRetryAtMs: number | null
     isDataStale: boolean
     lastSync: string
-    hasRealtimeSeries: boolean
-    realtimeWindowSeconds: number
-    realtimeBucketSeconds: number
-    realtimeTotals: RealtimeTotals
-    eventRows: EventRow[]
-    authEventSummaryRows: AuthEventSummaryRow[]
-    maxEventCount: number
-    visibleRoutes: MonitoringStatsPayload['routes']
-    routeSummaryRows: RouteSummaryRow[]
-    maxRouteRequests: number
-    latencySeries: LatencySeriesPoint[]
-    latencyChart: LatencyChartModel
-    errorRateMeter: ErrorRateMeter
-    readinessMeter: ReadinessMeter
     refreshDashboard: () => void
 }
 
@@ -86,24 +56,6 @@ function calculateRetryDelayMs(consecutiveFailures: number): number {
         RETRY_MAX_DELAY_MS,
         RETRY_BASE_DELAY_MS * (2 ** Math.max(0, consecutiveFailures - 1))
     )
-}
-
-function calculateBarWidth(value: number, maxValue: number): string {
-    return `${Math.max(8, Math.round((value / maxValue) * 100))}%`
-}
-
-function shouldShowLatencyPointLabel(
-    seriesLength: number,
-    index: number,
-    isLastEntry: boolean,
-): boolean {
-    if (seriesLength <= 6) {
-        return true
-    }
-    if (isLastEntry) {
-        return true
-    }
-    return index % 2 === 0
 }
 
 export function getIsPageVisible(): boolean {
@@ -455,230 +407,10 @@ export function useMonitoringDashboardModel({
         }
     }, [stopMonitoringStatsStream])
 
-    const eventRows = useMemo<EventRow[]>(() => {
-        if (!statsPayload) {
-            return []
-        }
-
-        const flattened = Object.entries(statsPayload.events).flatMap(([eventName, outcomes]) =>
-            Object.entries(outcomes).map(([outcome, count]) => ({
-                eventName,
-                outcome,
-                count,
-            }))
-        )
-
-        flattened.sort((a, b) => b.count - a.count || a.eventName.localeCompare(b.eventName))
-        return flattened
-    }, [statsPayload])
-
-    const visibleRoutes = useMemo(() => (
-        statsPayload
-            ? monitoringRouteVisibilityPolicy.filterVisibleRoutes(statsPayload.routes)
-            : []
-    ), [statsPayload])
-
-    const maxRouteRequests = useMemo(() => {
-        if (visibleRoutes.length === 0) {
-            return 1
-        }
-
-        return visibleRoutes.reduce(
-            (maxRequests, routeRow) => Math.max(maxRequests, routeRow.total_requests),
-            1
-        )
-    }, [visibleRoutes])
-
-    const maxEventCount = useMemo(() => {
-        if (eventRows.length === 0) {
-            return 1
-        }
-
-        return eventRows.reduce(
-            (maxCount, eventRow) => Math.max(maxCount, eventRow.count),
-            1
-        )
-    }, [eventRows])
-
-    const routeSummaryRows = useMemo<RouteSummaryRow[]>(() => (
-        visibleRoutes
-            .slice(0, MAX_ROUTE_SUMMARY_ROWS)
-            .map((routeRow) => ({
-                route: routeRow.route,
-                method: routeRow.method,
-                totalRequests: routeRow.total_requests,
-                totalErrors: routeRow.total_errors,
-                avgLatencyMs: routeRow.avg_latency_ms,
-                requestWidth: calculateBarWidth(routeRow.total_requests, maxRouteRequests),
-            }))
-    ), [maxRouteRequests, visibleRoutes])
-
-    const authEventSummaryRows = useMemo<AuthEventSummaryRow[]>(() => (
-        eventRows
-            .slice(0, MAX_AUTH_EVENT_SUMMARY_ROWS)
-            .map((eventRow) => ({
-                ...eventRow,
-                eventWidth: calculateBarWidth(eventRow.count, maxEventCount),
-            }))
-    ), [eventRows, maxEventCount])
-
-    const timeseriesPoints = useMemo(() => {
-        const points = statsPayload?.timeseries?.points ?? []
-        const validPoints = points.filter((point) => point !== null && point !== undefined)
-        return validPoints.slice(-MAX_REALTIME_LATENCY_TICKS)
-    }, [statsPayload])
-
-    const rawRealtimeWindowSeconds = statsPayload?.timeseries?.window_seconds ?? 0
-    const realtimeBucketSeconds = statsPayload?.timeseries?.bucket_seconds ?? 0
-    const hasRealtimeSeries = timeseriesPoints.length > 0
-    const realtimeWindowSeconds = useMemo(() => {
-        if (!hasRealtimeSeries || realtimeBucketSeconds <= 0) {
-            return rawRealtimeWindowSeconds
-        }
-
-        const renderedWindowSeconds = realtimeBucketSeconds * timeseriesPoints.length
-        if (rawRealtimeWindowSeconds <= 0) {
-            return renderedWindowSeconds
-        }
-
-        return Math.min(rawRealtimeWindowSeconds, renderedWindowSeconds)
-    }, [hasRealtimeSeries, rawRealtimeWindowSeconds, realtimeBucketSeconds, timeseriesPoints.length])
-
-    const realtimeTotals = useMemo<RealtimeTotals>(() => {
-        if (timeseriesPoints.length === 0) {
-            return null
-        }
-        const totals = timeseriesPoints.reduce(
-            (nextTotals, point) => ({
-                requests: nextTotals.requests + point.requests,
-                errors: nextTotals.errors + point.errors,
-            }),
-            { requests: 0, errors: 0 }
-        )
-        return {
-            requests: totals.requests,
-            errors: totals.errors,
-            errorRate: totals.requests > 0 ? totals.errors / totals.requests : 0,
-        }
-    }, [timeseriesPoints])
-
-    const latencySeries = useMemo<LatencySeriesPoint[]>(() => {
-        if (timeseriesPoints.length > 0) {
-            return timeseriesPoints.map((point, index) => ({
-                id: index + 1,
-                label: formatTimeLabel(point.timestamp),
-                value: point.avg_latency_ms,
-                requests: point.requests,
-            }))
-        }
-
-        if (!statsPayload) {
-            return []
-        }
-
-        return visibleRoutes
-            .slice(0, 8)
-            .map((routeRow, index) => ({
-                id: index + 1,
-                label: routeRow.route,
-                value: routeRow.avg_latency_ms,
-                requests: routeRow.total_requests,
-            }))
-    }, [statsPayload, timeseriesPoints, visibleRoutes])
-
-    const latencyChart = useMemo<LatencyChartModel>(() => {
-        if (latencySeries.length === 0) {
-            return {
-                linePoints: '',
-                areaPath: '',
-                maxLatency: 0,
-                maxRequests: 0,
-                points: [],
-            }
-        }
-
-        const plotWidth = LATENCY_CHART_WIDTH - LATENCY_CHART_PADDING_X * 2
-        const plotHeight = LATENCY_CHART_HEIGHT - LATENCY_CHART_TOP_PADDING - LATENCY_CHART_BOTTOM_PADDING
-        const maxLatency = latencySeries.reduce(
-            (nextMaxLatency, entry) => Math.max(nextMaxLatency, entry.value),
-            1
-        )
-        const maxRequests = latencySeries.reduce(
-            (nextMaxRequests, entry) => Math.max(nextMaxRequests, entry.requests),
-            0
-        )
-
-        const points = latencySeries.map((entry, index) => {
-            const normalizedX = latencySeries.length === 1 ? 0.5 : index / (latencySeries.length - 1)
-            const normalizedY = clamp(entry.value / maxLatency, 0, 1)
-
-            const x = LATENCY_CHART_PADDING_X + normalizedX * plotWidth
-            const y = LATENCY_CHART_TOP_PADDING + (1 - normalizedY) * plotHeight
-            const isLastEntry = index === latencySeries.length - 1
-
-            return {
-                id: entry.id,
-                x,
-                y,
-                xLabel: hasRealtimeSeries ? entry.label : String(entry.id),
-                showLabel: shouldShowLatencyPointLabel(latencySeries.length, index, isLastEntry),
-            }
-        })
-
-        const linePoints = points.map((point) => `${point.x},${point.y}`).join(' ')
-        const firstPoint = points.at(0)!
-        const lastPoint = points.at(-1)!
-        const polylinePoints = points.map((point) => `${point.x} ${point.y}`).join(' L ')
-        const baselineY = LATENCY_CHART_HEIGHT - LATENCY_CHART_BOTTOM_PADDING
-        const areaPath = `M ${firstPoint.x} ${baselineY} L ${polylinePoints} L ${lastPoint.x} ${baselineY} Z`
-
-        return {
-            linePoints,
-            areaPath,
-            maxLatency,
-            maxRequests,
-            points,
-        }
-    }, [hasRealtimeSeries, latencySeries])
-
-    const errorRateMeter = useMemo<ErrorRateMeter>(() => {
-        const sourceErrorRate = realtimeTotals?.errorRate ?? statsPayload?.totals.error_rate ?? 0
-        const errorRate = clamp(sourceErrorRate, 0, 1)
-        const meterPercent = errorRate * 100
-        const progressLength = 251.2 * errorRate
-        const colorClass = errorRate <= 0.05 ? 'text-blue-600' : 'text-red-700'
-
-        return {
-            percentText: `${meterPercent.toFixed(2)}%`,
-            progressLength,
-            colorClass,
-        }
-    }, [statsPayload, realtimeTotals])
-
-    const readinessMeter = useMemo<ReadinessMeter>(() => {
-        if (!readyPayload || readyPayload.checks.length === 0) {
-            return {
-                percentText: '--',
-                progressLength: 0,
-                colorClass: 'text-gray-600',
-                healthyChecks: 0,
-                totalChecks: 0,
-            }
-        }
-
-        const healthyChecks = readyPayload.checks.filter((check) => check.status.toLowerCase() === 'ok').length
-        const totalChecks = readyPayload.checks.length
-        const readinessRate = clamp(healthyChecks / totalChecks, 0, 1)
-        const progressLength = 251.2 * readinessRate
-
-        return {
-            percentText: `${(readinessRate * 100).toFixed(0)}%`,
-            progressLength,
-            colorClass: readinessRate >= 0.8 ? 'text-blue-600' : 'text-red-700',
-            healthyChecks,
-            totalChecks,
-        }
-    }, [readyPayload])
+    const dashboardProjection = useMemo(() => createMonitoringDashboardProjection({
+        statsPayload,
+        readyPayload,
+    }), [readyPayload, statsPayload])
 
     useEffect(() => {
         if (lastSuccessfulAtMs === null) {
@@ -731,20 +463,7 @@ export function useMonitoringDashboardModel({
         nextRetryAtMs,
         isDataStale,
         lastSync,
-        hasRealtimeSeries,
-        realtimeWindowSeconds,
-        realtimeBucketSeconds,
-        realtimeTotals,
-        eventRows,
-        authEventSummaryRows,
-        maxEventCount,
-        visibleRoutes,
-        routeSummaryRows,
-        maxRouteRequests,
-        latencySeries,
-        latencyChart,
-        errorRateMeter,
-        readinessMeter,
+        ...dashboardProjection,
         refreshDashboard,
     }
 }
