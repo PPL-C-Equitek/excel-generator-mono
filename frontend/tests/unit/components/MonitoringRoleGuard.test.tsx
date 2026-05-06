@@ -153,4 +153,25 @@ describe('MonitoringRoleGuard', () => {
 
         expect(mockReplace).not.toHaveBeenCalled()
     })
+
+    it('does not redirect after unmount when the access check rejects late', async () => {
+        let rejectAccess: ((reason?: unknown) => void) | undefined
+        mockGetMonitoringAccess.mockReturnValue(
+            new Promise((_, reject) => {
+                rejectAccess = reject
+            })
+        )
+
+        const { unmount } = render(
+            <MonitoringRoleGuard>
+                <div data-testid="monitoring-content">Monitoring Content</div>
+            </MonitoringRoleGuard>
+        )
+
+        unmount()
+        rejectAccess?.(new Error('late monitoring access failure'))
+        await Promise.resolve()
+
+        expect(mockReplace).not.toHaveBeenCalled()
+    })
 })

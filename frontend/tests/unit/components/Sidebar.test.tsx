@@ -100,6 +100,43 @@ describe('Sidebar', () => {
         expect(screen.queryByRole('link', { name: 'Monitoring' })).not.toBeInTheDocument()
     })
 
+    it('does not update Monitoring visibility after unmount when access resolves late', async () => {
+        let resolveAccess: ((value: { allowed: boolean; reason: string }) => void) | undefined
+        mockGetMonitoringAccess.mockReturnValue(
+            new Promise((resolve) => {
+                resolveAccess = resolve
+            })
+        )
+
+        const { unmount } = render(<Sidebar activeMenu="convert" />)
+
+        unmount()
+        resolveAccess?.({
+            allowed: true,
+            reason: 'ok',
+        })
+        await Promise.resolve()
+
+        expect(mockGetMonitoringAccess).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not update Monitoring visibility after unmount when access rejects late', async () => {
+        let rejectAccess: ((reason?: unknown) => void) | undefined
+        mockGetMonitoringAccess.mockReturnValue(
+            new Promise((_, reject) => {
+                rejectAccess = reject
+            })
+        )
+
+        const { unmount } = render(<Sidebar activeMenu="convert" />)
+
+        unmount()
+        rejectAccess?.(new Error('late monitoring access failure'))
+        await Promise.resolve()
+
+        expect(mockGetMonitoringAccess).toHaveBeenCalledTimes(1)
+    })
+
     it('renders Monitoring menu when the user has monitoring access', async () => {
         mockGetMonitoringAccess.mockResolvedValue({
             allowed: true,
