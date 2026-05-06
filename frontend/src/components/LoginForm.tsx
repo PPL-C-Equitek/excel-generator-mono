@@ -1,7 +1,5 @@
 'use client'
 
-import FeedbackMessage from './FeedbackMessage'
-
 export interface LoginFormData {
     email: string
     password: string
@@ -47,23 +45,51 @@ export default function LoginForm({
             </p>
 
             {errorMessage && (
-                <FeedbackMessage
-                    message={errorMessage}
-                    variant="error"
-                    dismissible={!!onDismissError}
-                    onDismiss={onDismissError}
-                    className="mb-4"
-                />
+                <div
+                    role="alert"
+                    className="mb-4 flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
+                    style={{
+                        backgroundColor: 'var(--danger-bg)',
+                        borderColor: 'var(--danger-border)',
+                        color: 'var(--danger-text)',
+                    }}
+                >
+                    <span>{errorMessage}</span>
+                    {onDismissError ? (
+                        <button
+                            type="button"
+                            onClick={onDismissError}
+                            aria-label="Dismiss error"
+                            className="shrink-0"
+                        >
+                            ×
+                        </button>
+                    ) : null}
+                </div>
             )}
 
             {successMessage && (
-                <FeedbackMessage
-                    message={successMessage}
-                    variant="success"
-                    dismissible={!!onDismissSuccess}
-                    onDismiss={onDismissSuccess}
-                    className="mb-4"
-                />
+                <div
+                    role="status"
+                    className="mb-4 flex items-start justify-between gap-3 rounded-lg border p-3 text-sm"
+                    style={{
+                        backgroundColor: 'var(--success-bg)',
+                        borderColor: 'var(--success-border)',
+                        color: 'var(--success-text)',
+                    }}
+                >
+                    <span>{successMessage}</span>
+                    {onDismissSuccess ? (
+                        <button
+                            type="button"
+                            onClick={onDismissSuccess}
+                            aria-label="Dismiss success"
+                            className="shrink-0"
+                        >
+                            ×
+                        </button>
+                    ) : null}
+                </div>
             )}
 
             <form
