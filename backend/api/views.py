@@ -280,6 +280,22 @@ class SessionOutputDownloadConfig:
     download_internal_error_message: str
 
 
+@dataclass(frozen=True)
+class ExportEndpointConfig:
+    request_serializer_class: type
+    response_serializer_class: type
+    export_callable: callable
+    storage_dir: str
+    validation_error_types: tuple[type[Exception], ...]
+    generation_error_types: tuple[type[Exception], ...]
+    invalid_request_message: str
+    internal_error_message: str
+    validation_log_message: str
+    generation_log_message: str
+    unexpected_log_message: str
+    invalid_metadata_message: str
+
+
 def _history_not_found_response():
     return Response(
         {
@@ -493,6 +509,35 @@ def _build_export_error_response(
             "message": internal_error_message,
         },
         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
+
+def _handle_export_endpoint(request, config: ExportEndpointConfig):
+    serializer = config.request_serializer_class(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        metadata = config.export_callable(
+            output_json=serializer.validated_data["output_json"],
+            storage_dir=config.storage_dir,
+        )
+    except Exception as exc:
+        return _build_export_error_response(
+            error=exc,
+            validation_error_types=config.validation_error_types,
+            generation_error_types=config.generation_error_types,
+            invalid_request_message=config.invalid_request_message,
+            internal_error_message=config.internal_error_message,
+            validation_log_message=config.validation_log_message,
+            generation_log_message=config.generation_log_message,
+            unexpected_log_message=config.unexpected_log_message,
+        )
+
+    return _build_export_success_response(
+        metadata=metadata,
+        response_serializer_class=config.response_serializer_class,
+        invalid_metadata_message=config.invalid_metadata_message,
     )
 
 
@@ -745,18 +790,13 @@ def upload(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def export_csv(request):
-    serializer = CsvExportRequestSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        metadata = export_csv_to_filesystem(
-            output_json=serializer.validated_data["output_json"],
+    return _handle_export_endpoint(
+        request=request,
+        config=ExportEndpointConfig(
+            request_serializer_class=CsvExportRequestSerializer,
+            response_serializer_class=CsvExportResponseSerializer,
+            export_callable=export_csv_to_filesystem,
             storage_dir=settings.CSV_EXPORT_DIR,
-        )
-    except Exception as exc:
-        return _build_export_error_response(
-            error=exc,
             validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
             generation_error_types=(OutputCSVGenerationError,),
             invalid_request_message="Invalid CSV export request.",
@@ -764,13 +804,9 @@ def export_csv(request):
             validation_log_message="Validation or mapping error during CSV export.",
             generation_log_message="CSV generation error during CSV export.",
             unexpected_log_message="Unexpected error during CSV export.",
-        )
-
-    return _build_export_success_response(
-        metadata=metadata,
-        response_serializer_class=CsvExportResponseSerializer,
-        invalid_metadata_message=(
-            "Failed to generate CSV due to invalid response metadata."
+            invalid_metadata_message=(
+                "Failed to generate CSV due to invalid response metadata."
+            ),
         ),
     )
 
@@ -779,18 +815,13 @@ def export_csv(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated, IsVerifiedUser])
 def export_excel(request):
-    serializer = ExcelExportRequestSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        metadata = export_excel_to_filesystem(
-            output_json=serializer.validated_data["output_json"],
+    return _handle_export_endpoint(
+        request=request,
+        config=ExportEndpointConfig(
+            request_serializer_class=ExcelExportRequestSerializer,
+            response_serializer_class=ExcelExportResponseSerializer,
+            export_callable=export_excel_to_filesystem,
             storage_dir=settings.EXCEL_EXPORT_DIR,
-        )
-    except Exception as exc:
-        return _build_export_error_response(
-            error=exc,
             validation_error_types=(OutputLLMValidationError, OutputCSVMappingError),
             generation_error_types=(OutputExcelGenerationError,),
             invalid_request_message="Invalid Excel export request.",
@@ -798,13 +829,9 @@ def export_excel(request):
             validation_log_message="Validation or mapping error during Excel export.",
             generation_log_message="Excel generation error during Excel export.",
             unexpected_log_message="Unexpected error during Excel export.",
-        )
-
-    return _build_export_success_response(
-        metadata=metadata,
-        response_serializer_class=ExcelExportResponseSerializer,
-        invalid_metadata_message=(
-            "Failed to generate Excel due to invalid response metadata."
+            invalid_metadata_message=(
+                "Failed to generate Excel due to invalid response metadata."
+            ),
         ),
     )
 
