@@ -604,7 +604,7 @@ export function useMonitoringDashboardModel({
             1
         )
         const maxRequests = latencySeries.reduce(
-            (nextMaxRequests, entry) => Math.max(nextMaxRequests, entry.requests ?? 0),
+            (nextMaxRequests, entry) => Math.max(nextMaxRequests, entry.requests),
             0
         )
 
