@@ -308,7 +308,7 @@ class ExportServiceTest(SimpleTestCase):
     def test_build_export_output_json_reuses_cached_serialization_for_repeated_nested_cell_values(self):
         shared_value = {"unit": "ICU", "meta": {"active": True}}
 
-        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
+        with patch("llm.services.export_service.json.dumps", wraps=json.dumps) as mock_json_dumps:
             export_output_json = build_export_output_json(
                 input_json={"filename": "summary.xlsx"},
                 output_json={
@@ -334,7 +334,7 @@ class ExportServiceTest(SimpleTestCase):
     def test_build_export_output_json_serializes_repeated_bytes_cells_once_with_cache(self):
         shared_value = b"ICU"
 
-        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
+        with patch("llm.services.export_service.json.dumps", wraps=json.dumps) as mock_json_dumps:
             export_output_json = build_export_output_json(
                 input_json={"filename": "summary.xlsx"},
                 output_json={
@@ -358,7 +358,7 @@ class ExportServiceTest(SimpleTestCase):
     def test_to_scalar_cell_serializes_nested_object_without_cache(self):
         payload = {"unit": "ICU", "meta": {"active": True}}
 
-        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
+        with patch("llm.services.export_service.json.dumps", wraps=json.dumps) as mock_json_dumps:
             result = _to_scalar_cell(payload)
 
         self.assertEqual(result, json.dumps(payload))

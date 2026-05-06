@@ -657,7 +657,7 @@ class BuildTableContextLinesTest(SimpleTestCase):
         self.assertEqual(len(row_lines), 3)
 
     def test_edge_truncates_to_3_rows_when_more_exist(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         rows = [{"X": i} for i in range(5)]
         table = {"table_name": "T", "headers": ["X"], "rows": rows}
@@ -667,7 +667,7 @@ class BuildTableContextLinesTest(SimpleTestCase):
         self.assertEqual(len(row_lines), 3)
 
     def test_edge_truncates_to_5_columns_per_row_when_more_exist(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         row = {f"col{i}": i for i in range(8)}
         table = {"table_name": "T", "headers": [f"col{i}" for i in range(8)], "rows": [row]}
@@ -687,7 +687,7 @@ class BuildTableContextLinesTest(SimpleTestCase):
         self.assertEqual(len(row_lines), 0)
 
     def test_edge_uses_default_sheet_name_when_table_name_missing(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         table = {"headers": ["A"], "rows": []}
         lines = _build_table_context_lines(table)

@@ -5,14 +5,12 @@ from uuid import UUID
 
 from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
-from django.conf import settings
 from django.db import transaction
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from chat_sessions.models import ChatMessage
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
@@ -61,6 +59,10 @@ from .services.export_service import (
     _normalize_filename_candidate,
     build_export_output_json,
     extract_original_name,
+)
+from .services.chat_context_service import (
+    _inject_file_context_if_available,
+    _build_chat_context_from_session,
 )
 logger = logging.getLogger(__name__)
 
@@ -154,61 +156,6 @@ def _resolve_send_message_session_context(user, session_id):
         return None, None
     return session, _build_session_message_history(session)
 
-
-def _build_table_context_lines(table: dict) -> list:
-    table_name = table.get("table_name", "Sheet")
-    headers = table.get("headers") or []
-    rows = table.get("rows") or []
-    lines = [f"Table '{table_name}': {len(headers)} columns, {len(rows)} rows"]
-    if headers:
-        lines.append(f"  Headers: {', '.join(str(h) for h in headers)}")
-    for i, row in enumerate(rows[:3]):
-        if isinstance(row, dict):
-            sample = dict(list(row.items())[:5])
-            lines.append(f"  Row {i + 1}: {json.dumps(sample)}")
-    return lines
-
-
-def _build_compact_file_context(export_json: dict) -> str:
-    lines = [
-        "[CONVERTED_FILE_CONTEXT]",
-        "The user is reviewing a converted file. "
-        "Use the metadata and samples below to answer questions about the file.",
-    ]
-    doc_info = export_json.get("document_info")
-    if isinstance(doc_info, dict):
-        filename = doc_info.get("filename", "unknown")
-        source_type = doc_info.get("source_type", "unknown")
-        lines.append(f"File: {filename} ({source_type})")
-
-    summary = export_json.get("summary")
-    if isinstance(summary, dict) and summary:
-        parts = [f"{k}={v}" for k, v in summary.items()]
-        lines.append("Summary: " + ", ".join(parts))
-
-    content_data = export_json.get("content_data")
-    if isinstance(content_data, list):
-        for table in content_data:
-            if isinstance(table, dict):
-                lines.extend(_build_table_context_lines(table))
-
-    return "\n".join(lines)
-
-
-def _inject_file_context_if_available(session, history: list) -> list:
-    if session is None:
-        return history
-    last_output = session.generated_outputs.order_by("-created_at").first()
-    if last_output is None:
-        return history
-    export_json = last_output.export_output_json or {}
-    if not export_json:
-        raw = getattr(last_output, "output_json", None)
-        if raw:
-            export_json = build_export_output_json(input_json=raw, output_json=raw)
-    if not export_json:
-        return history
-    return [{"role": "system", "content": _build_compact_file_context(export_json)}] + history
 
 
 def _generate_send_message_reply_and_title(session, history, message):
@@ -338,19 +285,6 @@ def _resolve_generate_session(user, session_id):
     return session, None
 
 
-def _build_chat_context_from_session(session) -> str | None:
-    if session is None:
-        return None
-    max_instructions = max(1, getattr(settings, "CHAT_CONTEXT_MAX_USER_INSTRUCTIONS", 5))
-    recent = list(
-        session.messages
-        .filter(role=ChatMessage.ROLE_USER)
-        .order_by("-created_at")[:max_instructions]
-    )
-    if not recent:
-        return None
-    recent.reverse()
-    return "\n".join(f"USER: {msg.content}" for msg in recent)
 
 
 def _resolve_message_target_output(user, session, target_output_id):
