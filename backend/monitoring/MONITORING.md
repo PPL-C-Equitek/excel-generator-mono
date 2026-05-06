@@ -147,6 +147,7 @@ Defined in `backend/config/settings.py` and consumed in `monitoring/container.py
 - `MONITORING_METRICS_BACKEND` (`memory` or `redis`, default `memory`)
 - `MONITORING_STREAM_INTERVAL_SECONDS` (default `2.0`)
 - `MONITORING_STATS_CACHE_TTL_SECONDS` (default `2.0`)
+- `MONITORING_SNAPSHOT_READINESS_CACHE_TTL_SECONDS` (default `2.0`; used by `/monitoring/snapshot/` only)
 
 ### Realtime and route sampling
 - `MONITORING_REALTIME_WINDOW_SECONDS` (default `300`)

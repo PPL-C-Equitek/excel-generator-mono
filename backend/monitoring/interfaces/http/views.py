@@ -136,7 +136,7 @@ def snapshot(request):
         )
 
     service = get_monitoring_service()
-    _, ready_payload = service.readiness()
+    _, ready_payload = service.snapshot_readiness()
     return Response(
         {
             "access": decision_payload,
