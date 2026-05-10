@@ -448,6 +448,151 @@ def _should_expose_validation_log() -> bool:
     return bool(getattr(settings, "LLM_EXPOSE_VALIDATION_LOG", False))
 
 
+def _build_refinement_config(refinement_payload: dict[str, Any]) -> RefinementConfig:
+    return RefinementConfig(
+        enabled=True,
+        max_iterations=int(refinement_payload.get("max_iterations", 3)),
+        early_exit_on_valid=bool(refinement_payload.get("early_exit_on_valid", True)),
+    )
+
+
+def _run_refinement_generation(
+    llm_generation_service: LlmGenerationService,
+    input_json: dict[str, Any] | list[Any],
+    custom_schema_id,
+    include_reasoning: bool,
+    refinement_payload: dict[str, Any],
+    chat_context: str | None = None,
+) -> dict[str, Any]:
+    refinement_orchestrator = RefinementOrchestrator(
+        generation_service=llm_generation_service,
+        reasoning_service=(build_llm_reasoning_service() if include_reasoning else None),
+    )
+    refinement_result = refinement_orchestrator.run(
+        input_json=input_json,
+        custom_schema_id=custom_schema_id,
+        include_reasoning=include_reasoning,
+        refinement_config=_build_refinement_config(refinement_payload),
+        chat_context=chat_context,
+        file_name=extract_original_name(input_json, input_json),
+        document_type=_extract_document_type(input_json),
+    )
+    return {
+        "refinement_enabled": True,
+        "output_json": _sanitize_output_json(refinement_result["output_json"]),
+        "raw_json": _sanitize_output_json(refinement_result["raw_json"]),
+        "validated_json": _sanitize_output_json(refinement_result["validated_json"]),
+        "validation_log": refinement_result["validation_log"],
+        "reasoning_response": refinement_result["reasoning"],
+        "refinement_meta": refinement_result["refinement_meta"],
+    }
+
+
+def _run_basic_generation(
+    llm_generation_service: LlmGenerationService,
+    input_json: dict[str, Any] | list[Any],
+    custom_schema_id,
+    include_reasoning: bool,
+    chat_context: str | None = None,
+) -> dict[str, Any]:
+    output_json = llm_generation_service.generate(
+        input_json=input_json,
+        custom_schema_id=custom_schema_id,
+        chat_context=chat_context,
+    )
+    sanitized_output_json = _sanitize_output_json(output_json)
+    return {
+        "refinement_enabled": False,
+        "output_json": sanitized_output_json,
+        "raw_json": None,
+        "validated_json": None,
+        "validation_log": None,
+        "reasoning_response": _generate_optional_reasoning(
+            include_reasoning=include_reasoning,
+            input_json=input_json,
+            output_json=sanitized_output_json,
+        ),
+        "refinement_meta": None,
+    }
+
+
+def _llm_generate_error_response(exc: Exception) -> Response:
+    if isinstance(exc, CustomSchemaNotFoundError):
+        return Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
+    if isinstance(exc, OpenAIConfigurationError):
+        return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
+    if isinstance(exc, OpenAIUpstreamError):
+        logger.exception("Upstream LLM provider error while handling llm_generate request.")
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
+    if isinstance(exc, OpenAIServiceError):
+        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+    if isinstance(exc, ValueError):
+        logger.exception("Invalid input_json payload.")
+        return Response(
+            {
+                "detail": INVALID_REQUEST_DETAIL,
+                "errors": {"input_json": [INVALID_INPUT_JSON_DETAIL]},
+            },
+            status=400,
+        )
+
+    logger.exception("Unexpected error while handling llm_generate request.")
+    return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+
+
+def _build_llm_generate_response_payload(result: dict[str, Any]) -> dict[str, Any]:
+    response_payload = {
+        "output_json": result["output_json"],
+        "reasoning": result["reasoning_response"],
+    }
+
+    if not result["refinement_enabled"]:
+        return response_payload
+
+    refinement_payload = {
+        "validated_json": result["validated_json"],
+    }
+    if _should_expose_validation_log():
+        refinement_payload["raw_json"] = result["raw_json"]
+        refinement_payload["validation_log"] = result["validation_log"]
+        refinement_payload["refinement_meta"] = result["refinement_meta"]
+    response_payload.update(refinement_payload)
+    return response_payload
+
+
+def _execute_llm_generate_flow(
+    validated_data: dict[str, Any],
+    user,
+    chat_context: str | None = None,
+) -> dict[str, Any] | Response:
+    input_json = validated_data["input_json"]
+    custom_schema_id = validated_data.get("custom_schema_id")
+    include_reasoning = validated_data.get("include_reasoning", True)
+    refinement_payload = validated_data.get("refinement", {})
+    refinement_enabled = bool(refinement_payload.get("enabled", False))
+    llm_generation_service = build_llm_generation_service(user)
+
+    try:
+        if refinement_enabled:
+            return _run_refinement_generation(
+                llm_generation_service=llm_generation_service,
+                input_json=input_json,
+                custom_schema_id=custom_schema_id,
+                include_reasoning=include_reasoning,
+                refinement_payload=refinement_payload,
+                chat_context=chat_context,
+            )
+        return _run_basic_generation(
+            llm_generation_service=llm_generation_service,
+            input_json=input_json,
+            custom_schema_id=custom_schema_id,
+            include_reasoning=include_reasoning,
+            chat_context=chat_context,
+        )
+    except Exception as exc:
+        return _llm_generate_error_response(exc)
+
+
 @api_view(["POST"])
 @require_http_methods(["POST"])
 def llm_generate(request):
@@ -466,10 +611,11 @@ def llm_generate(request):
     input_json = validated_data["input_json"]
     session_id = validated_data.get("session_id")
     chat_id = validated_data.get("chat_id")
-    custom_schema_id = validated_data.get("custom_schema_id")
+
     session, error_response = _resolve_generate_session(request.user, session_id)
     if error_response is not None:
         return error_response
+
     source_message, session, error_response = _resolve_generate_source_message(
         request.user,
         session,
@@ -477,96 +623,19 @@ def llm_generate(request):
     )
     if error_response is not None:
         return error_response
-    include_reasoning = validated_data.get("include_reasoning", True)
-    refinement_payload = validated_data.get("refinement", {})
-    refinement_enabled = bool(refinement_payload.get("enabled", False))
+
     chat_context = _build_chat_context_from_session(session)
-    llm_generation_service = build_llm_generation_service(request.user)
+    result = _execute_llm_generate_flow(
+        validated_data,
+        request.user,
+        chat_context=chat_context,
+    )
+    if isinstance(result, Response):
+        return result
 
-    try:
-        if refinement_enabled:
-            refinement_config = RefinementConfig(
-                enabled=True,
-                max_iterations=int(refinement_payload.get("max_iterations", 3)),
-                early_exit_on_valid=bool(
-                    refinement_payload.get("early_exit_on_valid", True)
-                ),
-            )
-            refinement_orchestrator = RefinementOrchestrator(
-                generation_service=llm_generation_service,
-                reasoning_service=(
-                    build_llm_reasoning_service() if include_reasoning else None
-                ),
-            )
-            refinement_result = refinement_orchestrator.run(
-                input_json=input_json,
-                custom_schema_id=custom_schema_id,
-                include_reasoning=include_reasoning,
-                refinement_config=refinement_config,
-                chat_context=chat_context,
-                file_name=extract_original_name(input_json, input_json),
-                document_type=_extract_document_type(input_json),
-            )
-            output_json = _sanitize_output_json(refinement_result["output_json"])
-            raw_json = _sanitize_output_json(refinement_result["raw_json"])
-            validated_json = _sanitize_output_json(refinement_result["validated_json"])
-            validation_log = refinement_result["validation_log"]
-            reasoning_response = refinement_result["reasoning"]
-            refinement_meta = refinement_result["refinement_meta"]
-        else:
-            output_json, error_response = _generate_output_json(
-                llm_generation_service,
-                input_json,
-                custom_schema_id,
-                chat_context=chat_context,
-            )
-            if error_response is not None:
-                return error_response
-            output_json = _sanitize_output_json(output_json)
-            reasoning_response = _generate_optional_reasoning(
-                include_reasoning=include_reasoning,
-                input_json=input_json,
-                output_json=output_json,
-            )
-            raw_json = None
-            validated_json = None
-            validation_log = None
-            refinement_meta = None
-    except CustomSchemaNotFoundError:
-        return Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
-    except OpenAIConfigurationError:
-        return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
-    except OpenAIUpstreamError as exc:
-        logger.exception("Upstream LLM provider error while handling llm_generate request.")
-        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
-    except OpenAIServiceError:
-        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
-    except ValueError:
-        logger.exception("Invalid input_json payload.")
-        return Response(
-            {
-                "detail": INVALID_REQUEST_DETAIL,
-                "errors": {"input_json": [INVALID_INPUT_JSON_DETAIL]},
-            },
-            status=400,
-        )
-    except Exception:
-        logger.exception("Unexpected error while handling llm_generate request.")
-        return Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
-
-    response_payload = {
-        "output_json": output_json,
-        "reasoning": reasoning_response,
-    }
-    if refinement_enabled:
-        refinement_payload = {
-            "validated_json": validated_json,
-        }
-        if _should_expose_validation_log():
-            refinement_payload["raw_json"] = raw_json
-            refinement_payload["validation_log"] = validation_log
-            refinement_payload["refinement_meta"] = refinement_meta
-        response_payload.update(refinement_payload)
+    output_json = result["output_json"]
+    response_payload = _build_llm_generate_response_payload(result)
+    reasoning_response = result["reasoning_response"]
 
     output_json = _sanitize_output_json(output_json)
     export_output_json = build_export_output_json(

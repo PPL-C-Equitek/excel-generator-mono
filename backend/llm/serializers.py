@@ -28,6 +28,59 @@ def _resolved_refinement_default_payload() -> dict[str, object]:
     }
 
 
+_VALIDATION_LOG_REQUIRED_KEYS = {"iteration", "verdict", "errors", "warnings", "summary"}
+_VALIDATION_LOG_VERDICTS = {"valid", "invalid"}
+_VALIDATION_LOG_ISSUE_FIELDS = ("path", "message", "severity")
+
+
+def _validate_validation_log_has_required_keys(value):
+    missing_keys = sorted(_VALIDATION_LOG_REQUIRED_KEYS.difference(value.keys()))
+    if missing_keys:
+        raise serializers.ValidationError(
+            "validation_log is missing required keys: " + ", ".join(missing_keys)
+        )
+
+
+def _validate_validation_log_issue_list(value, issues_key):
+    issues = value.get(issues_key)
+    if not isinstance(issues, list):
+        raise serializers.ValidationError(f"validation_log.{issues_key} must be a list.")
+
+    for issue in issues:
+        if not isinstance(issue, dict):
+            raise serializers.ValidationError(
+                f"validation_log.{issues_key} items must be objects."
+            )
+        for required_field in _VALIDATION_LOG_ISSUE_FIELDS:
+            issue_value = issue.get(required_field)
+            if not isinstance(issue_value, str) or not issue_value.strip():
+                raise serializers.ValidationError(
+                    f"validation_log.{issues_key} items must include non-empty {required_field}."
+                )
+
+
+def _validate_validation_log_verdict(value):
+    verdict = value.get("verdict")
+    if verdict not in _VALIDATION_LOG_VERDICTS:
+        raise serializers.ValidationError(
+            "validation_log.verdict must be either 'valid' or 'invalid'."
+        )
+
+
+def _validate_validation_log_iteration(value):
+    iteration = value.get("iteration")
+    if not isinstance(iteration, int) or iteration < 1:
+        raise serializers.ValidationError(
+            "validation_log.iteration must be a positive integer."
+        )
+
+
+def _validate_validation_log_summary(value):
+    summary = value.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        raise serializers.ValidationError("validation_log.summary must be a non-empty string.")
+
+
 class LlmGenerateRefinementRequestSerializer(serializers.Serializer):
     enabled = serializers.BooleanField(required=False, default=True)
     max_iterations = serializers.IntegerField(
@@ -115,43 +168,12 @@ class LlmGenerateResponseSerializer(serializers.Serializer):
         if not isinstance(value, dict):
             raise serializers.ValidationError("validation_log must be an object.")
 
-        required_keys = {"iteration", "verdict", "errors", "warnings", "summary"}
-        missing_keys = sorted(required_keys.difference(value.keys()))
-        if missing_keys:
-            raise serializers.ValidationError(
-                "validation_log is missing required keys: " + ", ".join(missing_keys)
-            )
-
-        for issues_key in ("errors", "warnings"):
-            issues = value.get(issues_key)
-            if not isinstance(issues, list):
-                raise serializers.ValidationError(f"validation_log.{issues_key} must be a list.")
-            for issue in issues:
-                if not isinstance(issue, dict):
-                    raise serializers.ValidationError(
-                        f"validation_log.{issues_key} items must be objects."
-                    )
-                for required_field in ("path", "message", "severity"):
-                    issue_value = issue.get(required_field)
-                    if not isinstance(issue_value, str) or not issue_value.strip():
-                        raise serializers.ValidationError(
-                            f"validation_log.{issues_key} items must include non-empty {required_field}."
-                        )
-
-        verdict = value.get("verdict")
-        if verdict not in {"valid", "invalid"}:
-            raise serializers.ValidationError(
-                "validation_log.verdict must be either 'valid' or 'invalid'."
-            )
-
-        if not isinstance(value.get("iteration"), int) or value["iteration"] < 1:
-            raise serializers.ValidationError(
-                "validation_log.iteration must be a positive integer."
-            )
-
-        summary = value.get("summary")
-        if not isinstance(summary, str) or not summary.strip():
-            raise serializers.ValidationError("validation_log.summary must be a non-empty string.")
+        _validate_validation_log_has_required_keys(value)
+        _validate_validation_log_issue_list(value, "errors")
+        _validate_validation_log_issue_list(value, "warnings")
+        _validate_validation_log_verdict(value)
+        _validate_validation_log_iteration(value)
+        _validate_validation_log_summary(value)
 
         return value
 
