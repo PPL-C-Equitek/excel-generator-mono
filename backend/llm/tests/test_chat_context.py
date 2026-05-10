@@ -433,7 +433,7 @@ class InjectFileContextTest(SimpleTestCase):
 
 class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
     def test_positive_uses_content_data_directly_when_llm_returns_export_format(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
 
         content_data = [
             {"table_name": "Sheet1", "headers": ["Nama", "Nilai"], "rows": []}
@@ -449,7 +449,7 @@ class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
         self.assertEqual(result, content_data)
 
     def test_positive_export_format_not_treated_as_heuristic_flat_table(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
 
         output_json = {
             "document_info": {"source_type": "Excel"},
@@ -465,7 +465,7 @@ class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
         self.assertNotIn("content_data", headers)
 
     def test_positive_still_handles_simple_headers_rows_format(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
 
         output_json = {"headers": ["A", "B"], "rows": [["x", "y"]]}
         result = _build_content_data_from_output(output_json)
@@ -475,7 +475,7 @@ class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
         self.assertIn("B", result[0]["headers"])
 
     def test_negative_empty_content_data_list_falls_through_to_heuristic(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
         output_json = {
             "document_info": {},
             "content_data": [],
@@ -485,14 +485,14 @@ class BuildContentDataFromOutputContentDataTest(SimpleTestCase):
         self.assertIsInstance(result, list)
 
     def test_negative_non_list_content_data_falls_through_to_heuristic(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
 
         output_json = {"content_data": "invalid"}
         result = _build_content_data_from_output(output_json)
         self.assertIsInstance(result, list)
 
     def test_edge_multiple_tables_in_content_data_all_returned(self):
-        from llm.views import _build_content_data_from_output
+        from llm.services.export_service import _build_content_data_from_output
 
         content_data = [
             {"table_name": "T1", "headers": ["X"], "rows": []},
@@ -760,3 +760,78 @@ class BuildCompactFileContextTest(SimpleTestCase):
         result = _build_compact_file_context(export_json)
 
         self.assertIn("DataSheet", result)
+
+    def test_edge_limits_to_max_tables_and_appends_omitted_count(self):
+        from llm.views import _MAX_COMPACT_TABLES, _build_compact_file_context
+
+        tables = [{"table_name": f"T{i}", "headers": [], "rows": []} for i in range(_MAX_COMPACT_TABLES + 2)]
+        result = _build_compact_file_context({"content_data": tables})
+
+        self.assertIn(f"T{_MAX_COMPACT_TABLES - 1}", result)
+        self.assertNotIn(f"T{_MAX_COMPACT_TABLES}", result)
+        self.assertIn("tables omitted", result)
+
+    def test_edge_header_line_truncated_when_table_has_many_columns(self):
+        from llm.views import _MAX_COMPACT_HEADERS, _build_compact_file_context
+
+        headers = [f"col{i}" for i in range(_MAX_COMPACT_HEADERS + 5)]
+        result = _build_compact_file_context({"content_data": [{"table_name": "T", "headers": headers, "rows": []}]})
+
+        self.assertIn("more", result)
+        self.assertNotIn(f"col{_MAX_COMPACT_HEADERS}", result)
+
+
+class InjectFileContextSaveBackTest(SimpleTestCase):
+    def _make_session(self, last_output=None):
+        session = Mock()
+        session.generated_outputs.order_by.return_value.first.return_value = last_output
+        return session
+
+    def test_positive_save_called_on_output_when_fallback_is_used(self):
+        from llm.views import _inject_file_context_if_available
+
+        output = Mock()
+        output.export_output_json = None
+        output.output_json = {"headers": ["A"], "rows": [["1"]]}
+        session = self._make_session(last_output=output)
+
+        _inject_file_context_if_available(session, [])
+
+        output.save.assert_called_once_with(update_fields=["export_output_json"])
+
+    def test_negative_save_not_called_when_export_output_json_already_present(self):
+        from llm.views import _inject_file_context_if_available
+
+        output = Mock()
+        output.export_output_json = {"document_info": {}, "summary": {}, "content_data": []}
+        session = self._make_session(last_output=output)
+
+        _inject_file_context_if_available(session, [])
+
+        output.save.assert_not_called()
+
+    def test_negative_history_unchanged_when_export_output_json_is_non_dict(self):
+        from llm.views import _inject_file_context_if_available
+
+        output = Mock()
+        output.export_output_json = ["corrupted", "data"]
+        output.output_json = None
+        session = self._make_session(last_output=output)
+        history = [{"role": "user", "content": "Halo"}]
+
+        result = _inject_file_context_if_available(session, history)
+
+        self.assertEqual(result, history)
+
+    def test_negative_save_exception_is_swallowed_and_context_still_injected(self):
+        from llm.views import _inject_file_context_if_available
+
+        output = Mock()
+        output.export_output_json = None
+        output.output_json = {"headers": ["A"], "rows": [["1"]]}
+        output.save.side_effect = Exception("db error")
+        session = self._make_session(last_output=output)
+
+        result = _inject_file_context_if_available(session, [])
+
+        self.assertEqual(result[0]["role"], "system")
