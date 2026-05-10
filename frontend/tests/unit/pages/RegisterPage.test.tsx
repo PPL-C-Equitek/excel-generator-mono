@@ -42,9 +42,9 @@ describe('Registration Page', () => {
   const setup = () => {
     render(<RegisterPage />);
     return {
-      nameInput: screen.getByLabelText(/nama lengkap|full name/i) as HTMLInputElement,
+      nameInput: screen.getByLabelText(/full name/i) as HTMLInputElement,
       emailInput: screen.getByLabelText(/email/i) as HTMLInputElement,
-      submitBtn: screen.getByRole('button', { name: /daftar sekarang|sign up/i }),
+      submitBtn: screen.getByRole('button', { name: /sign up/i }),
     };
   };
 
@@ -96,7 +96,7 @@ describe('Registration Page', () => {
     expect(emailInput).toBeInTheDocument();
     expect(submitBtn).toBeInTheDocument();
     expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/konfirmasi password/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/confirm password/i)).not.toBeInTheDocument();
   });
 
   describe('client-side validation', () => {
@@ -107,7 +107,7 @@ describe('Registration Page', () => {
       await user.type(emailInput, 'not-an-email');
 
       await waitFor(() => {
-        expect(screen.getByText(/format email tidak valid/i)).toBeInTheDocument();
+        expect(screen.getByText(/email format is not valid/i)).toBeInTheDocument();
       });
 
       expect(mockedAxios.post).not.toHaveBeenCalled();
@@ -119,8 +119,8 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/nama wajib diisi/i)).toBeInTheDocument();
-        expect(screen.getByText(/email wajib diisi/i)).toBeInTheDocument();
+        expect(screen.getByText(/name cannot be empty/i)).toBeInTheDocument();
+        expect(screen.getByText(/email cannot be empty/i)).toBeInTheDocument();
       });
 
       expect(mockedAxios.post).not.toHaveBeenCalled();
@@ -134,7 +134,7 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/format email tidak valid/i)).toBeInTheDocument();
+        expect(screen.getByText(/invalid email format/i)).toBeInTheDocument();
       });
 
       expect(mockedAxios.post).not.toHaveBeenCalled();
@@ -148,7 +148,7 @@ describe('Registration Page', () => {
 
       mockedAxios.post.mockResolvedValueOnce({
         status: 200,
-        data: { message: 'Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda.' },
+        data: { message: 'If the email is valid, a verification link has been sent to your inbox.' },
       });
 
       await user.type(nameInput, 'Trim User');
@@ -169,7 +169,7 @@ describe('Registration Page', () => {
 
       mockedAxios.post.mockResolvedValueOnce({
         status: 201,
-        data: { message: 'Jika email valid, link verifikasi telah dikirim ke kotak masuk Anda.' },
+        data: { message: 'If the email is valid, a verification link has been sent to your inbox.' },
       });
 
       await user.type(nameInput, 'John Doe');
@@ -177,7 +177,7 @@ describe('Registration Page', () => {
 
       fireEvent.click(submitBtn);
 
-      expect(submitBtn).toHaveTextContent(/mendaftar\.\.\./i);
+      expect(submitBtn).toHaveTextContent(/signing up\.\.\./i);
       expect(submitBtn).toBeDisabled();
 
       await waitFor(() => {
@@ -188,9 +188,9 @@ describe('Registration Page', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/jika email valid/i)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /kirim ulang email/i })).toBeInTheDocument();
-        expect(screen.getByRole('link', { name: /pergi ke halaman login/i })).toBeInTheDocument();
+        expect(screen.getByText(/if the email is valid/i)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /resend email/i })).toBeInTheDocument();
+        expect(screen.getByRole('link', { name: /go to login page/i })).toBeInTheDocument();
       });
     });
 
@@ -200,7 +200,7 @@ describe('Registration Page', () => {
 
       mockedAxios.post.mockResolvedValueOnce({
         status: 201,
-        data: { message: 'Registrasi berhasil' },
+        data: { message: 'Registration successful' },
       });
 
       await user.type(nameInput, 'Router User');
@@ -208,8 +208,8 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/registrasi berhasil/i)).toBeInTheDocument();
-        expect(screen.getByRole('link', { name: /pergi ke halaman login/i })).toBeInTheDocument();
+        expect(screen.getByText(/registration successful/i)).toBeInTheDocument();
+        expect(screen.getByRole('link', { name: /go to login page/i })).toBeInTheDocument();
       });
     });
 
@@ -224,10 +224,10 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/registrasi berhasil\. cek email anda\./i)).toBeInTheDocument();
+        expect(screen.getByText(/registration successful\. please check your email\./i)).toBeInTheDocument();
       });
 
-      expect(screen.getByRole('link', { name: /pergi ke halaman login/i })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /go to login page/i })).toBeInTheDocument();
     });
 
     test('successful resend verification shows success message', async () => {
@@ -236,18 +236,18 @@ describe('Registration Page', () => {
 
       mockedAxios.post.mockResolvedValueOnce({
         status: 200,
-        data: { message: 'Registrasi berhasil' },
+        data: { message: 'Registration successful' },
       });
 
       await user.type(nameInput, 'Resend User');
       await user.type(emailInput, 'resend@example.com');
       fireEvent.click(submitBtn);
 
-      const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
+      const resendBtn = await screen.findByRole('button', { name: /resend email/i });
 
       mockedAxios.post.mockResolvedValueOnce({
         status: 200,
-        data: { message: 'Email verifikasi telah dikirim ulang' },
+        data: { message: 'Verification email has been resent' },
       });
 
       fireEvent.click(resendBtn);
@@ -256,7 +256,7 @@ describe('Registration Page', () => {
         expect(mockedAxios.post).toHaveBeenCalledWith(expect.stringContaining('/auth/resend-verification/'), {
           email: 'resend@example.com',
         });
-        expect(screen.getByText(/email verifikasi telah dikirim ulang/i)).toBeInTheDocument();
+        expect(screen.getByText(/verification email has been resent/i)).toBeInTheDocument();
       });
     });
 
@@ -270,7 +270,7 @@ describe('Registration Page', () => {
       await user.type(emailInput, 'resendfail@example.com');
       fireEvent.click(submitBtn);
 
-      const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
+      const resendBtn = await screen.findByRole('button', { name: /resend email/i });
 
       mockedAxios.post.mockRejectedValueOnce({
         response: {
@@ -282,7 +282,7 @@ describe('Registration Page', () => {
       fireEvent.click(resendBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/gagal mengirim ulang email verifikasi\./i)).toBeInTheDocument();
+        expect(screen.getByText(/failed to resend verification email\./i)).toBeInTheDocument();
       });
     });
 
@@ -310,17 +310,17 @@ describe('Registration Page', () => {
       await user.type(emailInput, 'cooldown@example.com');
       fireEvent.click(submitBtn);
 
-      const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
+      const resendBtn = await screen.findByRole('button', { name: /resend email/i });
 
       mockedAxios.post.mockResolvedValueOnce({
         status: 200,
-        data: { message: 'Email verifikasi telah dikirim ulang' },
+        data: { message: 'Verification email has been resent' },
       });
 
       fireEvent.click(resendBtn);
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /kirim ulang \(/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /resend \(/i })).toBeInTheDocument();
       });
 
       expect(setIntervalSpy).toHaveBeenCalled();
@@ -339,7 +339,7 @@ describe('Registration Page', () => {
       fireEvent.change(emailInput, { target: { value: 'resendfallback@example.com' } });
       fireEvent.click(submitBtn);
 
-      const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
+      const resendBtn = await screen.findByRole('button', { name: /resend email/i });
 
       mockedAxios.post.mockResolvedValueOnce({
         status: 200,
@@ -349,7 +349,7 @@ describe('Registration Page', () => {
       fireEvent.click(resendBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/email verifikasi berhasil dikirim ulang\./i)).toBeInTheDocument();
+        expect(screen.getByText(/verification email sent successfully\./i)).toBeInTheDocument();
       });
     }, 10000);
 
@@ -362,7 +362,7 @@ describe('Registration Page', () => {
       fireEvent.change(emailInput, { target: { value: 'resendguard@example.com' } });
       fireEvent.click(submitBtn);
 
-      const resendBtn = await screen.findByRole('button', { name: /kirim ulang email/i });
+      const resendBtn = await screen.findByRole('button', { name: /resend email/i });
 
       let resolveResend: ((value: { status: number; data: { message: string } }) => void) | undefined;
       mockedAxios.post.mockImplementationOnce(
@@ -373,15 +373,15 @@ describe('Registration Page', () => {
       );
 
       fireEvent.click(resendBtn);
-      const loadingBtn = await screen.findByRole('button', { name: /mengirim\.\.\./i });
+      const loadingBtn = await screen.findByRole('button', { name: /sending\.\.\./i });
       loadingBtn.removeAttribute('disabled');
       loadingBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 
       expect(mockedAxios.post).toHaveBeenCalledTimes(2);
 
-      resolveResend?.({ status: 200, data: { message: 'Email verifikasi telah dikirim ulang' } });
+      resolveResend?.({ status: 200, data: { message: 'Verification email has been resent' } });
       await waitFor(() => {
-        expect(screen.getByText(/email verifikasi telah dikirim ulang/i)).toBeInTheDocument();
+        expect(screen.getByText(/verification email has been resent/i)).toBeInTheDocument();
       });
 
       expect(mockedAxios.post).toHaveBeenCalledTimes(2);
@@ -394,7 +394,7 @@ describe('Registration Page', () => {
       mockedAxios.post.mockRejectedValueOnce({
         response: {
           status: 400,
-          data: { message: 'Data yang dikirimkan tidak valid' },
+          data: { message: 'Invalid data provided' },
         },
       });
 
@@ -403,7 +403,7 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/data yang dikirimkan tidak valid/i)).toBeInTheDocument();
+        expect(screen.getByText(/invalid data provided/i)).toBeInTheDocument();
       });
     });
 
@@ -414,7 +414,7 @@ describe('Registration Page', () => {
       mockedAxios.post.mockRejectedValueOnce({
         response: {
           status: 500,
-          data: { message: 'Terjadi kesalahan pada server' },
+          data: { message: 'An error occurred on the server' },
         },
       });
 
@@ -423,10 +423,10 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/terjadi kesalahan pada server/i)).toBeInTheDocument();
+        expect(screen.getByText(/an error occurred on the server/i)).toBeInTheDocument();
       });
 
-      expect(submitBtn).toHaveTextContent(/daftar sekarang|sign up/i);
+      expect(submitBtn).toHaveTextContent(/sign up/i);
       expect(submitBtn).not.toBeDisabled();
     });
 
@@ -446,7 +446,7 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/email ini sudah terdaftar, silakan login/i)).toBeInTheDocument();
+        expect(screen.getByText(/email is already registered, please login/i)).toBeInTheDocument();
       });
     });
 
@@ -477,7 +477,7 @@ describe('Registration Page', () => {
 
       await waitFor(() => {
         expect(mockToastSuccess).toHaveBeenCalledWith(
-          expect.stringMatching(/email belum diverifikasi|email registered but unverified/i)
+          expect.stringMatching(/email is not verified yet|email registered but unverified/i)
         );
       });
 
@@ -507,7 +507,7 @@ describe('Registration Page', () => {
 
       await waitFor(() => {
         expect(mockToastSuccess).toHaveBeenCalledWith(
-          'Email belum diverifikasi. Kami telah mengirim ulang link verifikasi.'
+          'Email is not verified yet. We have resent the verification link.'
         );
       });
 
@@ -532,7 +532,7 @@ describe('Registration Page', () => {
 
       expect(mockedAxios.post).not.toHaveBeenCalled();
       expect(mockToastSuccess).toHaveBeenCalledWith(
-        'Email ini belum diverifikasi. Silakan cek inbox Anda atau tunggu hingga cooldown selesai.'
+        'Email is not verified yet. Please check your inbox or wait until the cooldown is over.'
       );
       expect(mockRouterPush).toHaveBeenCalledWith(
         '/auth/verify-email/pending?email=pending%40example.com'
@@ -555,7 +555,7 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/terlalu banyak percobaan/i)).toBeInTheDocument();
+        expect(screen.getByText(/too many attempts/i)).toBeInTheDocument();
       });
     });
 
@@ -567,8 +567,8 @@ describe('Registration Page', () => {
           status: 400,
           data: {
             errors: {
-              email: ['Format email tidak valid dari backend'],
-              non_field_errors: ['Terjadi kesalahan validasi umum'],
+              email: ['Invalid email format from backend'],
+              non_field_errors: ['A general validation error occurred'],
             },
           },
         },
@@ -579,8 +579,8 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/format email tidak valid dari backend/i)).toBeInTheDocument();
-        expect(screen.getByText(/terjadi kesalahan validasi umum/i)).toBeInTheDocument();
+        expect(screen.getByText(/invalid email format from backend/i)).toBeInTheDocument();
+        expect(screen.getByText(/a general validation error occurred/i)).toBeInTheDocument();
       });
     }, 10000);
 
@@ -592,9 +592,9 @@ describe('Registration Page', () => {
         response: {
           status: 400,
           data: {
-            message: 'Fallback message dari backend',
+            message: 'Fallback message from backend',
             errors: {
-              name: ['Nama backend tidak valid'],
+              name: ['Backend name is invalid'],
             },
           },
         },
@@ -605,8 +605,8 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/nama backend tidak valid/i)).toBeInTheDocument();
-        expect(screen.getByText(/fallback message dari backend/i)).toBeInTheDocument();
+        expect(screen.getByText(/backend name is invalid/i)).toBeInTheDocument();
+        expect(screen.getByText(/fallback message from backend/i)).toBeInTheDocument();
       });
     });
 
@@ -619,7 +619,7 @@ describe('Registration Page', () => {
           status: 400,
           data: {
             errors: {
-              name: ['Nama backend invalid kosong message'],
+              name: ['Backend name invalid empty message'],
             },
           },
         },
@@ -630,11 +630,11 @@ describe('Registration Page', () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(screen.getByText(/nama backend invalid kosong message/i)).toBeInTheDocument();
+        expect(screen.getByText(/backend name invalid empty message/i)).toBeInTheDocument();
       });
 
-      expect(screen.queryByText(/fallback message dari backend/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/data yang dikirimkan tidak valid/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/fallback message from backend/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/invalid data provided/i)).not.toBeInTheDocument();
     });
 
     test('shows fallback message on 400 when no data.message is provided', async () => {
@@ -647,7 +647,7 @@ describe('Registration Page', () => {
       await user.type(emailInput, 'inv@example.com');
       fireEvent.click(submitBtn);
 
-      await waitFor(() => expect(screen.getByText(/data yang dikirimkan tidak valid/i)).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText(/invalid data provided/i)).toBeInTheDocument());
     });
 
     test('shows fallback message on 500 when no data.message is provided', async () => {
@@ -660,7 +660,7 @@ describe('Registration Page', () => {
       await user.type(emailInput, 'serv@example.com');
       fireEvent.click(submitBtn);
 
-      await waitFor(() => expect(screen.getByText(/terjadi kesalahan pada server/i)).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText(/an error occurred on the server/i)).toBeInTheDocument());
     });
   });
 });
