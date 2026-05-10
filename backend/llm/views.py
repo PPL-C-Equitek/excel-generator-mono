@@ -453,6 +453,10 @@ def _estimate_payload_size_bytes(payload: Any) -> int:
         return 0
 
 
+def _elapsed_ms(started_at: float) -> int:
+    return int((time.perf_counter() - started_at) * 1000)
+
+
 def _log_llm_generate_telemetry(
     *,
     status: str,
@@ -537,11 +541,11 @@ def llm_generate(request):
         custom_schema_id,
         chat_context=chat_context,
     )
-    generation_duration_ms = int((time.perf_counter() - generation_started_at) * 1000)
+    generation_duration_ms = _elapsed_ms(generation_started_at)
     if error_response is not None:
         _log_llm_generate_telemetry(
             status="failure",
-            total_ms=int((time.perf_counter() - request_started_at) * 1000),
+            total_ms=_elapsed_ms(request_started_at),
             generation_ms=generation_duration_ms,
             reasoning_ms=reasoning_duration_ms,
             input_payload=input_json,
@@ -565,7 +569,7 @@ def llm_generate(request):
         input_json=input_json,
         output_json=output_json,
     )
-    reasoning_duration_ms = int((time.perf_counter() - reasoning_started_at) * 1000)
+    reasoning_duration_ms = _elapsed_ms(reasoning_started_at)
     thinking_log = ""
     if isinstance(reasoning_response, dict):
         raw_thinking_log = reasoning_response.get("thinking_log")
@@ -616,7 +620,7 @@ def llm_generate(request):
 
     _log_llm_generate_telemetry(
         status="success",
-        total_ms=int((time.perf_counter() - request_started_at) * 1000),
+        total_ms=_elapsed_ms(request_started_at),
         generation_ms=generation_duration_ms,
         reasoning_ms=reasoning_duration_ms,
         input_payload=input_json,
