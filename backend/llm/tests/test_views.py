@@ -226,6 +226,57 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.data["reasoning"]["final_answer"], "Conversion looks consistent.")
         mock_reasoning_service.generate.assert_called_once()
 
+    @patch("llm.views.logger")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_logs_phase_telemetry_for_successful_response(
+        self,
+        mock_build_generation_service,
+        mock_logger,
+    ):
+        mock_generation_service = mock_build_generation_service.return_value
+        mock_generation_service.generate.return_value = {"status": "ok"}
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}, "include_reasoning": False},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_logger.info.assert_called_once()
+
+        (
+            template,
+            status,
+            total_ms,
+            generation_ms,
+            reasoning_ms,
+            input_size_bytes,
+            output_size_bytes,
+            include_reasoning,
+            session_id,
+            chat_id,
+            output_id,
+            target_output_id,
+        ) = mock_logger.info.call_args[0]
+
+        self.assertEqual(
+            template,
+            "llm_generate telemetry: status=%s total_ms=%s generation_ms=%s reasoning_ms=%s input_size_bytes=%s output_size_bytes=%s include_reasoning=%s session_id=%s chat_id=%s output_id=%s target_output_id=%s",
+        )
+        self.assertEqual(status, "success")
+        self.assertIsInstance(total_ms, int)
+        self.assertIsInstance(generation_ms, int)
+        self.assertIsInstance(reasoning_ms, int)
+        self.assertIsInstance(input_size_bytes, int)
+        self.assertIsInstance(output_size_bytes, int)
+        self.assertFalse(include_reasoning)
+        self.assertIsNone(session_id)
+        self.assertIsNone(chat_id)
+        self.assertIsNone(output_id)
+        self.assertIsNone(target_output_id)
+
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_strips_reasoning_keys_from_output_json(self, mock_build_service):
         mock_service = mock_build_service.return_value
