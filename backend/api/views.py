@@ -70,7 +70,7 @@ from file_processing.services.export_service import (
     resolve_csv_download_artifact,
     resolve_excel_download_artifact,
 )
-from llm.views import build_export_output_json
+from llm.services.export_service import build_export_output_json
 
 logger = logging.getLogger(__name__)
 MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024  # multipart headers + boundaries

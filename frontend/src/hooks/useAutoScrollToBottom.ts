@@ -15,3 +15,4 @@ export function useAutoScrollToBottom(
     ref.current.scrollTop = ref.current.scrollHeight;
   }, [dependencyKey, enabled, ref]);
 }
+

@@ -328,6 +328,43 @@ describe('useConvertFlow', () => {
             )
         })
 
+        it('reuses active session context for follow-up prompts instead of creating a new session', async () => {
+            const firstOutput = { rows: [{ status: 'all' }] }
+            const secondOutput = { rows: [{ status: 'paid' }] }
+            const service = makeMockService({
+                generate: vi.fn()
+                    .mockResolvedValueOnce({
+                        output_json: firstOutput,
+                        session_id: '11111111-1111-1111-1111-111111111111',
+                        output_id: '22222222-2222-2222-2222-222222222222',
+                    })
+                    .mockResolvedValueOnce({ output_json: secondOutput }),
+            })
+            const { result } = renderHook(() => useConvertFlow(service))
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile)
+            })
+
+            await act(async () => {
+                await result.current.handleFileSelect(testFile, null, 'Refine this output')
+            })
+
+            expect(service.generate).toHaveBeenNthCalledWith(
+                2,
+                expect.objectContaining({
+                    ...validUploadResponse,
+                    previous_output: firstOutput,
+                    user_prompt: 'Refine this output',
+                }),
+                undefined,
+                expect.any(AbortSignal),
+                {
+                    sessionId: '11111111-1111-1111-1111-111111111111',
+                }
+            )
+        })
+
         it('stores thinking log from backend reasoning response', async () => {
             const service = makeMockService({
                 generate: vi.fn().mockResolvedValue({

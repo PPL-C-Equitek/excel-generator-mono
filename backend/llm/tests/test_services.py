@@ -143,6 +143,25 @@ class OpenAIClientServiceTest(SimpleTestCase):
         with self.assertRaises(OpenAIServiceError):
             generate_text("Hello")
 
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_BASE_URL=" https://proxy.example.test/v1 ",
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_builds_client_with_trimmed_base_url(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.return_value = Mock(output_text="ok result")
+
+        result = generate_text("Say hi")
+
+        self.assertEqual(result, "ok result")
+        mock_openai.assert_called_once_with(
+            api_key="test-key",
+            base_url="https://proxy.example.test/v1",
+        )
+
     def test_generate_text_raises_for_empty_prompt(self):
         with self.assertRaises(ValueError):
             generate_text("")
@@ -237,6 +256,77 @@ class OpenAIClientServiceTest(SimpleTestCase):
             generate_text("Hello")
 
         self.assertEqual(exc_ctx.exception.status_code, 504)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_falls_back_to_chat_completions_on_responses_404(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyAPIStatusError(
+            "not found",
+            status_code=404,
+        )
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="fallback result"))]
+        )
+
+        result = generate_text("Hello", system_prompt="Use strict JSON.")
+
+        self.assertEqual(result, "fallback result")
+        mock_client.responses.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            input="Hello",
+            instructions="Use strict JSON.",
+        )
+        mock_client.chat.completions.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": "Use strict JSON."},
+                {"role": "user", "content": "Hello"},
+            ],
+        )
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_SYSTEM_PROMPT="   ",
+    )
+    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_fallback_omits_system_message_when_prompt_blank(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyAPIStatusError(
+            "not found",
+            status_code=404,
+        )
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="fallback result"))]
+        )
+
+        result = generate_text("Hello")
+
+        self.assertEqual(result, "fallback result")
+        mock_client.chat.completions.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_fallback_raises_when_chat_choices_missing(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = DummyAPIStatusError(
+            "not found",
+            status_code=404,
+        )
+        mock_client.chat.completions.create.return_value = Mock(choices=[])
+
+        with self.assertRaises(OpenAIServiceError):
+            generate_text("Hello")
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.APIError", new=DummyAPIError)
@@ -664,6 +754,31 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
             model="gpt-4.1-mini",
             messages=messages,
         )
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_normalizes_list_content_chunks(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[
+                Mock(
+                    message=Mock(
+                        content=[
+                            {"text": " Halo "},
+                            {"content": "Dunia"},
+                            SimpleNamespace(text=" dari "),
+                            SimpleNamespace(content="Chat"),
+                            {"text": "   "},
+                        ]
+                    )
+                )
+            ]
+        )
+
+        result = generate_chat_response([{"role": "user", "content": "Halo"}])
+
+        self.assertEqual(result, "Halo\nDunia\ndari\nChat")
 
     # Negative
 

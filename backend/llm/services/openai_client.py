@@ -64,8 +64,18 @@ class OpenAITextGenerationProvider:
         if effective_system_prompt:
             request_payload["instructions"] = effective_system_prompt
 
-        with handle_openai_exceptions():
-            response = client.responses.create(**request_payload)
+        try:
+            with handle_openai_exceptions():
+                response = client.responses.create(**request_payload)
+        except OpenAIUpstreamError as exc:
+            if exc.status_code != 404:
+                raise
+            # Fallback for OpenAI-compatible providers that do not implement /responses.
+            return _generate_text_via_chat_completions(
+                client=client,
+                prompt=prompt,
+                system_prompt=effective_system_prompt or None,
+            )
 
         output_text = getattr(response, "output_text", None)
         if not output_text:
@@ -84,15 +94,71 @@ def _build_client() -> OpenAI:
     api_key = settings.OPENAI_API_KEY.strip()
     if not api_key:
         raise OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
+
+    base_url = getattr(settings, "OPENAI_BASE_URL", "")
+    normalized_base_url = base_url.strip() if isinstance(base_url, str) else ""
+    if normalized_base_url:
+        return OpenAI(api_key=api_key, base_url=normalized_base_url)
     return OpenAI(api_key=api_key)
 
 
 def _map_api_status_to_http(status_code: int | None) -> int:
+    if status_code == 404:
+        return 404
     if status_code == 429:
         return 429
     if status_code in (408, 504):
         return 504
     return 502
+
+
+def _generate_text_via_chat_completions(
+    client: OpenAI,
+    prompt: str,
+    system_prompt: str | None = None,
+) -> str:
+    messages: list[dict[str, str]] = []
+    if isinstance(system_prompt, str) and system_prompt.strip():
+        messages.append({"role": "system", "content": system_prompt.strip()})
+    messages.append({"role": "user", "content": prompt})
+
+    with handle_openai_exceptions():
+        response = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=messages,
+        )
+
+    try:
+        content = response.choices[0].message.content
+    except (AttributeError, IndexError):
+        content = None
+
+    normalized_content = _normalize_chat_message_content(content)
+    if not normalized_content:
+        raise OpenAIServiceError("OpenAI response did not include output_text.")
+    return normalized_content
+
+
+def _normalize_chat_message_content(content: Any) -> str | None:
+    if isinstance(content, str):
+        normalized_content = content.strip()
+        return normalized_content or None
+
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text_candidate = item.get("text") or item.get("content")
+            else:
+                text_candidate = getattr(item, "text", None) or getattr(item, "content", None)
+
+            if isinstance(text_candidate, str) and text_candidate.strip():
+                chunks.append(text_candidate.strip())
+
+        merged_content = "\n".join(chunks).strip()
+        return merged_content or None
+
+    return None
 
 
 def generate_text(prompt: str, system_prompt: str | None = None) -> str:
@@ -117,9 +183,10 @@ def generate_chat_response(messages: list[dict]) -> str:
     except (AttributeError, IndexError):
         content = None
 
-    if not content:
+    normalized_content = _normalize_chat_message_content(content)
+    if not normalized_content:
         raise OpenAIServiceError("OpenAI response did not include a reply.")
-    return content
+    return normalized_content
 
 
 def generate_json(

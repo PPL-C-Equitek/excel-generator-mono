@@ -1,9 +1,11 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import SessionConversationView from '@/components/SessionConversationView'
 import type { SessionResume } from '@/services/sessions'
 import type { ThinkingLogItem } from '@/services/thinkingLogs'
 import type { HistoryItem } from '@/services/history'
+import { downloadSessionOutputCsvFile, downloadSessionOutputExcelFile } from '@/services/llm'
 
 interface HistoryItemDetailProps {
     readonly item: HistoryItem
@@ -25,12 +27,6 @@ interface HistoryItemDetailProps {
     readonly stopEditing: () => void
     readonly handleRenameSubmit: (item: HistoryItem) => Promise<void>
     readonly requestDelete: (item: HistoryItem) => void
-    readonly downloadCsv: (historyId: string, filename: string) => Promise<void>
-    readonly downloadExcel: (historyId: string, filename: string) => Promise<void>
-    readonly isDownloading: (historyId: string, format: 'csv' | 'xlsx') => boolean
-    readonly getDisplayName: (customName: string, originalName: string) => string
-    readonly getCsvFilename: (displayName: string) => string
-    readonly getXlsxFilename: (displayName: string) => string
     readonly formatCreatedAt: (value: string) => string
 }
 
@@ -54,23 +50,59 @@ export default function HistoryItemDetail({
     stopEditing,
     handleRenameSubmit,
     requestDelete,
-    downloadCsv,
-    downloadExcel,
-    isDownloading,
-    getDisplayName,
-    getCsvFilename,
-    getXlsxFilename,
     formatCreatedAt,
 }: Readonly<HistoryItemDetailProps>) {
     const isEditing = editingHistoryId === item.id
     const isRenaming = renamingHistoryId === item.id
     const isDeleting = deletingHistoryId === item.id
-    const isCsvDownloading = isDownloading(item.id, 'csv')
-    const isExcelDownloading = isDownloading(item.id, 'xlsx')
-    const historyName = getDisplayName(item.custom_name, item.original_name)
+    const [isLatestCsvDownloading, setIsLatestCsvDownloading] = useState(false)
+    const [isLatestExcelDownloading, setIsLatestExcelDownloading] = useState(false)
+    const latestOutputId = useMemo(() => {
+        if (!session) {
+            return null
+        }
+
+        const reversedHistory = [...session.history].reverse()
+        const latestOutput = reversedHistory.find((entry) => entry.type === 'output')
+        return latestOutput?.id ?? null
+    }, [session])
+
+    const canDownloadLatestOutput = !!session?.id && !!latestOutputId
+
+    const handleDownloadLatestCsv = async () => {
+        const sessionId = session!.id
+        const outputId = latestOutputId!
+
+        setIsLatestCsvDownloading(true)
+        try {
+            await downloadSessionOutputCsvFile(
+                sessionId,
+                outputId,
+                `session-${sessionId}-latest-output.csv`
+            )
+        } finally {
+            setIsLatestCsvDownloading(false)
+        }
+    }
+
+    const handleDownloadLatestExcel = async () => {
+        const sessionId = session!.id
+        const outputId = latestOutputId!
+
+        setIsLatestExcelDownloading(true)
+        try {
+            await downloadSessionOutputExcelFile(
+                sessionId,
+                outputId,
+                `session-${sessionId}-latest-output.xlsx`
+            )
+        } finally {
+            setIsLatestExcelDownloading(false)
+        }
+    }
 
     return (
-        <div className="space-y-6">
+        <div className="flex h-full min-h-0 flex-col gap-6">
             <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -160,6 +192,7 @@ export default function HistoryItemDetail({
                         disabled={isDeleting || isRenaming}
                     >
                         {isDeleting ? 'Deleting...' : 'Delete'}
+                        
                     </button>
                 </div>
             )}
@@ -167,27 +200,29 @@ export default function HistoryItemDetail({
             <div className="flex flex-wrap gap-3">
                 <button
                     type="button"
-                    className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-red-700"
+                    className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                     onClick={() => {
-                        void downloadCsv(item.id, getCsvFilename(historyName))
+                        void handleDownloadLatestCsv()
                     }}
-                    disabled={isCsvDownloading}
+                    disabled={!canDownloadLatestOutput || isLatestCsvDownloading}
                 >
-                    {isCsvDownloading ? 'Downloading CSV...' : 'Download CSV'}
+                    {isLatestCsvDownloading ? 'Downloading latest CSV...' : 'Download latest as CSV'}
                 </button>
                 <button
                     type="button"
                     className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                     onClick={() => {
-                        void downloadExcel(item.id, getXlsxFilename(historyName))
+                        void handleDownloadLatestExcel()
                     }}
-                    disabled={isExcelDownloading}
+                    disabled={!canDownloadLatestOutput || isLatestExcelDownloading}
                 >
-                    {isExcelDownloading ? 'Downloading Excel...' : 'Download Excel'}
+                    {isLatestExcelDownloading
+                        ? 'Downloading latest Excel...'
+                        : 'Download latest as Excel'}
                 </button>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <div className="min-h-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                 {selectedSessionId ? (
                     <SessionConversationView
                         session={session}

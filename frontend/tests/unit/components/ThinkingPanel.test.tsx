@@ -12,7 +12,7 @@ type ThinkingPanelContractProps = {
 function renderThinkingPanel(props: ThinkingPanelContractProps = {}) {
   const mergedProps = {
     status: "success",
-    content: "Analisis selesai.",
+    content: "Analysis completed.",
     animated: false,
     ...props,
   };
@@ -24,38 +24,38 @@ describe("ThinkingPanel", () => {
   it("renders markdown content inside the thinking panel body", () => {
     renderThinkingPanel({
       status: "success",
-      content: "**Analisis**\n\n- Langkah pertama\n- Langkah kedua",
+      content: "**Analysis**\n\n- First step\n- Second step",
     });
 
-    const panel = screen.getByLabelText("Proses berpikir");
+    const panel = screen.getByLabelText("Thinking process");
     const body = within(panel).getByTestId("thinking-panel-content");
     const strongText = body.querySelector("strong");
     const bulletItems = within(body).getAllByRole("listitem");
 
     expect(panel).toBeInTheDocument();
-    expect(strongText).toHaveTextContent("Analisis");
+    expect(strongText).toHaveTextContent("Analysis");
     expect(bulletItems).toHaveLength(2);
-    expect(bulletItems[0]).toHaveTextContent("Langkah pertama");
-    expect(bulletItems[1]).toHaveTextContent("Langkah kedua");
+    expect(bulletItems[0]).toHaveTextContent("First step");
+    expect(bulletItems[1]).toHaveTextContent("Second step");
   });
 
   it("preserves plain text line breaks when the log is not markdown", () => {
     renderThinkingPanel({
       status: "success",
-      content: "Baris pertama\nBaris kedua",
+      content: "First line\nSecond line",
     });
 
     const body = screen.getByTestId("thinking-panel-content");
 
-    expect(body).toHaveTextContent("Baris pertama");
-    expect(body).toHaveTextContent("Baris kedua");
+    expect(body).toHaveTextContent("First line");
+    expect(body).toHaveTextContent("Second line");
     expect(body).toHaveClass("whitespace-pre-wrap");
   });
 
   it("keeps long content inside a max-height scroll region to prevent layout shift", () => {
     renderThinkingPanel({
       status: "success",
-      content: "baris panjang ".repeat(500),
+      content: "very long line ".repeat(500),
     });
 
     const scrollRegion = screen.getByTestId("thinking-panel-scroll-region");
@@ -64,15 +64,15 @@ describe("ThinkingPanel", () => {
     expect(scrollRegion).toHaveClass("overflow-y-auto");
   });
 
-  it('shows "Gagal memuat proses" when the log stream or fetch fails', () => {
+  it('shows "Failed to load process" when the log stream or fetch fails', () => {
     renderThinkingPanel({
       status: "error",
       content: "partial streamed content",
     });
 
-    const alert = screen.getByRole("alert", { name: "Proses berpikir" });
+    const alert = screen.getByRole("alert", { name: "Thinking process" });
 
-    expect(alert).toHaveTextContent("Gagal memuat proses");
+    expect(alert).toHaveTextContent("Failed to load process");
     expect(alert).not.toHaveTextContent("partial streamed content");
   });
 
@@ -83,9 +83,9 @@ describe("ThinkingPanel", () => {
       animated: true,
     });
 
-    const panel = screen.getByLabelText("Proses berpikir");
+    const panel = screen.getByLabelText("Thinking process");
 
-    expect(panel).toHaveTextContent("Memuat proses berpikir...");
+    expect(panel).toHaveTextContent("Loading thinking process...");
     expect(panel.tagName).toBe("SECTION");
     expect(panel).toHaveClass("animate-pulse");
   });
@@ -97,9 +97,9 @@ describe("ThinkingPanel", () => {
       animated: false,
     });
 
-    const panel = screen.getByLabelText("Proses berpikir");
+    const panel = screen.getByLabelText("Thinking process");
 
-    expect(panel).toHaveTextContent("Belum ada proses yang tersedia.");
+    expect(panel).toHaveTextContent("No process is available yet.");
     expect(panel).not.toHaveClass("animate-pulse");
   });
 
@@ -109,7 +109,7 @@ describe("ThinkingPanel", () => {
       content: null,
     });
 
-    expect(screen.getByText("Belum ada proses yang tersedia.")).toBeInTheDocument();
+    expect(screen.getByText("No process is available yet.")).toBeInTheDocument();
   });
 
   it("renders raw content fallback for thinking status with null content", () => {
@@ -119,9 +119,9 @@ describe("ThinkingPanel", () => {
       animated: true,
     });
 
-    const panel = screen.getByLabelText("Proses berpikir");
+    const panel = screen.getByLabelText("Thinking process");
     expect(panel).toHaveAttribute("aria-busy", "true");
-    expect(panel).toHaveTextContent("Memuat proses berpikir...");
+    expect(panel).toHaveTextContent("Loading thinking process...");
   });
 
   it("renders mixed inline markdown safely, including empty and unclosed markers", () => {

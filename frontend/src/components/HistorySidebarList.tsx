@@ -1,10 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ClipboardEvent } from 'react'
 import type { HistoryItem } from '@/services/history'
+import { getSessionResume } from '@/services/sessions'
 
 const HISTORY_FILE_NAME_MAX_LENGTH = 120
+const HISTORY_TITLE_EMPTY_ERROR_MESSAGE = 'Title cannot be empty.'
+const HISTORY_TITLE_MAX_LENGTH_ERROR_MESSAGE = 'Max 120 Character'
 
 function getDisplayName(customName: string, originalName: string): string {
     return customName.trim() || originalName
@@ -94,8 +97,10 @@ interface HistorySidebarContentProps {
 interface RenameHistoryDialogProps {
     readonly target: HistoryItem | null
     readonly value: string
+    readonly validationError: string | null
     readonly isPending: boolean
     readonly onChangeValue: (value: string) => void
+    readonly onMaxLengthBlocked: () => void
     readonly onCancel: () => void
     readonly onSubmit: (target: HistoryItem) => void
 }
@@ -126,6 +131,7 @@ function HistorySidebarItemRow({
             },
         }
         : `/history?historyId=${item.id}`
+    const sessionId = item.session_id ?? null
 
     return (
         <div
@@ -141,6 +147,15 @@ function HistorySidebarItemRow({
                     href={historyHref}
                     className="min-w-0 flex-1 rounded-md px-2 py-1 text-left transition focus:outline-none"
                     title={historyName}
+                    onClick={() => {
+                        if (!sessionId) {
+                            return
+                        }
+
+                        void Promise.resolve(getSessionResume(sessionId)).catch(() => {
+                            // SessionDetail handles final fallback state.
+                        })
+                    }}
                 >
                     <p className="truncate text-sm font-semibold">{historyName}</p>
                 </Link>
@@ -250,7 +265,7 @@ function HistorySidebarContent({
             ) : null}
 
             {shouldShowEmptyState ? (
-                <p className="px-4 text-sm text-white/75">No history yet.</p>
+                <p className="px-4 text-sm text-white/75">No history yet</p>
             ) : null}
 
             {shouldShowNoMatches ? (
@@ -277,13 +292,55 @@ function HistorySidebarContent({
 function RenameHistoryDialog({
     target,
     value,
+    validationError,
     isPending,
     onChangeValue,
+    onMaxLengthBlocked,
     onCancel,
     onSubmit,
 }: RenameHistoryDialogProps) {
     if (!target) {
         return null
+    }
+
+    const handleBeforeInput = (event: {
+        nativeEvent: InputEvent
+        currentTarget: HTMLInputElement
+        preventDefault: () => void
+    }) => {
+        const typedText = event.nativeEvent.data
+        if (!typedText) {
+            return
+        }
+
+        const targetInput = event.currentTarget
+        const selectionStart = targetInput.selectionStart ?? targetInput.value.length
+        const selectionEnd = targetInput.selectionEnd ?? selectionStart
+        const selectedLength = Math.max(0, selectionEnd - selectionStart)
+        const nextLength = targetInput.value.length - selectedLength + typedText.length
+
+        if (nextLength > HISTORY_FILE_NAME_MAX_LENGTH) {
+            event.preventDefault()
+            onMaxLengthBlocked()
+        }
+    }
+
+    const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
+        const pastedText = event.clipboardData.getData('text')
+        if (!pastedText) {
+            return
+        }
+
+        const targetInput = event.currentTarget
+        const selectionStart = targetInput.selectionStart ?? targetInput.value.length
+        const selectionEnd = targetInput.selectionEnd ?? selectionStart
+        const selectedLength = Math.max(0, selectionEnd - selectionStart)
+        const nextLength = targetInput.value.length - selectedLength + pastedText.length
+
+        if (nextLength > HISTORY_FILE_NAME_MAX_LENGTH) {
+            event.preventDefault()
+            onMaxLengthBlocked()
+        }
     }
 
     return (
@@ -305,11 +362,16 @@ function RenameHistoryDialog({
                         onChange={(event) => {
                             onChangeValue(event.target.value)
                         }}
+                        onBeforeInput={handleBeforeInput}
+                        onPaste={handlePaste}
                         className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
                         maxLength={HISTORY_FILE_NAME_MAX_LENGTH}
                         disabled={isPending}
                     />
                 </label>
+                {validationError ? (
+                    <p className="mt-2 text-xs text-red-700">{validationError}</p>
+                ) : null}
                 <div className="mt-4 flex justify-end gap-2">
                     <button
                         type="button"
@@ -396,6 +458,7 @@ export default function HistorySidebarList({
     const [openMenuHistoryId, setOpenMenuHistoryId] = useState<string | null>(null)
     const [renameTarget, setRenameTarget] = useState<HistoryItem | null>(null)
     const [renameValue, setRenameValue] = useState('')
+    const [renameValidationError, setRenameValidationError] = useState<string | null>(null)
     const [deleteTarget, setDeleteTarget] = useState<HistoryItem | null>(null)
     const filteredItems = useMemo(() => {
         const normalizedQuery = searchQuery.trim().toLowerCase()
@@ -450,6 +513,7 @@ export default function HistorySidebarList({
     const openRenameDialog = (item: HistoryItem) => {
         setRenameTarget(item)
         setRenameValue(getDisplayName(item.custom_name, item.original_name))
+        setRenameValidationError(null)
         setOpenMenuHistoryId(null)
     }
 
@@ -459,10 +523,23 @@ export default function HistorySidebarList({
     }
 
     const handleRenameSubmit = async (target: HistoryItem) => {
-        const didRename = await renameHistory(target.id, renameValue.trim())
+        const normalizedRenameValue = renameValue.trim()
+        if (!normalizedRenameValue) {
+            setRenameValidationError(HISTORY_TITLE_EMPTY_ERROR_MESSAGE)
+            return
+        }
+
+        if (normalizedRenameValue.length > HISTORY_FILE_NAME_MAX_LENGTH) {
+            setRenameValidationError(HISTORY_TITLE_MAX_LENGTH_ERROR_MESSAGE)
+            return
+        }
+
+        setRenameValidationError(null)
+        const didRename = await renameHistory(target.id, normalizedRenameValue)
         if (didRename) {
             setRenameTarget(null)
             setRenameValue('')
+            setRenameValidationError(null)
         }
     }
 
@@ -480,6 +557,18 @@ export default function HistorySidebarList({
     const closeRenameDialog = () => {
         setRenameTarget(null)
         setRenameValue('')
+        setRenameValidationError(null)
+    }
+
+    const handleRenameChangeValue = (value: string) => {
+        setRenameValue(value)
+        if (renameValidationError) {
+            setRenameValidationError(null)
+        }
+    }
+
+    const handleRenameMaxLengthBlocked = () => {
+        setRenameValidationError(HISTORY_TITLE_MAX_LENGTH_ERROR_MESSAGE)
     }
 
     const closeDeleteDialog = () => {
@@ -539,8 +628,10 @@ export default function HistorySidebarList({
             <RenameHistoryDialog
                 target={renameTarget}
                 value={renameValue}
+                validationError={renameValidationError}
                 isPending={isRenaming}
-                onChangeValue={setRenameValue}
+                onChangeValue={handleRenameChangeValue}
+                onMaxLengthBlocked={handleRenameMaxLengthBlocked}
                 onCancel={closeRenameDialog}
                 onSubmit={(target) => {
                     void handleRenameSubmit(target)

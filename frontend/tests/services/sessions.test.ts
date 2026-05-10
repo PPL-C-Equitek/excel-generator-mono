@@ -101,4 +101,54 @@ describe("sessions service", () => {
       "The session resume response is invalid."
     );
   });
+
+  it("appends a session message when authenticated", async () => {
+    mockGetValidAccessToken.mockResolvedValue("access-token");
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      ok: true,
+      session_id: "session-1",
+      chat_id: "chat-1",
+    });
+
+    const sessionsService = await import("@/services/sessions");
+    const result = await sessionsService.appendSessionMessage(
+      "session-1",
+      "Lanjutkan analisis"
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith("sessions/session-1/chat/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer access-token",
+      },
+      body: JSON.stringify({ message: "Lanjutkan analisis" }),
+    });
+    expect(result).toEqual({
+      ok: true,
+      session_id: "session-1",
+      chat_id: "chat-1",
+    });
+  });
+
+  it("throws auth error when append message is requested without token", async () => {
+    mockGetValidAccessToken.mockResolvedValue(null);
+    const fetchSpy = vi.spyOn(api, "fetchAPI");
+
+    const sessionsService = await import("@/services/sessions");
+    await expect(
+      sessionsService.appendSessionMessage("session-1", "Lanjutkan")
+    ).rejects.toThrow("Authentication credentials were not provided.");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("throws when append message returns a non-object payload", async () => {
+    mockGetValidAccessToken.mockResolvedValue("access-token");
+    vi.spyOn(api, "fetchAPI").mockResolvedValue("invalid-response");
+
+    const sessionsService = await import("@/services/sessions");
+    await expect(
+      sessionsService.appendSessionMessage("session-1", "Lanjutkan")
+    ).rejects.toThrow("The session chat response is invalid.");
+  });
 });

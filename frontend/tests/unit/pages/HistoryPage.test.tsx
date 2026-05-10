@@ -5,6 +5,10 @@ import HistoryPage from '../../../src/app/history/HistoryPage'
 import { useHistoryFiles } from '../../../src/hooks/useHistoryFiles'
 import { useSessionResume } from '../../../src/hooks/useSessionResume'
 import { useSessionThinkingLogs } from '../../../src/hooks/useSessionThinkingLogs'
+import {
+    downloadSessionOutputCsvFile,
+    downloadSessionOutputExcelFile,
+} from '../../../src/services/llm'
 
 vi.mock('../../../src/hooks/useHistoryFiles', () => ({
     useHistoryFiles: vi.fn(),
@@ -22,6 +26,11 @@ vi.mock('next/navigation', () => ({
     useSearchParams: vi.fn(),
 }))
 
+vi.mock('../../../src/services/llm', () => ({
+    downloadSessionOutputCsvFile: vi.fn(),
+    downloadSessionOutputExcelFile: vi.fn(),
+}))
+
 vi.mock('../../../src/components/Sidebar', () => ({
     default: ({ activeMenu, selectedHistoryId }: { activeMenu: string; selectedHistoryId?: string | null }) => (
         <div data-testid="sidebar">
@@ -35,6 +44,8 @@ const mockUseHistoryFiles = vi.mocked(useHistoryFiles)
 const mockUseSearchParams = vi.mocked(useSearchParams)
 const mockUseSessionResume = vi.mocked(useSessionResume)
 const mockUseSessionThinkingLogs = vi.mocked(useSessionThinkingLogs)
+const mockDownloadSessionOutputCsvFile = vi.mocked(downloadSessionOutputCsvFile)
+const mockDownloadSessionOutputExcelFile = vi.mocked(downloadSessionOutputExcelFile)
 
 const historyItems = [
     {
@@ -115,7 +126,18 @@ function makeSessionResumeState(sessionId: string) {
             updated_at: '2026-04-10T10:01:00Z',
             last_message_at: null,
             last_output_at: null,
-            history: [],
+            history: [
+                {
+                    type: 'output',
+                    id: 'output-1',
+                    chat_id: null,
+                    parent_output_id: null,
+                    output_json: { foo: 'bar' },
+                    thinking_log: '',
+                    reasoning: {},
+                    created_at: '2026-04-10T10:01:00Z',
+                },
+            ],
         },
         isLoading: false,
         error: null,
@@ -173,7 +195,7 @@ describe('HistoryPage', () => {
 
         expect(mockUseSessionResume).toHaveBeenCalledWith(sessionId)
         expect(mockUseSessionThinkingLogs).toHaveBeenCalledWith(sessionId)
-        expect(screen.getByText('Resume Session')).toBeInTheDocument()
+        expect(screen.getAllByText('Resume Session').length).toBeGreaterThan(0)
     })
 
     it('falls back to the selected history session_id when the query parameter is absent', () => {
@@ -266,37 +288,28 @@ describe('HistoryPage', () => {
         expect(screen.getByText('invalid-date')).toBeInTheDocument()
     })
 
-    it('calls csv and excel download handlers with derived filenames', () => {
-        const downloadCsv = vi.fn().mockResolvedValue(undefined)
-        const downloadExcel = vi.fn().mockResolvedValue(undefined)
-        mockUseHistoryFiles.mockReturnValue(makeHookState({ downloadCsv, downloadExcel }))
+    it('calls latest output download handlers when session output exists', async () => {
+        const sessionId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        mockSessionSearchParam(historyItems[0].id, sessionId)
+        mockUseSessionResume.mockReturnValue(makeSessionResumeState(sessionId))
 
         render(<HistoryPage />)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Download CSV' }))
-        fireEvent.click(screen.getByRole('button', { name: 'Download Excel' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Download latest as CSV' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Download latest as Excel' }))
 
-        expect(downloadCsv).toHaveBeenCalledWith(historyItems[0].id, 'report-a.csv')
-        expect(downloadExcel).toHaveBeenCalledWith(historyItems[0].id, 'report-a.xlsx')
-    })
-
-    it('shows downloading button labels when csv and excel are in progress', () => {
-        mockUseHistoryFiles.mockReturnValue(
-            makeHookState({
-                isDownloading: vi
-                    .fn()
-                    .mockImplementation(
-                        (historyId: string, fileFormat: 'csv' | 'xlsx') =>
-                            historyId === historyItems[0].id &&
-                            (fileFormat === 'csv' || fileFormat === 'xlsx')
-                    ),
-            })
-        )
-
-        render(<HistoryPage />)
-
-        expect(screen.getByRole('button', { name: 'Downloading CSV...' })).toBeDisabled()
-        expect(screen.getByRole('button', { name: 'Downloading Excel...' })).toBeDisabled()
+        await waitFor(() => {
+            expect(mockDownloadSessionOutputCsvFile).toHaveBeenCalledWith(
+                sessionId,
+                'output-1',
+                `session-${sessionId}-latest-output.csv`
+            )
+            expect(mockDownloadSessionOutputExcelFile).toHaveBeenCalledWith(
+                sessionId,
+                'output-1',
+                `session-${sessionId}-latest-output.xlsx`
+            )
+        })
     })
 
     it('allows rename flow and submits new name', async () => {

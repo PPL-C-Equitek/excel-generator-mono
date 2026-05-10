@@ -1,4 +1,3 @@
-import json
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -20,14 +19,16 @@ from llm.services.openai_client import (
 )
 from llm.views import (
     _build_generate_bootstrap_message,
-    build_export_output_json,
-    _extract_document_type,
+    _extract_follow_up_prompt,
     _sanitize_output_json,
-    _to_scalar_cell,
     build_llm_generation_service,
     build_llm_reasoning_service,
-    extract_original_name,
     get_authenticated_user_id,
+)
+from llm.services.chat_context_service import (
+    _build_compact_file_context,
+    _build_table_context_lines,
+    _inject_file_context_if_available,
 )
 from llm.serializers import MAX_MESSAGE_LENGTH
 
@@ -70,43 +71,6 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(result, "Uploaded file for conversion")
 
-    def test_extract_original_name_uses_input_document_info_filename(self):
-        result = extract_original_name(
-            {"document_info": {"filename": "input-doc.pdf"}},
-            {"document_info": {"filename": "output-doc.pdf"}},
-        )
-
-        self.assertEqual(result, "input-doc.pdf")
-
-    def test_extract_original_name_falls_back_to_output_document_info_filename(self):
-        result = extract_original_name(
-            {"document_info": {}},
-            {"document_info": {"filename": "output-doc.pdf"}},
-        )
-
-        self.assertEqual(result, "output-doc.pdf")
-
-    def test_extract_original_name_returns_generated_output_when_no_filename_available(self):
-        result = extract_original_name(
-            {"document_info": {}},
-            {"document_info": {}},
-        )
-
-        self.assertEqual(result, "generated-output")
-
-    def test_extract_original_name_returns_generated_output_when_input_and_output_are_not_objects(self):
-        result = extract_original_name([], [])
-
-        self.assertEqual(result, "generated-output")
-
-    def test_extract_original_name_returns_generated_output_when_document_info_values_are_not_objects(self):
-        result = extract_original_name(
-            {"document_info": "not-an-object"},
-            {"document_info": "not-an-object"},
-        )
-
-        self.assertEqual(result, "generated-output")
-
     def test_build_generate_bootstrap_message_falls_back_to_title_without_filename(self):
         result = _build_generate_bootstrap_message({}, "Convert generated-output")
 
@@ -122,17 +86,72 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(result, "Convert generated-output")
 
-    def test_extract_document_type_returns_unknown_for_non_object_payload(self):
-        result = _extract_document_type(["not-an-object"])
+    def test_build_table_context_lines_skips_headers_when_empty_and_includes_row_samples(self):
+        lines = _build_table_context_lines(
+            {
+                "table_name": "SheetA",
+                "headers": [],
+                "rows": [
+                    {"unit": "ICU", "value": 100, "meta": "x"},
+                    ["ignored-non-dict-row"],
+                ],
+            }
+        )
 
-        self.assertEqual(result, "unknown")
+        self.assertEqual(lines[0], "Table 'SheetA': 0 columns, 2 rows")
+        self.assertTrue(any(line.startswith("  Row 1: ") for line in lines))
+        self.assertFalse(any(line.startswith("  Headers: ") for line in lines))
 
-    def test_extract_document_type_supports_file_type_and_format_keys(self):
-        file_type_result = _extract_document_type({"file_type": " XLSX "})
-        format_result = _extract_document_type({"format": " CSV "})
+    def test_build_compact_file_context_handles_non_object_sections_and_non_dict_tables(self):
+        context = _build_compact_file_context(
+            {
+                "document_info": "invalid-doc-info",
+                "summary": {},
+                "content_data": [
+                    "non-dict-table-entry",
+                    {
+                        "table_name": "Summary",
+                        "headers": ["unit"],
+                        "rows": [{"unit": "ER"}],
+                    },
+                ],
+            }
+        )
 
-        self.assertEqual(file_type_result, "xlsx")
-        self.assertEqual(format_result, "csv")
+        self.assertIn("[CONVERTED_FILE_CONTEXT]", context)
+        self.assertIn("Table 'Summary': 1 columns, 1 rows", context)
+        self.assertNotIn("File:", context)
+        self.assertNotIn("Summary:", context)
+
+    def test_build_compact_file_context_handles_non_list_content_data(self):
+        context = _build_compact_file_context(
+            {
+                "document_info": {"filename": "report.xlsx", "source_type": "Excel"},
+                "summary": {"total_tables": 1},
+                "content_data": "not-a-list",
+            }
+        )
+
+        self.assertIn("File: report.xlsx (Excel)", context)
+        self.assertIn("Summary: total_tables=1", context)
+        self.assertNotIn("Table '", context)
+
+    def test_inject_file_context_returns_history_when_export_payload_cannot_be_built(self):
+        history = [{"role": "user", "content": "Halo"}]
+        last_output = SimpleNamespace(export_output_json={}, output_json={})
+        session = SimpleNamespace(
+            generated_outputs=SimpleNamespace(
+                order_by=lambda *_args, **_kwargs: SimpleNamespace(first=lambda: last_output)
+            )
+        )
+
+        result = _inject_file_context_if_available(session, history)
+
+        self.assertEqual(result, history)
+        self.assertIs(result, history)
+
+    def test_extract_follow_up_prompt_returns_empty_for_non_object_payload(self):
+        self.assertEqual(_extract_follow_up_prompt(["not-an-object"]), "")
 
     def test_sanitize_output_json_removes_reasoning_meta_keys_from_object(self):
         sanitized = _sanitize_output_json(
@@ -158,316 +177,6 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         sanitized = _sanitize_output_json(payload)
 
         self.assertEqual(sanitized, payload)
-
-    def test_build_export_output_json_normalizes_headers_and_rows_payload(self):
-        raw_output_json = {
-            "headers": ["unit", "value"],
-            "rows": [["ICU", 1000], ["ER", 1500]],
-            "final_answer": "ignored for export payload",
-        }
-        input_json = {
-            "filename": "hospital-report.xlsx",
-            "document_info": {"source_type": "Excel"},
-        }
-
-        export_output_json = build_export_output_json(
-            input_json=input_json,
-            output_json=raw_output_json,
-        )
-
-        self.assertEqual(
-            export_output_json,
-            {
-                "document_info": {
-                    "source_type": "Excel",
-                    "filename": "hospital-report.xlsx",
-                },
-                "summary": {
-                    "total_tables": 1,
-                    "total_rows": 2,
-                    "total_columns": 2,
-                },
-                "content_data": [
-                    {
-                        "table_name": "Sheet1",
-                        "headers": ["unit", "value"],
-                        "rows": [
-                            {"unit": "ICU", "value": 1000},
-                            {"unit": "ER", "value": 1500},
-                        ],
-                    }
-                ],
-            },
-        )
-
-    def test_build_export_output_json_normalizes_sheet_like_mapping_payload(self):
-        raw_output_json = {
-            "Rawat Jalan": [
-                {"unit": "Rawat Jalan", "value": 1000},
-                {"unit": "Rawat Jalan", "value": 1200},
-            ],
-            "ICU": [
-                {"unit": "ICU", "value": 3000},
-            ],
-        }
-        input_json = {
-            "document_info": {
-                "filename": "finance.pdf",
-                "source_type": "PDF",
-            }
-        }
-
-        export_output_json = build_export_output_json(
-            input_json=input_json,
-            output_json=raw_output_json,
-        )
-
-        self.assertEqual(
-            export_output_json["document_info"],
-            {
-                "source_type": "PDF",
-                "filename": "finance.pdf",
-            },
-        )
-        self.assertEqual(
-            export_output_json["summary"],
-            {
-                "total_tables": 2,
-                "total_rows": 3,
-                "total_columns": 2,
-            },
-        )
-        self.assertEqual(
-            export_output_json["content_data"],
-            [
-                {
-                    "table_name": "Rawat Jalan",
-                    "headers": ["unit", "value"],
-                    "rows": [
-                        {"unit": "Rawat Jalan", "value": 1000},
-                        {"unit": "Rawat Jalan", "value": 1200},
-                    ],
-                },
-                {
-                    "table_name": "ICU",
-                    "headers": ["unit", "value"],
-                    "rows": [
-                        {"unit": "ICU", "value": 3000},
-                    ],
-                },
-            ],
-        )
-
-    def test_build_export_output_json_infers_pdf_source_type_from_filename(self):
-        export_output_json = build_export_output_json(
-            input_json={"document_info": {"filename": "invoice.pdf"}},
-            output_json={"headers": ["unit"], "rows": [["ICU"]]},
-        )
-
-        self.assertEqual(
-            export_output_json["document_info"],
-            {
-                "source_type": "PDF",
-                "filename": "invoice.pdf",
-            },
-        )
-
-    def test_build_export_output_json_falls_back_to_excel_when_source_type_is_unrecognized(self):
-        export_output_json = build_export_output_json(
-            input_json={
-                "document_info": {
-                    "filename": "invoice.docx",
-                    "source_type": "word",
-                }
-            },
-            output_json={"headers": ["unit"], "rows": [["ICU"]]},
-        )
-
-        self.assertEqual(
-            export_output_json["document_info"],
-            {
-                "source_type": "Excel",
-                "filename": "invoice.docx",
-            },
-        )
-
-    def test_build_export_output_json_normalizes_duplicate_blank_headers_and_mixed_rows(self):
-        export_output_json = build_export_output_json(
-            input_json={"document_info": {"source_type": "xlsx"}},
-            output_json={
-                "headers": [" Unit ", "", "unit"],
-                "rows": [
-                    ["ICU", 10, 20],
-                    {"Unit": "ER", "column_2": 30, "unit_2": 40},
-                    "fallback",
-                ],
-            },
-        )
-
-        self.assertEqual(
-            export_output_json["content_data"],
-            [
-                {
-                    "table_name": "Sheet1",
-                    "headers": ["Unit", "column_2", "unit_2"],
-                    "rows": [
-                        {"Unit": "ICU", "column_2": 10, "unit_2": 20},
-                        {"Unit": "ER", "column_2": 30, "unit_2": 40},
-                        {"Unit": "fallback", "column_2": None, "unit_2": None},
-                    ],
-                }
-            ],
-        )
-
-    def test_build_export_output_json_uses_sheet_fallback_name_for_blank_sheet_key(self):
-        export_output_json = build_export_output_json(
-            input_json={"filename": "summary.xlsx"},
-            output_json={
-                "   ": [1, 2],
-                "Named": [{"value": 3, "other": "ok"}],
-            },
-        )
-
-        self.assertEqual(
-            export_output_json["content_data"],
-            [
-                {
-                    "table_name": "Sheet1",
-                    "headers": ["value"],
-                    "rows": [{"value": 1}, {"value": 2}],
-                },
-                {
-                    "table_name": "Named",
-                    "headers": ["value", "other"],
-                    "rows": [{"value": 3, "other": "ok"}],
-                },
-            ],
-        )
-
-    def test_build_export_output_json_wraps_scalar_payload_in_default_value_table(self):
-        export_output_json = build_export_output_json(
-            input_json={"filename": "summary.xlsx"},
-            output_json=123,
-        )
-
-        self.assertEqual(
-            export_output_json["content_data"],
-            [
-                {
-                    "table_name": "Sheet1",
-                    "headers": ["value"],
-                    "rows": [{"value": 123}],
-                }
-            ],
-        )
-        self.assertEqual(
-            export_output_json["summary"],
-            {"total_tables": 1, "total_rows": 1, "total_columns": 1},
-        )
-
-    def test_build_export_output_json_uses_default_value_header_for_empty_headers(self):
-        export_output_json = build_export_output_json(
-            input_json={"filename": "summary.xlsx"},
-            output_json={
-                "headers": [],
-                "rows": [[{"bad"}]],
-            },
-        )
-
-        self.assertEqual(
-            export_output_json["content_data"],
-            [
-                {
-                    "table_name": "Sheet1",
-                    "headers": ["value"],
-                    "rows": [{"value": "[Unserializable Value]"}],
-                }
-            ],
-        )
-
-    def test_build_export_output_json_infers_headers_from_list_of_lists_payload(self):
-        export_output_json = build_export_output_json(
-            input_json={"filename": "summary.xlsx"},
-            output_json=[["ICU", 10], ["ER", 20]],
-        )
-
-        self.assertEqual(
-            export_output_json["content_data"],
-            [
-                {
-                    "table_name": "Sheet1",
-                    "headers": ["column_1", "column_2"],
-                    "rows": [
-                        {"column_1": "ICU", "column_2": 10},
-                        {"column_1": "ER", "column_2": 20},
-                    ],
-                }
-            ],
-        )
-
-    def test_build_export_output_json_reuses_cached_serialization_for_repeated_nested_cell_values(self):
-        shared_value = {"unit": "ICU", "meta": {"active": True}}
-
-        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
-            export_output_json = build_export_output_json(
-                input_json={"filename": "summary.xlsx"},
-                output_json={
-                    "headers": ["payload"],
-                    "rows": [
-                        [shared_value],
-                        [shared_value],
-                        [shared_value],
-                    ],
-                },
-            )
-
-        self.assertEqual(
-            export_output_json["content_data"][0]["rows"],
-            [
-                {"payload": json.dumps(shared_value)},
-                {"payload": json.dumps(shared_value)},
-                {"payload": json.dumps(shared_value)},
-            ],
-        )
-        self.assertEqual(mock_json_dumps.call_count, 1)
-
-    def test_build_export_output_json_serializes_repeated_bytes_cells_once_with_cache(self):
-        shared_value = b"ICU"
-
-        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
-            export_output_json = build_export_output_json(
-                input_json={"filename": "summary.xlsx"},
-                output_json={
-                    "headers": ["payload"],
-                    "rows": [
-                        [shared_value],
-                        [shared_value],
-                    ],
-                },
-            )
-
-        self.assertEqual(
-            export_output_json["content_data"][0]["rows"],
-            [
-                {"payload": "b'ICU'"},
-                {"payload": "b'ICU'"},
-            ],
-        )
-        self.assertEqual(mock_json_dumps.call_count, 0)
-
-    def test_to_scalar_cell_serializes_nested_object_without_cache(self):
-        payload = {"unit": "ICU", "meta": {"active": True}}
-
-        with patch("llm.views.json.dumps", wraps=json.dumps) as mock_json_dumps:
-            result = _to_scalar_cell(payload)
-
-        self.assertEqual(result, json.dumps(payload))
-        self.assertEqual(mock_json_dumps.call_count, 1)
-
-    def test_to_scalar_cell_returns_bytes_as_string_without_cache(self):
-        result = _to_scalar_cell(b"ICU")
-
-        self.assertEqual(result, "b'ICU'")
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_returns_200(self, mock_build_service):
@@ -1982,6 +1691,79 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             [{"unit": "ICU", "value": 1000}],
         )
         self.assertTrue(ArtifactHistory.objects.exists())
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_appends_follow_up_user_prompt_to_existing_session(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        session = Session.objects.create(owner=self.user, title="Existing Session")
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "session_id": str(session.id),
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "user_prompt": "Lanjutkan untuk sheet berikutnya.",
+                },
+                "include_reasoning": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["session_id"], str(session.id))
+        self.assertIsNotNone(response.data["chat_id"])
+        self.assertEqual(Session.objects.count(), 1)
+
+        user_messages = list(
+            ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_USER).order_by("created_at")
+        )
+        self.assertEqual(len(user_messages), 1)
+        self.assertEqual(user_messages[0].content, "Lanjutkan untuk sheet berikutnya.")
+        self.assertEqual(str(user_messages[0].id), response.data["chat_id"])
+
+        generated_output = GeneratedOutput.objects.get(session=session)
+        self.assertEqual(generated_output.source_message_id, user_messages[0].id)
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_does_not_append_follow_up_when_user_prompt_blank(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        session = Session.objects.create(owner=self.user, title="Existing Session")
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "session_id": str(session.id),
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "user_prompt": "   ",
+                },
+                "include_reasoning": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["session_id"], str(session.id))
+        self.assertIsNone(response.data["chat_id"])
+        self.assertEqual(
+            ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_USER).count(),
+            0,
+        )
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_updates_session_last_output_at(self, mock_build_service):

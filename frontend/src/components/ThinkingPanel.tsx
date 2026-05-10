@@ -20,7 +20,7 @@ export interface ThinkingPanelProps {
   animated?: boolean;
 }
 
-const panelLabel = "Proses berpikir";
+const panelLabel = "Thinking process";
 const shellClassName =
   "rounded-2xl border border-slate-200/80 bg-slate-50/95 px-4 py-3 text-sm text-slate-700 shadow-sm";
 const scrollRegionClassName =
@@ -252,7 +252,7 @@ export default function ThinkingPanel({
         data-testid="thinking-panel-content"
         className="whitespace-pre-wrap text-slate-500"
       >
-        Memuat proses berpikir...
+        Loading thinking process...
       </p>
     );
   } else if (showEmptyState) {
@@ -261,7 +261,7 @@ export default function ThinkingPanel({
         data-testid="thinking-panel-content"
         className="whitespace-pre-wrap text-slate-500"
       >
-        Belum ada proses yang tersedia.
+        No process is available yet.
       </p>
     );
   } else {
@@ -289,7 +289,7 @@ export default function ThinkingPanel({
         <span aria-hidden className="mt-0.5 text-red-500">
           !
         </span>
-        <p>Gagal memuat proses</p>
+        <p>Failed to load process</p>
       </section>
     );
   }

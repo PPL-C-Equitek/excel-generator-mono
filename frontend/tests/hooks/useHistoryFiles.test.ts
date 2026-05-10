@@ -107,7 +107,7 @@ describe('useHistoryFiles', () => {
 
         await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-        expect(fetchApiSpy).toHaveBeenCalledWith('history/?limit=10&offset=0', expect.any(Object))
+        expect(fetchApiSpy).toHaveBeenCalledWith('sessions/?limit=10&offset=0', expect.any(Object))
     })
 
     it('supports options-only signature via built-in service', async () => {
@@ -125,7 +125,7 @@ describe('useHistoryFiles', () => {
 
         await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-        expect(fetchApiSpy).toHaveBeenCalledWith('history/?limit=3&offset=0', expect.any(Object))
+        expect(fetchApiSpy).toHaveBeenCalledWith('sessions/?limit=3&offset=0', expect.any(Object))
     })
 
     it('loads history items on mount', async () => {
@@ -336,6 +336,34 @@ describe('useHistoryFiles', () => {
         })
 
         expect(result.current.mutationError).toBe('Rename failed.')
+    })
+
+    it('rejects empty rename title before calling service', async () => {
+        const service = makeServiceMock()
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.renameHistory(historyItems[0].id, '   ')
+        })
+
+        expect(service.renameHistoryFile).not.toHaveBeenCalled()
+        expect(result.current.mutationError).toBe('Title cannot be empty.')
+    })
+
+    it('rejects rename title longer than 120 characters before calling service', async () => {
+        const service = makeServiceMock()
+        const { result } = renderHook(() => useHistoryFiles(service))
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+        await act(async () => {
+            await result.current.renameHistory(historyItems[0].id, 'A'.repeat(121))
+        })
+
+        expect(service.renameHistoryFile).not.toHaveBeenCalled()
+        expect(result.current.mutationError).toBe('Max 120 Character')
     })
 
     it('tracks csv download-in-progress and blocks duplicate requests for the same item', async () => {
