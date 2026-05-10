@@ -760,3 +760,78 @@ class BuildCompactFileContextTest(SimpleTestCase):
         result = _build_compact_file_context(export_json)
 
         self.assertIn("DataSheet", result)
+
+    def test_edge_limits_to_max_tables_and_appends_omitted_count(self):
+        from llm.services.chat_context_service import _MAX_COMPACT_TABLES, _build_compact_file_context
+
+        tables = [{"table_name": f"T{i}", "headers": [], "rows": []} for i in range(_MAX_COMPACT_TABLES + 2)]
+        result = _build_compact_file_context({"content_data": tables})
+
+        self.assertIn(f"T{_MAX_COMPACT_TABLES - 1}", result)
+        self.assertNotIn(f"T{_MAX_COMPACT_TABLES}", result)
+        self.assertIn("tables omitted", result)
+
+    def test_edge_header_line_truncated_when_table_has_many_columns(self):
+        from llm.services.chat_context_service import _MAX_COMPACT_HEADERS, _build_compact_file_context
+
+        headers = [f"col{i}" for i in range(_MAX_COMPACT_HEADERS + 5)]
+        result = _build_compact_file_context({"content_data": [{"table_name": "T", "headers": headers, "rows": []}]})
+
+        self.assertIn("more", result)
+        self.assertNotIn(f"col{_MAX_COMPACT_HEADERS}", result)
+
+
+class InjectFileContextSaveBackTest(SimpleTestCase):
+    def _make_session(self, last_output=None):
+        session = Mock()
+        session.generated_outputs.order_by.return_value.first.return_value = last_output
+        return session
+
+    def test_positive_save_called_on_output_when_fallback_is_used(self):
+        from llm.services.chat_context_service import _inject_file_context_if_available
+
+        output = Mock()
+        output.export_output_json = None
+        output.output_json = {"headers": ["A"], "rows": [["1"]]}
+        session = self._make_session(last_output=output)
+
+        _inject_file_context_if_available(session, [])
+
+        output.save.assert_called_once_with(update_fields=["export_output_json"])
+
+    def test_negative_save_not_called_when_export_output_json_already_present(self):
+        from llm.services.chat_context_service import _inject_file_context_if_available
+
+        output = Mock()
+        output.export_output_json = {"document_info": {}, "summary": {}, "content_data": []}
+        session = self._make_session(last_output=output)
+
+        _inject_file_context_if_available(session, [])
+
+        output.save.assert_not_called()
+
+    def test_negative_history_unchanged_when_export_output_json_is_non_dict(self):
+        from llm.services.chat_context_service import _inject_file_context_if_available
+
+        output = Mock()
+        output.export_output_json = ["corrupted", "data"]
+        output.output_json = None
+        session = self._make_session(last_output=output)
+        history = [{"role": "user", "content": "Halo"}]
+
+        result = _inject_file_context_if_available(session, history)
+
+        self.assertEqual(result, history)
+
+    def test_negative_save_exception_is_swallowed_and_context_still_injected(self):
+        from llm.services.chat_context_service import _inject_file_context_if_available
+
+        output = Mock()
+        output.export_output_json = None
+        output.output_json = {"headers": ["A"], "rows": [["1"]]}
+        output.save.side_effect = Exception("db error")
+        session = self._make_session(last_output=output)
+
+        result = _inject_file_context_if_available(session, [])
+
+        self.assertEqual(result[0]["role"], "system")
