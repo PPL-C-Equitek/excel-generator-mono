@@ -117,3 +117,54 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
         self.assertIn("- document_type: xlsx", prompt)
         self.assertIn("INPUT_JSON:", prompt)
         self.assertIn("OUTPUT_JSON:", prompt)
+
+    def test_build_conversion_reasoning_prompt_compacts_upload_wrapper_and_hides_raw_rows(self):
+        prompt = build_conversion_reasoning_prompt(
+            input_json={
+                "status": "success",
+                "message": "File uploaded successfully",
+                "filename": "invoice.pdf",
+                "format": "pdf",
+                "size": 123,
+                "extracted": {
+                    "Sheet1": [
+                        ["header_1", "header_2"],
+                        ["RAW_INPUT_SECRET_VALUE", "1000"],
+                    ]
+                },
+                "user_prompt": "Only keep paid rows",
+            },
+            output_json={
+                "document_info": {"source_type": "PDF", "filename": "invoice.pdf"},
+                "summary": {"total_tables": 1, "total_rows": 1, "total_columns": 2},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["status", "amount"],
+                        "rows": [{"status": "PAID", "amount": "RAW_OUTPUT_SECRET_VALUE"}],
+                    }
+                ],
+            },
+            file_name="invoice.pdf",
+            document_type="pdf",
+        )
+
+        self.assertIn("upload_wrapper", prompt)
+        self.assertIn("tabular_output", prompt)
+        self.assertIn("table_count", prompt)
+        self.assertIn("header_count", prompt)
+        self.assertNotIn("RAW_INPUT_SECRET_VALUE", prompt)
+        self.assertNotIn("RAW_OUTPUT_SECRET_VALUE", prompt)
+
+    def test_build_conversion_reasoning_prompt_compacts_large_nested_payload(self):
+        huge_value = "X" * 5000
+        prompt = build_conversion_reasoning_prompt(
+            input_json={
+                "extracted": {
+                    "Sheet1": [["col1"], [huge_value]],
+                }
+            },
+            output_json={"content_data": [{"table_name": "Sheet1", "headers": ["col1"], "rows": [{"col1": huge_value}]}]},
+        )
+
+        self.assertLess(len(prompt), 10000)
