@@ -484,6 +484,70 @@ class LlmGenerationServiceTest(SimpleTestCase):
             system_prompt="Schema-specific prompt",
         )
 
+    def test_json_generation_service_compacts_upload_wrapper_payload_for_prompt(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        service.generate(
+            {
+                "status": "success",
+                "message": "File uploaded successfully",
+                "filename": "report.pdf",
+                "size": 20480,
+                "format": "pdf",
+                "extracted": {
+                    "Sheet1": [["name", "amount"], ["A", 10]],
+                },
+            }
+        )
+
+        text_provider.generate_text.assert_called_once()
+        prompt = text_provider.generate_text.call_args.kwargs["prompt"]
+        parsed_prompt = json.loads(prompt)
+        self.assertEqual(
+            parsed_prompt,
+            {
+                "filename": "report.pdf",
+                "format": "pdf",
+                "extracted": {
+                    "Sheet1": [["name", "amount"], ["A", 10]],
+                },
+            },
+        )
+
+    def test_json_generation_service_preserves_follow_up_fields_when_compacting(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        service.generate(
+            {
+                "status": "success",
+                "message": "File uploaded successfully",
+                "filename": "report.pdf",
+                "size": 20480,
+                "format": "pdf",
+                "extracted": {"Sheet1": [["name"], ["A"]]},
+                "user_prompt": "Only keep paid invoices",
+                "previous_output": {"content_data": [{"rows": [{"status": "all"}]}]},
+            }
+        )
+
+        text_provider.generate_text.assert_called_once()
+        prompt = text_provider.generate_text.call_args.kwargs["prompt"]
+        parsed_prompt = json.loads(prompt)
+        self.assertEqual(
+            parsed_prompt,
+            {
+                "filename": "report.pdf",
+                "format": "pdf",
+                "extracted": {"Sheet1": [["name"], ["A"]]},
+                "user_prompt": "Only keep paid invoices",
+                "previous_output": {"content_data": [{"rows": [{"status": "all"}]}]},
+            },
+        )
+
     @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_uses_base_prompt_when_no_schema_selected(
         self, mock_build_extraction_prompt
