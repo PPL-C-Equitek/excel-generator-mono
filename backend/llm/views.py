@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import Any, cast
 from uuid import UUID
 
@@ -445,6 +446,43 @@ def _build_generate_success_response(output_json, session_id, chat_id, output_id
     return Response(response_serializer.data)
 
 
+def _estimate_payload_size_bytes(payload: Any) -> int:
+    try:
+        return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _log_llm_generate_telemetry(
+    *,
+    status: str,
+    total_ms: int,
+    generation_ms: int,
+    reasoning_ms: int,
+    input_payload: Any,
+    output_payload: Any,
+    include_reasoning: bool,
+    session_id: Any = None,
+    chat_id: Any = None,
+    output_id: Any = None,
+    target_output_id: Any = None,
+):
+    logger.info(
+        "llm_generate telemetry: status=%s total_ms=%s generation_ms=%s reasoning_ms=%s input_size_bytes=%s output_size_bytes=%s include_reasoning=%s session_id=%s chat_id=%s output_id=%s target_output_id=%s",
+        status,
+        total_ms,
+        generation_ms,
+        reasoning_ms,
+        _estimate_payload_size_bytes(input_payload),
+        _estimate_payload_size_bytes(output_payload),
+        include_reasoning,
+        str(session_id) if session_id is not None else None,
+        str(chat_id) if chat_id is not None else None,
+        str(output_id) if output_id is not None else None,
+        str(target_output_id) if target_output_id is not None else None,
+    )
+
+
 @api_view(["POST"])
 @require_http_methods(["POST"])
 def llm_generate(request):
@@ -460,6 +498,9 @@ def llm_generate(request):
         )
 
     validated_data = cast(dict[str, Any], request_serializer.validated_data)
+    request_started_at = time.perf_counter()
+    generation_duration_ms = 0
+    reasoning_duration_ms = 0
     input_json = validated_data["input_json"]
     session_id = validated_data.get("session_id")
     chat_id = validated_data.get("chat_id")
@@ -489,13 +530,28 @@ def llm_generate(request):
     include_reasoning = validated_data.get("include_reasoning", True)
     chat_context = _build_chat_context_from_session(session)
     llm_generation_service = build_llm_generation_service(request.user)
+    generation_started_at = time.perf_counter()
     output_json, error_response = _generate_output_json(
         llm_generation_service,
         input_json,
         custom_schema_id,
         chat_context=chat_context,
     )
+    generation_duration_ms = int((time.perf_counter() - generation_started_at) * 1000)
     if error_response is not None:
+        _log_llm_generate_telemetry(
+            status="failure",
+            total_ms=int((time.perf_counter() - request_started_at) * 1000),
+            generation_ms=generation_duration_ms,
+            reasoning_ms=reasoning_duration_ms,
+            input_payload=input_json,
+            output_payload=None,
+            include_reasoning=include_reasoning,
+            session_id=getattr(session, "id", None),
+            chat_id=getattr(source_message, "id", None),
+            output_id=None,
+            target_output_id=getattr(target_output, "id", None),
+        )
         return error_response
 
     output_json = _sanitize_output_json(output_json)
@@ -503,11 +559,13 @@ def llm_generate(request):
         input_json=input_json,
         output_json=output_json,
     )
+    reasoning_started_at = time.perf_counter()
     reasoning_response = _generate_optional_reasoning(
         include_reasoning=include_reasoning,
         input_json=input_json,
         output_json=output_json,
     )
+    reasoning_duration_ms = int((time.perf_counter() - reasoning_started_at) * 1000)
     thinking_log = ""
     if isinstance(reasoning_response, dict):
         raw_thinking_log = reasoning_response.get("thinking_log")
@@ -555,6 +613,20 @@ def llm_generate(request):
             output_json=output_json,
             status_processing="completed",
         )
+
+    _log_llm_generate_telemetry(
+        status="success",
+        total_ms=int((time.perf_counter() - request_started_at) * 1000),
+        generation_ms=generation_duration_ms,
+        reasoning_ms=reasoning_duration_ms,
+        input_payload=input_json,
+        output_payload=output_json,
+        include_reasoning=include_reasoning,
+        session_id=response_session_id,
+        chat_id=response_chat_id,
+        output_id=response_output_id,
+        target_output_id=getattr(target_output, "id", None),
+    )
 
     return _build_generate_success_response(
         output_json,
