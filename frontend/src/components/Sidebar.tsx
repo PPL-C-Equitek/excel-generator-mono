@@ -1,12 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { getStoredUser } from "@/lib/auth"
 import LogoutButton from "@/components/LogoutButton"
 import HistorySidebarList from "@/components/HistorySidebarList"
 import { useHistoryFiles } from '@/hooks/useHistoryFiles'
 import type { HistoryItem } from '@/services/history'
+import { getMonitoringAccess } from '@/services/monitoring'
 
 interface SidebarHistoryListState {
     readonly items: HistoryItem[]
@@ -26,17 +27,53 @@ interface SidebarProps {
     readonly historyListState?: SidebarHistoryListState
 }
 
+type SidebarMenuKey = Exclude<SidebarProps['activeMenu'], 'home' | 'history'>
+
+const SIDEBAR_MENUS: readonly {
+    readonly key: SidebarMenuKey
+    readonly label: string
+    readonly href: string
+}[] = [
+    { key: 'convert', label: 'Convert', href: '/convert' },
+    { key: 'schema', label: 'Schema', href: '/schema' },
+    { key: 'monitoring', label: 'Monitoring', href: '/monitoring' },
+    { key: 'change-password', label: 'Change Password', href: '/change-password' },
+]
+
 export default function Sidebar({ activeMenu, onLogout, selectedHistoryId, historyListState }: SidebarProps) {
-    const menus = [
-        { key: 'convert', label: 'Convert', href: '/convert' },
-        { key: 'schema', label: 'Schema', href: '/schema' },
-        { key: 'monitoring', label: 'Monitoring', href: '/monitoring' },
-        { key: 'change-password', label: 'Change Password', href: '/change-password' },
-    ]
+    const [canAccessMonitoring, setCanAccessMonitoring] = useState(false)
 
     const [username] = useState<string>(() => {
         return getStoredUser()?.name ?? 'User'
     })
+
+    useEffect(() => {
+        let isCancelled = false
+
+        const syncMonitoringAccess = async () => {
+            try {
+                const accessDecision = await getMonitoringAccess()
+
+                if (!isCancelled) {
+                    setCanAccessMonitoring(accessDecision.allowed)
+                }
+            } catch {
+                if (!isCancelled) {
+                    setCanAccessMonitoring(false)
+                }
+            }
+        }
+
+        void syncMonitoringAccess()
+
+        return () => {
+            isCancelled = true
+        }
+    }, [])
+
+    const visibleMenus = SIDEBAR_MENUS.filter((menu) => (
+        menu.key !== 'monitoring' || canAccessMonitoring
+    ))
 
     const localHistoryListState = useHistoryFiles({
         loadAll: true,
@@ -67,7 +104,7 @@ export default function Sidebar({ activeMenu, onLogout, selectedHistoryId, histo
             </div>
 
             <nav className="flex flex-col gap-1 px-3">
-                {menus.map((menu) => (
+                {visibleMenus.map((menu) => (
                     <a
                         key={menu.key}
                         href={menu.href}

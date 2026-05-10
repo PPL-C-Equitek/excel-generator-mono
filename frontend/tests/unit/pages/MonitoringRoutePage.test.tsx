@@ -9,14 +9,21 @@ vi.mock('../../../src/components/AuthGuard', () => ({
     ),
 }))
 
+vi.mock('../../../src/components/MonitoringRoleGuard', () => ({
+    default: ({ children }: { children: ReactNode }) => (
+        <div data-testid="monitoring-role-guard">{children}</div>
+    ),
+}))
+
 vi.mock('../../../src/app/monitoring/MonitoringPage', () => ({
     default: () => <div data-testid="monitoring-page" />,
 }))
 
 describe('Monitoring route page wrapper', () => {
-    it('wraps MonitoringPage with AuthGuard', () => {
+    it('wraps MonitoringPage with AuthGuard and MonitoringRoleGuard', () => {
         render(<Page />)
         expect(screen.getByTestId('auth-guard')).toBeInTheDocument()
+        expect(screen.getByTestId('monitoring-role-guard')).toBeInTheDocument()
         expect(screen.getByTestId('monitoring-page')).toBeInTheDocument()
     })
 })
