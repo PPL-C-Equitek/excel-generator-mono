@@ -18,15 +18,17 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
 )
 from llm.views import (
-    _build_compact_file_context,
     _build_generate_bootstrap_message,
-    _build_table_context_lines,
     _extract_follow_up_prompt,
-    _inject_file_context_if_available,
     _sanitize_output_json,
     build_llm_generation_service,
     build_llm_reasoning_service,
     get_authenticated_user_id,
+)
+from llm.services.chat_context_service import (
+    _build_compact_file_context,
+    _build_table_context_lines,
+    _inject_file_context_if_available,
 )
 from llm.serializers import MAX_MESSAGE_LENGTH
 

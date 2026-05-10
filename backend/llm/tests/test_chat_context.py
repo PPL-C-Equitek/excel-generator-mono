@@ -194,7 +194,7 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
         return session
 
     def test_positive_formats_user_message_as_USER_prefix(self):
-        from llm.views import _build_chat_context_from_session
+        from llm.services.chat_context_service import _build_chat_context_from_session
 
         session = self._make_session([
             self._make_message("user", "Format tanggal DD/MM/YYYY"),
@@ -204,7 +204,7 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
         self.assertIn("USER: Format tanggal DD/MM/YYYY", result)
 
     def test_negative_excludes_assistant_only_messages(self):
-        from llm.views import _build_chat_context_from_session
+        from llm.services.chat_context_service import _build_chat_context_from_session
 
         session = self._make_session([
             self._make_message("assistant", "Siap, akan diformat"),
@@ -214,7 +214,7 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
         self.assertIsNone(result)
 
     def test_positive_multiple_messages_only_includes_user_lines(self):
-        from llm.views import _build_chat_context_from_session
+        from llm.services.chat_context_service import _build_chat_context_from_session
 
         session = self._make_session([
             self._make_message("user", "Instruksi 1"),
@@ -230,7 +230,7 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
 
     def test_edge_limits_to_last_n_user_instructions(self):
         from django.test import override_settings
-        from llm.views import _build_chat_context_from_session
+        from llm.services.chat_context_service import _build_chat_context_from_session
 
         session = self._make_session([
             self._make_message("user", "Instruksi lama 1"),
@@ -248,18 +248,18 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
         self.assertEqual(lines[1], "USER: Instruksi terbaru 2")
 
     def test_negative_returns_none_when_session_is_none(self):
-        from llm.views import _build_chat_context_from_session
+        from llm.services.chat_context_service import _build_chat_context_from_session
 
         self.assertIsNone(_build_chat_context_from_session(None))
 
     def test_negative_returns_none_when_session_has_no_messages(self):
-        from llm.views import _build_chat_context_from_session
+        from llm.services.chat_context_service import _build_chat_context_from_session
 
         session = self._make_session([])
         self.assertIsNone(_build_chat_context_from_session(session))
 
     def test_edge_single_message_returns_single_line(self):
-        from llm.views import _build_chat_context_from_session
+        from llm.services.chat_context_service import _build_chat_context_from_session
 
         session = self._make_session([
             self._make_message("user", "Satu instruksi"),
@@ -271,7 +271,7 @@ class BuildChatContextFromSessionTest(SimpleTestCase):
 
     def test_edge_clamps_zero_max_instructions_to_one_message(self):
         from django.test import override_settings
-        from llm.views import _build_chat_context_from_session
+        from llm.services.chat_context_service import _build_chat_context_from_session
 
         session = self._make_session([
             self._make_message("user", "Instruksi 1"),
@@ -298,7 +298,7 @@ class InjectFileContextTest(SimpleTestCase):
         return session
 
     def test_positive_prepends_system_message_with_file_context(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         export_json = {
             "document_info": {"source_type": "Excel", "filename": "data.xlsx"},
@@ -316,7 +316,7 @@ class InjectFileContextTest(SimpleTestCase):
         self.assertIn("data.xlsx", result[0]["content"])
 
     def test_positive_reads_from_export_output_json_not_output_json(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         output = Mock()
         output.export_output_json = {
@@ -333,7 +333,7 @@ class InjectFileContextTest(SimpleTestCase):
         self.assertNotIn("wrong", result[0]["content"])
 
     def test_positive_original_history_preserved_after_system_message(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         session = self._make_session(last_output=self._make_output({"doc": "info"}))
         history = [
@@ -347,7 +347,7 @@ class InjectFileContextTest(SimpleTestCase):
         self.assertEqual(result[2], history[1])
 
     def test_negative_returns_history_unchanged_when_session_is_none(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         history = [{"role": "user", "content": "Halo"}]
         result = _inject_file_context_if_available(None, history)
@@ -355,7 +355,7 @@ class InjectFileContextTest(SimpleTestCase):
         self.assertEqual(result, history)
 
     def test_negative_returns_history_unchanged_when_no_generated_output(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         session = self._make_session(last_output=None)
         history = [{"role": "user", "content": "Halo"}]
@@ -365,7 +365,7 @@ class InjectFileContextTest(SimpleTestCase):
         self.assertEqual(result, history)
 
     def test_edge_empty_history_still_gets_system_message_prepended(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         session = self._make_session(last_output=self._make_output({"some": "data"}))
         result = _inject_file_context_if_available(session, [])
@@ -374,7 +374,7 @@ class InjectFileContextTest(SimpleTestCase):
         self.assertEqual(result[0]["role"], "system")
 
     def test_positive_compact_context_shows_metadata_headers_and_sample_rows(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         export_json = {
             "document_info": {"source_type": "Excel", "filename": "laporan.xlsx"},
@@ -401,7 +401,7 @@ class InjectFileContextTest(SimpleTestCase):
         self.assertNotIn('"rows"', content)
 
     def test_positive_fallback_builds_context_from_output_json_when_export_empty(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         output = Mock()
         output.export_output_json = {}
@@ -418,7 +418,7 @@ class InjectFileContextTest(SimpleTestCase):
         self.assertIn("Unit", result[0]["content"])
 
     def test_negative_returns_history_unchanged_when_both_export_and_output_json_empty(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         output = Mock()
         output.export_output_json = {}
@@ -623,7 +623,7 @@ class NormalizeSessionOutputExportPayloadTest(SimpleTestCase):
 
 class BuildTableContextLinesTest(SimpleTestCase):
     def test_positive_returns_summary_line_with_column_and_row_count(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         table = {"table_name": "Sales", "headers": ["A", "B"], "rows": [{"A": 1, "B": 2}]}
         lines = _build_table_context_lines(table)
@@ -631,7 +631,7 @@ class BuildTableContextLinesTest(SimpleTestCase):
         self.assertEqual(lines[0], "Table 'Sales': 2 columns, 1 rows")
 
     def test_positive_includes_headers_line_when_headers_present(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         table = {"table_name": "T", "headers": ["Col1", "Col2"], "rows": []}
         lines = _build_table_context_lines(table)
@@ -639,7 +639,7 @@ class BuildTableContextLinesTest(SimpleTestCase):
         self.assertTrue(any("Col1" in line and "Col2" in line for line in lines))
 
     def test_negative_no_headers_line_when_empty_headers(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         table = {"table_name": "T", "headers": [], "rows": []}
         lines = _build_table_context_lines(table)
@@ -647,7 +647,7 @@ class BuildTableContextLinesTest(SimpleTestCase):
         self.assertFalse(any("Headers:" in line for line in lines))
 
     def test_positive_includes_up_to_3_sample_rows(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         rows = [{"X": i} for i in range(3)]
         table = {"table_name": "T", "headers": ["X"], "rows": rows}
@@ -657,7 +657,7 @@ class BuildTableContextLinesTest(SimpleTestCase):
         self.assertEqual(len(row_lines), 3)
 
     def test_edge_truncates_to_3_rows_when_more_exist(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         rows = [{"X": i} for i in range(5)]
         table = {"table_name": "T", "headers": ["X"], "rows": rows}
@@ -667,7 +667,7 @@ class BuildTableContextLinesTest(SimpleTestCase):
         self.assertEqual(len(row_lines), 3)
 
     def test_edge_truncates_to_5_columns_per_row_when_more_exist(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         row = {f"col{i}": i for i in range(8)}
         table = {"table_name": "T", "headers": [f"col{i}" for i in range(8)], "rows": [row]}
@@ -678,7 +678,7 @@ class BuildTableContextLinesTest(SimpleTestCase):
         self.assertEqual(len(parsed), 5)
 
     def test_edge_non_dict_rows_skipped(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         table = {"table_name": "T", "headers": ["A"], "rows": [["list_row"], "string_row"]}
         lines = _build_table_context_lines(table)
@@ -687,7 +687,7 @@ class BuildTableContextLinesTest(SimpleTestCase):
         self.assertEqual(len(row_lines), 0)
 
     def test_edge_uses_default_sheet_name_when_table_name_missing(self):
-        from llm.views import _build_table_context_lines
+        from llm.services.chat_context_service import _build_table_context_lines
 
         table = {"headers": ["A"], "rows": []}
         lines = _build_table_context_lines(table)
@@ -697,14 +697,14 @@ class BuildTableContextLinesTest(SimpleTestCase):
 
 class BuildCompactFileContextTest(SimpleTestCase):
     def test_positive_starts_with_converted_file_context_header(self):
-        from llm.views import _build_compact_file_context
+        from llm.services.chat_context_service import _build_compact_file_context
 
         result = _build_compact_file_context({})
 
         self.assertTrue(result.startswith("[CONVERTED_FILE_CONTEXT]"))
 
     def test_positive_includes_file_info_from_document_info(self):
-        from llm.views import _build_compact_file_context
+        from llm.services.chat_context_service import _build_compact_file_context
 
         export_json = {"document_info": {"filename": "report.xlsx", "source_type": "Excel"}}
         result = _build_compact_file_context(export_json)
@@ -713,7 +713,7 @@ class BuildCompactFileContextTest(SimpleTestCase):
         self.assertIn("Excel", result)
 
     def test_positive_includes_summary_key_value_pairs(self):
-        from llm.views import _build_compact_file_context
+        from llm.services.chat_context_service import _build_compact_file_context
 
         export_json = {"summary": {"total_tables": 2, "total_rows": 10}}
         result = _build_compact_file_context(export_json)
@@ -722,14 +722,14 @@ class BuildCompactFileContextTest(SimpleTestCase):
         self.assertIn("total_rows=10", result)
 
     def test_negative_no_file_line_when_document_info_missing(self):
-        from llm.views import _build_compact_file_context
+        from llm.services.chat_context_service import _build_compact_file_context
 
         result = _build_compact_file_context({})
 
         self.assertNotIn("File:", result)
 
     def test_negative_no_summary_line_when_summary_is_empty_dict(self):
-        from llm.views import _build_compact_file_context
+        from llm.services.chat_context_service import _build_compact_file_context
 
         export_json = {"summary": {}}
         result = _build_compact_file_context(export_json)
@@ -737,7 +737,7 @@ class BuildCompactFileContextTest(SimpleTestCase):
         self.assertNotIn("Summary:", result)
 
     def test_negative_non_dict_tables_in_content_data_are_skipped(self):
-        from llm.views import _build_compact_file_context
+        from llm.services.chat_context_service import _build_compact_file_context
 
         export_json = {"content_data": ["not_a_dict", 42, None]}
         result = _build_compact_file_context(export_json)
@@ -745,14 +745,14 @@ class BuildCompactFileContextTest(SimpleTestCase):
         self.assertNotIn("Table '", result)
 
     def test_negative_no_table_lines_when_content_data_absent(self):
-        from llm.views import _build_compact_file_context
+        from llm.services.chat_context_service import _build_compact_file_context
 
         result = _build_compact_file_context({"document_info": {"filename": "f.csv"}})
 
         self.assertNotIn("Table '", result)
 
     def test_positive_includes_table_name_from_content_data(self):
-        from llm.views import _build_compact_file_context
+        from llm.services.chat_context_service import _build_compact_file_context
 
         export_json = {
             "content_data": [{"table_name": "DataSheet", "headers": [], "rows": []}]
@@ -762,7 +762,7 @@ class BuildCompactFileContextTest(SimpleTestCase):
         self.assertIn("DataSheet", result)
 
     def test_edge_limits_to_max_tables_and_appends_omitted_count(self):
-        from llm.views import _MAX_COMPACT_TABLES, _build_compact_file_context
+        from llm.services.chat_context_service import _MAX_COMPACT_TABLES, _build_compact_file_context
 
         tables = [{"table_name": f"T{i}", "headers": [], "rows": []} for i in range(_MAX_COMPACT_TABLES + 2)]
         result = _build_compact_file_context({"content_data": tables})
@@ -772,7 +772,7 @@ class BuildCompactFileContextTest(SimpleTestCase):
         self.assertIn("tables omitted", result)
 
     def test_edge_header_line_truncated_when_table_has_many_columns(self):
-        from llm.views import _MAX_COMPACT_HEADERS, _build_compact_file_context
+        from llm.services.chat_context_service import _MAX_COMPACT_HEADERS, _build_compact_file_context
 
         headers = [f"col{i}" for i in range(_MAX_COMPACT_HEADERS + 5)]
         result = _build_compact_file_context({"content_data": [{"table_name": "T", "headers": headers, "rows": []}]})
@@ -788,7 +788,7 @@ class InjectFileContextSaveBackTest(SimpleTestCase):
         return session
 
     def test_positive_save_called_on_output_when_fallback_is_used(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         output = Mock()
         output.export_output_json = None
@@ -800,7 +800,7 @@ class InjectFileContextSaveBackTest(SimpleTestCase):
         output.save.assert_called_once_with(update_fields=["export_output_json"])
 
     def test_negative_save_not_called_when_export_output_json_already_present(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         output = Mock()
         output.export_output_json = {"document_info": {}, "summary": {}, "content_data": []}
@@ -811,7 +811,7 @@ class InjectFileContextSaveBackTest(SimpleTestCase):
         output.save.assert_not_called()
 
     def test_negative_history_unchanged_when_export_output_json_is_non_dict(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         output = Mock()
         output.export_output_json = ["corrupted", "data"]
@@ -824,7 +824,7 @@ class InjectFileContextSaveBackTest(SimpleTestCase):
         self.assertEqual(result, history)
 
     def test_negative_save_exception_is_swallowed_and_context_still_injected(self):
-        from llm.views import _inject_file_context_if_available
+        from llm.services.chat_context_service import _inject_file_context_if_available
 
         output = Mock()
         output.export_output_json = None
