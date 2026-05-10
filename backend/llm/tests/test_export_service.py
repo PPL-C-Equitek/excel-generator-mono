@@ -3,7 +3,9 @@ from unittest.mock import patch
 from django.test import SimpleTestCase
 
 from llm.services.export_service import (
+    _collect_rows_array_metadata,
     _extract_document_type,
+    _resolve_export_source_type,
     _to_scalar_cell,
     build_export_output_json,
     extract_original_name,
@@ -368,4 +370,64 @@ class ExportServiceTest(SimpleTestCase):
         result = _to_scalar_cell(b"ICU")
 
         self.assertEqual(result, "b'ICU'")
+
+
+class ResolveExportSourceTypeTest(SimpleTestCase):
+    def test_positive_reads_source_type_from_input_json(self):
+        result = _resolve_export_source_type(
+            {"document_info": {"source_type": "PDF"}},
+            {},
+        )
+        self.assertEqual(result, "PDF")
+
+    def test_positive_falls_back_to_output_json_when_input_json_has_no_source_type(self):
+        result = _resolve_export_source_type(
+            {},
+            {"document_info": {"source_type": "PDF"}},
+        )
+        self.assertEqual(result, "PDF")
+
+    def test_positive_input_json_source_type_takes_priority_over_output_json(self):
+        result = _resolve_export_source_type(
+            {"document_info": {"source_type": "Excel"}},
+            {"document_info": {"source_type": "PDF"}},
+        )
+        self.assertEqual(result, "Excel")
+
+    def test_positive_falls_back_to_filename_extension_when_both_json_missing_source_type(self):
+        result = _resolve_export_source_type(
+            {"filename": "report.pdf"},
+            {},
+        )
+        self.assertEqual(result, "PDF")
+
+    def test_negative_defaults_to_excel_when_no_source_type_info_available(self):
+        result = _resolve_export_source_type({}, {})
+        self.assertEqual(result, "Excel")
+
+
+class CollectRowsArrayMetadataShortCircuitTest(SimpleTestCase):
+    def test_edge_breaks_early_on_mixed_type_rows(self):
+        rows = [{"a": 1}, [1, 2], {"b": 3}]
+        all_lists, all_dicts, _, collected_headers = _collect_rows_array_metadata(rows)
+
+        self.assertFalse(all_lists)
+        self.assertFalse(all_dicts)
+        self.assertEqual(collected_headers, ["a"])
+
+    def test_positive_all_dicts_collects_all_headers(self):
+        rows = [{"a": 1}, {"b": 2}, {"a": 3, "c": 4}]
+        all_lists, all_dicts, _, collected_headers = _collect_rows_array_metadata(rows)
+
+        self.assertFalse(all_lists)
+        self.assertTrue(all_dicts)
+        self.assertEqual(collected_headers, ["a", "b", "c"])
+
+    def test_positive_all_lists_tracks_max_columns(self):
+        rows = [[1, 2], [3, 4, 5], [6]]
+        all_lists, all_dicts, max_columns, _ = _collect_rows_array_metadata(rows)
+
+        self.assertTrue(all_lists)
+        self.assertFalse(all_dicts)
+        self.assertEqual(max_columns, 3)
 

@@ -63,6 +63,10 @@ def _resolve_export_source_type(input_json, output_json) -> str:
     if source_type:
         return source_type
 
+    source_type = _format_export_source_type(_extract_document_type(output_json))
+    if source_type:
+        return source_type
+
     filename = extract_original_name(input_json, output_json).lower()
     if filename.endswith(".pdf"):
         return "PDF"
@@ -149,6 +153,13 @@ def _map_unknown_row_to_object(row, headers, serialization_cache=None):
     return mapped_row
 
 
+def _collect_dict_row_headers(row, seen_headers, collected_headers):
+    for key in row:
+        if key not in seen_headers:
+            seen_headers.add(key)
+            collected_headers.append(key)
+
+
 def _collect_rows_array_metadata(rows):
     all_lists = bool(rows)
     all_dicts = bool(rows)
@@ -162,13 +173,13 @@ def _collect_rows_array_metadata(rows):
         all_lists = all_lists and is_list_row
         all_dicts = all_dicts and is_dict_row
 
+        if not all_lists and not all_dicts:
+            break
+
         if is_list_row:
             max_columns = max(max_columns, len(row))
         if is_dict_row:
-            for key in row:
-                if key not in seen_headers:
-                    seen_headers.add(key)
-                    collected_headers.append(key)
+            _collect_dict_row_headers(row, seen_headers, collected_headers)
 
     return all_lists, all_dicts, max_columns, collected_headers
 
