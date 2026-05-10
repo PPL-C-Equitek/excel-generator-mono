@@ -12,6 +12,7 @@ export interface LLMRequest {
   custom_schema_id?: string;
   session_id?: string;
   chat_id?: string;
+  target_output_id?: string;
 }
 
 export interface LLMReasoning {
@@ -164,6 +165,7 @@ export async function generateJson(
   context?: {
     sessionId?: string | null;
     chatId?: string | null;
+    targetOutputId?: string | null;
   }
 ): Promise<LLMResponse> {
   const isEmpty = Array.isArray(inputJson)
@@ -183,6 +185,12 @@ export async function generateJson(
   }
   if (typeof context?.chatId === "string" && context.chatId.trim().length > 0) {
     requestBody.chat_id = context.chatId;
+  }
+  if (
+    typeof context?.targetOutputId === "string" &&
+    context.targetOutputId.trim().length > 0
+  ) {
+    requestBody.target_output_id = context.targetOutputId;
   }
 
   const data = await postJsonRequest("llm/generate/", requestBody, {

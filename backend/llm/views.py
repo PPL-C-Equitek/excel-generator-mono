@@ -419,6 +419,17 @@ def _extract_follow_up_prompt(input_json):
     return prompt.strip()
 
 
+def _hydrate_previous_output_from_target(input_json, target_output):
+    if target_output is None or not isinstance(input_json, dict):
+        return input_json
+    if "previous_output" in input_json:
+        return input_json
+
+    hydrated_input = dict(input_json)
+    hydrated_input["previous_output"] = target_output.output_json
+    return hydrated_input
+
+
 def _build_generate_success_response(output_json, session_id, chat_id, output_id, reasoning):
     response_serializer = LlmGenerateResponseSerializer(
         data={
@@ -452,6 +463,7 @@ def llm_generate(request):
     input_json = validated_data["input_json"]
     session_id = validated_data.get("session_id")
     chat_id = validated_data.get("chat_id")
+    target_output_id = validated_data.get("target_output_id")
     custom_schema_id = validated_data.get("custom_schema_id")
     session, error_response = _resolve_generate_session(request.user, session_id)
     if error_response is not None:
@@ -463,6 +475,17 @@ def llm_generate(request):
     )
     if error_response is not None:
         return error_response
+    target_output, error_response = _resolve_message_target_output(
+        request.user,
+        session,
+        target_output_id,
+    )
+    if error_response is not None:
+        return error_response
+    if session is None and target_output is not None:
+        session = target_output.session
+
+    input_json = _hydrate_previous_output_from_target(input_json, target_output)
     include_reasoning = validated_data.get("include_reasoning", True)
     chat_context = _build_chat_context_from_session(session)
     llm_generation_service = build_llm_generation_service(request.user)
@@ -501,7 +524,9 @@ def llm_generate(request):
         source_message = append_user_message(
             session,
             follow_up_prompt,
+            target_output=target_output,
         )
+    parent_output = getattr(source_message, "target_output", None) or target_output
 
     response_session_id, response_output_id, response_chat_id, error_response = _persist_generate_output_for_authenticated_user(
         request.user,
@@ -511,7 +536,7 @@ def llm_generate(request):
         reasoning_response,
         export_output_json,
         source_message=source_message,
-        parent_output=getattr(source_message, "target_output", None),
+        parent_output=parent_output,
         bootstrap_message_content=_build_generate_bootstrap_message(
             input_json,
             resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
@@ -746,4 +771,3 @@ def thinking_log_detail(request, output_id):
         return _thinking_log_not_found_response()
 
     return Response(ThinkingLogItemSerializer(record).data, status=200)
-

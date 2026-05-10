@@ -429,6 +429,7 @@ export interface UseConvertFlowReturn {
 
 interface FollowUpContext {
     sessionId: string | null
+    targetOutputId?: string | null
 }
 
 export function useConvertFlow(
@@ -528,6 +529,7 @@ export function useConvertFlow(
                 followUpContext?.sessionId
                     ? {
                         sessionId: followUpContext.sessionId,
+                        targetOutputId: followUpContext.targetOutputId,
                     }
                     : undefined
             const selectedSchemaId =
@@ -572,12 +574,14 @@ export function useConvertFlow(
         const signal = abortPreviousRequest()
         const trimmedPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
         const isFollowUpPrompt = trimmedPrompt.length > 0
-        const previousOutput = isFollowUpPrompt ? generatedOutput : null
+        const activeOutputId = isFollowUpPrompt ? generatedOutputId : null
+        const previousOutput = isFollowUpPrompt && !activeOutputId ? generatedOutput : null
         const cachedUploadResult = isFollowUpPrompt ? uploadResultForExport : null
         const activeSessionId = isFollowUpPrompt ? generatedSessionId : null
         const followUpContext = isFollowUpPrompt
             ? {
                 sessionId: activeSessionId,
+                targetOutputId: activeOutputId,
             }
             : null
 
