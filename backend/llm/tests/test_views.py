@@ -1279,6 +1279,86 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         self.assertEqual(generated_output.source_message_id, user_messages[0].id)
 
     @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_hydrates_previous_output_from_target_output_id(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        session = Session.objects.create(owner=self.user, title="Existing Session")
+        parent_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"content_data": [{"rows": [{"status": "all"}]}]},
+        )
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "session_id": str(session.id),
+                "target_output_id": str(parent_output.id),
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "user_prompt": "Hanya tampilkan status paid.",
+                },
+                "include_reasoning": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_service.generate.assert_called_once_with(
+            input_json={
+                "filename": "invoice.pdf",
+                "user_prompt": "Hanya tampilkan status paid.",
+                "previous_output": parent_output.output_json,
+            },
+            custom_schema_id=None,
+            chat_context=None,
+        )
+
+        user_messages = list(
+            ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_USER).order_by("created_at")
+        )
+        self.assertEqual(len(user_messages), 1)
+        self.assertEqual(user_messages[0].target_output_id, parent_output.id)
+
+        generated_output = GeneratedOutput.objects.exclude(id=parent_output.id).get()
+        self.assertEqual(generated_output.parent_output_id, parent_output.id)
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_400_when_target_output_id_session_mismatches_request_session(
+        self, mock_build_service
+    ):
+        requested_session = Session.objects.create(owner=self.user, title="Requested Session")
+        other_session = Session.objects.create(owner=self.user, title="Other Session")
+        parent_output = GeneratedOutput.objects.create(
+            session=other_session,
+            output_json={"content_data": [{"rows": [{"status": "all"}]}]},
+        )
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "session_id": str(requested_session.id),
+                "target_output_id": str(parent_output.id),
+                "input_json": {"filename": "invoice.pdf", "user_prompt": "Refine"},
+                "include_reasoning": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["errors"]["target_output_id"],
+            ["target_output_id must belong to the same session."],
+        )
+        mock_build_service.assert_not_called()
+
+    @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_does_not_append_follow_up_when_user_prompt_blank(
         self, mock_build_service
     ):
