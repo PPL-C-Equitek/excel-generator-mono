@@ -12,6 +12,19 @@ from .reasoning_service import TextGenerationProvider, compose_system_prompt, ge
 _UPLOAD_PROMPT_NOISE_KEYS = {"status", "message", "size"}
 
 
+def _normalize_user_prompt(payload: dict[str, Any]) -> None:
+    user_prompt = payload.get("user_prompt")
+    if not isinstance(user_prompt, str):
+        return
+
+    trimmed_user_prompt = user_prompt.strip()
+    if trimmed_user_prompt:
+        payload["user_prompt"] = trimmed_user_prompt
+        return
+
+    payload.pop("user_prompt", None)
+
+
 def _compact_input_json_for_prompt(
     input_json: dict[str, Any] | list[Any],
 ) -> dict[str, Any] | list[Any]:
@@ -29,13 +42,7 @@ def _compact_input_json_for_prompt(
         if key not in _UPLOAD_PROMPT_NOISE_KEYS
     }
 
-    user_prompt = compact_payload.get("user_prompt")
-    if isinstance(user_prompt, str):
-        trimmed_user_prompt = user_prompt.strip()
-        if trimmed_user_prompt:
-            compact_payload["user_prompt"] = trimmed_user_prompt
-        else:
-            compact_payload.pop("user_prompt", None)
+    _normalize_user_prompt(compact_payload)
 
     return compact_payload
 
@@ -139,4 +146,3 @@ class LlmGenerationService:
             input_json=input_json,
             system_prompt=effective_system_prompt,
         )
-
