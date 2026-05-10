@@ -66,13 +66,17 @@ def _truncate_text(value: Any, max_chars: int = MAX_REASONING_TEXT_PREVIEW_CHARS
   return f"{trimmed[:max_chars]}... [TRUNCATED]"
 
 
+def _stringify_sample(values: list[Any], max_items: int) -> list[str]:
+  return [str(value) for value in values[:max_items]]
+
+
 def _summarize_row_shape(row: Any) -> dict[str, Any]:
   if isinstance(row, dict):
     keys = list(row.keys())
     return {
       "row_type": "object",
       "key_count": len(keys),
-      "key_sample": keys[:MAX_REASONING_KEY_SAMPLE],
+      "key_sample": _stringify_sample(keys, MAX_REASONING_KEY_SAMPLE),
     }
 
   if isinstance(row, list):
@@ -99,7 +103,7 @@ def _summarize_table(table: dict[str, Any], fallback_name: str) -> dict[str, Any
   summary = {
     "table_name": normalized_name,
     "header_count": len(normalized_headers),
-    "header_sample": normalized_headers[:MAX_REASONING_HEADERS],
+    "header_sample": _stringify_sample(normalized_headers, MAX_REASONING_HEADERS),
     "row_count": len(normalized_rows),
   }
 
@@ -226,10 +230,10 @@ def _summarize_upload_wrapper(value: dict[str, Any]) -> dict[str, Any]:
 def _summarize_generic_payload(value: Any, kind: str) -> dict[str, Any]:
   if isinstance(value, dict):
     keys = list(value.keys())
-    key_sample = keys[:MAX_REASONING_KEY_SAMPLE]
+    key_sample = _stringify_sample(keys, MAX_REASONING_KEY_SAMPLE)
     value_types = {
-      key: type(value[key]).__name__
-      for key in key_sample
+      str(key): type(raw_value).__name__
+      for key, raw_value in list(value.items())[:MAX_REASONING_KEY_SAMPLE]
     }
     return {
       "kind": kind,
