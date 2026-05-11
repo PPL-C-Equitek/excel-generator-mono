@@ -169,6 +169,33 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertEqual(serializer.validated_data["refinement"]["max_iterations"], 3)
 
+    @override_settings(
+        LLM_REFINEMENT_DEFAULT_MAX_ITER="7",
+        LLM_REFINEMENT_MAX_ITER_CAP="9",
+    )
+    def test_generate_request_serializer_uses_numeric_string_default_from_settings(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["refinement"]["max_iterations"], 7)
+
+    @override_settings(LLM_REFINEMENT_MAX_ITER_CAP="5")
+    def test_generate_request_serializer_applies_numeric_string_cap_from_settings(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {
+                    "enabled": True,
+                    "max_iterations": 6,
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement", serializer.errors)
+
     def test_generate_response_serializer_allows_null_reasoning(self):
         serializer = LlmGenerateResponseSerializer(
             data={"output_json": {"status": "ok"}, "reasoning": None}

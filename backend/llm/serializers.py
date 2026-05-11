@@ -9,14 +9,34 @@ REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
 REFINEMENT_FINAL_STATUS_CHOICES = ("valid", "best_effort", "failed")
 
 
+def _resolve_positive_int_setting(raw_value, fallback: int) -> int:
+    if isinstance(raw_value, bool):
+        return fallback
+
+    if isinstance(raw_value, int):
+        return raw_value if raw_value > 0 else fallback
+
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip()
+        if not normalized:
+            return fallback
+        try:
+            parsed = int(normalized)
+        except ValueError:
+            return fallback
+        return parsed if parsed > 0 else fallback
+
+    return fallback
+
+
 def _resolved_refinement_default_max_iterations() -> int:
     raw_value = getattr(settings, "LLM_REFINEMENT_DEFAULT_MAX_ITER", 3)
-    return raw_value if isinstance(raw_value, int) and raw_value > 0 else 3
+    return _resolve_positive_int_setting(raw_value, 3)
 
 
 def _resolved_refinement_max_iterations_cap() -> int:
     raw_value = getattr(settings, "LLM_REFINEMENT_MAX_ITER_CAP", 3)
-    return raw_value if isinstance(raw_value, int) and raw_value > 0 else 3
+    return _resolve_positive_int_setting(raw_value, 3)
 
 
 def _resolved_refinement_default_payload() -> dict[str, object]:
