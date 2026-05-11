@@ -132,6 +132,11 @@ class ValidateOutputLLMTest(unittest.TestCase):
         with self.assertRaises(OutputLLMValidationError):
             validate_output_llm(payload)
 
+        payload = self._build_valid_payload()
+        payload["summary"] = {"total_items": -1}
+        with self.assertRaises(OutputLLMValidationError):
+            validate_output_llm(payload)
+
     def test_validate_output_llm_rejects_empty_content_data_list(self):
         payload = self._build_valid_payload()
         payload["content_data"] = []
