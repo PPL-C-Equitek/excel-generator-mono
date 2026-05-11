@@ -248,6 +248,33 @@ class RefinementValidationLogTest(SimpleTestCase):
 
         self.assertIn("non-serializable-value", instruction)
 
+    def test_build_refinement_instruction_limits_embedded_validation_issues(self):
+        validation_log = {
+            "iteration": 2,
+            "verdict": "invalid",
+            "summary": "many issues",
+            "errors": [
+                {"path": f"$.errors[{index}]", "message": f"error-{index}", "severity": "error"}
+                for index in range(20)
+            ],
+            "warnings": [
+                {"path": f"$.warnings[{index}]", "message": f"warning-{index}", "severity": "warning"}
+                for index in range(10)
+            ],
+        }
+
+        instruction = build_refinement_instruction(
+            previous_output_json={"value": "ok"},
+            validation_log=validation_log,
+        )
+
+        self.assertIn('"error_count": 20', instruction)
+        self.assertIn('"warning_count": 10', instruction)
+        self.assertIn("error-11", instruction)
+        self.assertNotIn("error-12", instruction)
+        self.assertIn("warning-3", instruction)
+        self.assertNotIn("warning-4", instruction)
+
     def test_build_validation_log_handles_non_dict_table_entries(self):
         log = build_validation_log(
             {
@@ -640,6 +667,63 @@ class RefinementOrchestratorTest(SimpleTestCase):
         self.assertEqual(result["refinement_meta"]["iterations_run"], 3)
         self.assertEqual(result["refinement_meta"]["final_status"], "best_effort")
         self.assertEqual(result["validation_log"]["verdict"], "invalid")
+
+    def test_orchestrator_stops_early_on_plateau_without_valid_candidate(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid-1"},
+            {"status": "invalid-2"},
+            {"status": "invalid-3"},
+            {"status": "invalid-4"},
+            {"status": "invalid-5"},
+        ]
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+
+        result = orchestrator.run(
+            input_json={"filename": "bad.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=5,
+                early_exit_on_valid=False,
+                early_exit_on_plateau=True,
+                plateau_patience=2,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 3)
+        self.assertTrue(result["refinement_meta"]["early_exit_triggered"])
+        self.assertEqual(result["refinement_meta"]["final_status"], "best_effort")
+        self.assertEqual(generation_service.generate.call_count, 3)
+
+    def test_orchestrator_respects_plateau_disable_and_runs_full_iterations(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid-1"},
+            {"status": "invalid-2"},
+            {"status": "invalid-3"},
+            {"status": "invalid-4"},
+            {"status": "invalid-5"},
+        ]
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+
+        result = orchestrator.run(
+            input_json={"filename": "bad.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=5,
+                early_exit_on_valid=False,
+                early_exit_on_plateau=False,
+                plateau_patience=2,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 5)
+        self.assertFalse(result["refinement_meta"]["early_exit_triggered"])
+        self.assertEqual(generation_service.generate.call_count, 5)
 
     # Edge
     def test_edge_non_positive_max_iterations_is_normalized_to_single_iteration(self):
