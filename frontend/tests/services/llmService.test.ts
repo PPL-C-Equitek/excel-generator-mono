@@ -323,6 +323,17 @@ describe("generateJson edge cases", () => {
     await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
   });
 
+  it("throws schema error when response identifiers are not uuid-like strings", async () => {
+    vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      session_id: { invalid: true },
+    });
+
+    await expect(generateJson({ key: "value" })).rejects.toThrow(
+      "The server returned an invalid response."
+    );
+  });
+
   it("rethrows non-API Error as-is", async () => {
     vi.spyOn(api, "fetchAPI").mockRejectedValue(new Error("Network down"));
     await expect(generateJson({ key: "value" })).rejects.toThrow("Network down");
@@ -901,12 +912,12 @@ describe("downloadCsvFile", () => {
       headers: new Headers(
         contentDisposition
           ? {
-              "Content-Type": contentType,
-              "Content-Disposition": contentDisposition,
-            }
+            "Content-Type": contentType,
+            "Content-Disposition": contentDisposition,
+          }
           : {
-              "Content-Type": contentType,
-            }
+            "Content-Type": contentType,
+          }
       ),
       blob: vi.fn().mockResolvedValue(new Blob(["csv-bytes"])),
     }) as unknown as Response;
@@ -948,7 +959,7 @@ describe("downloadCsvFile", () => {
     });
 
     const anchor = originalCreateElement("a");
-    const clickSpy = vi.spyOn(anchor, "click").mockImplementation(() => {});
+    const clickSpy = vi.spyOn(anchor, "click").mockImplementation(() => { });
     vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
       if (tagName.toLowerCase() === "a") {
         return anchor;
@@ -960,7 +971,7 @@ describe("downloadCsvFile", () => {
     const appendSpy = vi
       .spyOn(document.body, "appendChild")
       .mockImplementation((node: Node) => node);
-    const removeSpy = vi.spyOn(anchor, "remove").mockImplementation(() => {});
+    const removeSpy = vi.spyOn(anchor, "remove").mockImplementation(() => { });
 
     await downloadCsvFile("csv_12345", "report.csv");
 
