@@ -1,10 +1,10 @@
 from types import SimpleNamespace
 
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework.response import Response
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from artifact_history.models import ArtifactHistory
@@ -20,6 +20,7 @@ from llm.services.openai_client import (
 from llm.views import (
     _build_generate_bootstrap_message,
     _extract_follow_up_prompt,
+    _generate_output_json,
     _sanitize_output_json,
     build_llm_generation_service,
     build_llm_reasoning_service,
@@ -58,6 +59,77 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         result = get_authenticated_user_id(SimpleNamespace(is_authenticated=False))
 
         self.assertIsNone(result)
+
+    def test_generate_output_json_returns_generated_output_when_successful(self):
+        generation_service = Mock()
+        generation_service.generate.return_value = {"result": "ok"}
+
+        output_json, error_response = _generate_output_json(
+            llm_generation_service=generation_service,
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=None,
+            chat_context={"chat": "ctx"},
+        )
+
+        self.assertEqual(output_json, {"result": "ok"})
+        self.assertIsNone(error_response)
+        generation_service.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=None,
+            chat_context={"chat": "ctx"},
+        )
+
+    def test_generate_output_json_maps_known_provider_errors(self):
+        cases = [
+            (CustomSchemaNotFoundError(), 404),
+            (OpenAIConfigurationError("misconfigured"), 503),
+            (OpenAIUpstreamError("upstream", status_code=429), 429),
+            (OpenAIServiceError("service error"), 502),
+        ]
+
+        for exception, expected_status in cases:
+            with self.subTest(expected_status=expected_status):
+                generation_service = Mock()
+                generation_service.generate.side_effect = exception
+
+                output_json, error_response = _generate_output_json(
+                    llm_generation_service=generation_service,
+                    input_json={"sheet": "Sheet1"},
+                    custom_schema_id=None,
+                )
+
+                self.assertIsNone(output_json)
+                self.assertIsInstance(error_response, Response)
+                self.assertEqual(error_response.status_code, expected_status)
+
+    def test_generate_output_json_returns_validation_error_for_invalid_input_payload(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = ValueError("bad payload")
+
+        output_json, error_response = _generate_output_json(
+            llm_generation_service=generation_service,
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=None,
+        )
+
+        self.assertIsNone(output_json)
+        self.assertIsInstance(error_response, Response)
+        self.assertEqual(error_response.status_code, 400)
+        self.assertIn("input_json", error_response.data["errors"])
+
+    def test_generate_output_json_returns_500_for_unexpected_exception(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = RuntimeError("unexpected")
+
+        output_json, error_response = _generate_output_json(
+            llm_generation_service=generation_service,
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=None,
+        )
+
+        self.assertIsNone(output_json)
+        self.assertIsInstance(error_response, Response)
+        self.assertEqual(error_response.status_code, 500)
 
     @patch("llm.views.extract_original_name", return_value="")
     def test_build_generate_bootstrap_message_returns_title_when_filename_missing(self, _mock_extract_original_name):
@@ -184,7 +256,10 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_service.generate.return_value = {"status": "ok"}
         client = APIClient()
 
-        payload = {"input_json": {"sheet": "Sheet1"}}
+        payload = {
+            "input_json": {"sheet": "Sheet1"},
+            "refinement": {"enabled": False},
+        }
         response = client.post("/llm/generate/", payload, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -217,7 +292,10 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         response = client.post(
             "/llm/generate/",
-            {"input_json": {"sheet": "Sheet1"}},
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {"enabled": False},
+            },
             format="json",
         )
 
@@ -225,6 +303,43 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.data["output_json"], {"status": "ok"})
         self.assertEqual(response.data["reasoning"]["final_answer"], "Conversion looks consistent.")
         mock_reasoning_service.generate.assert_called_once()
+
+    @patch("llm.views._generate_optional_reasoning")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_calls_generation_and_reasoning_once_in_non_refinement_path(
+        self,
+        mock_build_generation_service,
+        mock_generate_optional_reasoning,
+    ):
+        mock_generation_service = mock_build_generation_service.return_value
+        mock_generation_service.generate.return_value = {"status": "ok"}
+        mock_generate_optional_reasoning.return_value = {
+            "final_answer": "ok",
+            "reasoning_steps": ["once"],
+            "thinking_log": "once",
+        }
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_generation_service.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=None,
+            chat_context=None,
+        )
+        mock_generate_optional_reasoning.assert_called_once_with(
+            include_reasoning=True,
+            input_json={"sheet": "Sheet1"},
+            output_json={"status": "ok"},
+        )
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_strips_reasoning_keys_from_output_json(self, mock_build_service):
@@ -296,7 +411,10 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         response = client.post(
             "/llm/generate/",
-            {"input_json": {"sheet": "Sheet1"}},
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {"enabled": False},
+            },
             format="json",
         )
 
@@ -329,7 +447,10 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         response = client.post(
             "/llm/generate/",
-            {"input_json": {"sheet": "Sheet1"}},
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {"enabled": False},
+            },
             format="json",
         )
 
@@ -353,7 +474,11 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         response = client.post(
             "/llm/generate/",
-            {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": str(schema_id)},
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "custom_schema_id": str(schema_id),
+                "refinement": {"enabled": False},
+            },
             format="json",
         )
 
@@ -379,7 +504,11 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         response = client.post(
             "/llm/generate/",
-            {"input_json": {"sheet": "Sheet1"}, "custom_schema_id": str(schema_id)},
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "custom_schema_id": str(schema_id),
+                "refinement": {"enabled": False},
+            },
             format="json",
         )
 
@@ -418,6 +547,364 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.data["detail"], "Invalid request payload.")
         self.assertIn("errors", response.data)
 
+    def test_llm_generate_rejects_refinement_max_iterations_above_cap(self):
+        client = APIClient()
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {"enabled": True, "max_iterations": 4},
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertIn("errors", response.data)
+
+    @patch("llm.views.RefinementOrchestrator")
+    @patch("llm.views._generate_optional_reasoning")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_with_refinement_returns_extended_fields(
+        self,
+        mock_build_generation_service,
+        mock_generate_optional_reasoning,
+        mock_refinement_orchestrator_class,
+    ):
+        mock_build_generation_service.return_value = SimpleNamespace()
+        mock_generate_optional_reasoning.return_value = {
+            "final_answer": "should not be used",
+            "reasoning_steps": ["unused"],
+            "thinking_log": "unused",
+        }
+        mock_refinement_orchestrator = mock_refinement_orchestrator_class.return_value
+        mock_refinement_orchestrator.run.return_value = {
+            "raw_json": {"status": "raw"},
+            "validated_json": {
+                "document_info": {"source_type": "Excel", "filename": "sample.xlsx"},
+                "summary": {"total_tables": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["name"],
+                        "rows": [{"name": "A"}],
+                    }
+                ],
+            },
+            "output_json": {
+                "document_info": {"source_type": "Excel", "filename": "sample.xlsx"},
+                "summary": {"total_tables": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["name"],
+                        "rows": [{"name": "A"}],
+                    }
+                ],
+            },
+            "validation_log": {
+                "iteration": 2,
+                "verdict": "valid",
+                "errors": [],
+                "warnings": [],
+                "summary": "Output passed strict export schema validation.",
+            },
+            "reasoning": {
+                "final_answer": "Refinement completed.",
+                "reasoning_steps": ["Fixed required keys."],
+                "thinking_log": "Iterative repair completed.",
+            },
+            "refinement_meta": {
+                "iterations_run": 2,
+                "max_iterations": 3,
+                "early_exit_triggered": True,
+                "final_status": "valid",
+            },
+        }
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {
+                    "enabled": True,
+                    "max_iterations": 3,
+                    "early_exit_on_valid": True,
+                },
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["output_json"], response.data["validated_json"])
+        self.assertNotIn("raw_json", response.data)
+        self.assertNotIn("validation_log", response.data)
+        self.assertNotIn("refinement_meta", response.data)
+        self.assertEqual(response.data["reasoning"]["final_answer"], "Refinement completed.")
+        mock_generate_optional_reasoning.assert_not_called()
+
+    @patch("llm.views._build_chat_context_from_session")
+    @patch("llm.views._resolve_generate_source_message")
+    @patch("llm.views.RefinementOrchestrator")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_passes_chat_context_to_refinement_orchestrator(
+        self,
+        mock_build_generation_service,
+        mock_refinement_orchestrator_class,
+        mock_resolve_generate_source_message,
+        mock_build_chat_context_from_session,
+    ):
+        mock_build_generation_service.return_value = SimpleNamespace()
+        mock_refinement_orchestrator = mock_refinement_orchestrator_class.return_value
+        mock_resolve_generate_source_message.return_value = (
+            SimpleNamespace(target_output=None),
+            SimpleNamespace(),
+            None,
+        )
+        mock_build_chat_context_from_session.return_value = "USER: Gunakan Bahasa Indonesia"
+        mock_refinement_orchestrator.run.return_value = {
+            "raw_json": {"status": "raw"},
+            "validated_json": {"status": "validated"},
+            "output_json": {"status": "validated"},
+            "validation_log": {
+                "iteration": 1,
+                "verdict": "valid",
+                "errors": [],
+                "warnings": [],
+                "summary": "Output passed strict export schema validation.",
+            },
+            "reasoning": None,
+            "refinement_meta": {
+                "iterations_run": 1,
+                "max_iterations": 3,
+                "early_exit_triggered": True,
+                "final_status": "valid",
+            },
+        }
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "chat_id": str(uuid4()),
+                "refinement": {"enabled": True},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_refinement_orchestrator.run.assert_called_once()
+        self.assertEqual(
+            mock_refinement_orchestrator.run.call_args.kwargs["chat_context"],
+            "USER: Gunakan Bahasa Indonesia",
+        )
+
+    @override_settings(LLM_EXPOSE_VALIDATION_LOG=False)
+    @patch("llm.views.RefinementOrchestrator")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_with_refinement_hides_debug_refinement_fields_when_flag_disabled(
+        self,
+        mock_build_generation_service,
+        mock_refinement_orchestrator_class,
+    ):
+        mock_build_generation_service.return_value = SimpleNamespace()
+        mock_refinement_orchestrator = mock_refinement_orchestrator_class.return_value
+        mock_refinement_orchestrator.run.return_value = {
+            "raw_json": {"status": "raw"},
+            "validated_json": {"status": "validated"},
+            "output_json": {"status": "validated"},
+            "validation_log": {
+                "iteration": 1,
+                "verdict": "valid",
+                "errors": [],
+                "warnings": [],
+                "summary": "Output passed strict export schema validation.",
+            },
+            "reasoning": None,
+            "refinement_meta": {
+                "iterations_run": 1,
+                "max_iterations": 3,
+                "early_exit_triggered": True,
+                "final_status": "valid",
+            },
+        }
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}, "refinement": {"enabled": True}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["output_json"], {"status": "validated"})
+        self.assertEqual(response.data["validated_json"], {"status": "validated"})
+        self.assertNotIn("raw_json", response.data)
+        self.assertNotIn("validation_log", response.data)
+        self.assertNotIn("refinement_meta", response.data)
+
+    @override_settings(LLM_EXPOSE_VALIDATION_LOG=True)
+    @patch("llm.views.RefinementOrchestrator")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_with_refinement_exposes_validation_log_when_enabled(
+        self,
+        mock_build_generation_service,
+        mock_refinement_orchestrator_class,
+    ):
+        mock_build_generation_service.return_value = SimpleNamespace()
+        mock_refinement_orchestrator = mock_refinement_orchestrator_class.return_value
+        mock_refinement_orchestrator.run.return_value = {
+            "raw_json": {"status": "raw"},
+            "validated_json": {
+                "document_info": {"source_type": "Excel", "filename": "sample.xlsx"},
+                "summary": {"total_tables": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["name"],
+                        "rows": [{"name": "A"}],
+                    }
+                ],
+            },
+            "output_json": {
+                "document_info": {"source_type": "Excel", "filename": "sample.xlsx"},
+                "summary": {"total_tables": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["name"],
+                        "rows": [{"name": "A"}],
+                    }
+                ],
+            },
+            "validation_log": {
+                "iteration": 2,
+                "verdict": "valid",
+                "errors": [],
+                "warnings": [],
+                "summary": "Output passed strict export schema validation.",
+            },
+            "reasoning": {
+                "final_answer": "Refinement completed.",
+                "reasoning_steps": ["Fixed required keys."],
+                "thinking_log": "Iterative repair completed.",
+            },
+            "refinement_meta": {
+                "iterations_run": 2,
+                "max_iterations": 3,
+                "early_exit_triggered": True,
+                "final_status": "valid",
+            },
+        }
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {
+                    "enabled": True,
+                    "max_iterations": 3,
+                    "early_exit_on_valid": True,
+                },
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["raw_json"], {"status": "raw"})
+        self.assertEqual(response.data["validation_log"]["verdict"], "valid")
+        self.assertEqual(response.data["refinement_meta"]["final_status"], "valid")
+
+    # Positive
+    @override_settings(LLM_EXPOSE_VALIDATION_LOG=True)
+    @patch("llm.views.RefinementOrchestrator")
+    @patch("llm.views.build_llm_generation_service")
+    def test_positive_llm_generate_exposes_debug_refinement_fields_when_flag_enabled(
+        self,
+        mock_build_generation_service,
+        mock_refinement_orchestrator_class,
+    ):
+        mock_build_generation_service.return_value = SimpleNamespace()
+        mock_refinement_orchestrator = mock_refinement_orchestrator_class.return_value
+        mock_refinement_orchestrator.run.return_value = {
+            "raw_json": {"status": "raw"},
+            "validated_json": {"status": "validated"},
+            "output_json": {"status": "validated"},
+            "validation_log": {
+                "iteration": 1,
+                "verdict": "valid",
+                "errors": [],
+                "warnings": [],
+                "summary": "Output passed strict export schema validation.",
+            },
+            "reasoning": {
+                "final_answer": "ok",
+                "reasoning_steps": ["step"],
+                "thinking_log": "log",
+            },
+            "refinement_meta": {
+                "iterations_run": 1,
+                "max_iterations": 3,
+                "early_exit_triggered": True,
+                "final_status": "valid",
+            },
+        }
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {"input_json": {"sheet": "Sheet1"}, "refinement": {"enabled": True}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("raw_json", response.data)
+        self.assertIn("validation_log", response.data)
+        self.assertIn("refinement_meta", response.data)
+
+    # Negative
+    def test_negative_llm_generate_rejects_invalid_refinement_shape(self):
+        client = APIClient()
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {"max_iterations": "bad-value"},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid request payload.")
+        self.assertIn("errors", response.data)
+
+    # Edge
+    @patch("llm.views.build_llm_generation_service")
+    def test_edge_llm_generate_uses_non_refinement_path_when_refinement_explicitly_disabled(
+        self,
+        mock_build_service,
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {"status": "ok"}
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "include_reasoning": False,
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["output_json"], {"status": "ok"})
+        self.assertNotIn("validated_json", response.data)
+        self.assertNotIn("raw_json", response.data)
+
     def test_llm_generate_rejects_client_model_field(self):
         client = APIClient()
         response = client.post(
@@ -437,7 +924,14 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
         client = APIClient()
 
-        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"hello": "world"},
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.data["detail"], "Service unavailable. Please try again later.")
@@ -450,7 +944,14 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
         client = APIClient()
 
-        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"hello": "world"},
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
@@ -465,7 +966,14 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
         client = APIClient()
 
-        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"hello": "world"},
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
@@ -481,7 +989,14 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
         client = APIClient()
 
-        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"hello": "world"},
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
 
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
@@ -556,7 +1071,14 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_response_serializer.is_valid.return_value = False
         client = APIClient()
 
-        response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"hello": "world"},
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
@@ -883,7 +1405,8 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                 "input_json": {
                     "filename": "invoice.pdf",
                     "extracted": "raw upload text",
-                }
+                },
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -961,7 +1484,8 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                 "input_json": {
                     "filename": "invoice.pdf",
                     "extracted": "raw upload text",
-                }
+                },
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -995,7 +1519,8 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                 "input_json": {
                     "filename": "invoice.pdf",
                     "extracted": "raw upload text",
-                }
+                },
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -1032,7 +1557,8 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                 "input_json": {
                     "filename": "invoice.pdf",
                     "extracted": "raw upload text",
-                }
+                },
+                "refinement": {"enabled": False},
             },
             format="json",
         )

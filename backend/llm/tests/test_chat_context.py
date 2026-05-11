@@ -133,6 +133,7 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
 
         mock_prompt.assert_called_once_with(
             schema_hint=None,
+            refinement_instruction=None,
             chat_context=chat_ctx,
         )
 
@@ -145,6 +146,7 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
 
         mock_prompt.assert_called_once_with(
             schema_hint=None,
+            refinement_instruction=None,
             chat_context=None,
         )
 
@@ -161,6 +163,7 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
 
         mock_prompt.assert_called_once_with(
             schema_hint="schema: [A]",
+            refinement_instruction=None,
             chat_context="Format tanggal DD/MM/YYYY",
         )
 
@@ -177,7 +180,11 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
             mock_prompt.return_value = "mocked_prompt"
             service.generate(input_json={"x": 1}, chat_context="")
 
-        mock_prompt.assert_called_once_with(schema_hint=None, chat_context="")
+        mock_prompt.assert_called_once_with(
+            schema_hint=None,
+            refinement_instruction=None,
+            chat_context="",
+        )
 
 
 class BuildChatContextFromSessionTest(SimpleTestCase):

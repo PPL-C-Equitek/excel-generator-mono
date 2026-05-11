@@ -16,6 +16,7 @@ import { isJsonObject } from '@/utils/schemaValidator'
 import { sanitizeCSVCell } from '@/utils/csvSanitizer'
 import type { ILLMService } from '@/lib/ILLMService'
 import type { JsonObject, JsonValue } from '@/utils/schemaValidator'
+import type { RefinementMeta, ValidationLog, ReasoningPayload } from '@/services/llm'
 import { FILE_TOO_LARGE_MESSAGE, MAX_UPLOAD_SIZE_BYTES } from '@/constants/upload'
 
 const defaultService: ILLMService = {
@@ -416,6 +417,9 @@ export interface UseConvertFlowReturn {
     error: string | null
     excelError: string | null
     excelSuccessMessage: string | null
+    reasoning: ReasoningPayload | null
+    validationLog: ValidationLog | null
+    refinementMeta: RefinementMeta | null
     outputFile: OutputFile | null
     thinkingLog: string | null
     reasoningSteps: string[]
@@ -447,6 +451,9 @@ export function useConvertFlow(
     const [uploadResultForExport, setUploadResultForExport] = useState<JsonObject | null>(null)
     const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null)
     const [generatedOutput, setGeneratedOutput] = useState<JsonValue | null>(null)
+    const [reasoning, setReasoning] = useState<ReasoningPayload | null>(null)
+    const [validationLog, setValidationLog] = useState<ValidationLog | null>(null)
+    const [refinementMeta, setRefinementMeta] = useState<RefinementMeta | null>(null)
     const [generatedSessionId, setGeneratedSessionId] = useState<string | null>(null)
     const [generatedOutputId, setGeneratedOutputId] = useState<string | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
@@ -508,6 +515,9 @@ export function useConvertFlow(
         setUploadResultForExport(null)
         setCsvMetadata(null)
         setGeneratedOutput(null)
+        setReasoning(null)
+        setValidationLog(null)
+        setRefinementMeta(null)
         setGeneratedSessionId(null)
         setGeneratedOutputId(null)
         setIsExcelDownloading(false)
@@ -539,6 +549,10 @@ export function useConvertFlow(
                 : await llmService.generate(generationInput, selectedSchemaId, signal)
             if (signal.aborted) return
 
+            setGeneratedOutput(llmResult.validated_json ?? llmResult.output_json)
+            setReasoning(llmResult.reasoning ?? null)
+            setValidationLog(llmResult.validation_log ?? null)
+            setRefinementMeta(llmResult.refinement_meta ?? null)
             const reasoning = llmResult.reasoning
             const parsedReasoningSteps = Array.isArray(reasoning?.reasoning_steps)
                 ? reasoning.reasoning_steps
@@ -546,7 +560,6 @@ export function useConvertFlow(
                     .filter((step) => step.length > 0)
                 : []
 
-            setGeneratedOutput(llmResult.output_json)
             setThinkingLog(reasoning?.thinking_log?.trim() || null)
             setReasoningSteps(parsedReasoningSteps)
             setGeneratedSessionId(llmResult.session_id ?? null)
@@ -813,6 +826,9 @@ export function useConvertFlow(
         error,
         excelError,
         excelSuccessMessage,
+        reasoning,
+        validationLog,
+        refinementMeta,
         outputFile,
         thinkingLog,
         reasoningSteps,
