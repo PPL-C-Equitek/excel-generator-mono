@@ -4,7 +4,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework.response import Response
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from artifact_history.models import ArtifactHistory
@@ -20,6 +20,7 @@ from llm.services.openai_client import (
 from llm.views import (
     _build_generate_bootstrap_message,
     _extract_follow_up_prompt,
+    _generate_output_json,
     _sanitize_output_json,
     build_llm_generation_service,
     build_llm_reasoning_service,
@@ -58,6 +59,77 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         result = get_authenticated_user_id(SimpleNamespace(is_authenticated=False))
 
         self.assertIsNone(result)
+
+    def test_generate_output_json_returns_generated_output_when_successful(self):
+        generation_service = Mock()
+        generation_service.generate.return_value = {"result": "ok"}
+
+        output_json, error_response = _generate_output_json(
+            llm_generation_service=generation_service,
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=None,
+            chat_context={"chat": "ctx"},
+        )
+
+        self.assertEqual(output_json, {"result": "ok"})
+        self.assertIsNone(error_response)
+        generation_service.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=None,
+            chat_context={"chat": "ctx"},
+        )
+
+    def test_generate_output_json_maps_known_provider_errors(self):
+        cases = [
+            (CustomSchemaNotFoundError(), 404),
+            (OpenAIConfigurationError("misconfigured"), 503),
+            (OpenAIUpstreamError("upstream", status_code=429), 429),
+            (OpenAIServiceError("service error"), 502),
+        ]
+
+        for exception, expected_status in cases:
+            with self.subTest(expected_status=expected_status):
+                generation_service = Mock()
+                generation_service.generate.side_effect = exception
+
+                output_json, error_response = _generate_output_json(
+                    llm_generation_service=generation_service,
+                    input_json={"sheet": "Sheet1"},
+                    custom_schema_id=None,
+                )
+
+                self.assertIsNone(output_json)
+                self.assertIsInstance(error_response, Response)
+                self.assertEqual(error_response.status_code, expected_status)
+
+    def test_generate_output_json_returns_validation_error_for_invalid_input_payload(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = ValueError("bad payload")
+
+        output_json, error_response = _generate_output_json(
+            llm_generation_service=generation_service,
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=None,
+        )
+
+        self.assertIsNone(output_json)
+        self.assertIsInstance(error_response, Response)
+        self.assertEqual(error_response.status_code, 400)
+        self.assertIn("input_json", error_response.data["errors"])
+
+    def test_generate_output_json_returns_500_for_unexpected_exception(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = RuntimeError("unexpected")
+
+        output_json, error_response = _generate_output_json(
+            llm_generation_service=generation_service,
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id=None,
+        )
+
+        self.assertIsNone(output_json)
+        self.assertIsInstance(error_response, Response)
+        self.assertEqual(error_response.status_code, 500)
 
     @patch("llm.views.extract_original_name", return_value="")
     def test_build_generate_bootstrap_message_returns_title_when_filename_missing(self, _mock_extract_original_name):

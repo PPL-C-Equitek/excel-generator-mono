@@ -12,6 +12,7 @@ from llm.serializers import (
     LlmReasoningResponseSerializer,
     SendMessageRequestSerializer,
     ThinkingLogItemSerializer,
+    _resolve_positive_int_setting,
     _safe_thinking_log_summary,
 )
 class LlmReasoningSerializerTest(SimpleTestCase):
@@ -48,6 +49,15 @@ class LlmReasoningSerializerTest(SimpleTestCase):
 
 
 class LlmGenerateSerializerTest(SimpleTestCase):
+    def test_resolve_positive_int_setting_handles_bool_int_str_and_fallback_values(self):
+        self.assertEqual(_resolve_positive_int_setting(True, 3), 3)
+        self.assertEqual(_resolve_positive_int_setting(5, 3), 5)
+        self.assertEqual(_resolve_positive_int_setting(0, 3), 3)
+        self.assertEqual(_resolve_positive_int_setting("7", 3), 7)
+        self.assertEqual(_resolve_positive_int_setting("   ", 3), 3)
+        self.assertEqual(_resolve_positive_int_setting("invalid", 3), 3)
+        self.assertEqual(_resolve_positive_int_setting(None, 3), 3)
+
     def test_generate_request_serializer_accepts_json_object(self):
         serializer = LlmGenerateRequestSerializer(data={"input_json": {"sheet": "Sheet1"}})
 

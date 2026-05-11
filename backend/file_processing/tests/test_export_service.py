@@ -137,6 +137,21 @@ class ValidateOutputLLMTest(unittest.TestCase):
         with self.assertRaises(OutputLLMValidationError):
             validate_output_llm(payload)
 
+    def test_validate_output_llm_rejects_summary_total_items_boolean(self):
+        payload = self._build_valid_payload()
+        payload["summary"] = {"total_items": True}
+
+        with self.assertRaises(OutputLLMValidationError):
+            validate_output_llm(payload)
+
+    def test_validate_output_llm_accepts_summary_total_items_non_negative_integer(self):
+        payload = self._build_valid_payload()
+        payload["summary"] = {"total_items": 0}
+
+        result = validate_output_llm(payload)
+
+        self.assertEqual(result["summary"]["total_items"], 0)
+
     def test_validate_output_llm_rejects_empty_content_data_list(self):
         payload = self._build_valid_payload()
         payload["content_data"] = []
@@ -1364,7 +1379,7 @@ class ResolveCSVDownloadArtifactTest(unittest.TestCase):
 
             self.assertEqual(result["artifact_type"], "csv")
             self.assertEqual(result["file_name"], file_name)
-            self.assertEqual(result["file_path"], file_path)
+            self.assertEqual(os.path.realpath(result["file_path"]), os.path.realpath(file_path))
             self.assertEqual(result["content_type"], "text/csv")
 
     def test_resolve_csv_download_artifact_returns_zip_metadata_for_existing_file(self):
@@ -1382,7 +1397,7 @@ class ResolveCSVDownloadArtifactTest(unittest.TestCase):
 
             self.assertEqual(result["artifact_type"], "zip")
             self.assertEqual(result["file_name"], file_name)
-            self.assertEqual(result["file_path"], file_path)
+            self.assertEqual(os.path.realpath(result["file_path"]), os.path.realpath(file_path))
             self.assertEqual(result["content_type"], "application/zip")
 
     def test_resolve_csv_download_artifact_rejects_invalid_file_id(self):
@@ -1432,7 +1447,10 @@ class ResolveCSVDownloadArtifactTest(unittest.TestCase):
 
             self.assertEqual(result["artifact_type"], "csv")
             self.assertEqual(result["file_name"], csv_file_name)
-            self.assertEqual(result["file_path"], csv_file_path)
+            self.assertEqual(
+                os.path.realpath(result["file_path"]),
+                os.path.realpath(csv_file_path),
+            )
             self.assertEqual(result["content_type"], "text/csv")
 
     def test_resolve_csv_download_artifact_rejects_invalid_storage_dir(self):
@@ -1594,7 +1612,7 @@ class ResolveExcelDownloadArtifactTest(unittest.TestCase):
 
             self.assertEqual(result["artifact_type"], "xlsx")
             self.assertEqual(result["file_name"], file_name)
-            self.assertEqual(result["file_path"], file_path)
+            self.assertEqual(os.path.realpath(result["file_path"]), os.path.realpath(file_path))
             self.assertEqual(
                 result["content_type"],
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
