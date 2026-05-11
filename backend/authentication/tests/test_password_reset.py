@@ -165,6 +165,32 @@ class ForgotPasswordViewTest(APISimpleTestCase):
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
+    @patch("authentication.password_reset.adapters.send_password_reset_email")
+    @patch("authentication.password_reset.adapters.User")
+    def test_rate_limit_normalizes_email_identity_across_case_and_whitespace(
+        self, mock_user_model, mock_send_email
+    ):
+        mock_queryset = MagicMock()
+        mock_queryset.exists.return_value = True
+        mock_user_model.objects.filter.return_value = mock_queryset
+
+        payload_variants = (
+            {"email": "  RateLimit@Example.com  "},
+            {"email": "ratelimit@example.com"},
+            {"email": "RATELIMIT@example.com"},
+        )
+
+        for payload in payload_variants:
+            response = self.client.post(self.url, payload, format="json")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        blocked_response = self.client.post(
+            self.url,
+            {"email": "ratelimit@example.com"},
+            format="json",
+        )
+        self.assertEqual(blocked_response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
     @patch("authentication.password_reset.http.ForgotPasswordView.get_request_password_reset_use_case")
     def test_service_error_returns_500(self, mock_get_use_case):
         mock_use_case = MagicMock()
@@ -310,6 +336,38 @@ class ResendPasswordResetViewTest(APISimpleTestCase):
         )
 
 
+class PasswordResetThrottleScopeIsolationTest(APISimpleTestCase):
+    def setUp(self):
+        cache.clear()
+        self.forgot_url = "/auth/forgot-password/"
+        self.resend_url = "/auth/resend-password-reset/"
+
+    @patch("authentication.password_reset.adapters.send_password_reset_email")
+    @patch("authentication.password_reset.adapters.User")
+    def test_forgot_and_resend_throttles_are_isolated_per_scope(
+        self, mock_user_model, mock_send_email
+    ):
+        mock_queryset = MagicMock()
+        mock_queryset.exists.return_value = True
+        mock_user_model.objects.filter.return_value = mock_queryset
+        payload = {"email": "scope@example.com"}
+
+        for _ in range(3):
+            response = self.client.post(self.forgot_url, payload, format="json")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        forgot_blocked = self.client.post(self.forgot_url, payload, format="json")
+        self.assertEqual(forgot_blocked.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+        for _ in range(3):
+            response = self.client.post(self.resend_url, payload, format="json")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        resend_blocked = self.client.post(self.resend_url, payload, format="json")
+        self.assertEqual(resend_blocked.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertEqual(mock_send_email.call_count, 6)
+
+
 class ResetPasswordViewTest(APISimpleTestCase):
     def setUp(self):
         cache.clear()
@@ -318,6 +376,19 @@ class ResetPasswordViewTest(APISimpleTestCase):
             "token": "signed-reset-token",
             "password": "Strong#123",
             "password_confirm": "Strong#123",
+        }
+
+    def _build_payload(
+        self,
+        *,
+        token: str,
+        password: str = "Strong#123",
+        password_confirm: str = "Strong#123",
+    ):
+        return {
+            "token": token,
+            "password": password,
+            "password_confirm": password_confirm,
         }
 
     @patch("authentication.password_reset.adapters.decode_password_reset_token")
@@ -414,6 +485,77 @@ class ResetPasswordViewTest(APISimpleTestCase):
 
         response = self.client.post(self.url, self.valid_payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    @patch("authentication.password_reset.http.ResetPasswordView.get_complete_password_reset_use_case")
+    def test_rate_limit_groups_tokens_by_first_16_chars_prefix(self, mock_get_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.return_value = MagicMock(message="Password reset successfully")
+        mock_get_use_case.return_value = mock_use_case
+
+        shared_prefix = "1234567890abcdef"
+        payload_a = self._build_payload(token=f"{shared_prefix}-token-a")
+        payload_b = self._build_payload(token=f"{shared_prefix}-token-b")
+
+        for _ in range(5):
+            response = self.client.post(self.url, payload_a, format="json")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        blocked_response = self.client.post(self.url, payload_b, format="json")
+        self.assertEqual(blocked_response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertEqual(mock_use_case.execute.call_count, 5)
+
+    @patch("authentication.password_reset.http.ResetPasswordView.get_complete_password_reset_use_case")
+    def test_rate_limit_separates_tokens_with_different_prefixes(self, mock_get_use_case):
+        mock_use_case = MagicMock()
+        mock_use_case.execute.return_value = MagicMock(message="Password reset successfully")
+        mock_get_use_case.return_value = mock_use_case
+
+        payload_a = self._build_payload(token="1234567890abcdef-token-a")
+        payload_b = self._build_payload(token="fedcba0987654321-token-b")
+
+        for _ in range(5):
+            response = self.client.post(self.url, payload_a, format="json")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_different_prefix = self.client.post(self.url, payload_b, format="json")
+        self.assertEqual(response_different_prefix.status_code, status.HTTP_200_OK)
+
+        blocked_response = self.client.post(self.url, payload_a, format="json")
+        self.assertEqual(blocked_response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertEqual(mock_use_case.execute.call_count, 6)
+
+    def test_password_strength_isp_invalid_partitions_return_400(self):
+        invalid_password_partitions = (
+            {
+                "name": "too_short",
+                "password": "Aa1!",
+            },
+            {
+                "name": "missing_letter",
+                "password": "1234567!",
+            },
+            {
+                "name": "missing_number",
+                "password": "Password!",
+            },
+            {
+                "name": "missing_special_character",
+                "password": "Password1",
+            },
+        )
+
+        for partition in invalid_password_partitions:
+            with self.subTest(partition=partition["name"]):
+                payload = self._build_payload(
+                    token="signed-reset-token",
+                    password=partition["password"],
+                    password_confirm=partition["password"],
+                )
+                response = self.client.post(self.url, payload, format="json")
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn("errors", response.data)
+                self.assertIn("password", response.data["errors"])
 
     @patch("authentication.password_reset.http.ResetPasswordView.get_complete_password_reset_use_case")
     def test_service_error_returns_500(self, mock_get_use_case):
