@@ -29,6 +29,7 @@ from monitoring.infrastructure.repositories import (
 
 MONITORING_DEFAULT_DISCORD_WEBHOOK_TIMEOUT_SECONDS = 3.0
 MONITORING_DEFAULT_STATS_CACHE_TTL_SECONDS = 2.0
+MONITORING_DEFAULT_SNAPSHOT_READINESS_CACHE_TTL_SECONDS = 2.0
 
 _monitoring_service: MonitoringService | None = None
 logger = logging.getLogger(__name__)
@@ -204,12 +205,20 @@ def build_monitoring_service() -> MonitoringService:
             MONITORING_DEFAULT_STATS_CACHE_TTL_SECONDS,
         )
     )
+    snapshot_readiness_cache_ttl_seconds = float(
+        getattr(
+            settings,
+            "MONITORING_SNAPSHOT_READINESS_CACHE_TTL_SECONDS",
+            MONITORING_DEFAULT_SNAPSHOT_READINESS_CACHE_TTL_SECONDS,
+        )
+    )
     return MonitoringService(
         readiness_service=readiness,
         metrics_repository=repository,
         alert_notifier=alert_notifier,
         readiness_alert_cooldown_seconds=alert_cooldown_seconds,
         stats_cache_ttl_seconds=stats_cache_ttl_seconds,
+        snapshot_readiness_cache_ttl_seconds=snapshot_readiness_cache_ttl_seconds,
     )
 
 

@@ -85,6 +85,7 @@ Auth outcomes are resolved from HTTP status:
 
 ### 5.3 Realtime series
 - Built from request records in fixed buckets.
+- Redis backend pre-aggregates request counts/errors/latency into bucket hashes, so snapshots read the rendered buckets instead of scanning recent requests.
 - Defaults: window `300s`, bucket `10s`.
 - Frontend uses the recent points for latency/traffic charting.
 
@@ -147,11 +148,12 @@ Defined in `backend/config/settings.py` and consumed in `monitoring/container.py
 - `MONITORING_METRICS_BACKEND` (`memory` or `redis`, default `memory`)
 - `MONITORING_STREAM_INTERVAL_SECONDS` (default `2.0`)
 - `MONITORING_STATS_CACHE_TTL_SECONDS` (default `2.0`)
+- `MONITORING_SNAPSHOT_READINESS_CACHE_TTL_SECONDS` (default `2.0`; used by `/monitoring/snapshot/` only)
 
 ### Realtime and route sampling
 - `MONITORING_REALTIME_WINDOW_SECONDS` (default `300`)
 - `MONITORING_REALTIME_BUCKET_SECONDS` (default `10`)
-- `MONITORING_MAX_REALTIME_RECORDS` (default `10000`)
+- `MONITORING_MAX_REALTIME_RECORDS` (default `10000`; applies to memory backend request deque)
 - `MONITORING_MAX_ROUTE_LATENCY_SAMPLES` (default `2048`)
 - `MONITORING_MAX_ROUTES_PER_SNAPSHOT` (default `0`, means unlimited)
 

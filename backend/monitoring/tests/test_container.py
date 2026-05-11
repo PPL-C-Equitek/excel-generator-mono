@@ -293,10 +293,12 @@ class MonitoringContainerTest(SimpleTestCase):
             alert_notifier=notifier,
             readiness_alert_cooldown_seconds=123,
             stats_cache_ttl_seconds=2.0,
+            snapshot_readiness_cache_ttl_seconds=2.0,
         )
 
     @override_settings(
         MONITORING_STATS_CACHE_TTL_SECONDS=4.5,
+        MONITORING_SNAPSHOT_READINESS_CACHE_TTL_SECONDS=1.25,
         MONITORING_DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/test",
         MONITORING_DISCORD_WEBHOOK_USERNAME="OpsBot",
         MONITORING_DISCORD_WEBHOOK_TIMEOUT_SECONDS=2.5,
@@ -331,6 +333,7 @@ class MonitoringContainerTest(SimpleTestCase):
             alert_notifier=notifier,
             readiness_alert_cooldown_seconds=300,
             stats_cache_ttl_seconds=4.5,
+            snapshot_readiness_cache_ttl_seconds=1.25,
         )
 
     @override_settings(

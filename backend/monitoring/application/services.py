@@ -18,6 +18,7 @@ HTTP_STATUS_OK = 200
 HTTP_STATUS_UNAVAILABLE = 503
 DEFAULT_READINESS_ALERT_COOLDOWN_SECONDS = 300
 DEFAULT_STATS_CACHE_TTL_SECONDS = 2.0
+DEFAULT_SNAPSHOT_READINESS_CACHE_TTL_SECONDS = 2.0
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ class MonitoringService:
         alert_notifier: MonitoringAlertNotifier | None = None,
         readiness_alert_cooldown_seconds: int = DEFAULT_READINESS_ALERT_COOLDOWN_SECONDS,
         stats_cache_ttl_seconds: float = DEFAULT_STATS_CACHE_TTL_SECONDS,
+        snapshot_readiness_cache_ttl_seconds: float = DEFAULT_SNAPSHOT_READINESS_CACHE_TTL_SECONDS,
         now: Callable[[], datetime] | None = None,
     ):
         self._readiness_service = readiness_service
@@ -72,12 +74,18 @@ class MonitoringService:
         self._alert_notifier = alert_notifier
         self._readiness_alert_cooldown_seconds = readiness_alert_cooldown_seconds
         self._stats_cache_ttl_seconds = stats_cache_ttl_seconds
+        self._snapshot_readiness_cache_ttl_seconds = max(
+            0.0,
+            float(snapshot_readiness_cache_ttl_seconds),
+        )
         self._now = now or datetime.utcnow
         self._last_readiness_status: str | None = None
         self._last_readiness_alert_time: datetime | None = None
         self._cached_stats_payload: dict[str, object] | None = None
         self._cached_stats_payload_json: str | None = None
         self._cached_stats_at: datetime | None = None
+        self._cached_snapshot_readiness: tuple[int, dict[str, object]] | None = None
+        self._cached_snapshot_readiness_at: datetime | None = None
 
     def live(self) -> dict[str, object]:
         return {
@@ -86,10 +94,19 @@ class MonitoringService:
         }
 
     def readiness(self) -> tuple[int, dict[str, object]]:
-        http_status, payload = self._readiness_service.run()
-        payload["timestamp"] = self._iso_now()
-        self._notify_if_readiness_non_ok(payload=payload, http_status=http_status)
-        return http_status, payload
+        self._invalidate_snapshot_readiness_cache()
+        return self._run_readiness_checks()
+
+    def snapshot_readiness(self) -> tuple[int, dict[str, object]]:
+        now = self._now()
+        if self._is_snapshot_readiness_cache_fresh(now=now):
+            assert self._cached_snapshot_readiness is not None
+            return self._cached_snapshot_readiness
+
+        readiness = self._run_readiness_checks()
+        self._cached_snapshot_readiness = readiness
+        self._cached_snapshot_readiness_at = now
+        return readiness
 
     def record_request(
         self,
@@ -167,10 +184,28 @@ class MonitoringService:
         age_seconds = (now - self._cached_stats_at).total_seconds()
         return age_seconds <= self._stats_cache_ttl_seconds
 
+    def _run_readiness_checks(self) -> tuple[int, dict[str, object]]:
+        http_status, payload = self._readiness_service.run()
+        payload["timestamp"] = self._iso_now()
+        self._notify_if_readiness_non_ok(payload=payload, http_status=http_status)
+        return http_status, payload
+
+    def _is_snapshot_readiness_cache_fresh(self, *, now: datetime) -> bool:
+        if self._cached_snapshot_readiness is None or self._cached_snapshot_readiness_at is None:
+            return False
+        if self._snapshot_readiness_cache_ttl_seconds <= 0:
+            return False
+        age_seconds = (now - self._cached_snapshot_readiness_at).total_seconds()
+        return age_seconds <= self._snapshot_readiness_cache_ttl_seconds
+
     def _invalidate_stats_cache(self) -> None:
         self._cached_stats_payload = None
         self._cached_stats_payload_json = None
         self._cached_stats_at = None
+
+    def _invalidate_snapshot_readiness_cache(self) -> None:
+        self._cached_snapshot_readiness = None
+        self._cached_snapshot_readiness_at = None
 
     def _iso_now(self) -> str:
         return self._now().isoformat()

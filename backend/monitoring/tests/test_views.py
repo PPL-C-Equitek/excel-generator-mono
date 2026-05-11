@@ -375,7 +375,7 @@ class MonitoringViewsTest(APITestCase):
         self.client.force_authenticate(user=user)
 
         service = Mock()
-        service.readiness.return_value = (
+        service.snapshot_readiness.return_value = (
             200,
             {
                 "status": "ok",
@@ -404,7 +404,8 @@ class MonitoringViewsTest(APITestCase):
         )
         self.assertEqual(response.data["ready"]["status"], "ok")
         self.assertEqual(response.data["stats"]["status"], "ok")
-        service.readiness.assert_called_once()
+        service.snapshot_readiness.assert_called_once()
+        service.readiness.assert_not_called()
         service.stats.assert_called_once()
 
     def test_live_endpoint_rejects_post_method(self):

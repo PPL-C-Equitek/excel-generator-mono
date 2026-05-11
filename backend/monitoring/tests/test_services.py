@@ -133,8 +133,10 @@ class _RepositoryDouble:
 class _ReadinessSequenceDouble:
     def __init__(self, responses):
         self._responses = iter(responses)
+        self.run_calls = 0
 
     def run(self):
+        self.run_calls += 1
         return next(self._responses)
 
 
@@ -332,6 +334,78 @@ class MonitoringServiceTest(SimpleTestCase):
                 status="down",
             )
         )
+
+    def test_snapshot_readiness_uses_short_lived_cache(self):
+        clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
+        readiness = _ReadinessSequenceDouble(
+            [
+                (503, {"status": "down", "checks": [{"name": "db", "status": "error"}]}),
+                (200, {"status": "ok", "checks": []}),
+            ]
+        )
+        service = MonitoringService(
+            readiness_service=readiness,
+            metrics_repository=self.repo,
+            now=clock,
+            snapshot_readiness_cache_ttl_seconds=5,
+        )
+
+        first_status, first_payload = service.snapshot_readiness()
+        clock.tick(seconds=4)
+        second_status, second_payload = service.snapshot_readiness()
+        clock.tick(seconds=2)
+        third_status, third_payload = service.snapshot_readiness()
+
+        self.assertEqual(first_status, 503)
+        self.assertEqual(second_status, 503)
+        self.assertIs(first_payload, second_payload)
+        self.assertEqual(third_status, 200)
+        self.assertEqual(third_payload["status"], "ok")
+        self.assertEqual(readiness.run_calls, 2)
+
+    def test_snapshot_readiness_skips_cache_when_ttl_is_zero(self):
+        readiness = _ReadinessSequenceDouble(
+            [
+                (503, {"status": "down", "checks": [{"name": "db", "status": "error"}]}),
+                (200, {"status": "ok", "checks": []}),
+            ]
+        )
+        service = MonitoringService(
+            readiness_service=readiness,
+            metrics_repository=self.repo,
+            now=self.now,
+            snapshot_readiness_cache_ttl_seconds=0,
+        )
+
+        first_status, first_payload = service.snapshot_readiness()
+        second_status, second_payload = service.snapshot_readiness()
+
+        self.assertEqual(first_status, 503)
+        self.assertEqual(first_payload["status"], "down")
+        self.assertEqual(second_status, 200)
+        self.assertEqual(second_payload["status"], "ok")
+        self.assertEqual(readiness.run_calls, 2)
+
+    def test_readiness_bypasses_snapshot_readiness_cache(self):
+        readiness = _ReadinessSequenceDouble(
+            [
+                (503, {"status": "down", "checks": [{"name": "db", "status": "error"}]}),
+                (200, {"status": "ok", "checks": []}),
+            ]
+        )
+        service = MonitoringService(
+            readiness_service=readiness,
+            metrics_repository=self.repo,
+            now=self.now,
+            snapshot_readiness_cache_ttl_seconds=30,
+        )
+
+        service.snapshot_readiness()
+        status_code, payload = service.readiness()
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(readiness.run_calls, 2)
 
     def test_stats_uses_short_lived_cache(self):
         clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
