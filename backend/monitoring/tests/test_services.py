@@ -554,44 +554,43 @@ class MonitoringServiceTest(SimpleTestCase):
 
                 self.assertEqual(repo.get_snapshot_calls, 2)
 
-    def test_stats_cache_invalidated_after_record_request(self):
-        clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
-        service = MonitoringService(
-            readiness_service=self.readiness,
-            metrics_repository=self.repo,
-            now=clock,
-            stats_cache_ttl_seconds=300,
+    def test_stats_cache_invalidated_after_mutating_events_partitions(self):
+        scenarios = (
+            {
+                "name": "record_request_invalidates_cache",
+                "action": lambda service: service.record_request(
+                    route="/upload",
+                    method="POST",
+                    status_code=200,
+                    duration_ms=10.0,
+                ),
+            },
+            {
+                "name": "record_event_invalidates_cache",
+                "action": lambda service: service.record_event(
+                    event_name="login",
+                    outcome="success",
+                    endpoint="/auth/login/",
+                ),
+            },
         )
 
-        service.stats()
-        service.record_request(
-            route="/upload",
-            method="POST",
-            status_code=200,
-            duration_ms=10.0,
-        )
-        service.stats()
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["name"]):
+                clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
+                repo = _RepositoryDouble()
+                service = MonitoringService(
+                    readiness_service=self.readiness,
+                    metrics_repository=repo,
+                    now=clock,
+                    stats_cache_ttl_seconds=300,
+                )
 
-        self.assertEqual(self.repo.get_snapshot_calls, 2)
+                service.stats()
+                scenario["action"](service)
+                service.stats()
 
-    def test_stats_cache_invalidated_after_record_event(self):
-        clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
-        service = MonitoringService(
-            readiness_service=self.readiness,
-            metrics_repository=self.repo,
-            now=clock,
-            stats_cache_ttl_seconds=300,
-        )
-
-        service.stats()
-        service.record_event(
-            event_name="login",
-            outcome="success",
-            endpoint="/auth/login/",
-        )
-        service.stats()
-
-        self.assertEqual(self.repo.get_snapshot_calls, 2)
+                self.assertEqual(repo.get_snapshot_calls, 2)
 
     def test_record_request_sends_event_to_repository(self):
         self.service.record_request(
