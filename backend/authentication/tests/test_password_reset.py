@@ -16,6 +16,7 @@ from authentication.services import (
 )
 from authentication.password_reset.entities import CompletePasswordResetCommand
 from authentication.password_reset.exceptions import PasswordResetServiceError
+from authentication.password_reset.http import _reset_password_rate_limit_key
 from authentication.password_reset.use_cases import DefaultCompletePasswordResetUseCase
 
 
@@ -576,3 +577,48 @@ class CompletePasswordResetUseCaseTest(SimpleTestCase):
                     password="Strong#123",
                 )
             )
+
+
+class ResetPasswordRateLimitKeyTest(SimpleTestCase):
+    def test_rate_limit_key_isp_partitions(self):
+        scenarios = (
+            {
+                "name": "uses_first_16_characters_of_string_token",
+                "request_data": {"token": "1234567890abcdef-extra"},
+                "meta": {"REMOTE_ADDR": "10.0.0.1"},
+                "expected": "ip:10.0.0.1:token:1234567890abcdef",
+            },
+            {
+                "name": "uses_no_token_when_token_missing",
+                "request_data": {},
+                "meta": {"REMOTE_ADDR": "10.0.0.2"},
+                "expected": "ip:10.0.0.2:token:no-token",
+            },
+            {
+                "name": "uses_no_token_when_token_is_blank",
+                "request_data": {"token": ""},
+                "meta": {"REMOTE_ADDR": "10.0.0.3"},
+                "expected": "ip:10.0.0.3:token:no-token",
+            },
+            {
+                "name": "uses_no_token_when_token_is_non_string",
+                "request_data": {"token": 12345},
+                "meta": {"REMOTE_ADDR": "10.0.0.4"},
+                "expected": "ip:10.0.0.4:token:no-token",
+            },
+            {
+                "name": "uses_unknown_ip_when_remote_addr_missing",
+                "request_data": {"token": "abcdef1234567890rest"},
+                "meta": {},
+                "expected": "ip:unknown:token:abcdef1234567890",
+            },
+        )
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["name"]):
+                request = MagicMock()
+                request.data = scenario["request_data"]
+                request.META = scenario["meta"]
+
+                key = _reset_password_rate_limit_key(request)
+
+                self.assertEqual(key, scenario["expected"])
