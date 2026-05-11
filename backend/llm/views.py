@@ -632,15 +632,10 @@ def llm_generate(request):
     if isinstance(result, Response):
         return result
 
-    output_json = result["output_json"]
+    output_json = _sanitize_output_json(result["output_json"])
     response_payload = _build_llm_generate_response_payload(result)
     reasoning_response = result["reasoning_response"]
 
-    output_json = _sanitize_output_json(output_json)
-    export_output_json = build_export_output_json(
-        input_json=input_json,
-        output_json=output_json,
-    )
     thinking_log = ""
     if isinstance(reasoning_response, dict):
         raw_thinking_log = reasoning_response.get("thinking_log")
@@ -659,6 +654,23 @@ def llm_generate(request):
             follow_up_prompt,
         )
 
+    is_authenticated = bool(getattr(request.user, "is_authenticated", False))
+    export_output_json = None
+    resolved_original_name = None
+    resolved_title = ""
+    bootstrap_message_content = ""
+    if is_authenticated:
+        resolved_original_name = extract_original_name(input_json, output_json)
+        resolved_title = resolve_session_title(f"Convert {resolved_original_name}")
+        bootstrap_message_content = _build_generate_bootstrap_message(
+            input_json,
+            resolved_title,
+        )
+        export_output_json = build_export_output_json(
+            input_json=input_json,
+            output_json=output_json,
+        )
+
     response_session_id, response_output_id, response_chat_id, error_response = _persist_generate_output_for_authenticated_user(
         request.user,
         session,
@@ -668,19 +680,16 @@ def llm_generate(request):
         export_output_json,
         source_message=source_message,
         parent_output=getattr(source_message, "target_output", None),
-        bootstrap_message_content=_build_generate_bootstrap_message(
-            input_json,
-            resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
-        ),
-        title=resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
+        bootstrap_message_content=bootstrap_message_content,
+        title=resolved_title,
     )
     if error_response is not None:
         return error_response
 
-    if getattr(request.user, "is_authenticated", False):
+    if is_authenticated:
         create_artifact_history(
             owner=request.user,
-            original_name=extract_original_name(input_json, output_json),
+            original_name=resolved_original_name,
             custom_name=None,
             session_id=response_session_id,
             output_json=output_json,
@@ -901,4 +910,3 @@ def thinking_log_detail(request, output_id):
         return _thinking_log_not_found_response()
 
     return Response(ThinkingLogItemSerializer(record).data, status=200)
-

@@ -341,6 +341,30 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             output_json={"status": "ok"},
         )
 
+    @patch("llm.views.build_export_output_json")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_skips_export_build_for_anonymous_user(
+        self,
+        mock_build_generation_service,
+        mock_build_export_output_json,
+    ):
+        mock_generation_service = mock_build_generation_service.return_value
+        mock_generation_service.generate.return_value = {"status": "ok"}
+        client = APIClient()
+
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "include_reasoning": False,
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_build_export_output_json.assert_not_called()
+
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_strips_reasoning_keys_from_output_json(self, mock_build_service):
         mock_service = mock_build_service.return_value
@@ -1458,6 +1482,36 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             },
         )
         self.assertEqual(ArtifactHistory.objects.count(), 1)
+
+    @patch("llm.views.extract_original_name", return_value="invoice.pdf")
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_resolves_original_name_once_for_authenticated_flow(
+        self,
+        mock_build_service,
+        mock_extract_original_name,
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "extracted": "raw upload text",
+                },
+                "include_reasoning": False,
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_extract_original_name.assert_called_once()
 
     @patch("llm.views._generate_optional_reasoning")
     @patch("llm.views.build_llm_generation_service")
