@@ -428,16 +428,35 @@ class OpenAIClientServiceTest(SimpleTestCase):
                 )
 
     @patch("llm.services.openai_client.generate_text")
-    def test_generate_json_parses_object_response(self, mock_generate_text):
-        mock_generate_text.return_value = '{"status":"ok","rows":[1,2]}'
-
-        result = generate_json({"source": "upload"})
-
-        self.assertEqual(result, {"status": "ok", "rows": [1, 2]})
-        mock_generate_text.assert_called_once_with(
-            prompt='{"source": "upload"}',
-            system_prompt=None,
+    def test_generate_json_parses_structured_response_partitions(self, mock_generate_text):
+        scenarios = (
+            {
+                "name": "object_response",
+                "input_payload": {"source": "upload"},
+                "provider_output": '{"status":"ok","rows":[1,2]}',
+                "expected_result": {"status": "ok", "rows": [1, 2]},
+                "expected_prompt": '{"source": "upload"}',
+            },
+            {
+                "name": "array_response",
+                "input_payload": [{"input": 1}],
+                "provider_output": '[{"a":1}]',
+                "expected_result": [{"a": 1}],
+                "expected_prompt": '[{"input": 1}]',
+            },
         )
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["name"]):
+                mock_generate_text.reset_mock()
+                mock_generate_text.return_value = scenario["provider_output"]
+
+                result = generate_json(scenario["input_payload"])
+
+                self.assertEqual(result, scenario["expected_result"])
+                mock_generate_text.assert_called_once_with(
+                    prompt=scenario["expected_prompt"],
+                    system_prompt=None,
+                )
 
     @patch("llm.services.openai_client.generate_text")
     def test_generate_json_passes_system_prompt_override(self, mock_generate_text):
@@ -451,18 +470,6 @@ class OpenAIClientServiceTest(SimpleTestCase):
         mock_generate_text.assert_called_once_with(
             prompt='{"source": "upload"}',
             system_prompt="Schema-specific prompt",
-        )
-
-    @patch("llm.services.openai_client.generate_text")
-    def test_generate_json_parses_array_response(self, mock_generate_text):
-        mock_generate_text.return_value = '[{"a":1}]'
-
-        result = generate_json([{"input": 1}])
-
-        self.assertEqual(result, [{"a": 1}])
-        mock_generate_text.assert_called_once_with(
-            prompt='[{"input": 1}]',
-            system_prompt=None,
         )
 
     def test_generate_json_rejects_non_json_object_or_array_input(self):
@@ -973,17 +980,21 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.OpenAI")
     def test_generate_chat_response_raises_when_choices_missing_or_invalid(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        
-        # Simulating IndexError by returning empty choices
-        mock_client.chat.completions.create.return_value = Mock(choices=[])
+        scenarios = (
+            {
+                "name": "empty_choices_index_error_path",
+                "response": Mock(choices=[]),
+            },
+            {
+                "name": "missing_choices_attribute_path",
+                "response": Mock(spec=[]),
+            },
+        )
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["name"]):
+                mock_client = Mock()
+                mock_openai.return_value = mock_client
+                mock_client.chat.completions.create.return_value = scenario["response"]
 
-        with self.assertRaises(OpenAIServiceError):
-            generate_chat_response([{"role": "user", "content": "Halo"}])
-            
-        # Simulating AttributeError by returning an object without choices
-        mock_client.chat.completions.create.return_value = Mock(spec=[])
-        
-        with self.assertRaises(OpenAIServiceError):
-            generate_chat_response([{"role": "user", "content": "Halo"}])
+                with self.assertRaises(OpenAIServiceError):
+                    generate_chat_response([{"role": "user", "content": "Halo"}])
