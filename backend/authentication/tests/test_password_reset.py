@@ -131,21 +131,50 @@ class ForgotPasswordViewTest(APISimpleTestCase):
 
     @patch("authentication.password_reset.adapters.send_password_reset_email")
     @patch("authentication.password_reset.adapters.User")
-    def test_rate_limit_returns_429_on_4th_request(
+    def test_rate_limit_blocks_on_4th_request_for_email_identity_partitions(
         self, mock_user_model, mock_send_email
     ):
         mock_queryset = MagicMock()
         mock_queryset.exists.return_value = True
         mock_user_model.objects.filter.return_value = mock_queryset
 
-        payload = {"email": "ratelimit@example.com"}
+        identity_partitions = (
+            {
+                "name": "exact_same_email",
+                "payloads": (
+                    {"email": "ratelimit@example.com"},
+                    {"email": "ratelimit@example.com"},
+                    {"email": "ratelimit@example.com"},
+                ),
+                "blocked_payload": {"email": "ratelimit@example.com"},
+            },
+            {
+                "name": "normalized_case_and_whitespace_email",
+                "payloads": (
+                    {"email": "  RateLimit@Example.com  "},
+                    {"email": "ratelimit@example.com"},
+                    {"email": "RATELIMIT@example.com"},
+                ),
+                "blocked_payload": {"email": "ratelimit@example.com"},
+            },
+        )
+        for partition in identity_partitions:
+            with self.subTest(partition=partition["name"]):
+                cache.clear()
 
-        for _ in range(3):
-            response = self.client.post(self.url, payload, format="json")
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
+                for payload in partition["payloads"]:
+                    response = self.client.post(self.url, payload, format="json")
+                    self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        response = self.client.post(self.url, payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+                blocked_response = self.client.post(
+                    self.url,
+                    partition["blocked_payload"],
+                    format="json",
+                )
+                self.assertEqual(
+                    blocked_response.status_code,
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                )
 
     @patch("authentication.password_reset.adapters.send_password_reset_email")
     @patch("authentication.password_reset.adapters.User")
