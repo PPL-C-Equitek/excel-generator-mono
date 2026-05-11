@@ -422,7 +422,7 @@ class RefinementOrchestratorTest(SimpleTestCase):
         self.assertEqual(result["refinement_meta"]["final_status"], "valid")
         self.assertEqual(result["validated_json"]["document_info"]["filename"], "report.xlsx")
 
-    def test_orchestrator_calls_reasoning_service_each_iteration_when_enabled(self):
+    def test_orchestrator_calls_reasoning_service_once_for_best_candidate_when_enabled(self):
         generation_service = Mock()
         generation_service.generate.side_effect = [
             {"status": "invalid-1"},
@@ -451,7 +451,7 @@ class RefinementOrchestratorTest(SimpleTestCase):
             ),
         )
 
-        self.assertEqual(reasoning_service.generate.call_count, 3)
+        self.assertEqual(reasoning_service.generate.call_count, 1)
 
     @patch("llm.services.refinement_service.generate_conversion_reasoning_response")
     def test_orchestrator_continues_when_reasoning_generation_fails(
@@ -504,23 +504,11 @@ class RefinementOrchestratorTest(SimpleTestCase):
             },
             {"status": "invalid-3"},
         ]
-        mock_generate_reasoning.side_effect = [
-            {
-                "final_answer": "iter 1",
-                "reasoning_steps": ["step-1"],
-                "thinking_log": "log-1",
-            },
-            {
-                "final_answer": "iter 2",
-                "reasoning_steps": ["step-2"],
-                "thinking_log": "log-2",
-            },
-            {
-                "final_answer": "iter 3",
-                "reasoning_steps": ["step-3"],
-                "thinking_log": "log-3",
-            },
-        ]
+        mock_generate_reasoning.return_value = {
+            "final_answer": "iter 2",
+            "reasoning_steps": ["step-2"],
+            "thinking_log": "log-2",
+        }
 
         orchestrator = RefinementOrchestrator(
             generation_service=generation_service,
@@ -539,6 +527,11 @@ class RefinementOrchestratorTest(SimpleTestCase):
 
         self.assertEqual(result["validated_json"]["document_info"]["filename"], "report.xlsx")
         self.assertEqual(result["reasoning"]["final_answer"], "iter 2")
+        mock_generate_reasoning.assert_called_once()
+        self.assertEqual(
+            mock_generate_reasoning.call_args.kwargs["output_json"]["document_info"]["filename"],
+            "report.xlsx",
+        )
 
     def test_orchestrator_builds_refinement_instruction_from_previous_iteration(self):
         generation_service = Mock()
@@ -677,4 +670,3 @@ class RefinementOrchestratorTest(SimpleTestCase):
 
         self.assertEqual(result["refinement_meta"]["iterations_run"], 1)
         self.assertEqual(generation_service.generate.call_count, 1)
-

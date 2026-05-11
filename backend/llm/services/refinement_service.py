@@ -360,11 +360,11 @@ def _update_best_candidate(
     best_log: dict[str, Any] | None,
     candidate: Any,
     validation_log: dict[str, Any],
-) -> tuple[int, Any, dict[str, Any] | None, bool]:
+) -> tuple[int, Any, dict[str, Any] | None]:
     score = _compute_validation_score(validation_log)
     if score < best_score:
-        return best_score, best_candidate, best_log, False
-    return score, candidate, validation_log, True
+        return best_score, best_candidate, best_log
+    return score, candidate, validation_log
 
 
 def _maybe_generate_reasoning(
@@ -422,8 +422,6 @@ class RefinementOrchestrator:
         best_candidate = None
         best_log = None
         best_score = -1
-        latest_reasoning = None
-        best_reasoning = None
         iterations_run = 0
         early_exit_triggered = False
         has_valid_candidate = False
@@ -454,24 +452,13 @@ class RefinementOrchestrator:
                 iteration=iteration,
                 input_json=input_json,
             )
-            latest_reasoning = _maybe_generate_reasoning(
-                current_reasoning=latest_reasoning,
-                include_reasoning=include_reasoning,
-                reasoning_service=self.reasoning_service,
-                input_json=input_json,
-                output_json=sanitized_candidate,
-                file_name=file_name,
-                document_type=document_type,
-            )
-            best_score, best_candidate, best_log, did_update_best = _update_best_candidate(
+            best_score, best_candidate, best_log = _update_best_candidate(
                 best_score=best_score,
                 best_candidate=best_candidate,
                 best_log=best_log,
                 candidate=sanitized_candidate,
                 validation_log=validation_log,
             )
-            if did_update_best:
-                best_reasoning = latest_reasoning
 
             is_valid = validation_log["verdict"] == "valid"
             has_valid_candidate = has_valid_candidate or is_valid
@@ -486,13 +473,22 @@ class RefinementOrchestrator:
             has_valid_candidate=has_valid_candidate,
             best_candidate=best_candidate,
         )
+        reasoning_payload = _maybe_generate_reasoning(
+            current_reasoning=None,
+            include_reasoning=include_reasoning,
+            reasoning_service=self.reasoning_service,
+            input_json=input_json,
+            output_json=best_candidate,
+            file_name=file_name,
+            document_type=document_type,
+        )
 
         return {
             "raw_json": first_candidate,
             "validated_json": best_candidate,
             "output_json": best_candidate,
             "validation_log": best_log,
-            "reasoning": best_reasoning if include_reasoning else None,
+            "reasoning": reasoning_payload if include_reasoning else None,
             "refinement_meta": {
                 "iterations_run": iterations_run,
                 "max_iterations": max_iterations,
