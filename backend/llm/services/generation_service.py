@@ -9,6 +9,56 @@ from .openai_client import OpenAIServiceError
 from .reasoning_service import TextGenerationProvider, compose_system_prompt, get_base_system_prompt
 
 
+_UPLOAD_PROMPT_NOISE_KEYS = {"status", "message", "size"}
+
+
+def _normalize_user_prompt(payload: dict[str, Any]) -> None:
+    user_prompt = payload.get("user_prompt")
+    if not isinstance(user_prompt, str):
+        return
+
+    trimmed_user_prompt = user_prompt.strip()
+    if trimmed_user_prompt:
+        payload["user_prompt"] = trimmed_user_prompt
+        return
+
+    payload.pop("user_prompt", None)
+
+
+def _compact_input_json_for_prompt(
+    input_json: dict[str, Any] | list[Any],
+) -> dict[str, Any] | list[Any]:
+    if not isinstance(input_json, dict):
+        return input_json
+
+    # Refinement wrapper payload keeps the same keys, but compacts nested upload input.
+    if {
+        "original_input_json",
+        "previous_output_json",
+        "validation_log",
+    }.issubset(input_json.keys()):
+        compact_payload = dict(input_json)
+        original_input = compact_payload.get("original_input_json")
+        if isinstance(original_input, (dict, list)):
+            compact_payload["original_input_json"] = _compact_input_json_for_prompt(
+                original_input
+            )
+        return compact_payload
+
+    # Upload API wraps extracted data with transport metadata.
+    # Keep semantic payload for LLM prompt and drop known wrapper noise.
+    if "extracted" not in input_json:
+        return input_json
+
+    compact_payload = {
+        key: value
+        for key, value in input_json.items()
+        if key not in _UPLOAD_PROMPT_NOISE_KEYS
+    }
+    _normalize_user_prompt(compact_payload)
+    return compact_payload
+
+
 class JsonGenerationPort(Protocol):
     def generate(
         self,
@@ -37,7 +87,8 @@ class JsonGenerationService:
         if not isinstance(input_json, (dict, list)):
             raise ValueError("input_json must be an object or array.")
 
-        generate_text_kwargs = {"prompt": json.dumps(input_json)}
+        compact_prompt_payload = _compact_input_json_for_prompt(input_json)
+        generate_text_kwargs = {"prompt": json.dumps(compact_prompt_payload)}
         if system_prompt is not None:
             generate_text_kwargs["system_prompt"] = system_prompt
 
