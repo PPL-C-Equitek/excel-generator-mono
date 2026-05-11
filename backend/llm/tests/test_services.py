@@ -127,6 +127,36 @@ class CompactInputJsonForPromptTest(SimpleTestCase):
             },
         )
 
+    def test_compact_input_json_for_prompt_does_not_mutate_original_payload(self):
+        input_json = {
+            "status": "success",
+            "message": "uploaded",
+            "size": 100,
+            "filename": "report.pdf",
+            "extracted": {"Sheet1": [["a"], ["1"]]},
+            "user_prompt": "  Keep only paid rows  ",
+        }
+        expected_original = {
+            "status": "success",
+            "message": "uploaded",
+            "size": 100,
+            "filename": "report.pdf",
+            "extracted": {"Sheet1": [["a"], ["1"]]},
+            "user_prompt": "  Keep only paid rows  ",
+        }
+
+        result = _compact_input_json_for_prompt(input_json)
+
+        self.assertEqual(
+            result,
+            {
+                "filename": "report.pdf",
+                "extracted": {"Sheet1": [["a"], ["1"]]},
+                "user_prompt": "Keep only paid rows",
+            },
+        )
+        self.assertEqual(input_json, expected_original)
+
 
 class OpenAIClientServiceTest(SimpleTestCase):
     @override_settings(
