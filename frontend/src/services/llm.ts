@@ -41,6 +41,8 @@ export interface LLMReasoning {
   thinking_log: string;
 }
 
+export type ReasoningPayload = LLMReasoning;
+
 export interface LLMResponse {
   output_json: JsonValue;
   raw_json?: JsonValue;

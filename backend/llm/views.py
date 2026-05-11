@@ -3,7 +3,6 @@ import logging
 from typing import Any, cast
 from uuid import UUID
 
-from artifact_history.models import ArtifactHistory
 from django.conf import settings
 from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
