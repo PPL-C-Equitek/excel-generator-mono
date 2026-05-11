@@ -197,7 +197,7 @@ describe("generateJson positive", () => {
     fetchSpy.mockRestore();
   });
 
-  it("sends session_id and chat_id for follow-up generation when context is provided", async () => {
+  it("sends session_id, chat_id, and target_output_id for follow-up generation when context is provided", async () => {
     const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
       output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
       session_id: "11111111-1111-1111-1111-111111111111",
@@ -212,6 +212,7 @@ describe("generateJson positive", () => {
       {
         sessionId: "11111111-1111-1111-1111-111111111111",
         chatId: "33333333-3333-3333-3333-333333333333",
+        targetOutputId: "22222222-2222-2222-2222-222222222222",
       }
     );
 
@@ -222,6 +223,7 @@ describe("generateJson positive", () => {
           input_json: { key: "value" },
           session_id: "11111111-1111-1111-1111-111111111111",
           chat_id: "33333333-3333-3333-3333-333333333333",
+          target_output_id: "22222222-2222-2222-2222-222222222222",
         }),
       })
     );

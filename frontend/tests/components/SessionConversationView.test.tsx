@@ -798,12 +798,15 @@ describe('SessionConversationView', () => {
         await waitFor(() => {
             expect(mockGenerateJson).toHaveBeenCalledWith(
                 {
-                    previous_output: { summary: { total_rows: 1 } },
+                    target_output_id: 'output-1',
                     user_prompt: 'Lanjutkan analisisnya',
                 },
                 undefined,
                 undefined,
-                { sessionId: 'session-1' }
+                {
+                    sessionId: 'session-1',
+                    targetOutputId: 'output-1',
+                }
             )
             expect(screen.getByText('Lanjutkan analisisnya')).toBeInTheDocument()
             expect(screen.getByText('Thinking follow up')).toBeInTheDocument()

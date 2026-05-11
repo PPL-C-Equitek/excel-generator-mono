@@ -105,6 +105,15 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("session_id", serializer.errors)
 
+    def test_generate_request_serializer_accepts_valid_target_output_id(self):
+        target_output_id = uuid4()
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}, "target_output_id": str(target_output_id)}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["target_output_id"], target_output_id)
+
     def test_generate_response_serializer_accepts_session_and_output_ids(self):
         chat_id = uuid4()
         serializer = LlmGenerateResponseSerializer(

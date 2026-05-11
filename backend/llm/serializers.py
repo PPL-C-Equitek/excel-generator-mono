@@ -133,6 +133,7 @@ class LlmGenerateRequestSerializer(serializers.Serializer):
     input_json = serializers.JSONField()
     session_id = serializers.UUIDField(required=False, allow_null=True)
     chat_id = serializers.UUIDField(required=False, allow_null=True)
+    target_output_id = serializers.UUIDField(required=False, allow_null=True)
     custom_schema_id = serializers.UUIDField(required=False, allow_null=True)
     include_reasoning = serializers.BooleanField(required=False, default=True)
     refinement = LlmGenerateRefinementRequestSerializer(required=False)
