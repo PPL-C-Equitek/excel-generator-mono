@@ -167,6 +167,39 @@ class RefinementValidationLogTest(SimpleTestCase):
             )
         )
 
+    def test_build_validation_log_marks_negative_total_items_as_invalid_quality(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
+                "summary": {"total_items": -1},
+                "content_data": [
+                    {
+                        "table_name": "result",
+                        "headers": ["ID", "Barang"],
+                        "rows": [{"ID": "1", "Barang": "A"}],
+                    }
+                ],
+            },
+            iteration=1,
+            input_json={
+                "content_data": [
+                    {
+                        "headers": ["ID", "Barang"],
+                        "rows": [{"ID": "1", "Barang": "A"}],
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(log["verdict"], "invalid")
+        self.assertTrue(
+            any(
+                issue["path"] == "$.summary.total_items"
+                and "non-negative integer" in issue["message"]
+                for issue in log["errors"]
+            )
+        )
+
     def test_build_refinement_instruction_truncates_large_payload(self):
         long_value = "a" * 13000
         instruction = build_refinement_instruction(

@@ -214,7 +214,18 @@ def _collect_summary_quality_errors(
         return []
 
     total_items = summary.get("total_items")
-    if not isinstance(total_items, int) or total_items < 0 or total_items == total_rows:
+    if not isinstance(total_items, int):
+        return []
+
+    if total_items < 0:
+        return [
+            _build_quality_error(
+                "$.summary.total_items",
+                "summary.total_items must be a non-negative integer.",
+            )
+        ]
+
+    if total_items == total_rows:
         return []
 
     return [
