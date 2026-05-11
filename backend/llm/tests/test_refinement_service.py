@@ -450,6 +450,63 @@ class RefinementOrchestratorTest(SimpleTestCase):
         self.assertEqual(result["refinement_meta"]["iterations_run"], 2)
         self.assertIsNone(result["reasoning"])
 
+    @patch("llm.services.refinement_service.generate_conversion_reasoning_response")
+    def test_orchestrator_returns_reasoning_for_best_candidate_when_last_iteration_is_worse(
+        self,
+        mock_generate_reasoning,
+    ):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid-1"},
+            {
+                "document_info": {"source_type": "Excel", "filename": "report.xlsx"},
+                "summary": {"total_tables": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["item"],
+                        "rows": [{"item": "Pen"}],
+                    }
+                ],
+            },
+            {"status": "invalid-3"},
+        ]
+        mock_generate_reasoning.side_effect = [
+            {
+                "final_answer": "iter 1",
+                "reasoning_steps": ["step-1"],
+                "thinking_log": "log-1",
+            },
+            {
+                "final_answer": "iter 2",
+                "reasoning_steps": ["step-2"],
+                "thinking_log": "log-2",
+            },
+            {
+                "final_answer": "iter 3",
+                "reasoning_steps": ["step-3"],
+                "thinking_log": "log-3",
+            },
+        ]
+
+        orchestrator = RefinementOrchestrator(
+            generation_service=generation_service,
+            reasoning_service=self._build_reasoning_service(),
+        )
+        result = orchestrator.run(
+            input_json={"filename": "report.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=True,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=3,
+                early_exit_on_valid=False,
+            ),
+        )
+
+        self.assertEqual(result["validated_json"]["document_info"]["filename"], "report.xlsx")
+        self.assertEqual(result["reasoning"]["final_answer"], "iter 2")
+
     def test_orchestrator_builds_refinement_instruction_from_previous_iteration(self):
         generation_service = Mock()
         generation_service.generate.side_effect = [
