@@ -441,49 +441,29 @@ class MonitoringServiceTest(SimpleTestCase):
         self.assertEqual(third_payload["status"], "ok")
         self.assertEqual(readiness.run_calls, 2)
 
-    def test_snapshot_readiness_skips_cache_when_ttl_is_zero(self):
-        readiness = _ReadinessSequenceDouble(
-            [
-                (503, {"status": "down", "checks": [{"name": "db", "status": "error"}]}),
-                (200, {"status": "ok", "checks": []}),
-            ]
-        )
-        service = MonitoringService(
-            readiness_service=readiness,
-            metrics_repository=self.repo,
-            now=self.now,
-            snapshot_readiness_cache_ttl_seconds=0,
-        )
+    def test_snapshot_readiness_skips_cache_for_non_positive_ttl_partitions(self):
+        for ttl in (0, -1):
+            with self.subTest(ttl=ttl):
+                readiness = _ReadinessSequenceDouble(
+                    [
+                        (503, {"status": "down", "checks": [{"name": "db", "status": "error"}]}),
+                        (200, {"status": "ok", "checks": []}),
+                    ]
+                )
+                service = self._build_service(
+                    readiness=readiness,
+                    now=self.now,
+                    snapshot_readiness_cache_ttl_seconds=ttl,
+                )
 
-        first_status, first_payload = service.snapshot_readiness()
-        second_status, second_payload = service.snapshot_readiness()
+                first_status, first_payload = service.snapshot_readiness()
+                second_status, second_payload = service.snapshot_readiness()
 
-        self.assertEqual(first_status, 503)
-        self.assertEqual(first_payload["status"], "down")
-        self.assertEqual(second_status, 200)
-        self.assertEqual(second_payload["status"], "ok")
-        self.assertEqual(readiness.run_calls, 2)
-
-    def test_snapshot_readiness_skips_cache_when_ttl_is_negative(self):
-        readiness = _ReadinessSequenceDouble(
-            [
-                (503, {"status": "down", "checks": [{"name": "db", "status": "error"}]}),
-                (200, {"status": "ok", "checks": []}),
-            ]
-        )
-        service = self._build_service(
-            readiness=readiness,
-            snapshot_readiness_cache_ttl_seconds=-1,
-        )
-
-        first_status, first_payload = service.snapshot_readiness()
-        second_status, second_payload = service.snapshot_readiness()
-
-        self.assertEqual(first_status, 503)
-        self.assertEqual(first_payload["status"], "down")
-        self.assertEqual(second_status, 200)
-        self.assertEqual(second_payload["status"], "ok")
-        self.assertEqual(readiness.run_calls, 2)
+                self.assertEqual(first_status, 503)
+                self.assertEqual(first_payload["status"], "down")
+                self.assertEqual(second_status, 200)
+                self.assertEqual(second_payload["status"], "ok")
+                self.assertEqual(readiness.run_calls, 2)
 
     def test_snapshot_readiness_uses_cache_when_age_equals_ttl_boundary(self):
         clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
@@ -559,32 +539,20 @@ class MonitoringServiceTest(SimpleTestCase):
 
         self.assertEqual(self.repo.get_snapshot_calls, 1)
 
-    def test_stats_skips_cache_when_ttl_is_zero(self):
-        repo = _RepositoryDouble()
-        service = MonitoringService(
-            readiness_service=self.readiness,
-            metrics_repository=repo,
-            now=lambda: datetime(2026, 4, 20, 10, 5, 0),
-            stats_cache_ttl_seconds=0,
-        )
+    def test_stats_skips_cache_for_non_positive_ttl_partitions(self):
+        for ttl in (0, -1):
+            with self.subTest(ttl=ttl):
+                repo = _RepositoryDouble()
+                service = self._build_service(
+                    repo=repo,
+                    now=lambda: datetime(2026, 4, 20, 10, 5, 0),
+                    stats_cache_ttl_seconds=ttl,
+                )
 
-        service.stats()
-        service.stats()
+                service.stats()
+                service.stats()
 
-        self.assertEqual(repo.get_snapshot_calls, 2)
-
-    def test_stats_skips_cache_when_ttl_is_negative(self):
-        repo = _RepositoryDouble()
-        service = self._build_service(
-            repo=repo,
-            now=lambda: datetime(2026, 4, 20, 10, 5, 0),
-            stats_cache_ttl_seconds=-1,
-        )
-
-        service.stats()
-        service.stats()
-
-        self.assertEqual(repo.get_snapshot_calls, 2)
+                self.assertEqual(repo.get_snapshot_calls, 2)
 
     def test_stats_cache_invalidated_after_record_request(self):
         clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
