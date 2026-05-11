@@ -18,8 +18,10 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
 )
 from llm.views import (
+    _estimate_payload_size_bytes,
     _build_generate_bootstrap_message,
     _extract_follow_up_prompt,
+    _hydrate_previous_output_from_target,
     _sanitize_output_json,
     build_llm_generation_service,
     build_llm_reasoning_service,
@@ -152,6 +154,25 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
     def test_extract_follow_up_prompt_returns_empty_for_non_object_payload(self):
         self.assertEqual(_extract_follow_up_prompt(["not-an-object"]), "")
+
+    def test_hydrate_previous_output_from_target_does_not_override_existing_previous_output(self):
+        existing_previous_output = {"content_data": [{"rows": [{"status": "paid"}]}]}
+        input_json = {
+            "filename": "invoice.pdf",
+            "previous_output": existing_previous_output,
+        }
+        target_output = SimpleNamespace(output_json={"content_data": [{"rows": [{"status": "all"}]}]})
+
+        hydrated = _hydrate_previous_output_from_target(input_json, target_output)
+
+        self.assertIs(hydrated, input_json)
+        self.assertEqual(hydrated["previous_output"], existing_previous_output)
+
+    def test_estimate_payload_size_bytes_returns_zero_for_non_serializable_payload(self):
+        class _NonSerializable:
+            pass
+
+        self.assertEqual(_estimate_payload_size_bytes(_NonSerializable()), 0)
 
     def test_sanitize_output_json_removes_reasoning_meta_keys_from_object(self):
         sanitized = _sanitize_output_json(

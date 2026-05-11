@@ -5,6 +5,7 @@ from django.test import SimpleTestCase, override_settings
 from unittest.mock import Mock, patch
 
 from llm.services.generation_service import (
+    _compact_input_json_for_prompt,
     CustomSchemaNotFoundError,
     DjangoCustomSchemaPromptSource,
     JsonGenerationService,
@@ -44,6 +45,87 @@ class DummyAPIError(Exception):
 
 class DummyAPIConnectionError(Exception):
     pass
+
+
+class CompactInputJsonForPromptTest(SimpleTestCase):
+    def test_compact_input_json_for_prompt_isp_partitions(self):
+        scenarios = (
+            {
+                "name": "non_dict_payload_is_passthrough",
+                "input_json": [{"sheet": "Sheet1"}],
+                "expected": [{"sheet": "Sheet1"}],
+            },
+            {
+                "name": "dict_without_extracted_is_passthrough",
+                "input_json": {"filename": "report.pdf", "format": "pdf"},
+                "expected": {"filename": "report.pdf", "format": "pdf"},
+            },
+            {
+                "name": "dict_with_extracted_drops_upload_wrapper_noise",
+                "input_json": {
+                    "status": "success",
+                    "message": "uploaded",
+                    "size": 100,
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                },
+                "expected": {
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                },
+            },
+            {
+                "name": "trimmed_user_prompt_is_preserved",
+                "input_json": {
+                    "status": "success",
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                    "user_prompt": "  Only paid rows  ",
+                },
+                "expected": {
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                    "user_prompt": "Only paid rows",
+                },
+            },
+            {
+                "name": "blank_user_prompt_is_removed",
+                "input_json": {
+                    "status": "success",
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                    "user_prompt": "   ",
+                },
+                "expected": {
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                },
+            },
+        )
+
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["name"]):
+                result = _compact_input_json_for_prompt(scenario["input_json"])
+                self.assertEqual(result, scenario["expected"])
+
+    def test_compact_input_json_for_prompt_keeps_non_string_user_prompt(self):
+        input_json = {
+            "status": "success",
+            "filename": "report.pdf",
+            "extracted": {"Sheet1": [["a"], ["1"]]},
+            "user_prompt": {"unexpected": "object"},
+        }
+
+        result = _compact_input_json_for_prompt(input_json)
+
+        self.assertEqual(
+            result,
+            {
+                "filename": "report.pdf",
+                "extracted": {"Sheet1": [["a"], ["1"]]},
+                "user_prompt": {"unexpected": "object"},
+            },
+        )
 
 
 class OpenAIClientServiceTest(SimpleTestCase):
