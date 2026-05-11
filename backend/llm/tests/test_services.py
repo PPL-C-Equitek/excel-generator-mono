@@ -13,6 +13,7 @@ from llm.services.generation_service import (
     compose_system_prompt,
 )
 from llm.services.openai_client import (
+    OpenAITextGenerationProvider,
     OpenAIServiceError,
     OpenAIUpstreamError,
     generate_chat_response,
@@ -281,6 +282,51 @@ class OpenAIClientServiceTest(SimpleTestCase):
             api_key="test-key",
             base_url="https://proxy.example.test/v1",
         )
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_text_generation_provider_reuses_cached_client_for_same_settings(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = [
+            Mock(output_text="first"),
+            Mock(output_text="second"),
+        ]
+        provider = OpenAITextGenerationProvider()
+
+        first_result = provider.generate_text("First prompt")
+        second_result = provider.generate_text("Second prompt")
+
+        self.assertEqual(first_result, "first")
+        self.assertEqual(second_result, "second")
+        mock_openai.assert_called_once_with(api_key="test-key")
+        self.assertEqual(mock_client.responses.create.call_count, 2)
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_BASE_URL="https://proxy-a.example/v1",
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_text_generation_provider_rebuilds_client_when_base_url_changes(self, mock_openai):
+        first_client = Mock()
+        second_client = Mock()
+        mock_openai.side_effect = [first_client, second_client]
+        first_client.responses.create.return_value = Mock(output_text="first")
+        second_client.responses.create.return_value = Mock(output_text="second")
+        provider = OpenAITextGenerationProvider()
+
+        first_result = provider.generate_text("First prompt")
+        with override_settings(OPENAI_BASE_URL="https://proxy-b.example/v1"):
+            second_result = provider.generate_text("Second prompt")
+
+        self.assertEqual(first_result, "first")
+        self.assertEqual(second_result, "second")
+        self.assertEqual(mock_openai.call_count, 2)
+        first_call_kwargs = mock_openai.call_args_list[0].kwargs
+        second_call_kwargs = mock_openai.call_args_list[1].kwargs
+        self.assertEqual(first_call_kwargs["base_url"], "https://proxy-a.example/v1")
+        self.assertEqual(second_call_kwargs["base_url"], "https://proxy-b.example/v1")
 
     def test_generate_text_raises_for_empty_prompt(self):
         with self.assertRaises(ValueError):
