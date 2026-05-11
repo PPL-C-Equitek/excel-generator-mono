@@ -900,6 +900,62 @@ class LlmGenerationServiceTest(SimpleTestCase):
             system_prompt="Extraction prompt.",
         )
 
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_caches_schema_fragment_for_repeated_schema_id(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.side_effect = [{"status": "ok-1"}, {"status": "ok-2"}]
+        schema_prompt_source = Mock()
+        schema_prompt_source.get_prompt_fragment.return_value = (
+            "Use only invoice_number and total_amount."
+        )
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "",
+        )
+
+        first_result = service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-1")
+        second_result = service.generate({"sheet": "Sheet2"}, custom_schema_id="schema-1")
+
+        self.assertEqual(first_result, {"status": "ok-1"})
+        self.assertEqual(second_result, {"status": "ok-2"})
+        schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
+        self.assertEqual(json_generator.generate.call_count, 2)
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_fetches_schema_fragment_for_distinct_schema_ids(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.side_effect = [{"status": "ok-1"}, {"status": "ok-2"}]
+        schema_prompt_source = Mock()
+        schema_prompt_source.get_prompt_fragment.side_effect = [
+            "Prompt A",
+            "Prompt B",
+        ]
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "",
+        )
+
+        service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-a")
+        service.generate({"sheet": "Sheet2"}, custom_schema_id="schema-b")
+
+        self.assertEqual(schema_prompt_source.get_prompt_fragment.call_count, 2)
+        self.assertEqual(
+            schema_prompt_source.get_prompt_fragment.call_args_list[0].args[0],
+            "schema-a",
+        )
+        self.assertEqual(
+            schema_prompt_source.get_prompt_fragment.call_args_list[1].args[0],
+            "schema-b",
+        )
+
     @patch("llm.services.generation_service.CustomSchema.objects.get")
     def test_django_custom_schema_prompt_source_returns_schema_prompt_fragment(
         self, mock_get
