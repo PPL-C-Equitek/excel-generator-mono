@@ -345,7 +345,7 @@ def _generate_output_json(llm_generation_service, input_json, custom_schema_id, 
     except OpenAIServiceError:
         return None, Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
     except ValueError:
-        logger.exception("Invalid input_json payload.")
+        logger.exception(INVALID_INPUT_JSON_DETAIL)
         return None, Response(
             {
                 "detail": INVALID_REQUEST_DETAIL,
@@ -526,7 +526,7 @@ def _llm_generate_error_response(exc: Exception) -> Response:
     if isinstance(exc, OpenAIServiceError):
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
     if isinstance(exc, ValueError):
-        logger.exception("Invalid input_json payload.")
+        logger.exception(INVALID_INPUT_JSON_DETAIL)
         return Response(
             {
                 "detail": INVALID_REQUEST_DETAIL,
