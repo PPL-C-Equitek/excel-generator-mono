@@ -279,192 +279,153 @@ class OpenAIClientServiceTest(SimpleTestCase):
             generate_text("")
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.AuthenticationError", new=DummyAuthenticationError)
     @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_authentication_error(self, mock_openai):
+    def test_generate_text_maps_upstream_error_partitions(self, mock_openai):
         mock_client = Mock()
         mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyAuthenticationError("bad auth")
+        scenarios = (
+            {
+                "name": "authentication",
+                "error": DummyAuthenticationError("bad auth"),
+                "expected_status": 502,
+            },
+            {
+                "name": "rate_limit",
+                "error": DummyRateLimitError("rate limit"),
+                "expected_status": 429,
+            },
+            {
+                "name": "timeout",
+                "error": DummyTimeoutError("timeout"),
+                "expected_status": 504,
+            },
+            {
+                "name": "api_status_401",
+                "error": DummyAPIStatusError("api status", status_code=401),
+                "expected_status": 502,
+            },
+            {
+                "name": "api_status_429",
+                "error": DummyAPIStatusError("api status", status_code=429),
+                "expected_status": 429,
+            },
+            {
+                "name": "api_status_504",
+                "error": DummyAPIStatusError("api status", status_code=504),
+                "expected_status": 504,
+            },
+            {
+                "name": "api_status_other",
+                "error": DummyAPIStatusError("api status", status_code=418),
+                "expected_status": 502,
+            },
+            {
+                "name": "api_error",
+                "error": DummyAPIError("api failure"),
+                "expected_status": 502,
+            },
+            {
+                "name": "api_connection",
+                "error": DummyAPIConnectionError("connection aborted"),
+                "expected_status": 502,
+            },
+        )
 
-        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
-            generate_text("Hello")
+        with (
+            patch("llm.services.openai_client.AuthenticationError", new=DummyAuthenticationError),
+            patch("llm.services.openai_client.RateLimitError", new=DummyRateLimitError),
+            patch("llm.services.openai_client.APITimeoutError", new=DummyTimeoutError),
+            patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError),
+            patch("llm.services.openai_client.APIError", new=DummyAPIError),
+            patch("llm.services.openai_client.APIConnectionError", new=DummyAPIConnectionError),
+        ):
+            for scenario in scenarios:
+                with self.subTest(scenario=scenario["name"]):
+                    mock_client.responses.create.side_effect = scenario["error"]
 
-        self.assertEqual(exc_ctx.exception.status_code, 502)
+                    with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
+                        generate_text("Hello")
 
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.RateLimitError", new=DummyRateLimitError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_rate_limit_error(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyRateLimitError("rate limit")
-
-        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
-            generate_text("Hello")
-
-        self.assertEqual(exc_ctx.exception.status_code, 429)
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APITimeoutError", new=DummyTimeoutError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_timeout_error(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyTimeoutError("timeout")
-
-        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
-            generate_text("Hello")
-
-        self.assertEqual(exc_ctx.exception.status_code, 504)
+                    self.assertEqual(
+                        exc_ctx.exception.status_code,
+                        scenario["expected_status"],
+                    )
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
     @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_api_status_error(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyAPIStatusError("api status", status_code=418)
-
-        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
-            generate_text("Hello")
-
-        self.assertEqual(exc_ctx.exception.status_code, 502)
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_api_status_401_to_502(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyAPIStatusError("api status", status_code=401)
-
-        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
-            generate_text("Hello")
-
-        self.assertEqual(exc_ctx.exception.status_code, 502)
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_api_status_429_to_429(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyAPIStatusError("api status", status_code=429)
-
-        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
-            generate_text("Hello")
-
-        self.assertEqual(exc_ctx.exception.status_code, 429)
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_api_status_504_to_504(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyAPIStatusError("api status", status_code=504)
-
-        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
-            generate_text("Hello")
-
-        self.assertEqual(exc_ctx.exception.status_code, 504)
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_falls_back_to_chat_completions_on_responses_404(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyAPIStatusError(
-            "not found",
-            status_code=404,
+    def test_generate_text_fallback_isp_partitions(self, mock_openai):
+        scenarios = (
+            {
+                "name": "explicit_system_prompt_adds_system_message",
+                "system_prompt": "Use strict JSON.",
+                "settings_system_prompt": None,
+                "expected_messages": [
+                    {"role": "system", "content": "Use strict JSON."},
+                    {"role": "user", "content": "Hello"},
+                ],
+                "chat_response": Mock(choices=[Mock(message=Mock(content="fallback result"))]),
+                "expected_result": "fallback result",
+                "expect_service_error": False,
+            },
+            {
+                "name": "blank_resolved_prompt_omits_system_message",
+                "system_prompt": None,
+                "settings_system_prompt": "   ",
+                "expected_messages": [{"role": "user", "content": "Hello"}],
+                "chat_response": Mock(choices=[Mock(message=Mock(content="fallback result"))]),
+                "expected_result": "fallback result",
+                "expect_service_error": False,
+            },
+            {
+                "name": "missing_chat_choices_raises_service_error",
+                "system_prompt": "Use strict JSON.",
+                "settings_system_prompt": None,
+                "expected_messages": [
+                    {"role": "system", "content": "Use strict JSON."},
+                    {"role": "user", "content": "Hello"},
+                ],
+                "chat_response": Mock(choices=[]),
+                "expected_result": None,
+                "expect_service_error": True,
+            },
         )
-        mock_client.chat.completions.create.return_value = Mock(
-            choices=[Mock(message=Mock(content="fallback result"))]
-        )
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["name"]):
+                mock_client = Mock()
+                mock_openai.return_value = mock_client
+                mock_client.responses.create.side_effect = DummyAPIStatusError(
+                    "not found",
+                    status_code=404,
+                )
+                mock_client.chat.completions.create.return_value = scenario["chat_response"]
 
-        result = generate_text("Hello", system_prompt="Use strict JSON.")
+                with override_settings(
+                    OPENAI_SYSTEM_PROMPT=scenario["settings_system_prompt"],
+                ):
+                    if scenario["expect_service_error"]:
+                        with self.assertRaises(OpenAIServiceError):
+                            generate_text("Hello", system_prompt=scenario["system_prompt"])
+                    else:
+                        result = generate_text("Hello", system_prompt=scenario["system_prompt"])
+                        self.assertEqual(result, scenario["expected_result"])
 
-        self.assertEqual(result, "fallback result")
-        mock_client.responses.create.assert_called_once_with(
-            model="gpt-4.1-mini",
-            input="Hello",
-            instructions="Use strict JSON.",
-        )
-        mock_client.chat.completions.create.assert_called_once_with(
-            model="gpt-4.1-mini",
-            messages=[
-                {"role": "system", "content": "Use strict JSON."},
-                {"role": "user", "content": "Hello"},
-            ],
-        )
+                if scenario["system_prompt"]:
+                    mock_client.responses.create.assert_called_once_with(
+                        model="gpt-4.1-mini",
+                        input="Hello",
+                        instructions="Use strict JSON.",
+                    )
+                else:
+                    mock_client.responses.create.assert_called_once_with(
+                        model="gpt-4.1-mini",
+                        input="Hello",
+                    )
 
-    @override_settings(
-        OPENAI_API_KEY="test-key",
-        OPENAI_MODEL="gpt-4.1-mini",
-        OPENAI_SYSTEM_PROMPT="   ",
-    )
-    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_fallback_omits_system_message_when_prompt_blank(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyAPIStatusError(
-            "not found",
-            status_code=404,
-        )
-        mock_client.chat.completions.create.return_value = Mock(
-            choices=[Mock(message=Mock(content="fallback result"))]
-        )
-
-        result = generate_text("Hello")
-
-        self.assertEqual(result, "fallback result")
-        mock_client.chat.completions.create.assert_called_once_with(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": "Hello"}],
-        )
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_fallback_raises_when_chat_choices_missing(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyAPIStatusError(
-            "not found",
-            status_code=404,
-        )
-        mock_client.chat.completions.create.return_value = Mock(choices=[])
-
-        with self.assertRaises(OpenAIServiceError):
-            generate_text("Hello")
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APIError", new=DummyAPIError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_api_error(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyAPIError("api failure")
-
-        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
-            generate_text("Hello")
-
-        self.assertEqual(exc_ctx.exception.status_code, 502)
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APIConnectionError", new=DummyAPIConnectionError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_text_maps_api_connection_error(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.responses.create.side_effect = DummyAPIConnectionError("connection aborted")
-
-        with self.assertRaises(OpenAIUpstreamError) as exc_ctx:
-            generate_text("Hello")
-
-        self.assertEqual(exc_ctx.exception.status_code, 502)
+                mock_client.chat.completions.create.assert_called_once_with(
+                    model="gpt-4.1-mini",
+                    messages=scenario["expected_messages"],
+                )
 
     @patch("llm.services.openai_client.generate_text")
     def test_generate_json_parses_object_response(self, mock_generate_text):
@@ -947,69 +908,67 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
             generate_chat_response([{"role": "user", "content": "Halo"}])
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.AuthenticationError", new=DummyAuthenticationError)
     @patch("llm.services.openai_client.OpenAI")
-    def test_generate_chat_response_maps_authentication_error_to_502(self, mock_openai):
+    def test_generate_chat_response_maps_upstream_error_partitions(self, mock_openai):
         mock_client = Mock()
         mock_openai.return_value = mock_client
-        mock_client.chat.completions.create.side_effect = DummyAuthenticationError("bad auth")
+        scenarios = (
+            {
+                "name": "authentication",
+                "error": DummyAuthenticationError("bad auth"),
+                "expected_status": 502,
+            },
+            {
+                "name": "rate_limit",
+                "error": DummyRateLimitError("rate limit"),
+                "expected_status": 429,
+            },
+            {
+                "name": "timeout",
+                "error": DummyTimeoutError("timeout"),
+                "expected_status": 504,
+            },
+            {
+                "name": "api_connection",
+                "error": DummyAPIConnectionError("conn aborted"),
+                "expected_status": 502,
+            },
+            {
+                "name": "api_status_401",
+                "error": DummyAPIStatusError("api status", status_code=401),
+                "expected_status": 502,
+            },
+            {
+                "name": "api_status_429",
+                "error": DummyAPIStatusError("api status", status_code=429),
+                "expected_status": 429,
+            },
+            {
+                "name": "api_status_504",
+                "error": DummyAPIStatusError("api status", status_code=504),
+                "expected_status": 504,
+            },
+            {
+                "name": "api_status_other",
+                "error": DummyAPIStatusError("api status", status_code=502),
+                "expected_status": 502,
+            },
+        )
+        with (
+            patch("llm.services.openai_client.AuthenticationError", new=DummyAuthenticationError),
+            patch("llm.services.openai_client.RateLimitError", new=DummyRateLimitError),
+            patch("llm.services.openai_client.APITimeoutError", new=DummyTimeoutError),
+            patch("llm.services.openai_client.APIConnectionError", new=DummyAPIConnectionError),
+            patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError),
+        ):
+            for scenario in scenarios:
+                with self.subTest(scenario=scenario["name"]):
+                    mock_client.chat.completions.create.side_effect = scenario["error"]
 
-        with self.assertRaises(OpenAIUpstreamError) as ctx:
-            generate_chat_response([{"role": "user", "content": "Halo"}])
+                    with self.assertRaises(OpenAIUpstreamError) as ctx:
+                        generate_chat_response([{"role": "user", "content": "Halo"}])
 
-        self.assertEqual(ctx.exception.status_code, 502)
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.RateLimitError", new=DummyRateLimitError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_chat_response_maps_rate_limit_error_to_429(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.chat.completions.create.side_effect = DummyRateLimitError("rate limit")
-
-        with self.assertRaises(OpenAIUpstreamError) as ctx:
-            generate_chat_response([{"role": "user", "content": "Halo"}])
-
-        self.assertEqual(ctx.exception.status_code, 429)
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APITimeoutError", new=DummyTimeoutError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_chat_response_maps_timeout_error_to_504(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.chat.completions.create.side_effect = DummyTimeoutError("timeout")
-
-        with self.assertRaises(OpenAIUpstreamError) as ctx:
-            generate_chat_response([{"role": "user", "content": "Halo"}])
-
-        self.assertEqual(ctx.exception.status_code, 504)
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APIConnectionError", new=DummyAPIConnectionError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_chat_response_maps_connection_error_to_502(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.chat.completions.create.side_effect = DummyAPIConnectionError("conn aborted")
-
-        with self.assertRaises(OpenAIUpstreamError) as ctx:
-            generate_chat_response([{"role": "user", "content": "Halo"}])
-
-        self.assertEqual(ctx.exception.status_code, 502)
-
-    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
-    @patch("llm.services.openai_client.APIStatusError", new=DummyAPIStatusError)
-    @patch("llm.services.openai_client.OpenAI")
-    def test_generate_chat_response_maps_api_status_error(self, mock_openai):
-        mock_client = Mock()
-        mock_openai.return_value = mock_client
-        mock_client.chat.completions.create.side_effect = DummyAPIStatusError("api status", status_code=502)
-
-        with self.assertRaises(OpenAIUpstreamError) as ctx:
-            generate_chat_response([{"role": "user", "content": "Halo"}])
-
-        self.assertEqual(ctx.exception.status_code, 502)
+                    self.assertEqual(ctx.exception.status_code, scenario["expected_status"])
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.OpenAI")
