@@ -529,11 +529,12 @@ class RefinementOrchestrator:
             is_valid = validation_log["verdict"] == "valid"
             has_valid_candidate = has_valid_candidate or is_valid
             if is_valid and refinement_config.early_exit_on_valid:
-                early_exit_triggered = True
+                early_exit_triggered = iteration < max_iterations
                 break
             if (
                 not has_valid_candidate
                 and refinement_config.early_exit_on_plateau
+                and iteration < max_iterations
                 and stagnation_count >= plateau_patience
             ):
                 early_exit_triggered = True
