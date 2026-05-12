@@ -6,6 +6,7 @@ from llm.services.refinement_service import (
     RefinementConfig,
     RefinementOrchestrator,
     _compact_validation_issues,
+    _compact_validation_log_for_instruction,
     _collect_refinement_quality_errors,
     _collect_headers_from_header_list,
     _collect_headers_from_rows,
@@ -370,6 +371,13 @@ class RefinementHelpersTest(SimpleTestCase):
                 }
             ],
         )
+
+    def test_compact_validation_log_for_instruction_returns_non_dict_unchanged(self):
+        validation_log = ["invalid-structure"]
+
+        compact_log = _compact_validation_log_for_instruction(validation_log)
+
+        self.assertIs(compact_log, validation_log)
 
 
 class RefinementOrchestratorTest(SimpleTestCase):
