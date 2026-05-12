@@ -812,4 +812,71 @@ describe('SessionConversationView', () => {
             expect(screen.getByText('Thinking follow up')).toBeInTheDocument()
         })
     })
+
+    it('uses previous_output fallback when latest output id is temporary', async () => {
+        mockGenerateJson.mockResolvedValueOnce({
+            output_json: { summary: { status: 'done' } },
+            session_id: 'session-1',
+            chat_id: 'chat-2',
+            output_id: 'output-2',
+            reasoning: {
+                final_answer: 'Done',
+                reasoning_steps: ['step-1'],
+                thinking_log: 'Thinking follow up',
+            },
+        })
+
+        const user = userEvent.setup()
+        render(
+            <SessionConversationView
+                session={makeSession({
+                    history: [
+                        {
+                            type: 'message',
+                            id: 'message-1',
+                            role: 'user',
+                            content: 'Tolong lanjutkan.',
+                            thinking_log: '',
+                            target_output_id: null,
+                            created_at: '2026-04-10T10:00:00Z',
+                        },
+                        {
+                            type: 'output',
+                            id: 'temp-output-1',
+                            chat_id: null,
+                            parent_output_id: null,
+                            output_json: { summary: { total_rows: 1 } },
+                            thinking_log: 'Session fallback log',
+                            reasoning: { step1: 'Normalisasi' },
+                            created_at: '2026-04-10T10:01:00Z',
+                        },
+                    ],
+                })}
+                isLoadingSession={false}
+                sessionError={null}
+                isSessionNotFound={false}
+                thinkingLogsByOutputId={thinkingLogsByOutputId}
+                isLoadingThinkingLogs={false}
+                thinkingLogsError={null}
+            />
+        )
+
+        await user.type(screen.getByRole('textbox', { name: 'Follow-up message' }), 'Lanjutkan analisisnya')
+        await user.click(screen.getByRole('button', { name: 'Send' }))
+
+        await waitFor(() => {
+            expect(mockGenerateJson).toHaveBeenCalledWith(
+                {
+                    previous_output: { summary: { total_rows: 1 } },
+                    user_prompt: 'Lanjutkan analisisnya',
+                },
+                undefined,
+                undefined,
+                {
+                    sessionId: 'session-1',
+                    targetOutputId: undefined,
+                }
+            )
+        })
+    })
 })
