@@ -87,9 +87,9 @@ function renderReasoningSteps(steps: string[]) {
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <p className="text-sm font-semibold text-slate-900">Reasoning steps</p>
-      <div className="mt-3 space-y-3 text-sm text-slate-700">
+    <section className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+      <p className="text-sm font-semibold text-gray-900">Reasoning steps</p>
+      <div className="mt-3 space-y-3 text-sm text-gray-700">
         {steps.map((step, index) => (
           <div key={`${step}-${index}`} className="flex items-start gap-3">
             <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-700 text-[11px] font-bold text-white">
@@ -164,10 +164,10 @@ function SessionHistoryBubble({
         className={`flex ${isAssistant ? "justify-start" : "justify-end"}`}
       >
         <div
-          className={`w-full max-w-[94%] rounded-3xl px-4 py-3 shadow-sm ${
+          className={`w-full max-w-[94%] rounded-2xl px-4 py-3 shadow-md ${
             isAssistant
-              ? "bg-slate-100 text-slate-900"
-              : "bg-red-700 text-white"
+              ? "border border-gray-200 bg-white text-gray-900"
+              : "bg-blue-600 text-white"
           }`}
         >
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] opacity-70">
@@ -186,8 +186,8 @@ function SessionHistoryBubble({
 
   return (
     <article className="flex justify-start">
-      <div className="w-full max-w-[96%] space-y-3 rounded-3xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+      <div className="w-full max-w-[96%] space-y-3 rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-md">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
           AI Output
         </p>
 
@@ -198,9 +198,9 @@ function SessionHistoryBubble({
           thinkingLogsError,
         )}
 
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="font-semibold text-slate-900">Your file is ready.</p>
-          <p className="mt-1 break-all text-xs text-slate-500">Output ID: {item.id}</p>
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+          <p className="font-semibold text-gray-900">Your file is ready.</p>
+          <p className="mt-1 break-all text-xs text-gray-500">Output ID: {item.id}</p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -211,7 +211,7 @@ function SessionHistoryBubble({
                   `session-${sessionId}-output-${item.id}.csv`,
                 );
               }}
-              className="rounded-lg bg-red-700 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-red-800"
+              className="rounded-xl bg-red-700 px-4 py-2 text-xs font-bold text-white shadow-md transition-all duration-150 hover:bg-red-800 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               Download CSV
             </button>
@@ -224,17 +224,17 @@ function SessionHistoryBubble({
                   `session-${sessionId}-output-${item.id}.xlsx`,
                 );
               }}
-              className="rounded-lg border border-red-700 bg-white px-4 py-2 text-xs font-bold text-red-700 transition-colors hover:bg-red-50"
+              className="rounded-xl border border-red-700 bg-white px-4 py-2 text-xs font-bold text-red-700 shadow-md transition-all duration-150 hover:bg-red-50 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               Download Excel
             </button>
           </div>
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-gray-500">
             Structured output is available for download as CSV or Excel.
           </p>
         </div>
 
-        <p className="text-[11px] text-slate-500">
+        <p className="text-[11px] text-gray-500">
           {formatHistoryTimestamp(item.created_at)}
         </p>
       </div>
@@ -381,7 +381,7 @@ export default function SessionConversationView({
     {
       label: "Total Events",
       value: localHistory.length,
-      tone: "from-slate-900 to-slate-700",
+      tone: "from-gray-900 to-gray-700",
     },
     {
       label: "User Prompts",
@@ -391,7 +391,7 @@ export default function SessionConversationView({
     {
       label: "AI Outputs",
       value: outputCount,
-      tone: "from-amber-700 to-amber-500",
+      tone: "from-red-700 to-red-600",
     },
   ];
   const canSend = draftMessage.trim().length > 0 && !isSending;
@@ -405,8 +405,8 @@ export default function SessionConversationView({
 
     return (
       <article className="flex justify-start">
-        <div className="w-full max-w-[96%] rounded-3xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+        <div className="w-full max-w-[96%] rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-md">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
             AI Thinking
           </p>
           {pendingReasoningSteps.length > 0 ? (
@@ -432,7 +432,7 @@ export default function SessionConversationView({
 
   if (isLoadingSession) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-5 text-sm text-slate-600">
+      <section className="rounded-2xl border border-gray-200 bg-gray-50 px-5 py-5 text-sm text-gray-600">
         Loading session...
       </section>
     );
@@ -440,7 +440,7 @@ export default function SessionConversationView({
 
   if (isSessionNotFound) {
     return (
-      <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-5 text-sm text-amber-800">
+      <section className="rounded-2xl border border-gray-200 bg-gray-50 px-5 py-5 text-sm text-gray-700">
         Session Not Found
       </section>
     );
@@ -448,7 +448,7 @@ export default function SessionConversationView({
 
   if (sessionError) {
     return (
-      <section className="rounded-2xl border border-red-200 bg-red-50 px-5 py-5 text-sm text-red-700">
+      <section role="alert" className="rounded-lg border border-red-400 bg-red-50 px-5 py-5 text-sm text-red-700">
         {sessionError}
       </section>
     );
@@ -554,44 +554,46 @@ export default function SessionConversationView({
 
   return (
     <section
-      className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white"
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl"
       aria-labelledby="session-conversation-title"
     >
-      <header className="space-y-2 border-b border-slate-200 px-5 py-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+      <header className="space-y-2 border-b border-gray-200 px-5 py-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
           Session View
         </p>
-        <h2 id="session-conversation-title" className="text-lg font-bold text-slate-900">
+        <h2 id="session-conversation-title" className="text-lg font-bold text-gray-900">
           {session.title}
         </h2>
-        <p className="text-xs text-slate-500">{session.id}</p>
+        <p className="text-xs text-gray-500">{session.id}</p>
         {thinkingLogsError ? (
-          <p className="text-sm text-red-700">{thinkingLogsError}</p>
+          <div role="alert" className="rounded-lg border border-red-400 bg-red-50 p-3 text-sm text-red-700">
+            {thinkingLogsError}
+          </div>
         ) : null}
       </header>
 
-      <section className="border-b border-slate-200 bg-slate-50 px-5 py-3">
+      <section className="border-b border-gray-200 bg-gray-50 px-5 py-3">
         <details>
-          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-widest text-slate-600">
+          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-widest text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
             Session Info
           </summary>
           <div className="mt-3 space-y-3">
-            <p className="whitespace-pre-wrap wrap-anywhere text-sm leading-6 text-slate-800">
+            <p className="whitespace-pre-wrap wrap-anywhere text-sm leading-6 text-gray-800">
               {primaryPrompt}
             </p>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <article className="rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">Created</p>
-                <p className="mt-1 text-xs font-semibold text-slate-800">{formatSessionDate(session.created_at)}</p>
+              <article className="rounded-xl bg-white px-3 py-2 ring-1 ring-gray-200">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">Created</p>
+                <p className="mt-1 text-xs font-semibold text-gray-800">{formatSessionDate(session.created_at)}</p>
               </article>
-              <article className="rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">Updated</p>
-                <p className="mt-1 text-xs font-semibold text-slate-800">{formatSessionDate(session.updated_at)}</p>
+              <article className="rounded-xl bg-white px-3 py-2 ring-1 ring-gray-200">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">Updated</p>
+                <p className="mt-1 text-xs font-semibold text-gray-800">{formatSessionDate(session.updated_at)}</p>
               </article>
               {metricCards.map((metric) => (
                 <article
                   key={metric.label}
-                  className={`rounded-xl bg-linear-to-br ${metric.tone} px-3 py-2 text-white shadow-sm`}
+                  className={`rounded-xl bg-linear-to-br ${metric.tone} px-3 py-2 text-white shadow-md`}
                 >
                   <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/85">
                     {metric.label}
@@ -625,7 +627,7 @@ export default function SessionConversationView({
         </div>
       </div>
 
-      <section className="border-t border-slate-200 bg-white px-5 py-3">
+      <section className="border-t border-gray-200 bg-gray-50 px-5 py-3">
         <label htmlFor="history-followup-input" className="sr-only">
           Follow-up message
         </label>
@@ -638,7 +640,7 @@ export default function SessionConversationView({
             rows={2}
             placeholder="Continue this session conversation..."
             disabled={isSending}
-            className="min-h-12 flex-1 resize-none rounded-2xl border border-slate-300 px-4 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-12 flex-1 resize-none rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           />
           <button
             type="button"
@@ -646,12 +648,16 @@ export default function SessionConversationView({
               void handleSendMessage();
             }}
             disabled={!canSend}
-            className="h-11 shrink-0 rounded-xl bg-red-700 px-5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-11 shrink-0 rounded-xl bg-red-700 px-5 text-sm font-bold text-white shadow-md transition-all duration-150 hover:bg-red-800 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSending ? "Sending..." : "Send"}
           </button>
         </div>
-        {sendError ? <p className="mt-2 text-xs text-red-700">{sendError}</p> : null}
+        {sendError ? (
+          <div role="alert" className="mt-3 rounded-lg border border-red-400 bg-red-50 p-3 text-sm text-red-700">
+            {sendError}
+          </div>
+        ) : null}
       </section>
     </section>
   );

@@ -22,12 +22,12 @@ export interface ThinkingPanelProps {
 
 const panelLabel = "Thinking process";
 const shellClassName =
-  "rounded-2xl border border-slate-200/80 bg-slate-50/95 px-4 py-3 text-sm text-slate-700 shadow-sm";
+  "rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 shadow-md";
 const scrollRegionClassName =
-  "max-h-[400px] overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:border-2 [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-track]:bg-transparent";
+  "max-h-[400px] overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-color:#d1d5db_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:border-2 [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-track]:bg-transparent";
 const statusClassName =
-  "flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm shadow-sm";
-const contentClassName = "space-y-3 whitespace-pre-wrap leading-6 text-slate-700";
+  "flex items-start gap-3 rounded-lg border px-4 py-3 text-sm shadow-md";
+const contentClassName = "space-y-3 whitespace-pre-wrap leading-6 text-gray-700";
 
 function createContentKey(
   prefix: string,
@@ -170,7 +170,7 @@ function renderMarkdownContent(content: string) {
     blocks.push(
       <ul
         key={listKey}
-        className="list-disc space-y-1 pl-5 text-slate-700"
+        className="list-disc space-y-1 pl-5 text-gray-700"
       >
         {listItems.map((item) => (
           <li key={createContentKey("item", item, itemKeyCounts)}>
@@ -250,7 +250,7 @@ export default function ThinkingPanel({
     bodyContent = (
       <p
         data-testid="thinking-panel-content"
-        className="whitespace-pre-wrap text-slate-500"
+        className="whitespace-pre-wrap text-gray-500"
       >
         Loading thinking process...
       </p>
@@ -259,7 +259,7 @@ export default function ThinkingPanel({
     bodyContent = (
       <p
         data-testid="thinking-panel-content"
-        className="whitespace-pre-wrap text-slate-500"
+        className="whitespace-pre-wrap text-gray-500"
       >
         No process is available yet.
       </p>
@@ -281,7 +281,7 @@ export default function ThinkingPanel({
         role="alert"
         aria-label={panelLabel}
         aria-labelledby={titleId}
-        className={`${statusClassName} border-red-200 bg-red-50 text-red-700`}
+        className={`${statusClassName} border-red-400 bg-red-50 text-red-700`}
       >
         <h3 id={titleId} className="sr-only">
           {panelLabel}

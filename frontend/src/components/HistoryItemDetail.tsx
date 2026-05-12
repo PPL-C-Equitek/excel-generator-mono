@@ -104,19 +104,19 @@ export default function HistoryItemDetail({
     return (
         <div className="flex h-full min-h-0 flex-col gap-6">
             <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 shadow-md">
+                    <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">
                         Status
                     </p>
-                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                    <p className="mt-2 text-sm font-semibold text-gray-900">
                         {item.status_processing}
                     </p>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 shadow-md">
+                    <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">
                         Created at
                     </p>
-                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                    <p className="mt-2 text-sm font-semibold text-gray-900">
                         {formatCreatedAt(item.created_at)}
                     </p>
                 </div>
@@ -124,7 +124,7 @@ export default function HistoryItemDetail({
 
             {isEditing ? (
                 <form
-                    className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4"
+                    className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-md"
                     onSubmit={(event) => {
                         event.preventDefault()
                         void handleRenameSubmit(item)
@@ -133,7 +133,7 @@ export default function HistoryItemDetail({
                     <div>
                         <label
                             htmlFor={`history-name-${item.id}`}
-                            className="block text-sm font-semibold text-slate-900"
+                            className="block text-sm font-semibold text-gray-900"
                         >
                             File Name
                         </label>
@@ -145,25 +145,25 @@ export default function HistoryItemDetail({
                                 setRenameValue(event.target.value)
                             }}
                             placeholder="Enter a file name"
-                            className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                            className="mt-2 w-full rounded-xl border border-gray-300 bg-gray-100 px-4 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                             maxLength={historyFileNameMaxLength}
                             disabled={isRenaming}
                         />
                     </div>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-gray-500">
                         Leave blank to use the uploaded file name. Up to {historyFileNameMaxLength} characters.
                     </p>
                     <div className="flex flex-wrap gap-3">
                         <button
                             type="submit"
-                            className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-xl bg-red-700 px-4 py-2 text-sm font-bold text-white shadow-md transition-all duration-150 hover:bg-red-800 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                             disabled={isRenaming}
                         >
                             {isRenaming ? 'Saving...' : 'Save Name'}
                         </button>
                         <button
                             type="button"
-                            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                             onClick={stopEditing}
                             disabled={isRenaming}
                         >
@@ -175,7 +175,7 @@ export default function HistoryItemDetail({
                 <div className="flex flex-wrap gap-3">
                     <button
                         type="button"
-                        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => {
                             startEditing(item)
                         }}
@@ -185,14 +185,13 @@ export default function HistoryItemDetail({
                     </button>
                     <button
                         type="button"
-                        className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-xl border border-red-400 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => {
                             requestDelete(item)
                         }}
                         disabled={isDeleting || isRenaming}
                     >
                         {isDeleting ? 'Deleting...' : 'Delete'}
-                        
                     </button>
                 </div>
             )}
@@ -200,7 +199,7 @@ export default function HistoryItemDetail({
             <div className="flex flex-wrap gap-3">
                 <button
                     type="button"
-                    className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                    className="rounded-xl border border-red-700 bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-md transition-all duration-150 hover:bg-red-50 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                     onClick={() => {
                         void handleDownloadLatestCsv()
                     }}
@@ -210,7 +209,7 @@ export default function HistoryItemDetail({
                 </button>
                 <button
                     type="button"
-                    className="rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                    className="rounded-xl border border-red-700 bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-md transition-all duration-150 hover:bg-red-50 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                     onClick={() => {
                         void handleDownloadLatestExcel()
                     }}
@@ -222,7 +221,7 @@ export default function HistoryItemDetail({
                 </button>
             </div>
 
-            <div className="min-h-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <div className="min-h-0 flex-1 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 shadow-md">
                 {selectedSessionId ? (
                     <SessionConversationView
                         session={session}
@@ -234,7 +233,7 @@ export default function HistoryItemDetail({
                         thinkingLogsError={thinkingLogsError}
                     />
                 ) : (
-                    <p className="text-sm text-slate-600">
+                    <p className="text-sm text-gray-600">
                         Session context is not available for this history item, so per-session thinking logs cannot be loaded yet.
                     </p>
                 )}
