@@ -52,6 +52,20 @@ class PromptSchemasTest(SimpleTestCase):
         self.assertEqual(summary["row_count"], 1)
         self.assertEqual(summary["first_row_shape"]["row_type"], "object")
 
+    def test_summarize_table_omits_first_row_shape_when_rows_empty(self):
+        summary = _summarize_table(
+            {
+                "table_name": "Sheet1",
+                "headers": ["item"],
+                "rows": [],
+            },
+            fallback_name="FallbackTable",
+        )
+
+        self.assertEqual(summary["table_name"], "Sheet1")
+        self.assertEqual(summary["row_count"], 0)
+        self.assertNotIn("first_row_shape", summary)
+
     def test_summarize_scalar_object_handles_invalid_empty_and_max_sample(self):
         self.assertIsNone(_summarize_scalar_object(["not-an-object"]))
         self.assertIsNone(_summarize_scalar_object({"nested": {"a": 1}}))
@@ -113,6 +127,12 @@ class PromptSchemasTest(SimpleTestCase):
         self.assertEqual(summarized_list["first_item_shape"]["row_type"], "object")
         self.assertEqual(summarized_scalar, {"value_type": "str"})
 
+    def test_summarize_extracted_payload_handles_empty_list_without_first_item_shape(self):
+        summarized = _summarize_extracted_payload([])
+
+        self.assertEqual(summarized["item_count"], 0)
+        self.assertNotIn("first_item_shape", summarized)
+
     def test_summarize_upload_wrapper_includes_previous_output_summary(self):
         summary = _summarize_upload_wrapper(
             {
@@ -136,6 +156,20 @@ class PromptSchemasTest(SimpleTestCase):
         self.assertEqual(summary["user_prompt"], "keep paid invoices only")
         self.assertEqual(summary["previous_output"]["kind"], "tabular_output")
 
+    def test_summarize_upload_wrapper_skips_non_tabular_previous_output(self):
+        summary = _summarize_upload_wrapper(
+            {
+                "filename": "invoice.pdf",
+                "format": "pdf",
+                "user_prompt": "keep paid invoices only",
+                "extracted": {"Sheet1": [{"status": "paid"}]},
+                "previous_output": [],
+            }
+        )
+
+        self.assertTrue(summary["has_previous_output"])
+        self.assertNotIn("previous_output", summary)
+
     def test_summarize_generic_payload_covers_object_array_and_scalar(self):
         object_summary = _summarize_generic_payload({"a": 1, "b": "x"}, kind="input_context")
         array_summary = _summarize_generic_payload([1, "x", {"k": "v"}], kind="output_context")
@@ -145,6 +179,14 @@ class PromptSchemasTest(SimpleTestCase):
         self.assertEqual(array_summary["payload_type"], "array")
         self.assertEqual(array_summary["item_types"], ["int", "str", "dict"])
         self.assertEqual(scalar_summary["payload_type"], "float")
+
+    def test_summarize_generic_payload_array_deduplicates_item_types(self):
+        array_summary = _summarize_generic_payload(
+            [1, 2, "x", "y", {"k": "v"}, {"a": 1}],
+            kind="output_context",
+        )
+
+        self.assertEqual(array_summary["item_types"], ["int", "str", "dict"])
 
     def test_build_reasoning_context_summary_prefers_upload_then_tabular_then_generic(self):
         upload_summary = _build_reasoning_context_summary(
