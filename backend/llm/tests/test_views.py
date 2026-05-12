@@ -1881,6 +1881,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                     "user_prompt": "Hanya tampilkan status paid.",
                 },
                 "include_reasoning": False,
+                "refinement": {"enabled": False},
             },
             format="json",
         )
