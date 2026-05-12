@@ -125,6 +125,7 @@ class LlmGenerationService:
         self,
         input_json: dict[str, Any] | list[Any],
         custom_schema_id=None,
+        refinement_instruction: str | None = None,
         chat_context: str | None = None,
     ) -> dict[str, Any] | list[Any]:
         schema_prompt_fragment = None
@@ -135,9 +136,9 @@ class LlmGenerationService:
 
         extraction_prompt = build_extraction_prompt(
             schema_hint=schema_prompt_fragment,
+            refinement_instruction=refinement_instruction,
             chat_context=chat_context,
         )
-
         effective_system_prompt = compose_system_prompt(
             self.base_system_prompt_provider(),
             extraction_prompt,

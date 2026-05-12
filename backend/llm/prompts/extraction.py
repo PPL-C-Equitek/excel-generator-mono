@@ -33,6 +33,22 @@ def _build_schema_hint_section(schema_hint: str | None) -> str | None:
     )
 
 
+def _build_refinement_section(refinement_instruction: str | None) -> str | None:
+    normalized_instruction = (
+        refinement_instruction.strip() if isinstance(refinement_instruction, str) else ""
+    )
+    if not normalized_instruction:
+        return None
+
+    return (
+        "## REFINEMENT\n"
+        "This is a refinement attempt based on validation feedback.\n"
+        "Fix only schema or validation violations while preserving extracted meaning.\n"
+        "Do not include explanations in output.\n"
+        f"{normalized_instruction}"
+    )
+
+
 def _build_chat_context_section(chat_context: str | None) -> str | None:
     normalized = chat_context.strip() if isinstance(chat_context, str) else ""
     if not normalized:
@@ -49,6 +65,7 @@ def _build_chat_context_section(chat_context: str | None) -> str | None:
 
 def build_extraction_prompt(
     schema_hint: str | None = None,
+    refinement_instruction: str | None = None,
     chat_context: str | None = None,
 ) -> str:
     sections = [BASE_EXTRACTION_PROMPT]
@@ -60,5 +77,9 @@ def build_extraction_prompt(
     chat_context_section = _build_chat_context_section(chat_context)
     if chat_context_section:
         sections.append(chat_context_section.strip())
+
+    refinement_section = _build_refinement_section(refinement_instruction)
+    if refinement_section:
+        sections.append(refinement_section.strip())
 
     return "\n\n".join(sections)

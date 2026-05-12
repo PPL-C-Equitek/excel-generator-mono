@@ -70,6 +70,30 @@ describe("generateJson positive", () => {
     });
   });
 
+  it("accepts optional validated_json refinement output", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      validated_json: { summary: "Validated", rows: [{ id: 1, value: "ok" }] },
+      validation_log: {
+        iteration: 2,
+        verdict: "valid",
+        errors: [],
+        warnings: [],
+        summary: "Output passed strict export schema validation.",
+      },
+      refinement_meta: {
+        iterations_run: 2,
+        max_iterations: 3,
+        early_exit_triggered: true,
+        final_status: "valid",
+      },
+    });
+
+    const result = await generateJson({ key: "value" });
+    expect(result.validated_json).toMatchObject({ summary: "Validated" });
+    fetchSpy.mockRestore();
+  });
+
   it("accepts optional session and output identifiers from the backend response", async () => {
     const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
       output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
@@ -291,6 +315,25 @@ describe("generateJson edge cases", () => {
   it("throws schema error when output_json is missing", async () => {
     server.use(handlerInvalidSchema);
     await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
+  });
+
+  it("throws schema error when validated_json is present but not an object", async () => {
+    vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      validated_json: "invalid",
+    });
+    await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
+  });
+
+  it("throws schema error when response identifiers are not uuid-like strings", async () => {
+    vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      session_id: { invalid: true },
+    });
+
+    await expect(generateJson({ key: "value" })).rejects.toThrow(
+      "The server returned an invalid response."
+    );
   });
 
   it("rethrows non-API Error as-is", async () => {
@@ -871,12 +914,12 @@ describe("downloadCsvFile", () => {
       headers: new Headers(
         contentDisposition
           ? {
-              "Content-Type": contentType,
-              "Content-Disposition": contentDisposition,
-            }
+            "Content-Type": contentType,
+            "Content-Disposition": contentDisposition,
+          }
           : {
-              "Content-Type": contentType,
-            }
+            "Content-Type": contentType,
+          }
       ),
       blob: vi.fn().mockResolvedValue(new Blob(["csv-bytes"])),
     }) as unknown as Response;
@@ -918,7 +961,7 @@ describe("downloadCsvFile", () => {
     });
 
     const anchor = originalCreateElement("a");
-    const clickSpy = vi.spyOn(anchor, "click").mockImplementation(() => {});
+    const clickSpy = vi.spyOn(anchor, "click").mockImplementation(() => { });
     vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
       if (tagName.toLowerCase() === "a") {
         return anchor;
@@ -930,7 +973,7 @@ describe("downloadCsvFile", () => {
     const appendSpy = vi
       .spyOn(document.body, "appendChild")
       .mockImplementation((node: Node) => node);
-    const removeSpy = vi.spyOn(anchor, "remove").mockImplementation(() => {});
+    const removeSpy = vi.spyOn(anchor, "remove").mockImplementation(() => { });
 
     await downloadCsvFile("csv_12345", "report.csv");
 
