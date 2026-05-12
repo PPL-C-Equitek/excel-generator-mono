@@ -1,4 +1,5 @@
 from django.test import SimpleTestCase
+from django.test import override_settings
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -9,7 +10,9 @@ from llm.serializers import (
     LlmGenerateResponseSerializer,
     LlmReasoningRequestSerializer,
     LlmReasoningResponseSerializer,
+    SendMessageRequestSerializer,
     ThinkingLogItemSerializer,
+    _resolve_positive_int_setting,
     _safe_thinking_log_summary,
 )
 class LlmReasoningSerializerTest(SimpleTestCase):
@@ -46,6 +49,15 @@ class LlmReasoningSerializerTest(SimpleTestCase):
 
 
 class LlmGenerateSerializerTest(SimpleTestCase):
+    def test_resolve_positive_int_setting_handles_bool_int_str_and_fallback_values(self):
+        self.assertEqual(_resolve_positive_int_setting(True, 3), 3)
+        self.assertEqual(_resolve_positive_int_setting(5, 3), 5)
+        self.assertEqual(_resolve_positive_int_setting(0, 3), 3)
+        self.assertEqual(_resolve_positive_int_setting("7", 3), 7)
+        self.assertEqual(_resolve_positive_int_setting("   ", 3), 3)
+        self.assertEqual(_resolve_positive_int_setting("invalid", 3), 3)
+        self.assertEqual(_resolve_positive_int_setting(None, 3), 3)
+
     def test_generate_request_serializer_accepts_json_object(self):
         serializer = LlmGenerateRequestSerializer(data={"input_json": {"sheet": "Sheet1"}})
 
@@ -125,6 +137,84 @@ class LlmGenerateSerializerTest(SimpleTestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertFalse(serializer.validated_data["include_reasoning"])
 
+    def test_generate_request_serializer_defaults_refinement_enabled_true(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertTrue(serializer.validated_data["refinement"]["enabled"])
+
+    def test_generate_request_serializer_accepts_refinement_payload(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {
+                    "enabled": True,
+                    "max_iterations": 2,
+                    "early_exit_on_valid": False,
+                },
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertTrue(serializer.validated_data["refinement"]["enabled"])
+        self.assertEqual(serializer.validated_data["refinement"]["max_iterations"], 2)
+        self.assertFalse(serializer.validated_data["refinement"]["early_exit_on_valid"])
+
+    def test_generate_request_serializer_rejects_refinement_max_iterations_above_cap(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {
+                    "enabled": True,
+                    "max_iterations": 4,
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement", serializer.errors)
+
+    @override_settings(
+        LLM_REFINEMENT_DEFAULT_MAX_ITER="invalid-default",
+        LLM_REFINEMENT_MAX_ITER_CAP=5,
+    )
+    def test_generate_request_serializer_uses_safe_default_when_setting_invalid(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["refinement"]["max_iterations"], 3)
+
+    @override_settings(
+        LLM_REFINEMENT_DEFAULT_MAX_ITER="7",
+        LLM_REFINEMENT_MAX_ITER_CAP="9",
+    )
+    def test_generate_request_serializer_uses_numeric_string_default_from_settings(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["refinement"]["max_iterations"], 7)
+
+    @override_settings(LLM_REFINEMENT_MAX_ITER_CAP="5")
+    def test_generate_request_serializer_applies_numeric_string_cap_from_settings(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {
+                    "enabled": True,
+                    "max_iterations": 6,
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement", serializer.errors)
+
     def test_generate_response_serializer_allows_null_reasoning(self):
         serializer = LlmGenerateResponseSerializer(
             data={"output_json": {"status": "ok"}, "reasoning": None}
@@ -152,6 +242,313 @@ class LlmGenerateSerializerTest(SimpleTestCase):
             data={"output_json": [["row-1"]], "reasoning": None}
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_generate_response_serializer_accepts_refinement_fields(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {
+                    "document_info": {"source_type": "Excel", "filename": "test.xlsx"},
+                    "summary": {"total_tables": 1},
+                    "content_data": [
+                        {
+                            "table_name": "Sheet1",
+                            "headers": ["name"],
+                            "rows": [{"name": "A"}],
+                        }
+                    ],
+                },
+                "reasoning": {
+                    "final_answer": "Done",
+                    "reasoning_steps": ["Validated schema."],
+                    "thinking_log": "Refined output.",
+                },
+                "raw_json": {"status": "draft"},
+                "validated_json": {"status": "valid"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "valid",
+                    "errors": [],
+                    "warnings": [],
+                    "summary": "Output passed strict export schema validation.",
+                },
+                "refinement_meta": {
+                    "iterations_run": 1,
+                    "max_iterations": 3,
+                    "early_exit_triggered": True,
+                    "final_status": "valid",
+                },
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_generate_response_serializer_rejects_non_object_validation_log(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": "invalid",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_with_missing_keys(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "errors": [],
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_when_warnings_not_list(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": [],
+                    "warnings": "not-a-list",
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_issue_item_when_not_object(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": ["not-object"],
+                    "warnings": [],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_issue_with_blank_required_field(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": [{"path": " ", "message": "bad", "severity": "error"}],
+                    "warnings": [],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_with_invalid_verdict(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "maybe",
+                    "errors": [],
+                    "warnings": [],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_with_non_positive_iteration(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 0,
+                    "verdict": "invalid",
+                    "errors": [],
+                    "warnings": [],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_with_blank_summary(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": [],
+                    "warnings": [],
+                    "summary": "   ",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_accepts_validation_log_with_structured_issue_items(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": [{"path": "$.x", "message": "bad", "severity": "error"}],
+                    "warnings": [{"path": "$.y", "message": "warn", "severity": "warning"}],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_generate_response_serializer_rejects_validation_log_issue_without_required_fields(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validation_log": {
+                    "iteration": 1,
+                    "verdict": "invalid",
+                    "errors": [{"path": "$.x", "severity": "error"}],
+                    "warnings": [],
+                    "summary": "invalid",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("validation_log", serializer.errors)
+
+    def test_generate_response_serializer_rejects_non_object_refinement_meta(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": "invalid",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    def test_generate_response_serializer_rejects_refinement_meta_with_missing_keys(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": {"iterations_run": 1},
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    def test_generate_response_serializer_rejects_refinement_meta_with_non_positive_iterations_run(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": {
+                    "iterations_run": 0,
+                    "max_iterations": 3,
+                    "early_exit_triggered": False,
+                    "final_status": "failed",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    def test_generate_response_serializer_rejects_refinement_meta_with_non_positive_max_iterations(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": {
+                    "iterations_run": 1,
+                    "max_iterations": 0,
+                    "early_exit_triggered": False,
+                    "final_status": "failed",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    def test_generate_response_serializer_rejects_refinement_meta_with_non_boolean_early_exit(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": {
+                    "iterations_run": 1,
+                    "max_iterations": 1,
+                    "early_exit_triggered": "no",
+                    "final_status": "failed",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    # Positive
+    def test_positive_generate_response_serializer_accepts_minimal_refinement_visible_payload(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "validated_json": {"status": "ok"},
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    # Negative
+    def test_negative_generate_response_serializer_rejects_invalid_refinement_meta_final_status(self):
+        serializer = LlmGenerateResponseSerializer(
+            data={
+                "output_json": {"status": "ok"},
+                "refinement_meta": {
+                    "iterations_run": 1,
+                    "max_iterations": 3,
+                    "early_exit_triggered": True,
+                    "final_status": "unknown-status",
+                },
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("refinement_meta", serializer.errors)
+
+    # Edge
+    def test_edge_generate_request_serializer_defaults_refinement_payload_when_omitted(self):
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertIn("refinement", serializer.validated_data)
+        self.assertIn("max_iterations", serializer.validated_data["refinement"])
 
 
 class ThinkingLogSerializerTest(SimpleTestCase):
@@ -240,6 +637,20 @@ class ThinkingLogSerializerTest(SimpleTestCase):
         self.assertIsNone(serializer.data["session_id"])
         self.assertNotIn("request_id", serializer.data)
         self.assertEqual(serializer.data["thinking_log"], "")
+
+
+class SendMessageSerializerTest(SimpleTestCase):
+    def test_send_message_request_serializer_accepts_non_blank_message(self):
+        serializer = SendMessageRequestSerializer(data={"message": "Hello"})
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["message"], "Hello")
+
+    def test_send_message_request_serializer_rejects_whitespace_only_message(self):
+        serializer = SendMessageRequestSerializer(data={"message": "   \n\t"})
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("message", serializer.errors)
 
     def test_thinking_log_item_serializer_omits_request_id_even_if_present_in_output_json(self):
         instance = SimpleNamespace(

@@ -128,6 +128,17 @@ def _validate_summary(summary):
                 f"summary['{key}'] has unsupported value type."
             )
 
+    if "total_items" in summary:
+        total_items = summary["total_items"]
+        if not isinstance(total_items, int) or isinstance(total_items, bool):
+            raise OutputLLMValidationError(
+                "summary.total_items must be a non-negative integer."
+            )
+        if total_items < 0:
+            raise OutputLLMValidationError(
+                "summary.total_items must be a non-negative integer."
+            )
+
 def _validate_content_data(content_data):
     if not content_data:
         raise OutputLLMValidationError("content_data must not be empty.")
