@@ -18,9 +18,12 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
 )
 from llm.views import (
+    _LlmGenerateWorkflow,
+    _estimate_payload_size_bytes,
     _build_generate_bootstrap_message,
     _extract_follow_up_prompt,
     _generate_output_json,
+    _hydrate_previous_output_from_target,
     _sanitize_output_json,
     build_llm_generation_service,
     build_llm_reasoning_service,
@@ -224,6 +227,67 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
     def test_extract_follow_up_prompt_returns_empty_for_non_object_payload(self):
         self.assertEqual(_extract_follow_up_prompt(["not-an-object"]), "")
+
+    def test_hydrate_previous_output_keeps_existing_previous_output(self):
+        existing_previous_output = {"content_data": [{"rows": [{"status": "paid"}]}]}
+        payload = {
+            "filename": "invoice.pdf",
+            "previous_output": existing_previous_output,
+            "user_prompt": "Refine paid rows only",
+        }
+        target_output = SimpleNamespace(output_json={"content_data": [{"rows": [{"status": "all"}]}]})
+
+        hydrated_payload = _hydrate_previous_output_from_target(payload, target_output)
+
+        self.assertIs(hydrated_payload, payload)
+        self.assertEqual(hydrated_payload["previous_output"], existing_previous_output)
+
+    def test_estimate_payload_size_bytes_returns_zero_for_non_serializable_payload(self):
+        class _NonSerializable:
+            pass
+
+        self.assertEqual(_estimate_payload_size_bytes(_NonSerializable()), 0)
+
+    @patch("llm.views._build_chat_context_from_session")
+    @patch("llm.views._resolve_message_target_output")
+    @patch("llm.views._resolve_generate_source_message")
+    @patch("llm.views._resolve_generate_session")
+    def test_workflow_resolve_context_uses_target_output_session_when_session_not_provided(
+        self,
+        mock_resolve_generate_session,
+        mock_resolve_generate_source_message,
+        mock_resolve_message_target_output,
+        mock_build_chat_context_from_session,
+    ):
+        request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False))
+        target_session = SimpleNamespace(id=uuid4())
+        target_output = SimpleNamespace(
+            id=uuid4(),
+            session=target_session,
+            output_json={"content_data": [{"rows": [{"status": "all"}]}]},
+        )
+        validated_data = {
+            "input_json": {
+                "filename": "invoice.pdf",
+                "user_prompt": "Hanya tampilkan status paid.",
+            },
+            "target_output_id": str(target_output.id),
+        }
+        mock_resolve_generate_session.return_value = (None, None)
+        mock_resolve_generate_source_message.return_value = (None, None, None)
+        mock_resolve_message_target_output.return_value = (target_output, None)
+        mock_build_chat_context_from_session.return_value = "USER: refine status paid only"
+
+        workflow = _LlmGenerateWorkflow(request, validated_data)
+        error_response = workflow._resolve_context()
+
+        self.assertIsNone(error_response)
+        self.assertIs(workflow.runtime.session, target_session)
+        self.assertEqual(
+            workflow.runtime.input_json["previous_output"],
+            target_output.output_json,
+        )
+        self.assertEqual(workflow.runtime.chat_context, "USER: refine status paid only")
 
     def test_sanitize_output_json_removes_reasoning_meta_keys_from_object(self):
         sanitized = _sanitize_output_json(
@@ -1887,6 +1951,57 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        mock_service.generate.assert_called_once_with(
+            input_json={
+                "filename": "invoice.pdf",
+                "user_prompt": "Hanya tampilkan status paid.",
+                "previous_output": parent_output.output_json,
+            },
+            custom_schema_id=None,
+            chat_context=None,
+        )
+
+        user_messages = list(
+            ChatMessage.objects.filter(session=session, role=ChatMessage.ROLE_USER).order_by("created_at")
+        )
+        self.assertEqual(len(user_messages), 1)
+        self.assertEqual(user_messages[0].target_output_id, parent_output.id)
+
+        generated_output = GeneratedOutput.objects.exclude(id=parent_output.id).get()
+        self.assertEqual(generated_output.parent_output_id, parent_output.id)
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_resolves_session_from_target_output_when_session_id_missing(
+        self, mock_build_service
+    ):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {
+            "headers": ["unit", "value"],
+            "rows": [["ICU", 1000]],
+        }
+        session = Session.objects.create(owner=self.user, title="Existing Session")
+        parent_output = GeneratedOutput.objects.create(
+            session=session,
+            output_json={"content_data": [{"rows": [{"status": "all"}]}]},
+        )
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/llm/generate/",
+            {
+                "target_output_id": str(parent_output.id),
+                "input_json": {
+                    "filename": "invoice.pdf",
+                    "user_prompt": "Hanya tampilkan status paid.",
+                },
+                "include_reasoning": False,
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["session_id"], str(session.id))
         mock_service.generate.assert_called_once_with(
             input_json={
                 "filename": "invoice.pdf",
