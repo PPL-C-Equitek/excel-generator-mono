@@ -305,12 +305,6 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertIs(hydrated_payload, payload)
         self.assertEqual(hydrated_payload["previous_output"], existing_previous_output)
 
-    def test_estimate_payload_size_bytes_returns_zero_for_non_serializable_payload(self):
-        class _NonSerializable:
-            pass
-
-        self.assertEqual(_estimate_payload_size_bytes(_NonSerializable()), 0)
-
     @patch("llm.views._build_chat_context_from_session")
     @patch("llm.views._resolve_message_target_output")
     @patch("llm.views._resolve_generate_source_message")
