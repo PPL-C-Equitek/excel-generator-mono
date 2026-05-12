@@ -721,6 +721,35 @@ class LlmGenerationServiceTest(SimpleTestCase):
             {"iteration": 1, "verdict": "invalid"},
         )
 
+    def test_json_generation_service_drops_blank_user_prompt_when_compacting(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        service.generate(
+            {
+                "status": "success",
+                "message": "File uploaded successfully",
+                "filename": "report.pdf",
+                "size": 20480,
+                "format": "pdf",
+                "extracted": {"Sheet1": [["name"], ["A"]]},
+                "user_prompt": "   ",
+            }
+        )
+
+        prompt = text_provider.generate_text.call_args.kwargs["prompt"]
+        parsed_prompt = json.loads(prompt)
+        self.assertNotIn("user_prompt", parsed_prompt)
+        self.assertEqual(
+            parsed_prompt,
+            {
+                "filename": "report.pdf",
+                "format": "pdf",
+                "extracted": {"Sheet1": [["name"], ["A"]]},
+            },
+        )
+
     @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_uses_base_prompt_when_no_schema_selected(
         self, mock_build_extraction_prompt
