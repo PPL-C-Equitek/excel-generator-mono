@@ -136,6 +136,21 @@ class CompactInputJsonForPromptTest(SimpleTestCase):
         self.assertEqual(result["previous_output_json"], {"content_data": []})
         self.assertEqual(result["validation_log"], {"iteration": 1, "verdict": "invalid"})
 
+    def test_compact_input_json_for_prompt_handles_refinement_wrapper_with_list_original_input(self):
+        input_json = {
+            "original_input_json": [
+                {"table_name": "Sheet1", "rows": [{"id": 1}]},
+            ],
+            "previous_output_json": {"content_data": []},
+            "validation_log": {"iteration": 1, "verdict": "invalid"},
+        }
+
+        result = _compact_input_json_for_prompt(input_json)
+
+        self.assertEqual(result["original_input_json"], input_json["original_input_json"])
+        self.assertEqual(result["previous_output_json"], {"content_data": []})
+        self.assertEqual(result["validation_log"], {"iteration": 1, "verdict": "invalid"})
+
     def test_compact_input_json_for_prompt_does_not_mutate_original_payload(self):
         input_json = {
             "status": "success",

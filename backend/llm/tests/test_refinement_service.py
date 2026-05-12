@@ -5,6 +5,7 @@ from unittest.mock import patch
 from llm.services.refinement_service import (
     RefinementConfig,
     RefinementOrchestrator,
+    _compact_validation_issues,
     _collect_refinement_quality_errors,
     _collect_headers_from_header_list,
     _collect_headers_from_rows,
@@ -344,6 +345,30 @@ class RefinementHelpersTest(SimpleTestCase):
         self.assertEqual(
             _resolve_refinement_final_status(has_valid_candidate=False, best_candidate=None),
             "failed",
+        )
+
+    def test_compact_validation_issues_returns_empty_for_non_list(self):
+        self.assertEqual(_compact_validation_issues("not-a-list", max_items=5), [])
+
+    def test_compact_validation_issues_skips_invalid_items_and_required_fields(self):
+        issues = [
+            "not-a-dict",
+            {"path": "$.ok", "message": "", "severity": "error"},
+            {"path": "$.ok", "message": "has message", "severity": None},
+            {"path": "  $.valid.path  ", "message": "  valid message  ", "severity": "  warning  "},
+        ]
+
+        compacted = _compact_validation_issues(issues, max_items=5)
+
+        self.assertEqual(
+            compacted,
+            [
+                {
+                    "path": "$.valid.path",
+                    "message": "valid message",
+                    "severity": "warning",
+                }
+            ],
         )
 
 
