@@ -369,7 +369,10 @@ def generate_csv(mapped_output, sanitization_policy=None, filename_policy=None):
     return {"files": files}
 
 
-def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy, seen_names):
+def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy, seen_names=None):
+    if seen_names is None:
+        seen_names = set()
+        
     sheet_name, headers, rows = _validate_sheet_structure(
         sheet, sheet_index, OutputCSVGenerationError
     )
@@ -397,7 +400,10 @@ def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy, se
     }
 
 
-def _normalize_csv_export_filename(filename, seen_names):
+def _normalize_csv_export_filename(filename, seen_names=None):
+    if seen_names is None:
+        seen_names = set()
+        
     basename = filename.replace("\\", "/").split("/")[-1]
     safe_name = _CSV_FILENAME_INVALID_CHARS.sub("_", basename)
     
