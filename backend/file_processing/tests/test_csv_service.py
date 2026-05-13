@@ -6,11 +6,13 @@ import os
 import tempfile
 import json
 from file_processing.services.csv_service import parse_csv, process_uploaded_csv
-from file_processing.services.upload_service import (
-    _validate_csv_content,
+from file_processing.services.upload_file_types import (
     CSV_CORRUPT_ERROR,
     CSV_PROTECTED_ERROR,
     FILE_EXTENSION_MISMATCH_ERROR,
+)
+from file_processing.services.upload_service import (
+    _validate_csv_content,
     process_upload,
 )
 
