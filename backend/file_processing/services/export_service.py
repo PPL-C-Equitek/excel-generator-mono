@@ -385,6 +385,8 @@ def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
         raise OutputCSVGenerationError(
             "filename_policy.build_filename must return a non-empty string."
         )
+        
+    filename = filename.replace("\\", "/").split("/")[-1]
 
     return {
         "name": filename,
