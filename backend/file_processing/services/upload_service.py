@@ -5,7 +5,6 @@ from uuid import uuid4
 from django.conf import settings
 from django.utils.text import get_valid_filename
 from PyPDF2 import PdfReader
-from PyPDF2.errors import PdfReadError
 
 from .excel_service import process_uploaded_excel
 from .txt_service import process_uploaded_txt
@@ -17,7 +16,12 @@ from file_processing.services import word_validation_service
 from file_processing.services.image_validation_service import validate_image
 from file_processing.services.word_extraction_service import WordExtractionService
 from file_processing.services.contracts import ValidationResult, ExtractionResult
-from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
+from file_processing.services import (
+    excel_validation_service,
+    file_validation_service,
+    mime_validation_service,
+    pdf_validation_service,
+)
 from file_processing.services.exceptions import (
     UploadValidationError,
     UploadExtractionError,
@@ -380,91 +384,41 @@ def process_upload(uploaded_file):
 
 def _validate_file_content(uploaded_file, ext) -> ValidationResult:
     """Validate file size, MIME type, and type-specific constraints."""
-    # Image files can return early without further checks
-    if ext in IMAGE_EXTENSIONS:
-        is_valid, error = validate_image(uploaded_file)
-        if not is_valid:
-            return ValidationResult.fail(error or "Invalid image file.")
-        return ValidationResult.ok()
-
-    # All other file types: check size and MIME type
-    if uploaded_file.size > MAX_FILE_SIZE:
-        return ValidationResult.fail(FILE_TOO_LARGE_ERROR)
-
-    is_valid_mime, mime_error = validate_mime_type(uploaded_file, ext)
-    if not is_valid_mime:
-        return ValidationResult.fail(mime_error or MIME_TYPE_DETECTION_ERROR)
-
-    # Type-specific format validation
-    if ext in {EXT_XLS, EXT_XLSX}:
-        is_valid_excel, excel_error = validate_excel_sheet_count(uploaded_file, ext)
-        if not is_valid_excel:
-            return ValidationResult.fail(excel_error or EXCEL_CORRUPT_ERROR)
-
-    if ext in {EXT_DOC, EXT_DOCX}:
-        is_valid_word, word_error = word_validation_service.validate_word(
-            uploaded_file, ext
-        )
-        if not is_valid_word:
-            return ValidationResult.fail(word_error or WORD_CORRUPT_ERROR)
-
-    return ValidationResult.ok()
+    return file_validation_service._validate_file_content(
+        uploaded_file,
+        ext,
+        validate_image_func=validate_image,
+        validate_mime_type_func=validate_mime_type,
+        validate_excel_sheet_count_func=validate_excel_sheet_count,
+        validate_word_func=word_validation_service.validate_word,
+    )
 
 
 def validate_file_result(uploaded_file) -> ValidationResult:
     """Validate uploaded file and return ValidationResult."""
-    ext = os.path.splitext(uploaded_file.name)[1].lower()
-
-    if ext not in ALLOWED_EXTENSIONS:
-        return ValidationResult.fail(
-            "Unsupported file type. Only PDF, XLS, XLSX, TXT, CSV, PNG, JPG, JPEG, DOC, and DOCX are allowed.",
-        )
-
-    return _validate_file_content(uploaded_file, ext)
+    return file_validation_service.validate_file_result(
+        uploaded_file,
+        validate_image_func=validate_image,
+        validate_mime_type_func=validate_mime_type,
+        validate_excel_sheet_count_func=validate_excel_sheet_count,
+        validate_word_func=word_validation_service.validate_word,
+    )
 
 
 def validate_pdf_result(uploaded_file) -> ValidationResult:
-    try:
-        uploaded_file.seek(0)
-        reader = PdfReader(uploaded_file, strict=True)
-    except Exception:
-        return ValidationResult.fail(PDF_CORRUPT_ERROR)
-
-    is_valid, error = check_pdf_encrypted(reader)
-    if not is_valid:
-        return ValidationResult.fail(error or PDF_CORRUPT_ERROR)
-
-    is_valid, page_count_or_error = check_pdf_structure(reader)
-    if not is_valid:
-        return ValidationResult.fail(page_count_or_error or PDF_CORRUPT_ERROR)
-
-    page_count = page_count_or_error
-    is_valid, error = check_pdf_page_count(page_count)
-    if not is_valid:
-        return ValidationResult.fail(error or PDF_CORRUPT_ERROR)
-
-    return ValidationResult.ok()
+    return pdf_validation_service.validate_pdf_result(uploaded_file, reader_cls=PdfReader)
 
 
 def check_pdf_encrypted(reader):
-    if reader.is_encrypted:
-        return False, "PDF file is password-protected."
-    return True, None
+    return pdf_validation_service.check_pdf_encrypted(reader)
 
 
 def check_pdf_structure(reader):
-    try:
-        return True, len(reader.pages)
-    except PdfReadError:
-        return False, PDF_CORRUPT_ERROR
-    except Exception:
-        return False, PDF_CORRUPT_ERROR
+    return pdf_validation_service.check_pdf_structure(reader)
 
 
 def check_pdf_page_count(page_count):
-    if page_count > MAX_PDF_PAGES:
-        return False, f"PDF exceeds the maximum allowed page count of {MAX_PDF_PAGES}."
-    return True, None
+    return pdf_validation_service.check_pdf_page_count(page_count)
 
 
 def validate_excel_sheet_count(uploaded_file, ext):
@@ -481,236 +435,108 @@ def validate_excel_sheet_count(uploaded_file, ext):
 
 
 def check_excel_sheet_count(sheet_count):
-    if sheet_count > MAX_EXCEL_SHEETS:
-        return False, EXCEL_TOO_MANY_SHEETS_ERROR
-    return True, None
+    return excel_validation_service.check_excel_sheet_count(sheet_count)
 
 
 def _should_parse_as_xls(uploaded_file, ext):
-    if ext == EXT_XLS:
-        return True
-
-    if ext == EXT_XLSX and _is_ole_container(uploaded_file):
-        return _is_legacy_xls_content(uploaded_file)
-
-    return False
+    return excel_validation_service._should_parse_as_xls(
+        uploaded_file,
+        ext,
+        is_ole_container_func=_is_ole_container,
+        is_legacy_xls_content_func=_is_legacy_xls_content,
+    )
 
 
 def _get_xlsx_sheet_count(uploaded_file):
-    from openpyxl import load_workbook
-
-    uploaded_file.seek(0)
-    workbook = load_workbook(uploaded_file, read_only=True, data_only=True)
-    try:
-        return len(workbook.sheetnames)
-    finally:
-        workbook.close()
-        uploaded_file.seek(0)
+    return excel_validation_service._get_xlsx_sheet_count(uploaded_file)
 
 
 def _get_xls_sheet_count(uploaded_file):
-    import xlrd
-
-    uploaded_file.seek(0)
-    workbook_bytes = uploaded_file.read()
-    uploaded_file.seek(0)
-
-    workbook = xlrd.open_workbook(file_contents=workbook_bytes, on_demand=True)
-    try:
-        return workbook.nsheets
-    finally:
-        release_resources = getattr(workbook, "release_resources", None)
-        if callable(release_resources):
-            release_resources()
-        uploaded_file.seek(0)
+    return excel_validation_service._get_xls_sheet_count(uploaded_file)
 
 
 def _validate_xlsx_mime_structure(uploaded_file):
-    if _is_ole_container(uploaded_file):
-        if _is_legacy_xls_content(uploaded_file):
-            return "legacy", None
-        return "invalid", EXCEL_PASSWORD_PROTECTED_ERROR
-
-    if not _has_zip_signature(uploaded_file):
-        return "invalid", DOES_NOT_MATCH_EXTENSION_ERROR
-
-    return "valid", None
+    return mime_validation_service._validate_xlsx_mime_structure(
+        uploaded_file,
+        is_ole_container_func=_is_ole_container,
+        is_legacy_xls_content_func=_is_legacy_xls_content,
+        has_zip_signature_func=_has_zip_signature,
+    )
 
 
 def _validate_word_mime_structure(uploaded_file, ext):
-    if ext == EXT_DOC and not _is_ole_container(uploaded_file):
-        return DOES_NOT_MATCH_EXTENSION_ERROR
-
-    if ext == EXT_DOCX:
-        # Encrypted OOXML (.docx) is wrapped in an OLE container; allow it to
-        # continue to Word validation so it can return the protected-file error.
-        if _is_ole_container(uploaded_file):
-            return None
-        if not _has_zip_signature(uploaded_file):
-            return DOES_NOT_MATCH_EXTENSION_ERROR
-
-    return None
+    return mime_validation_service._validate_word_mime_structure(
+        uploaded_file,
+        ext,
+        is_ole_container_func=_is_ole_container,
+        has_zip_signature_func=_has_zip_signature,
+    )
 
 
 def _resolve_txt_detected_mime(uploaded_file, detected_mime):
-    request_mime = (getattr(uploaded_file, "content_type", "") or "").lower()
-    if (
-        detected_mime in {MIME_OCTET_STREAM, MIME_ZIP, MIME_OLE_STORAGE}
-        and request_mime
-    ):
-        return request_mime
-    return detected_mime
+    return mime_validation_service._resolve_txt_detected_mime(
+        uploaded_file,
+        detected_mime,
+    )
 
 
 def validate_mime_type(uploaded_file, ext):
-    try:
-        head = _read_head(uploaded_file)
-        mime = _detect_mime(head, ext)
-
-        if not mime:
-            return False, MIME_TYPE_DETECTION_ERROR
-
-        expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
-
-        if ext == EXT_XLSX:
-            xlsx_state, xlsx_error = _validate_xlsx_mime_structure(uploaded_file)
-            if xlsx_state == "legacy":
-                return True, None
-            if xlsx_error:
-                return False, xlsx_error
-
-        if ext == EXT_TXT:
-            detected_mime = _resolve_txt_detected_mime(uploaded_file, mime)
-            return _validate_txt_content(uploaded_file, detected_mime)
-
-        if ext == EXT_CSV:
-            return _validate_csv_content(uploaded_file, mime)
-
-        if ext in {EXT_DOC, EXT_DOCX}:
-            word_error = _validate_word_mime_structure(uploaded_file, ext)
-            if word_error:
-                return False, word_error
-
-        if mime not in expected_mimes:
-            return False, DOES_NOT_MATCH_EXTENSION_ERROR
-
-        return True, None
-
-    except Exception:
-        return False, MIME_TYPE_DETECTION_ERROR
+    return mime_validation_service.validate_mime_type(
+        uploaded_file,
+        ext,
+        allowed_mime_types=ALLOWED_MIME_TYPES,
+        magic_module=magic,
+        is_ole_container_func=_is_ole_container,
+        is_legacy_xls_content_func=_is_legacy_xls_content,
+        has_zip_signature_func=_has_zip_signature,
+        has_binary_signature_func=_has_binary_signature,
+    )
 
 
 def _read_head(uploaded_file, size=2048):
-    uploaded_file.seek(0)
-    head = uploaded_file.read(size)
-    uploaded_file.seek(0)
-    return head
+    return mime_validation_service._read_head(uploaded_file, size)
 
 
 def _detect_mime(head, ext):
-    try:
-        return magic.from_buffer(head, mime=True)
-    except Exception:
-        return _fallback_mime(head, ext)
+    return mime_validation_service._detect_mime(head, ext, magic_module=magic)
 
 
 def _fallback_mime(head, ext):
-    if head.startswith(b"%PDF"):
-        return "application/pdf"
-    if head.startswith(ZIP_SIGNATURE_PREFIX):
-        return MIME_ZIP
-    if head.startswith(OLE_SIGNATURE):
-        return MIME_OLE_STORAGE
-    if ext in {EXT_XLS, EXT_DOC}:
-        return MIME_OCTET_STREAM
-    return None
+    return mime_validation_service._fallback_mime(head, ext)
 
 
 def _is_ole_container(uploaded_file):
-    try:
-        uploaded_file.seek(0)
-        header = uploaded_file.read(len(OLE_SIGNATURE))
-        uploaded_file.seek(0)
-        return header == OLE_SIGNATURE
-    except Exception:
-        return False
+    return mime_validation_service._is_ole_container(uploaded_file)
 
 
 def _is_legacy_xls_content(uploaded_file):
-    try:
-        import xlrd
-    except Exception:
-        return False
-
-    try:
-        uploaded_file.seek(0)
-        content = uploaded_file.read()
-        uploaded_file.seek(0)
-        xlrd.open_workbook(file_contents=content, on_demand=True)
-        return True
-    except Exception:
-        return False
+    return mime_validation_service._is_legacy_xls_content(uploaded_file)
 
 
 def _has_zip_signature(uploaded_file):
-    try:
-        uploaded_file.seek(0)
-        header = uploaded_file.read(len(ZIP_SIGNATURE_PREFIX))
-        uploaded_file.seek(0)
-        return header == ZIP_SIGNATURE_PREFIX
-    except Exception:
-        return False
+    return mime_validation_service._has_zip_signature(uploaded_file)
 
 
 def _has_binary_signature(uploaded_file):
-    try:
-        max_prefix = max(len(sig) for sig, _ in BINARY_SIGNATURES)
-        uploaded_file.seek(0)
-        header = uploaded_file.read(max_prefix)
-        uploaded_file.seek(0)
-
-        for signature, error_msg in BINARY_SIGNATURES:
-            if header.startswith(signature):
-                return True, error_msg
-
-        return False, None
-    except Exception:
-        return False, None
+    return mime_validation_service._has_binary_signature(uploaded_file)
 
 
 def _validate_txt_content(uploaded_file, detected_mime: str):
-    is_binary, binary_error = _has_binary_signature(uploaded_file)
-    if is_binary:
-        return False, binary_error
-
-    if detected_mime and detected_mime.startswith("text/"):
-        return True, None
-
-    allowed = ALLOWED_MIME_TYPES.get(EXT_TXT, [])
-    if detected_mime in allowed:
-        return True, None
-
-    return False, TXT_CORRUPT_ERROR
+    return mime_validation_service._validate_txt_content(
+        uploaded_file,
+        detected_mime,
+        allowed_mime_types=ALLOWED_MIME_TYPES,
+        has_binary_signature_func=_has_binary_signature,
+    )
 
 
 def _validate_csv_content(uploaded_file, detected_mime: str):
-    is_binary, binary_error = _has_binary_signature(uploaded_file)
-    if is_binary:
-        uploaded_file.seek(0)
-        header = uploaded_file.read(8)
-        uploaded_file.seek(0)
-        if header == OLE_SIGNATURE:
-            return False, CSV_PROTECTED_ERROR
-        return False, binary_error
-
-    if detected_mime and detected_mime.startswith("text/"):
-        return True, None
-
-    allowed = ALLOWED_MIME_TYPES.get(EXT_CSV, [])
-    if detected_mime in allowed:
-        return True, None
-
-    return False, CSV_CORRUPT_ERROR
+    return mime_validation_service._validate_csv_content(
+        uploaded_file,
+        detected_mime,
+        allowed_mime_types=ALLOWED_MIME_TYPES,
+        has_binary_signature_func=_has_binary_signature,
+    )
 
 
 def save_temp_file(uploaded_file):

@@ -34,6 +34,7 @@ from file_processing.services.upload_service import (
     validate_mime_type,
     validate_pdf,
 )
+from file_processing.utils.upload_constants import FILE_TOO_LARGE_ERROR, MAX_FILE_SIZE
 
 
 class TestOCRService(TestCase):
@@ -1787,10 +1788,10 @@ class TestUploadServiceCoverageGaps(TestCase):
     )
     def test_validate_file_size_limit(self, _mock_mime):
         f = SimpleUploadedFile("large.pdf", b"x")
-        f.size = upload_service.MAX_FILE_SIZE + 1
+        f.size = MAX_FILE_SIZE + 1
         is_valid, error = upload_service.validate_file(f)
         self.assertFalse(is_valid)
-        self.assertEqual(error, upload_service.FILE_TOO_LARGE_ERROR)
+        self.assertEqual(error, FILE_TOO_LARGE_ERROR)
 
     @patch(
         "file_processing.services.upload_service.validate_mime_type",
