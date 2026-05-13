@@ -139,25 +139,22 @@ def _generate_text_via_chat_completions(
     return normalized_content
 
 
+def _extract_text_from_content_item(item: Any) -> str | None:
+    if isinstance(item, dict):
+        candidate = item.get("text") or item.get("content")
+    else:
+        candidate = getattr(item, "text", None) or getattr(item, "content", None)
+    if isinstance(candidate, str) and candidate.strip():
+        return candidate.strip()
+    return None
+
+
 def _normalize_chat_message_content(content: Any) -> str | None:
     if isinstance(content, str):
-        normalized_content = content.strip()
-        return normalized_content or None
-
+        return content.strip() or None
     if isinstance(content, list):
-        chunks: list[str] = []
-        for item in content:
-            if isinstance(item, dict):
-                text_candidate = item.get("text") or item.get("content")
-            else:
-                text_candidate = getattr(item, "text", None) or getattr(item, "content", None)
-
-            if isinstance(text_candidate, str) and text_candidate.strip():
-                chunks.append(text_candidate.strip())
-
-        merged_content = "\n".join(chunks).strip()
-        return merged_content or None
-
+        chunks = [t for item in content if (t := _extract_text_from_content_item(item))]
+        return "\n".join(chunks).strip() or None
     return None
 
 
