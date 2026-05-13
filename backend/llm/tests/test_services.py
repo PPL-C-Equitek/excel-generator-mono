@@ -14,6 +14,7 @@ from llm.services.generation_service import (
 from llm.services.openai_client import (
     OpenAIServiceError,
     OpenAIUpstreamError,
+    _extract_text_from_content_item,
     generate_chat_response,
     generate_json,
     generate_streaming_chat_response,
@@ -1033,3 +1034,41 @@ class GenerateStreamingChatResponseTest(SimpleTestCase):
         list(generate_streaming_chat_response([{"role": "user", "content": "Hi"}]))
 
         mock_openai.assert_called_once_with(api_key="test-key")
+
+
+class ExtractTextFromContentItemTest(SimpleTestCase):
+    def test_positive_extracts_text_key_from_dict(self):
+        result = _extract_text_from_content_item({"text": "hello"})
+        self.assertEqual(result, "hello")
+
+    def test_positive_extracts_content_key_from_dict(self):
+        result = _extract_text_from_content_item({"content": "world"})
+        self.assertEqual(result, "world")
+
+    def test_positive_extracts_text_attr_from_object(self):
+        result = _extract_text_from_content_item(SimpleNamespace(text="hi"))
+        self.assertEqual(result, "hi")
+
+    def test_positive_extracts_content_attr_from_object(self):
+        result = _extract_text_from_content_item(SimpleNamespace(content="there"))
+        self.assertEqual(result, "there")
+
+    def test_positive_strips_whitespace(self):
+        result = _extract_text_from_content_item({"text": "  trimmed  "})
+        self.assertEqual(result, "trimmed")
+
+    def test_negative_returns_none_for_blank_text(self):
+        result = _extract_text_from_content_item({"text": "   "})
+        self.assertIsNone(result)
+
+    def test_negative_returns_none_when_no_text_or_content_key(self):
+        result = _extract_text_from_content_item({"other": "value"})
+        self.assertIsNone(result)
+
+    def test_negative_returns_none_for_non_string_text(self):
+        result = _extract_text_from_content_item({"text": 123})
+        self.assertIsNone(result)
+
+    def test_edge_prefers_text_over_content_key(self):
+        result = _extract_text_from_content_item({"text": "from-text", "content": "from-content"})
+        self.assertEqual(result, "from-text")
