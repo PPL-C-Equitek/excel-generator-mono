@@ -66,6 +66,15 @@ describe('sanitizeCSVCell', () => {
         expect(output).not.toBe(input) // checks for deep copy / non-mutating
     })
 
+    it('preserves plain object prototype', () => {
+        const input = { a: '=1' }
+        const output = sanitizeCSVCell(input) as Record<string, unknown>
+        
+        expect(output).toEqual({ a: "'=1" })
+        expect(output).not.toBe(input)
+        expect(Object.getPrototypeOf(output)).toBe(Object.prototype)
+    })
+
     it('returns null and numbers as is', () => {
         expect(sanitizeCSVCell(null)).toBe(null)
         expect(sanitizeCSVCell(123)).toBe(123)
