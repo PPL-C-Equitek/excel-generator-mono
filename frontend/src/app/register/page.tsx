@@ -66,18 +66,22 @@ export function validateRegistrationForm(formData: RegisterFormData): {
   };
   let isValid = true;
 
+  // Only set the first error found
   if (!formData.name.trim()) {
     errors.name = 'Name cannot be empty';
     isValid = false;
+    return { isValid, errors };
   }
 
   const trimmedEmail = formData.email.trim();
   if (!trimmedEmail) {
     errors.email = 'Email cannot be empty';
     isValid = false;
+    return { isValid, errors };
   } else if (!EMAIL_REGEX.test(trimmedEmail)) {
     errors.email = 'Invalid email format';
     isValid = false;
+    return { isValid, errors };
   }
 
   return { isValid, errors };
@@ -156,14 +160,6 @@ export default function RegisterPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
-
-    if (name === 'email') {
-      const trimmedEmail = value.trim();
-      setErrors((prev) => ({
-        ...prev,
-        email: trimmedEmail && !EMAIL_REGEX.test(trimmedEmail) ? 'Invalid email format' : '',
-      }));
-    }
   };
 
   const handleSubmit = async (e: FormSubmitEvent) => {
@@ -221,7 +217,7 @@ export default function RegisterPage() {
       if (status === 409) {
         setErrors((prev) => ({
           ...prev,
-          form: 'Email is already registered, please login',
+          email: 'Email is already registered, please login',
         }));
         return;
       }
@@ -315,15 +311,12 @@ export default function RegisterPage() {
                     value={formData.name}
                     onChange={handleChange}
                     placeholder="Enter your full name"
-                    className={`relative block w-full appearance-none rounded-xl border px-4 py-3 text-sm outline-none ${
-                      errors.name ? 'border-rose-400 bg-rose-50/70' : 'border-transparent'
-                      }`}
+                    className="relative block w-full appearance-none rounded-xl border border-transparent px-4 py-3 text-sm outline-none"
                     style={{
                       backgroundColor: 'var(--surface-2)',
                       color: 'var(--foreground)',
                     }}
                   />
-                  {errors.name && <FieldErrorMessage>{errors.name}</FieldErrorMessage>}
                 </div>
 
                 <div className="force-light">
@@ -337,15 +330,15 @@ export default function RegisterPage() {
                     value={formData.email}
                     onChange={handleChange}
                     placeholder="Enter your email"
-                    className={`relative block w-full appearance-none rounded-xl border px-4 py-3 text-sm outline-none ${
-                      errors.email ? 'border-rose-400 bg-rose-50/70' : 'border-transparent'
-                      }`}
+                    className="relative block w-full appearance-none rounded-xl border border-transparent px-4 py-3 text-sm outline-none"
                     style={{
                       backgroundColor: 'var(--surface-2)',
                       color: 'var(--foreground)',
                     }}
                   />
-                  {errors.email && <FieldErrorMessage>{errors.email}</FieldErrorMessage>}
+                  {(errors.name || errors.email) && (
+                    <FieldErrorMessage>{errors.name || errors.email}</FieldErrorMessage>
+                  )}
                 </div>
               </div>
 

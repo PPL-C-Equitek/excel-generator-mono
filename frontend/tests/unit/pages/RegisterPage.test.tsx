@@ -100,26 +100,26 @@ describe('Registration Page', () => {
   });
 
   describe('client-side validation', () => {
-    test('shows invalid email error in real-time and does not call API before submit', async () => {
-      const { emailInput } = setup();
-      const user = userEvent.setup();
-
-      await user.type(emailInput, 'not-an-email');
-
-      await waitFor(() => {
-        expect(screen.getByText(/email format is not valid/i)).toBeInTheDocument();
-      });
-
-      expect(mockedAxios.post).not.toHaveBeenCalled();
-    });
-
-    test('shows required error messages if fields are empty on submit', async () => {
+    test('shows name error when name is empty on submit', async () => {
       const { submitBtn } = setup();
 
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
         expect(screen.getByText(/name cannot be empty/i)).toBeInTheDocument();
+      });
+
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+    });
+
+    test('shows required error messages if fields are empty on submit', async () => {
+      const { nameInput, submitBtn } = setup();
+      const user = userEvent.setup();
+
+      await user.type(nameInput, 'John Doe');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
         expect(screen.getByText(/email cannot be empty/i)).toBeInTheDocument();
       });
 
@@ -127,9 +127,10 @@ describe('Registration Page', () => {
     });
 
     test('shows error if email format is invalid', async () => {
-      const { emailInput, submitBtn } = setup();
+      const { nameInput, emailInput, submitBtn } = setup();
       const user = userEvent.setup();
 
+      await user.type(nameInput, 'John Doe');
       await user.type(emailInput, 'invalid-email');
       fireEvent.click(submitBtn);
 
