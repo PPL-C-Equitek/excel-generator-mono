@@ -183,10 +183,11 @@ def _get_empty_page_numbers(extracted_data):
     return empty
 
 
-def _process_pdf(file_path, uploaded_file):
-    is_valid, error = validate_pdf(uploaded_file)
-    if not is_valid:
-        return False, error, None
+def _process_pdf_result(file_path, uploaded_file) -> ExtractionResult:
+    """Process PDF and return ExtractionResult. Raises UploadValidationError on validation failure."""
+    validation_result = validate_pdf_result(uploaded_file)
+    if not validation_result.is_valid:
+        raise UploadValidationError(validation_result.error)
 
     try:
         extracted_data = NonOCRPDFService.extract_non_ocr_pdf_to_json(file_path)
@@ -202,14 +203,19 @@ def _process_pdf(file_path, uploaded_file):
                 for page in extracted_data["content"]:
                     if page["page"] in ocr_by_page:
                         page["text"] = ocr_by_page[page["page"]]["text"]
+        return ExtractionResult.ok(extracted_data)
     except Exception:
         logger.exception("Non-OCR extraction failed, fallback to OCR")
-        extracted_data = OCRService.process_pdf(file_path)
-
-    return True, None, extracted_data
+        try:
+            extracted_data = OCRService.process_pdf(file_path)
+            return ExtractionResult.ok(extracted_data)
+        except Exception as exc:
+            logger.exception("PDF extraction failed")
+            return ExtractionResult.fail("PDF extraction failed.")
 
 
 def _process_image_result(file_path) -> ExtractionResult:
+    """Process image extraction and return ExtractionResult."""
     try:
         extractor = ImageExtractor()
         extracted_data = extractor.extract(file_path)
@@ -221,11 +227,8 @@ def _process_image_result(file_path) -> ExtractionResult:
         return ExtractionResult.fail("Image OCR extraction failed.")
 
 
-def _process_image(file_path):
-    return _process_image_result(file_path).to_legacy_tuple()
-
-
-def process_word_result(file_path, ext) -> ExtractionResult:
+def _process_word_result(file_path, ext) -> ExtractionResult:
+    """Process word extraction and return ExtractionResult."""
     try:
         extracted_data = WordExtractionService.extract_word_to_json(file_path, ext)
     except ValueError as exc:
@@ -237,35 +240,50 @@ def process_word_result(file_path, ext) -> ExtractionResult:
     return ExtractionResult.ok(extracted_data)
 
 
-def process_word(file_path, ext):
-    return process_word_result(file_path, ext).to_legacy_tuple()
+def _convert_extraction_tuple_to_result(result_tuple) -> ExtractionResult:
+    """Convert external service tuple result to ExtractionResult."""
+    success, error, extracted_data = result_tuple
+    if success:
+        return ExtractionResult.ok(extracted_data)
+    return ExtractionResult.fail(error or "Processing failed")
+
+
+def _process_uploaded_excel_result(file_path) -> ExtractionResult:
+    """Process Excel file and return ExtractionResult."""
+    return _convert_extraction_tuple_to_result(process_uploaded_excel(file_path))
+
+
+def _process_uploaded_txt_result(file_path) -> ExtractionResult:
+    """Process TXT file and return ExtractionResult."""
+    return _convert_extraction_tuple_to_result(process_uploaded_txt(file_path))
+
+
+def _process_uploaded_csv_result(file_path) -> ExtractionResult:
+    """Process CSV file and return ExtractionResult."""
+    return _convert_extraction_tuple_to_result(process_uploaded_csv(file_path))
 
 
 
-def _dispatch_upload_processing(ext, file_path, uploaded_file):
-    """Dispatch upload processing by file type. Raises UploadExtractionError on failure."""
+def _dispatch_upload_processing(ext, file_path, uploaded_file) -> ExtractionResult:
+    """Dispatch upload processing by file type. Returns ExtractionResult."""
     processors = {
-        EXT_PDF: lambda: _process_pdf(file_path, uploaded_file),
-        EXT_XLS: lambda: process_uploaded_excel(file_path),
-        EXT_XLSX: lambda: process_uploaded_excel(file_path),
-        EXT_DOC: lambda: process_word(file_path, EXT_DOC),
-        EXT_DOCX: lambda: process_word(file_path, EXT_DOCX),
-        EXT_TXT: lambda: process_uploaded_txt(file_path),
-        EXT_CSV: lambda: process_uploaded_csv(file_path),
-        EXT_PNG: lambda: _process_image(file_path),
-        EXT_JPG: lambda: _process_image(file_path),
-        EXT_JPEG: lambda: _process_image(file_path),
+        EXT_PDF: lambda: _process_pdf_result(file_path, uploaded_file),
+        EXT_XLS: lambda: _process_uploaded_excel_result(file_path),
+        EXT_XLSX: lambda: _process_uploaded_excel_result(file_path),
+        EXT_DOC: lambda: _process_word_result(file_path, EXT_DOC),
+        EXT_DOCX: lambda: _process_word_result(file_path, EXT_DOCX),
+        EXT_TXT: lambda: _process_uploaded_txt_result(file_path),
+        EXT_CSV: lambda: _process_uploaded_csv_result(file_path),
+        EXT_PNG: lambda: _process_image_result(file_path),
+        EXT_JPG: lambda: _process_image_result(file_path),
+        EXT_JPEG: lambda: _process_image_result(file_path),
     }
 
     processor = processors.get(ext)
     if processor is None:
-        raise UploadExtractionError("Unsupported file type")
+        return ExtractionResult.fail("Unsupported file type")
 
-    is_success, error, extracted_data = processor()
-    if not is_success:
-        raise UploadExtractionError(error or "Failed to process uploaded file")
-
-    return extracted_data
+    return processor()
 
 
 def _get_upload_extension(uploaded_file):
@@ -280,11 +298,16 @@ def _cleanup_temp_upload(file_path):
         logger.exception("Failed to delete temporary upload file.")
 
 
-def _process_stored_upload(ext, file_path, uploaded_file):
-    """Process stored upload. Raises UploadExtractionError on failure."""
+def _process_stored_upload(ext, file_path, uploaded_file) -> ExtractionResult:
+    """Process stored upload. Returns ExtractionResult."""
     try:
-        extracted_data = _dispatch_upload_processing(ext, file_path, uploaded_file)
-        return extracted_data
+        extraction_result = _dispatch_upload_processing(ext, file_path, uploaded_file)
+        if extraction_result.success:
+            return extraction_result
+        raise UploadExtractionError(extraction_result.error or "Failed to process uploaded file")
+    except UploadValidationError:
+        # Re-raise validation errors from PDF processing
+        raise
     except UploadExtractionError:
         raise
     except Exception as exc:
@@ -296,16 +319,16 @@ def _process_stored_upload(ext, file_path, uploaded_file):
 
 def process_upload(uploaded_file):
     """
-    Process uploaded file with domain exception handling at boundary layer.
+    Process uploaded file (boundary layer). Returns legacy tuple format for backward compatibility.
     
-    Internal errors are mapped to domain exceptions and converted back to 
-    legacy tuple format for backward compatibility.
+    Internal flow uses result objects (ValidationResult, ExtractionResult) for consistency.
+    Exception handling maps domain errors back to tuple format.
     
     Returns: (success: bool, error: str | None, _unused: None, extracted_data: dict | None)
     """
     file_path = None
     try:
-        # Validation phase (raises UploadValidationError)
+        # Validation phase (internal: ValidationResult)
         validation_result = validate_file_result(uploaded_file)
         if not validation_result.is_valid:
             raise UploadValidationError(validation_result.error)
@@ -314,9 +337,11 @@ def process_upload(uploaded_file):
         ext = _get_upload_extension(uploaded_file)
         file_path = save_temp_file(uploaded_file)
 
-        # Extraction phase (raises UploadExtractionError)
-        extracted_data = _process_stored_upload(ext, file_path, uploaded_file)
-        return True, None, None, extracted_data
+        # Extraction phase (internal: ExtractionResult)
+        extraction_result = _process_stored_upload(ext, file_path, uploaded_file)
+        
+        # Convert result object to legacy tuple at boundary
+        return True, None, None, extraction_result.extracted_data
 
     except UploadValidationError as exc:
         logger.warning(f"Validation error during upload: {exc}")
@@ -333,10 +358,6 @@ def process_upload(uploaded_file):
     finally:
         if file_path:
             _cleanup_temp_upload(file_path)
-
-
-def validate_file(uploaded_file):
-    return validate_file_result(uploaded_file).to_legacy_tuple()
 
 
 def _validate_file_content(uploaded_file, ext) -> ValidationResult:
@@ -373,6 +394,7 @@ def _validate_file_content(uploaded_file, ext) -> ValidationResult:
 
 
 def validate_file_result(uploaded_file) -> ValidationResult:
+    """Validate uploaded file and return ValidationResult."""
     ext = os.path.splitext(uploaded_file.name)[1].lower()
 
     if ext not in ALLOWED_EXTENSIONS:
@@ -381,10 +403,6 @@ def validate_file_result(uploaded_file) -> ValidationResult:
         )
 
     return _validate_file_content(uploaded_file, ext)
-
-
-def validate_pdf(uploaded_file):
-    return validate_pdf_result(uploaded_file).to_legacy_tuple()
 
 
 def validate_pdf_result(uploaded_file) -> ValidationResult:
@@ -702,3 +720,28 @@ def save_temp_file(uploaded_file):
     except Exception as exc:
         logger.exception("Failed to save temporary upload file")
         raise UploadStorageError("Failed to save temporary file") from exc
+
+# =============================================================================
+# Test compatibility wrappers (backward compatibility for existing tests)
+# These convert result objects back to tuple format for test infrastructure.
+# Production code should use the result objects and process_upload as boundary.
+# =============================================================================
+
+def validate_file(uploaded_file):
+    """Test compatibility wrapper: convert ValidationResult to tuple."""
+    return validate_file_result(uploaded_file).to_legacy_tuple()
+
+
+def validate_pdf(uploaded_file):
+    """Test compatibility wrapper: convert ValidationResult to tuple."""
+    return validate_pdf_result(uploaded_file).to_legacy_tuple()
+
+
+def process_word(file_path, ext):
+    """Test compatibility wrapper: convert ExtractionResult to tuple."""
+    return _process_word_result(file_path, ext).to_legacy_tuple()
+
+
+def _process_image(file_path):
+    """Test compatibility wrapper: convert ExtractionResult to tuple."""
+    return _process_image_result(file_path).to_legacy_tuple()
