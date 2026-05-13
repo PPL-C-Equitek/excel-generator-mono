@@ -6,9 +6,13 @@
  * 
  * Fungsi ini melakukan deep copy sederhana dan murni non-mutating.
  */
+function shouldEscapeCSVFormulaCell(value: string): boolean {
+    return /^ *[=+\-@]/.test(value)
+}
+
 export function sanitizeCSVCell(data: unknown): unknown {
     if (typeof data === 'string') {
-        if (/^ *[=+\-@]/.test(data)) {
+        if (shouldEscapeCSVFormulaCell(data)) {
             return "'" + data
         }
     } else if (Array.isArray(data)) {
