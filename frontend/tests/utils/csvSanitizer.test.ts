@@ -21,7 +21,7 @@ describe('sanitizeCSVCell', () => {
     it('does not modify normal strings', () => {
         expect(sanitizeCSVCell('hello world')).toBe('hello world')
         expect(sanitizeCSVCell('12345')).toBe('12345')
-        expect(sanitizeCSVCell('a=b')).toBe('a=b') // = not at the start
+        expect(sanitizeCSVCell('a=b')).toBe('a=b')
     })
 
     it('escapes leading-space formula values', () => {
@@ -63,7 +63,7 @@ describe('sanitizeCSVCell', () => {
         
         const output = sanitizeCSVCell(input)
         expect(output).toEqual(expected)
-        expect(output).not.toBe(input) // checks for deep copy / non-mutating
+        expect(output).not.toBe(input)
     })
 
     it('preserves plain object prototype', () => {

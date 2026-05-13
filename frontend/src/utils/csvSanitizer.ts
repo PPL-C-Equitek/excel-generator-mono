@@ -1,11 +1,3 @@
-/**
- * Mencegah CSV Injection vulnerability.
- * Jika string dimulai dengan karakter berbahaya (=, +, -, @),
- * tambahkan karakter quote (') di depannya agar spreadsheet program
- * membacanya sebagai teks alih-alih mengeksekusi rumus macro.
- * 
- * Fungsi ini melakukan deep copy sederhana dan murni non-mutating.
- */
 function shouldEscapeCSVFormulaCell(value: string): boolean {
     return /^\s*[=+\-@]/.test(value)
 }
