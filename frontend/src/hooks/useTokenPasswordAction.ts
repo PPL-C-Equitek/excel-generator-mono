@@ -83,13 +83,16 @@ function validatePasswordForm(password: string, passwordConfirm: string): TokenF
   };
 
   if (!password) {
-    nextErrors.password = 'Password is required.';
+    nextErrors.password = 'Password is required';
+    return nextErrors;
   }
 
   if (!passwordConfirm) {
-    nextErrors.passwordConfirm = 'Password confirmation is required.';
+    nextErrors.passwordConfirm = 'Password confirmation is required';
+    return nextErrors;
   } else if (password !== passwordConfirm) {
-    nextErrors.passwordConfirm = 'Passwords do not match.';
+    nextErrors.passwordConfirm = 'Passwords do not match';
+    return nextErrors;
   }
 
   return nextErrors;
@@ -232,6 +235,7 @@ export function useTokenPasswordAction({
         if (fieldErrors) {
           setErrors(fieldErrors);
           setStatus('form');
+          setMessage('');
           return;
         }
 

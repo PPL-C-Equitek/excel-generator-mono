@@ -311,7 +311,7 @@ export default function RegisterPage() {
                     value={formData.name}
                     onChange={handleChange}
                     placeholder="Enter your full name"
-                    className="relative block w-full appearance-none rounded-xl border border-transparent px-4 py-3 text-sm outline-none"
+                    className="relative block w-full appearance-none rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-blue-500"
                     style={{
                       backgroundColor: 'var(--surface-2)',
                       color: 'var(--foreground)',
@@ -330,7 +330,7 @@ export default function RegisterPage() {
                     value={formData.email}
                     onChange={handleChange}
                     placeholder="Enter your email"
-                    className="relative block w-full appearance-none rounded-xl border border-transparent px-4 py-3 text-sm outline-none"
+                    className="relative block w-full appearance-none rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-blue-500"
                     style={{
                       backgroundColor: 'var(--surface-2)',
                       color: 'var(--foreground)',
