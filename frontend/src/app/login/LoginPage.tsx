@@ -1,10 +1,10 @@
 'use client'
+
 import { useState } from 'react'
-import Navbar from '@/components/Navbar'
-import LoginForm from '@/components/LoginForm'
-import { LANDING_NAV_LINKS } from '@/constants/landing'
-import type { LoginFormData } from '@/components/LoginForm'
 import { useGoogleLogin } from '@react-oauth/google'
+import Navbar from '@/components/Navbar'
+import LoginForm, { LoginFormData } from '@/components/LoginForm'
+import { LANDING_NAV_LINKS } from '@/constants/landing'
 import { login, loginWithGoogle } from '@/lib/api'
 import { storeAuthTokens } from '@/lib/auth'
 
@@ -90,7 +90,7 @@ export default function LoginPage() {
                                 d="M9 12.75 11.25 15 15 9.75m6 2.25A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z"
                             />
                         </svg>
-                        <span>Login successful! Redirecting...</span>
+                        <span>Welcome back!</span>
                     </div>
                 )}
 
@@ -98,7 +98,7 @@ export default function LoginPage() {
                     onSubmit={handleLogin}
                     onGoogleSignIn={() => {
                         if (!googleClientId) {
-                            setApiError('Google OAuth belum dikonfigurasi. Isi NEXT_PUBLIC_GOOGLE_CLIENT_ID lalu restart frontend.')
+                            setApiError('NEXT_PUBLIC_GOOGLE_CLIENT_ID is not configured')
                             return
                         }
 

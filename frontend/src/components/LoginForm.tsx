@@ -66,7 +66,6 @@ export default function LoginForm({
             className="rounded-2xl p-10 w-full max-w-lg mx-auto"
             style={{ backgroundColor: 'var(--brand-primary)' }}
         >
-            {/* Heading */}
             <h1 className="text-white font-bold text-2xl text-center mb-1">Login</h1>
             <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.75)' }}>
                 Sign in to continue to your workspace.
@@ -172,6 +171,6 @@ export default function LoginForm({
                     Sign up for free!
                 </a>
             </p>
-        </div >
+        </div>
     )
 }

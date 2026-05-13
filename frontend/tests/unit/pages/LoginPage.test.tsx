@@ -20,6 +20,11 @@ vi.mock('@/components/LogoutButton', () => ({
     default: () => <button type="button">Logout</button>,
 }))
 
+vi.mock('@/lib/api', () => ({
+    login: vi.fn(),
+    loginWithGoogle: vi.fn(),
+}))
+
 vi.mock('@/lib/auth', async () => {
     const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
 
@@ -34,6 +39,7 @@ vi.mock('@/lib/auth', async () => {
 describe('LoginPage', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        vi.useRealTimers()
         window.localStorage.clear()
         window.sessionStorage.clear()
         mockHasValidSession.mockResolvedValue(false)
@@ -178,7 +184,7 @@ describe('LoginPage', () => {
         it('does not call login API when form is submitted empty', async () => {
             render(<LoginPage />)
 
-            fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
+        fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
             await waitFor(() => {
                 expect(api.login).not.toHaveBeenCalled()
@@ -297,6 +303,8 @@ describe('handleLogin', () => {
         fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
         await waitFor(() => {
+            expect(api.login).toHaveBeenCalledWith('user1@gmail.com', 'user1123')
+            expect(screen.getByText(/welcome back!/i)).toBeInTheDocument()
             expect(localStorage.getItem('user_name')).toBe('User 1')
             expect(localStorage.getItem('user_email')).toBe('user1@gmail.com')
         })
@@ -441,6 +449,7 @@ describe('handleLogin', () => {
         })
 
         it('overwrites existing tokens in localStorage on re-login', async () => {
+            vi.useFakeTimers()
             localStorage.setItem('access_token', 'old-access')
             localStorage.setItem('refresh_token', 'old-refresh')
 
@@ -459,10 +468,16 @@ describe('handleLogin', () => {
             })
             fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
-            await waitFor(() => {
-                expect(localStorage.getItem('access_token')).toBe('new-access')
-                expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
+            await act(async () => {
+                await Promise.resolve()
             })
+
+            expect(localStorage.getItem('access_token')).toBe('new-access')
+            expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
+
+            vi.advanceTimersByTime(2000)
+            expect(globalThis.location.href).toBe('/convert')
+            vi.useRealTimers()
         })
     })
 })
