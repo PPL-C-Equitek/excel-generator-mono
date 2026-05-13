@@ -209,7 +209,7 @@ def _process_pdf_result(file_path, uploaded_file) -> ExtractionResult:
         try:
             extracted_data = OCRService.process_pdf(file_path)
             return ExtractionResult.ok(extracted_data)
-        except Exception as exc:
+        except Exception:
             logger.exception("PDF extraction failed")
             return ExtractionResult.fail("PDF extraction failed.")
 
@@ -352,7 +352,7 @@ def process_upload(uploaded_file):
     except UploadStorageError as exc:
         logger.warning(f"Storage error during upload: {exc}")
         return False, str(exc), None, None
-    except Exception as exc:
+    except Exception:
         logger.exception("Unexpected error during file upload")
         return False, "Internal server error while processing the file.", None, None
     finally:
