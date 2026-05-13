@@ -16,6 +16,7 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
     generate_chat_response,
     generate_json,
+    generate_streaming_chat_response,
     generate_text,
 )
 
@@ -978,6 +979,57 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
             
         # Simulating AttributeError by returning an object without choices
         mock_client.chat.completions.create.return_value = Mock(spec=[])
-        
+
         with self.assertRaises(OpenAIServiceError):
             generate_chat_response([{"role": "user", "content": "Halo"}])
+
+
+class GenerateStreamingChatResponseTest(SimpleTestCase):
+    def test_negative_raises_value_error_for_empty_messages(self):
+        with self.assertRaises(ValueError):
+            next(generate_streaming_chat_response([]))
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini", OPENAI_BASE_URL="")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_negative_skips_chunks_with_no_delta_content(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        bad_chunk = Mock(choices=[])
+        mock_stream = Mock()
+        mock_stream.__iter__ = Mock(return_value=iter([bad_chunk]))
+        mock_stream.close = Mock()
+        mock_client.chat.completions.create.return_value = mock_stream
+
+        result = list(generate_streaming_chat_response([{"role": "user", "content": "Hi"}]))
+
+        self.assertEqual(result, [])
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini", OPENAI_BASE_URL="")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_positive_yields_delta_content_from_chunks(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        good_chunk = Mock()
+        good_chunk.choices = [Mock(delta=Mock(content="Hello"))]
+        mock_stream = Mock()
+        mock_stream.__iter__ = Mock(return_value=iter([good_chunk]))
+        mock_stream.close = Mock()
+        mock_client.chat.completions.create.return_value = mock_stream
+
+        result = list(generate_streaming_chat_response([{"role": "user", "content": "Hi"}]))
+
+        self.assertEqual(result, ["Hello"])
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini", OPENAI_BASE_URL="")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_positive_builds_client_without_base_url(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_stream = Mock()
+        mock_stream.__iter__ = Mock(return_value=iter([]))
+        mock_stream.close = Mock()
+        mock_client.chat.completions.create.return_value = mock_stream
+
+        list(generate_streaming_chat_response([{"role": "user", "content": "Hi"}]))
+
+        mock_openai.assert_called_once_with(api_key="test-key")
