@@ -771,11 +771,30 @@ def send_message(request):
     return Response(response_serializer.data)
 
 
+def _build_sse_event(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+
+def _prepare_stream_history(session, history: list) -> list:
+    if session is None:
+        return history
+    prepared = build_history_with_summary(session, history)
+    return _inject_file_context_if_available(session, prepared)
+
+
+def _persist_and_finalize_stream(user, session, message: str, reply: str):
+    with transaction.atomic():
+        if session is None:
+            title = generate_session_title_from_message(message)
+            session = create_session_for_user(user, title=title)
+        append_user_message(session, message)
+        append_assistant_message(session, reply)
+    return session
+
+
 def _build_stream_event_generator(request, session, history, message):
     reply_chunks = []
-
-    prepared_history = build_history_with_summary(session, history) if session is not None else history
-    prepared_history = _inject_file_context_if_available(session, prepared_history)
+    prepared_history = _prepare_stream_history(session, history)
 
     try:
         stream = generate_streaming_chat_response(prepared_history)
@@ -784,18 +803,18 @@ def _build_stream_event_generator(request, session, history, message):
                 stream.close()
                 return
             reply_chunks.append(chunk)
-            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            yield _build_sse_event({'chunk': chunk})
     except OpenAIConfigurationError:
         raise
     except OpenAIServiceError:
-        yield f"data: {json.dumps({'error': UPSTREAM_FAILURE_DETAIL})}\n\n"
+        yield _build_sse_event({'error': UPSTREAM_FAILURE_DETAIL})
         yield _SSE_DONE
         return
     except GeneratorExit:
         return
     except Exception:
         logger.exception("Unexpected error during streaming send_message.")
-        yield f"data: {json.dumps({'error': INTERNAL_FAILURE_DETAIL})}\n\n"
+        yield _build_sse_event({'error': INTERNAL_FAILURE_DETAIL})
         yield _SSE_DONE
         return
 
@@ -803,14 +822,8 @@ def _build_stream_event_generator(request, session, history, message):
     if not reply:
         return
 
-    with transaction.atomic():
-        if session is None:
-            title = generate_session_title_from_message(message)
-            session = create_session_for_user(request.user, title=title)
-        append_user_message(session, message)
-        append_assistant_message(session, reply)
-
-    yield f"data: {json.dumps({'session_id': str(session.id), 'done': True})}\n\n"
+    session = _persist_and_finalize_stream(request.user, session, message, reply)
+    yield _build_sse_event({'session_id': str(session.id), 'done': True})
     yield _SSE_DONE
 
 
