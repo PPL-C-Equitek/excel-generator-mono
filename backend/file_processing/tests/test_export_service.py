@@ -1837,3 +1837,44 @@ class DiscoverExcelDownloadArtifactsTest(unittest.TestCase):
         ):
             with self.assertRaises(export_service.OutputExcelDownloadStorageError):
                 export_service._discover_excel_download_artifacts(r"C:\safe\storage")
+
+
+class BuildCSVFileDefaultSeenNamesTest(unittest.TestCase):
+    def test_build_csv_file_defaults_seen_names_to_empty_set(self):
+        sheet = {
+            "name": "Report",
+            "headers": ["col"],
+            "rows": [["val"]],
+        }
+
+        result = export_service._build_csv_file(
+            sheet=sheet,
+            sheet_index=0,
+            sanitization_policy=export_service._DEFAULT_CSV_SANITIZATION_POLICY,
+            filename_policy=export_service._DEFAULT_CSV_FILENAME_POLICY,
+        )
+
+        self.assertEqual(result["name"], "Report.csv")
+        self.assertIn("col", result["content"])
+
+
+class NormalizeCSVExportFilenameTest(unittest.TestCase):
+    """Covers lines 404-405 and 412 of _normalize_csv_export_filename."""
+
+    def test_normalize_defaults_seen_names_to_empty_set(self):
+        result = export_service._normalize_csv_export_filename("Report.csv")
+
+        self.assertEqual(result, "Report.csv")
+
+    def test_normalize_filename_without_csv_extension(self):
+        result = export_service._normalize_csv_export_filename("data.txt", set())
+
+        self.assertEqual(result, "data.txt")
+
+    def test_normalize_deduplicates_non_csv_filenames(self):
+        seen = set()
+        first = export_service._normalize_csv_export_filename("data.txt", seen)
+        second = export_service._normalize_csv_export_filename("data.txt", seen)
+
+        self.assertEqual(first, "data.txt")
+        self.assertEqual(second, "data.txt_1")
