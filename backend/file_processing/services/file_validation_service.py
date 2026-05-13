@@ -56,21 +56,50 @@ def _validate_file_content(
     validate_word_func=None,
 ) -> ValidationResult:
     """Validate file size, MIME type, and type-specific constraints."""
-    validate_image_func = validate_image_func or validate_image
-    validate_mime_type_func = validate_mime_type_func or validate_mime_type
-    validate_excel_sheet_count_func = (
-        validate_excel_sheet_count_func or validate_excel_sheet_count
+    validators = _resolve_validators(
+        validate_image_func=validate_image_func,
+        validate_mime_type_func=validate_mime_type_func,
+        validate_excel_sheet_count_func=validate_excel_sheet_count_func,
+        validate_word_func=validate_word_func,
     )
-    validate_word_func = validate_word_func or word_validation_service.validate_word
 
-    # Image files can return early without further checks
     if ext in IMAGE_EXTENSIONS:
-        is_valid, error = validate_image_func(uploaded_file)
-        if not is_valid:
-            return ValidationResult.fail(error or "Invalid image file.")
-        return ValidationResult.ok()
+        return _validate_image_content(uploaded_file, validators["image"])
 
-    # All other file types: check size and MIME type
+    common_result = _validate_common_content(uploaded_file, ext, validators["mime"])
+    if not common_result.is_valid:
+        return common_result
+
+    return _validate_type_specific_content(uploaded_file, ext, validators)
+
+
+def _resolve_validators(
+    *,
+    validate_image_func=None,
+    validate_mime_type_func=None,
+    validate_excel_sheet_count_func=None,
+    validate_word_func=None,
+):
+    return {
+        "image": validate_image_func or validate_image,
+        "mime": validate_mime_type_func or validate_mime_type,
+        "excel": validate_excel_sheet_count_func or validate_excel_sheet_count,
+        "word": validate_word_func or word_validation_service.validate_word,
+    }
+
+
+def _validate_image_content(uploaded_file, validate_image_func) -> ValidationResult:
+    is_valid, error = validate_image_func(uploaded_file)
+    if not is_valid:
+        return ValidationResult.fail(error or "Invalid image file.")
+    return ValidationResult.ok()
+
+
+def _validate_common_content(
+    uploaded_file,
+    ext,
+    validate_mime_type_func,
+) -> ValidationResult:
     if uploaded_file.size > MAX_FILE_SIZE:
         return ValidationResult.fail(FILE_TOO_LARGE_ERROR)
 
@@ -78,19 +107,32 @@ def _validate_file_content(
     if not is_valid_mime:
         return ValidationResult.fail(mime_error or MIME_TYPE_DETECTION_ERROR)
 
-    # Type-specific format validation
+    return ValidationResult.ok()
+
+
+def _validate_type_specific_content(uploaded_file, ext, validators) -> ValidationResult:
     if ext in {EXT_XLS, EXT_XLSX}:
-        is_valid_excel, excel_error = validate_excel_sheet_count_func(
-            uploaded_file,
-            ext,
-        )
-        if not is_valid_excel:
-            return ValidationResult.fail(excel_error or EXCEL_CORRUPT_ERROR)
+        return _validate_excel_content(uploaded_file, ext, validators["excel"])
 
     if ext in {EXT_DOC, EXT_DOCX}:
-        is_valid_word, word_error = validate_word_func(uploaded_file, ext)
-        if not is_valid_word:
-            return ValidationResult.fail(word_error or WORD_CORRUPT_ERROR)
+        return _validate_word_content(uploaded_file, ext, validators["word"])
 
     return ValidationResult.ok()
 
+
+def _validate_excel_content(
+    uploaded_file,
+    ext,
+    validate_excel_sheet_count_func,
+) -> ValidationResult:
+    is_valid, error = validate_excel_sheet_count_func(uploaded_file, ext)
+    if not is_valid:
+        return ValidationResult.fail(error or EXCEL_CORRUPT_ERROR)
+    return ValidationResult.ok()
+
+
+def _validate_word_content(uploaded_file, ext, validate_word_func) -> ValidationResult:
+    is_valid, error = validate_word_func(uploaded_file, ext)
+    if not is_valid:
+        return ValidationResult.fail(error or WORD_CORRUPT_ERROR)
+    return ValidationResult.ok()
