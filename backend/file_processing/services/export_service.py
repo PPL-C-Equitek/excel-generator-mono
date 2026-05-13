@@ -386,12 +386,16 @@ def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
             "filename_policy.build_filename must return a non-empty string."
         )
         
-    filename = filename.replace("\\", "/").split("/")[-1]
+    filename = _normalize_csv_export_filename(filename)
 
     return {
         "name": filename,
         "content": _build_csv_content(normalized_headers, normalized_rows),
     }
+
+
+def _normalize_csv_export_filename(filename):
+    return filename.replace("\\", "/").split("/")[-1]
 
 
 def _validate_sheet_structure(sheet, sheet_index, error_class):
