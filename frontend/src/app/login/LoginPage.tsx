@@ -1,14 +1,18 @@
 'use client'
-import Navbar from '@/components/Navbar'
-import LoginForm from '@/components/LoginForm'
-import { LANDING_NAV_LINKS } from '@/constants/landing'
-import type { LoginFormData } from '@/components/LoginForm'
+
+import { useState } from 'react'
 import { useGoogleLogin } from '@react-oauth/google'
+import Navbar from '@/components/Navbar'
+import LoginForm, { LoginFormData } from '@/components/LoginForm'
+import { LANDING_NAV_LINKS } from '@/constants/landing'
 import { login, loginWithGoogle } from '@/lib/api'
 import { storeAuthTokens } from '@/lib/auth'
 
 export default function LoginPage() {
     const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    const [isLoading, setIsLoading] = useState(false)
+    const [apiError, setApiError] = useState<string | null>(null)
+    const [showSuccessMessage, setShowSuccessMessage] = useState(false)
 
     const saveTokensAndRedirect = (
         accessToken: string,
@@ -22,18 +26,24 @@ export default function LoginPage() {
             localStorage.setItem('user_email', user.email)
         }
 
-        globalThis.location.href = '/convert'
+        setShowSuccessMessage(true)
+        setTimeout(() => {
+            globalThis.location.href = '/convert'
+        }, 2000)
     }
 
     const handleLogin = async (data: LoginFormData) => {
         try {
+            setIsLoading(true)
+            setApiError(null)
             const res = await login(data.email, data.password)
             saveTokensAndRedirect(res.access_token, res.refresh_token, res.user)
         } catch (err: unknown) {
+            setIsLoading(false)
             if (err instanceof Error) {
-                alert(err.message)
+                setApiError(err.message)
             } else {
-                alert('Something went wrong')
+                setApiError('Something went wrong. Please try again.')
             }
         }
     }
@@ -41,18 +51,21 @@ export default function LoginPage() {
     const triggerGoogleSignIn = useGoogleLogin({
         onSuccess: async (tokenResponse) => {
             try {
+                setIsLoading(true)
+                setApiError(null)
                 const res = await loginWithGoogle(tokenResponse.access_token)
                 saveTokensAndRedirect(res.access_token, res.refresh_token, res.user)
             } catch (err: unknown) {
+                setIsLoading(false)
                 if (err instanceof Error) {
-                    alert(err.message)
+                    setApiError(err.message)
                 } else {
-                    alert('Google sign-in failed')
+                    setApiError('Google sign-in failed. Please try again.')
                 }
             }
         },
         onError: () => {
-            alert('Google sign-in cancelled or failed')
+            setApiError('Google sign-in cancelled or failed. Please try again.')
         },
         scope: 'openid email profile',
     })
@@ -61,16 +74,39 @@ export default function LoginPage() {
         <div className="force-light min-h-screen flex flex-col bg-gray-50">
             <Navbar links={LANDING_NAV_LINKS} activePage="login" />
             <main className="flex flex-1 items-center justify-center px-4 py-12">
+                {/* Success Message */}
+                {showSuccessMessage && (
+                    <div className="fixed top-4 left-4 right-4 mx-auto max-w-lg rounded-lg border border-green-200 bg-green-50 p-4 text-sm font-medium text-green-800 shadow-lg z-50 flex items-center gap-3">
+                        <svg
+                            className="h-5 w-5 flex-shrink-0 text-green-600"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M9 12.75 11.25 15 15 9.75m6 2.25A9 9 0 1 1 3 12a9 9 0 0 1 18 0Z"
+                            />
+                        </svg>
+                        <span>Welcome back!</span>
+                    </div>
+                )}
+
                 <LoginForm
                     onSubmit={handleLogin}
                     onGoogleSignIn={() => {
                         if (!googleClientId) {
-                            alert('Google OAuth belum dikonfigurasi. Isi NEXT_PUBLIC_GOOGLE_CLIENT_ID lalu restart frontend.')
+                            setApiError('NEXT_PUBLIC_GOOGLE_CLIENT_ID is not configured')
                             return
                         }
 
                         triggerGoogleSignIn()
                     }}
+                    isLoading={isLoading}
+                    apiError={apiError}
+                    onClearApiError={() => setApiError(null)}
                 />
             </main>
         </div>
