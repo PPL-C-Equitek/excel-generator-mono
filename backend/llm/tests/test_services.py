@@ -484,6 +484,99 @@ class LlmGenerationServiceTest(SimpleTestCase):
             system_prompt="Schema-specific prompt",
         )
 
+    def test_json_generation_service_compacts_upload_wrapper_payload_for_prompt(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        service.generate(
+            {
+                "status": "success",
+                "message": "File uploaded successfully",
+                "filename": "report.pdf",
+                "size": 20480,
+                "format": "pdf",
+                "extracted": {
+                    "Sheet1": [["name", "amount"], ["A", 10]],
+                },
+            }
+        )
+
+        text_provider.generate_text.assert_called_once()
+        prompt = text_provider.generate_text.call_args.kwargs["prompt"]
+        parsed_prompt = json.loads(prompt)
+        self.assertEqual(
+            parsed_prompt,
+            {
+                "filename": "report.pdf",
+                "format": "pdf",
+                "extracted": {
+                    "Sheet1": [["name", "amount"], ["A", 10]],
+                },
+            },
+        )
+
+    def test_json_generation_service_preserves_follow_up_fields_when_compacting(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        service.generate(
+            {
+                "status": "success",
+                "message": "File uploaded successfully",
+                "filename": "report.pdf",
+                "size": 20480,
+                "format": "pdf",
+                "extracted": {"Sheet1": [["name"], ["A"]]},
+                "user_prompt": "Only keep paid invoices",
+                "previous_output": {"content_data": [{"rows": [{"status": "all"}]}]},
+            }
+        )
+
+        text_provider.generate_text.assert_called_once()
+        prompt = text_provider.generate_text.call_args.kwargs["prompt"]
+        parsed_prompt = json.loads(prompt)
+        self.assertEqual(
+            parsed_prompt,
+            {
+                "filename": "report.pdf",
+                "format": "pdf",
+                "extracted": {"Sheet1": [["name"], ["A"]]},
+                "user_prompt": "Only keep paid invoices",
+                "previous_output": {"content_data": [{"rows": [{"status": "all"}]}]},
+            },
+        )
+
+    def test_json_generation_service_drops_blank_user_prompt_when_compacting(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        service.generate(
+            {
+                "status": "success",
+                "message": "File uploaded successfully",
+                "filename": "report.pdf",
+                "size": 20480,
+                "format": "pdf",
+                "extracted": {"Sheet1": [["name"], ["A"]]},
+                "user_prompt": "   ",
+            }
+        )
+
+        prompt = text_provider.generate_text.call_args.kwargs["prompt"]
+        parsed_prompt = json.loads(prompt)
+        self.assertNotIn("user_prompt", parsed_prompt)
+        self.assertEqual(
+            parsed_prompt,
+            {
+                "filename": "report.pdf",
+                "format": "pdf",
+                "extracted": {"Sheet1": [["name"], ["A"]]},
+            },
+        )
+
     @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_uses_base_prompt_when_no_schema_selected(
         self, mock_build_extraction_prompt
@@ -503,6 +596,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            refinement_instruction=None,
             chat_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_not_called()
@@ -533,6 +627,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="Use only invoice_number and total_amount.",
+            refinement_instruction=None,
             chat_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
@@ -561,6 +656,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="   ",
+            refinement_instruction=None,
             chat_context=None,
         )
         json_generator.generate.assert_called_once_with(
@@ -587,11 +683,43 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            refinement_instruction=None,
             chat_context=None,
         )
         json_generator.generate.assert_called_once_with(
             input_json={"name": "Pen", "price": 5000},
             system_prompt="Extraction prompt.",
+        )
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_passes_refinement_instruction_when_provided(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "Base prompt.",
+        )
+
+        result = service.generate(
+            {"sheet": "Sheet1"},
+            custom_schema_id=None,
+            refinement_instruction="Fix validation errors",
+        )
+
+        self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint=None,
+            refinement_instruction="Fix validation errors",
+            chat_context=None,
+        )
+        json_generator.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            system_prompt="Base prompt.\n\nExtraction prompt.",
         )
 
     @patch("llm.services.generation_service.build_extraction_prompt")
@@ -619,6 +747,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="Use only invoice_number and total_amount.",
+            refinement_instruction=None,
             chat_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")

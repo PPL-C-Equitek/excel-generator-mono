@@ -90,6 +90,48 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
 
         self.assertNotIn("## INPUT", prompt)
 
+    def test_build_extraction_prompt_includes_refinement_section_when_provided(self):
+        prompt = build_extraction_prompt(
+            schema_hint="headers: [item]",
+            refinement_instruction="Fix summary.total_items mismatch.",
+        )
+
+        self.assertIn("## SCHEMA_HINT", prompt)
+        self.assertIn("## REFINEMENT", prompt)
+        self.assertIn("Fix summary.total_items mismatch.", prompt)
+
+    def test_build_extraction_prompt_ignores_blank_refinement_instruction(self):
+        prompt = build_extraction_prompt(
+            schema_hint="headers: [item]",
+            refinement_instruction="   ",
+        )
+
+        self.assertIn("## SCHEMA_HINT", prompt)
+        self.assertNotIn("## REFINEMENT", prompt)
+
+    def test_build_extraction_prompt_includes_refinement_without_schema_hint(self):
+        prompt = build_extraction_prompt(
+            schema_hint="   ",
+            refinement_instruction="Repair content_data row mapping.",
+        )
+
+        self.assertNotIn("## SCHEMA_HINT", prompt)
+        self.assertIn("## REFINEMENT", prompt)
+        self.assertIn("Repair content_data row mapping.", prompt)
+
+    def test_build_extraction_prompt_supports_schema_chat_and_refinement_together(self):
+        prompt = build_extraction_prompt(
+            schema_hint="headers: [item]",
+            chat_context="USER: Gunakan Bahasa Indonesia",
+            refinement_instruction="Fix summary.total_items mismatch.",
+        )
+
+        self.assertIn("## SCHEMA_HINT", prompt)
+        self.assertIn("## CHAT_CONTEXT", prompt)
+        self.assertIn("## REFINEMENT", prompt)
+        self.assertLess(prompt.find("## SCHEMA_HINT"), prompt.find("## CHAT_CONTEXT"))
+        self.assertLess(prompt.find("## CHAT_CONTEXT"), prompt.find("## REFINEMENT"))
+
     def test_to_json_context_truncates_when_output_too_long(self):
         result = _to_json_context({"value": "x" * 30}, max_chars=10)
 
@@ -117,3 +159,54 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
         self.assertIn("- document_type: xlsx", prompt)
         self.assertIn("INPUT_JSON:", prompt)
         self.assertIn("OUTPUT_JSON:", prompt)
+
+    def test_build_conversion_reasoning_prompt_compacts_upload_wrapper_and_hides_raw_rows(self):
+        prompt = build_conversion_reasoning_prompt(
+            input_json={
+                "status": "success",
+                "message": "File uploaded successfully",
+                "filename": "invoice.pdf",
+                "format": "pdf",
+                "size": 123,
+                "extracted": {
+                    "Sheet1": [
+                        ["header_1", "header_2"],
+                        ["RAW_INPUT_SECRET_VALUE", "1000"],
+                    ]
+                },
+                "user_prompt": "Only keep paid rows",
+            },
+            output_json={
+                "document_info": {"source_type": "PDF", "filename": "invoice.pdf"},
+                "summary": {"total_tables": 1, "total_rows": 1, "total_columns": 2},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["status", "amount"],
+                        "rows": [{"status": "PAID", "amount": "RAW_OUTPUT_SECRET_VALUE"}],
+                    }
+                ],
+            },
+            file_name="invoice.pdf",
+            document_type="pdf",
+        )
+
+        self.assertIn("upload_wrapper", prompt)
+        self.assertIn("tabular_output", prompt)
+        self.assertIn("table_count", prompt)
+        self.assertIn("header_count", prompt)
+        self.assertNotIn("RAW_INPUT_SECRET_VALUE", prompt)
+        self.assertNotIn("RAW_OUTPUT_SECRET_VALUE", prompt)
+
+    def test_build_conversion_reasoning_prompt_compacts_large_nested_payload(self):
+        huge_value = "X" * 5000
+        prompt = build_conversion_reasoning_prompt(
+            input_json={
+                "extracted": {
+                    "Sheet1": [["col1"], [huge_value]],
+                }
+            },
+            output_json={"content_data": [{"table_name": "Sheet1", "headers": ["col1"], "rows": [{"col1": huge_value}]}]},
+        )
+
+        self.assertLess(len(prompt), 10000)
