@@ -18,6 +18,11 @@ from file_processing.services.image_validation_service import validate_image
 from file_processing.services.word_extraction_service import WordExtractionService
 from file_processing.services.contracts import ValidationResult, ExtractionResult
 from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
+from file_processing.services.exceptions import (
+    UploadValidationError,
+    UploadExtractionError,
+    UploadStorageError,
+)
 
 try:
     import magic
@@ -238,6 +243,7 @@ def process_word(file_path, ext):
 
 
 def _dispatch_upload_processing(ext, file_path, uploaded_file):
+    """Dispatch upload processing by file type. Raises UploadExtractionError on failure."""
     processors = {
         EXT_PDF: lambda: _process_pdf(file_path, uploaded_file),
         EXT_XLS: lambda: process_uploaded_excel(file_path),
@@ -253,9 +259,13 @@ def _dispatch_upload_processing(ext, file_path, uploaded_file):
 
     processor = processors.get(ext)
     if processor is None:
-        return False, "Unsupported file type", None
+        raise UploadExtractionError("Unsupported file type")
 
-    return processor()
+    is_success, error, extracted_data = processor()
+    if not is_success:
+        raise UploadExtractionError(error or "Failed to process uploaded file")
+
+    return extracted_data
 
 
 def _get_upload_extension(uploaded_file):
@@ -271,37 +281,58 @@ def _cleanup_temp_upload(file_path):
 
 
 def _process_stored_upload(ext, file_path, uploaded_file):
-    success, error, extracted_data = _dispatch_upload_processing(
-        ext,
-        file_path,
-        uploaded_file,
-    )
-    if not success:
-        return False, error, None
-    return True, None, extracted_data
+    """Process stored upload. Raises UploadExtractionError on failure."""
+    try:
+        extracted_data = _dispatch_upload_processing(ext, file_path, uploaded_file)
+        return extracted_data
+    except UploadExtractionError:
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error during upload processing")
+        raise UploadExtractionError(
+            "Failed to process uploaded file"
+        ) from exc
 
 
 def process_upload(uploaded_file):
-    is_valid, error = validate_file(uploaded_file)
-    if not is_valid:
-        return False, error, None, None
-
-    ext = _get_upload_extension(uploaded_file)
-    file_path = save_temp_file(uploaded_file)
-
+    """
+    Process uploaded file with domain exception handling at boundary layer.
+    
+    Internal errors are mapped to domain exceptions and converted back to 
+    legacy tuple format for backward compatibility.
+    
+    Returns: (success: bool, error: str | None, _unused: None, extracted_data: dict | None)
+    """
+    file_path = None
     try:
-        success, error, extracted_data = _process_stored_upload(
-            ext,
-            file_path,
-            uploaded_file,
-        )
-        if not success:
-            return False, error, None, None
+        # Validation phase (raises UploadValidationError)
+        validation_result = validate_file_result(uploaded_file)
+        if not validation_result.is_valid:
+            raise UploadValidationError(validation_result.error)
 
+        # Storage phase (raises UploadStorageError)
+        ext = _get_upload_extension(uploaded_file)
+        file_path = save_temp_file(uploaded_file)
+
+        # Extraction phase (raises UploadExtractionError)
+        extracted_data = _process_stored_upload(ext, file_path, uploaded_file)
+        return True, None, None, extracted_data
+
+    except UploadValidationError as exc:
+        logger.warning(f"Validation error during upload: {exc}")
+        return False, str(exc), None, None
+    except UploadExtractionError as exc:
+        logger.warning(f"Extraction error during upload: {exc}")
+        return False, str(exc), None, None
+    except UploadStorageError as exc:
+        logger.warning(f"Storage error during upload: {exc}")
+        return False, str(exc), None, None
+    except Exception as exc:
+        logger.exception("Unexpected error during file upload")
+        return False, "Internal server error while processing the file.", None, None
     finally:
-        _cleanup_temp_upload(file_path)
-
-    return True, None, None, extracted_data
+        if file_path:
+            _cleanup_temp_upload(file_path)
 
 
 def validate_file(uploaded_file):
@@ -647,20 +678,27 @@ def _validate_csv_content(uploaded_file, detected_mime: str):
 
 
 def save_temp_file(uploaded_file):
-    os.makedirs(settings.UPLOAD_TEMP_DIR, exist_ok=True)
+    """Save uploaded file to temporary directory. Raises UploadStorageError on failure."""
+    try:
+        os.makedirs(settings.UPLOAD_TEMP_DIR, exist_ok=True)
 
-    original_name = os.path.basename(uploaded_file.name)
-    safe_name = get_valid_filename(original_name)
-    unique_name = f"{uuid4()}_{safe_name}"
+        original_name = os.path.basename(uploaded_file.name)
+        safe_name = get_valid_filename(original_name)
+        unique_name = f"{uuid4()}_{safe_name}"
 
-    base_dir = os.path.abspath(settings.UPLOAD_TEMP_DIR)
-    file_path = os.path.abspath(os.path.join(base_dir, unique_name))
+        base_dir = os.path.abspath(settings.UPLOAD_TEMP_DIR)
+        file_path = os.path.abspath(os.path.join(base_dir, unique_name))
 
-    if not file_path.startswith(base_dir):
-        raise ValueError("Invalid file path detected.")
+        if not file_path.startswith(base_dir):
+            raise UploadStorageError("Invalid file path detected.")
 
-    with open(file_path, "wb+") as destination:
-        for chunk in uploaded_file.chunks():
-            destination.write(chunk)
+        with open(file_path, "wb+") as destination:
+            for chunk in uploaded_file.chunks():
+                destination.write(chunk)
 
-    return file_path
+        return file_path
+    except UploadStorageError:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to save temporary upload file")
+        raise UploadStorageError("Failed to save temporary file") from exc
