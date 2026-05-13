@@ -183,13 +183,30 @@ class StreamSendMessageEdgeCaseTest(TestCase):
         mock_stream.return_value = iter(["Reply"])
         session = Session.objects.create(owner=self.user, title="Existing")
 
-        self.client.post(
+        response = self.client.post(
             "/llm/send-message/stream/",
             {"message": "Lanjut", "session_id": str(session.id)},
             content_type="application/json",
         )
+        list(response.streaming_content)  # consume to trigger DB persist
 
         self.assertEqual(Session.objects.filter(owner=self.user).count(), 1)
+
+    @patch("llm.views._build_stream_event_generator")
+    def test_edge_empty_generator_yields_no_first_event(self, mock_build_gen):
+        def _empty():
+            yield from ()
+
+        mock_build_gen.return_value = _empty()
+
+        response = self.client.post(
+            "/llm/send-message/stream/",
+            {"message": "Hi"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.streaming_content), [])
 
     @patch("llm.views.generate_streaming_chat_response")
     def test_edge_returns_503_on_config_error(self, mock_stream):
