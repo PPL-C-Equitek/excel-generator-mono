@@ -37,6 +37,12 @@ describe('sanitizeCSVCell', () => {
         expect(sanitizeCSVCell(input)).toEqual(expected)
     })
 
+    it('handles tab-prefixed formulas in nested arrays', () => {
+        const input = ['safe', ['\t=SUM(A1:A2)']]
+        const expected = ['safe', ["'\t=SUM(A1:A2)"]]
+        expect(sanitizeCSVCell(input)).toEqual(expected)
+    })
+
     it('maps over object values recursively without mutating original', () => {
         const input = {
             a: '=1',
