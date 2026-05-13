@@ -76,7 +76,7 @@ function readFieldErrors(data: unknown): TokenFormErrors | null {
   return hasFormErrors(nextErrors) ? nextErrors : null;
 }
 
-function validatePasswordForm(password: string, passwordConfirm: string): TokenFormErrors {
+export function validatePasswordForm(password: string, passwordConfirm: string): TokenFormErrors {
   const nextErrors: TokenFormErrors = {
     password: '',
     passwordConfirm: '',
