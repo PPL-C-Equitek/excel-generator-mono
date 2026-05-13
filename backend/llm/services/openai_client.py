@@ -181,24 +181,14 @@ def generate_streaming_chat_response(messages: list[dict]):
         )
 
     try:
-        for chunk in stream:
-            try:
-                delta = chunk.choices[0].delta.content
-            except (AttributeError, IndexError):
-                delta = None
-            if delta:
-                yield delta
-    except AuthenticationError as exc:
-        raise OpenAIUpstreamError("LLM authentication failed.", status_code=502) from exc
-    except RateLimitError as exc:
-        raise OpenAIUpstreamError("LLM rate limit exceeded.", status_code=429) from exc
-    except APITimeoutError as exc:
-        raise OpenAIUpstreamError("LLM request timed out.", status_code=504) from exc
-    except APIStatusError as exc:
-        status_code = _map_api_status_to_http(getattr(exc, "status_code", None))
-        raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=status_code) from exc
-    except (APIConnectionError, APIError) as exc:
-        raise OpenAIUpstreamError(_LLM_PROVIDER_FAILED, status_code=502) from exc
+        with handle_openai_exceptions():
+            for chunk in stream:
+                try:
+                    delta = chunk.choices[0].delta.content
+                except (AttributeError, IndexError):
+                    delta = None
+                if delta:
+                    yield delta
     finally:
         stream.close()
 
