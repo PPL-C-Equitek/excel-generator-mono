@@ -185,7 +185,11 @@ def _get_empty_page_numbers(extracted_data):
 
 def _process_pdf_result(file_path, uploaded_file) -> ExtractionResult:
     """Process PDF and return ExtractionResult. Raises UploadValidationError on validation failure."""
-    validation_result = validate_pdf_result(uploaded_file)
+    validation_is_valid, validation_error = validate_pdf(uploaded_file)
+    validation_result = ValidationResult(
+        is_valid=validation_is_valid,
+        error=validation_error,
+    )
     if not validation_result.is_valid:
         raise UploadValidationError(validation_result.error)
 
@@ -211,7 +215,15 @@ def _process_pdf_result(file_path, uploaded_file) -> ExtractionResult:
             return ExtractionResult.ok(extracted_data)
         except Exception:
             logger.exception("PDF extraction failed")
-            return ExtractionResult.fail("PDF extraction failed.")
+            raise
+
+
+def _process_pdf(file_path, uploaded_file):
+    """Legacy wrapper that preserves the tuple return contract."""
+    try:
+        return _process_pdf_result(file_path, uploaded_file).to_legacy_tuple()
+    except UploadValidationError as exc:
+        return False, str(exc), None
 
 
 def _process_image_result(file_path) -> ExtractionResult:
@@ -267,16 +279,22 @@ def _process_uploaded_csv_result(file_path) -> ExtractionResult:
 def _dispatch_upload_processing(ext, file_path, uploaded_file) -> ExtractionResult:
     """Dispatch upload processing by file type. Returns ExtractionResult."""
     processors = {
-        EXT_PDF: lambda: _process_pdf_result(file_path, uploaded_file),
+        EXT_PDF: lambda: _convert_extraction_tuple_to_result(
+            _process_pdf(file_path, uploaded_file)
+        ),
         EXT_XLS: lambda: _process_uploaded_excel_result(file_path),
         EXT_XLSX: lambda: _process_uploaded_excel_result(file_path),
-        EXT_DOC: lambda: _process_word_result(file_path, EXT_DOC),
-        EXT_DOCX: lambda: _process_word_result(file_path, EXT_DOCX),
+        EXT_DOC: lambda: _convert_extraction_tuple_to_result(
+            process_word(file_path, EXT_DOC)
+        ),
+        EXT_DOCX: lambda: _convert_extraction_tuple_to_result(
+            process_word(file_path, EXT_DOCX)
+        ),
         EXT_TXT: lambda: _process_uploaded_txt_result(file_path),
         EXT_CSV: lambda: _process_uploaded_csv_result(file_path),
-        EXT_PNG: lambda: _process_image_result(file_path),
-        EXT_JPG: lambda: _process_image_result(file_path),
-        EXT_JPEG: lambda: _process_image_result(file_path),
+        EXT_PNG: lambda: _convert_extraction_tuple_to_result(_process_image(file_path)),
+        EXT_JPG: lambda: _convert_extraction_tuple_to_result(_process_image(file_path)),
+        EXT_JPEG: lambda: _convert_extraction_tuple_to_result(_process_image(file_path)),
     }
 
     processor = processors.get(ext)
@@ -310,11 +328,6 @@ def _process_stored_upload(ext, file_path, uploaded_file) -> ExtractionResult:
         raise
     except UploadExtractionError:
         raise
-    except Exception as exc:
-        logger.exception("Unexpected error during upload processing")
-        raise UploadExtractionError(
-            "Failed to process uploaded file"
-        ) from exc
 
 
 def process_upload(uploaded_file):
@@ -329,13 +342,20 @@ def process_upload(uploaded_file):
     file_path = None
     try:
         # Validation phase (internal: ValidationResult)
-        validation_result = validate_file_result(uploaded_file)
+        validation_is_valid, validation_error = validate_file(uploaded_file)
+        validation_result = ValidationResult(
+            is_valid=validation_is_valid,
+            error=validation_error,
+        )
         if not validation_result.is_valid:
             raise UploadValidationError(validation_result.error)
 
         # Storage phase (raises UploadStorageError)
         ext = _get_upload_extension(uploaded_file)
-        file_path = save_temp_file(uploaded_file)
+        try:
+            file_path = save_temp_file(uploaded_file)
+        except ValueError as exc:
+            raise UploadStorageError(str(exc)) from exc
 
         # Extraction phase (internal: ExtractionResult)
         extraction_result = _process_stored_upload(ext, file_path, uploaded_file)
@@ -352,9 +372,6 @@ def process_upload(uploaded_file):
     except UploadStorageError as exc:
         logger.warning(f"Storage error during upload: {exc}")
         return False, str(exc), None, None
-    except Exception:
-        logger.exception("Unexpected error during file upload")
-        return False, "Internal server error while processing the file.", None, None
     finally:
         if file_path:
             _cleanup_temp_upload(file_path)
@@ -708,13 +725,15 @@ def save_temp_file(uploaded_file):
         file_path = os.path.abspath(os.path.join(base_dir, unique_name))
 
         if not file_path.startswith(base_dir):
-            raise UploadStorageError("Invalid file path detected.")
+            raise ValueError("Invalid file path detected.")
 
         with open(file_path, "wb+") as destination:
             for chunk in uploaded_file.chunks():
                 destination.write(chunk)
 
         return file_path
+    except ValueError:
+        raise
     except UploadStorageError:
         raise
     except Exception as exc:
