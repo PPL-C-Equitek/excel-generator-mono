@@ -24,6 +24,13 @@ describe('sanitizeCSVCell', () => {
         expect(sanitizeCSVCell('a=b')).toBe('a=b') // = not at the start
     })
 
+    it('escapes leading-space formula values', () => {
+        expect(sanitizeCSVCell(' =SUM(A1:A2)')).toBe("' =SUM(A1:A2)")
+        expect(sanitizeCSVCell(' +1')).toBe("' +1")
+        expect(sanitizeCSVCell(' @cmd')).toBe("' @cmd")
+        expect(sanitizeCSVCell(' hello')).toBe(' hello')
+    })
+
     it('maps over array elements recursively', () => {
         const input = ['=1', 'hello', ['-2', 'world']]
         const expected = ["'=1", 'hello', ["'-2", 'world']]
