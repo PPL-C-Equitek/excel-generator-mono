@@ -1080,6 +1080,141 @@ class TestUploadService(TestCase):
         self.assertIsNone(file_path)
         self.assertIsNone(extracted)
 
+    @patch("file_processing.services.upload_service._dispatch_upload_processing")
+    def test_process_stored_upload_returns_extraction_result(self, mock_dispatch):
+        payload = {"content": [{"page": 1, "text": ["ok"]}]}
+        mock_dispatch.return_value = upload_service.ExtractionResult.ok(payload)
+
+        result = upload_service._process_stored_upload(
+            ".pdf",
+            "/tmp/file.pdf",
+            SimpleUploadedFile(
+                "doc.pdf",
+                self.generate_valid_pdf_bytes(),
+                content_type="application/pdf",
+            ),
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.extracted_data, payload)
+        mock_dispatch.assert_called_once()
+
+    @patch("file_processing.services.upload_service._dispatch_upload_processing")
+    def test_process_stored_upload_raises_when_extraction_fails(self, mock_dispatch):
+        mock_dispatch.return_value = upload_service.ExtractionResult.fail(
+            "bad extraction"
+        )
+
+        with self.assertRaises(upload_service.UploadExtractionError) as context:
+            upload_service._process_stored_upload(
+                ".pdf",
+                "/tmp/file.pdf",
+                SimpleUploadedFile(
+                    "doc.pdf",
+                    self.generate_valid_pdf_bytes(),
+                    content_type="application/pdf",
+                ),
+            )
+
+        self.assertEqual(str(context.exception), "bad extraction")
+
+    @patch("file_processing.services.upload_service._dispatch_upload_processing")
+    def test_process_stored_upload_re_raises_validation_error(self, mock_dispatch):
+        mock_dispatch.side_effect = upload_service.UploadValidationError(
+            "bad validation"
+        )
+
+        with self.assertRaises(upload_service.UploadValidationError) as context:
+            upload_service._process_stored_upload(
+                ".pdf",
+                "/tmp/file.pdf",
+                SimpleUploadedFile(
+                    "doc.pdf",
+                    self.generate_valid_pdf_bytes(),
+                    content_type="application/pdf",
+                ),
+            )
+
+        self.assertEqual(str(context.exception), "bad validation")
+
+    @patch("file_processing.services.upload_service._cleanup_temp_upload")
+    @patch(
+        "file_processing.services.upload_service._process_stored_upload",
+        side_effect=upload_service.UploadExtractionError("boom"),
+    )
+    @patch("file_processing.services.upload_service.save_temp_file")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_handles_upload_extraction_error_and_cleans_up(
+        self, mock_validate, mock_save, _mock_process, mock_cleanup
+    ):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (True, None)
+        mock_save.return_value = "/tmp/file.pdf"
+
+        success, error, _, extracted = process_upload(
+            SimpleUploadedFile(
+                "doc.pdf",
+                self.generate_valid_pdf_bytes(),
+                content_type="application/pdf",
+            )
+        )
+
+        self.assertFalse(success)
+        self.assertEqual(error, "boom")
+        self.assertIsNone(extracted)
+        mock_cleanup.assert_called_once_with("/tmp/file.pdf")
+
+    @patch(
+        "file_processing.services.upload_service.save_temp_file",
+        side_effect=ValueError("Invalid file path detected."),
+    )
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_wraps_save_temp_value_error(
+        self, mock_validate, mock_save
+    ):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (True, None)
+
+        success, error, _, extracted = process_upload(
+            SimpleUploadedFile(
+                "doc.pdf",
+                self.generate_valid_pdf_bytes(),
+                content_type="application/pdf",
+            )
+        )
+
+        self.assertFalse(success)
+        self.assertEqual(error, "Invalid file path detected.")
+        self.assertIsNone(extracted)
+        mock_save.assert_called_once()
+
+    @patch(
+        "file_processing.services.upload_service.save_temp_file",
+        side_effect=upload_service.UploadStorageError("storage boom"),
+    )
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_handles_upload_storage_error(
+        self, mock_validate, mock_save
+    ):
+        from file_processing.services.upload_service import process_upload
+
+        mock_validate.return_value = (True, None)
+
+        success, error, _, extracted = process_upload(
+            SimpleUploadedFile(
+                "doc.pdf",
+                self.generate_valid_pdf_bytes(),
+                content_type="application/pdf",
+            )
+        )
+
+        self.assertFalse(success)
+        self.assertEqual(error, "storage boom")
+        self.assertIsNone(extracted)
+        mock_save.assert_called_once()
+
     @patch("file_processing.services.upload_service._process_image")
     @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service.validate_file")
@@ -1108,6 +1243,39 @@ class TestUploadService(TestCase):
         self.assertEqual(error, "Image file is corrupted or unreadable.")
         self.assertIsNone(file_path)
         self.assertIsNone(extracted)
+
+    def test_save_temp_file_wraps_unexpected_storage_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_dir = upload_service.settings.UPLOAD_TEMP_DIR
+            upload_service.settings.UPLOAD_TEMP_DIR = tmpdir
+            try:
+                f = SimpleUploadedFile("my file.xlsx", b"abc")
+
+                with patch.object(f, "chunks", side_effect=OSError("boom")):
+                    with self.assertRaises(upload_service.UploadStorageError) as context:
+                        upload_service.save_temp_file(f)
+
+                self.assertEqual(str(context.exception), "Failed to save temporary file")
+            finally:
+                upload_service.settings.UPLOAD_TEMP_DIR = original_dir
+
+    def test_save_temp_file_re_raises_explicit_upload_storage_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_dir = upload_service.settings.UPLOAD_TEMP_DIR
+            upload_service.settings.UPLOAD_TEMP_DIR = tmpdir
+            try:
+                f = SimpleUploadedFile("my file.xlsx", b"abc")
+
+                with patch(
+                    "file_processing.services.upload_service.get_valid_filename",
+                    side_effect=upload_service.UploadStorageError("explicit storage error"),
+                ):
+                    with self.assertRaises(upload_service.UploadStorageError) as context:
+                        upload_service.save_temp_file(f)
+
+                self.assertEqual(str(context.exception), "explicit storage error")
+            finally:
+                upload_service.settings.UPLOAD_TEMP_DIR = original_dir
 
     @patch("file_processing.services.upload_service.OCRService.process_pdf")
     @patch(
