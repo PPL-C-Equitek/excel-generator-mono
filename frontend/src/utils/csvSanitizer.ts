@@ -11,7 +11,7 @@ function shouldEscapeCSVFormulaCell(value: string): boolean {
 }
 
 function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
-    const newObj: Record<string, unknown> = Object.create(null)
+    const newObj: Record<string, unknown> = {}
     for (const key of Object.keys(obj)) {
         newObj[key] = sanitizeCSVCell(obj[key])
     }
