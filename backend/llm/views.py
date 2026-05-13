@@ -100,6 +100,13 @@ def get_authenticated_user_id(user) -> object | None:
     return getattr(user, "id", None)
 
 
+def _require_json_content_type(request):
+    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type != _JSON_CONTENT_TYPE:
+        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    return None
+
+
 def build_llm_generation_service(user=None) -> LlmGenerationService:
     return LlmGenerationService(
         json_generator=JsonGenerationService(
@@ -600,9 +607,9 @@ def _execute_llm_generate_flow(
 @api_view(["POST"])
 @require_http_methods(["POST"])
 def llm_generate(request):
-    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != _JSON_CONTENT_TYPE:
-        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
 
     request_serializer = LlmGenerateRequestSerializer(data=request.data)
     if not request_serializer.is_valid():
@@ -703,9 +710,9 @@ def llm_generate(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def send_message(request):
-    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != _JSON_CONTENT_TYPE:
-        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
 
     serializer = SendMessageRequestSerializer(data=request.data)
     if not serializer.is_valid():
@@ -777,10 +784,6 @@ def _build_stream_event_generator(request, session, history, message):
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
     except OpenAIConfigurationError:
         raise
-    except OpenAIUpstreamError:
-        yield f"data: {json.dumps({'error': UPSTREAM_FAILURE_DETAIL})}\n\n"
-        yield _SSE_DONE
-        return
     except OpenAIServiceError:
         yield f"data: {json.dumps({'error': UPSTREAM_FAILURE_DETAIL})}\n\n"
         yield _SSE_DONE
@@ -808,9 +811,9 @@ def _build_stream_event_generator(request, session, history, message):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def stream_send_message(request):
-    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != _JSON_CONTENT_TYPE:
-        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
 
     serializer = StreamSendMessageRequestSerializer(data=request.data)
     if not serializer.is_valid():
@@ -848,9 +851,9 @@ def stream_send_message(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def llm_reasoning(request):
-    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != _JSON_CONTENT_TYPE:
-        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
 
     request_serializer = LlmReasoningRequestSerializer(data=request.data)
     if not request_serializer.is_valid():

@@ -1,5 +1,6 @@
 import json
-from unittest.mock import patch
+import uuid
+from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from rest_framework.test import APIClient
 from authentication.models import User
@@ -207,3 +208,120 @@ class StreamSendMessageEdgeCaseTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 503)
+
+    @patch("llm.views.generate_streaming_chat_response")
+    def test_edge_generator_exit_is_handled_gracefully(self, mock_stream):
+        from llm.views import _build_stream_event_generator
+
+        mock_stream.return_value = iter(["chunk1", "chunk2"])
+        mock_request = MagicMock()
+        mock_request.is_aborted = lambda: False
+        mock_request.user = self.user
+
+        gen = _build_stream_event_generator(
+            mock_request, None, [{"role": "user", "content": "hi"}], "hi"
+        )
+        next(gen)
+        gen.close()
+
+    @patch("llm.views.generate_streaming_chat_response")
+    def test_edge_abort_stops_stream_without_persisting(self, mock_stream):
+        from llm.views import _build_stream_event_generator
+
+        def _chunks():
+            yield "chunk1"
+            yield "chunk2"
+            yield "chunk3"
+
+        mock_stream.return_value = _chunks()
+        call_count = {"n": 0}
+
+        def _is_aborted():
+            call_count["n"] += 1
+            return call_count["n"] >= 2
+
+        mock_request = MagicMock()
+        mock_request.is_aborted = _is_aborted
+        mock_request.user = self.user
+
+        events = list(_build_stream_event_generator(
+            mock_request, None, [{"role": "user", "content": "hi"}], "hi"
+        ))
+
+        self.assertFalse(Session.objects.filter(owner=self.user).exists())
+        parsed = [
+            json.loads(e[6:].strip())
+            for e in events
+            if e.startswith("data: ") and e.strip() != "data: [DONE]"
+        ]
+        done_events = [c for c in parsed if c.get("done")]
+        self.assertEqual(len(done_events), 0)
+
+
+class StreamSendMessageNegativeSessionTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="stream-neg-session@example.com",
+            name="Neg Session User",
+            password="secret",
+            status="verified",
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def test_negative_returns_404_when_session_id_not_found(self):
+        fake_session_id = str(uuid.uuid4())
+
+        response = self.client.post(
+            "/llm/send-message/stream/",
+            {"message": "Hi", "session_id": fake_session_id},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    @patch("llm.views.logger")
+    @patch("llm.views.generate_streaming_chat_response")
+    def test_negative_service_error_sends_error_event(self, mock_stream, mock_logger):
+        from llm.services.openai_client import OpenAIServiceError
+
+        def _raise():
+            yield "partial"
+            raise OpenAIServiceError("provider error")
+
+        mock_stream.return_value = _raise()
+
+        response = self.client.post(
+            "/llm/send-message/stream/",
+            {"message": "Hi"},
+            content_type="application/json",
+        )
+        events = _collect_sse(response)
+        error_event = next((e for e in events if "error" in e), None)
+
+        self.assertIsNotNone(error_event)
+        self.assertFalse(Session.objects.filter(owner=self.user).exists())
+
+    @patch("llm.views.logger")
+    @patch("llm.views.generate_streaming_chat_response")
+    def test_negative_unexpected_exception_sends_error_event_and_logs(
+        self, mock_stream, mock_logger
+    ):
+        def _raise():
+            yield "partial"
+            raise RuntimeError("unexpected boom")
+
+        mock_stream.return_value = _raise()
+
+        response = self.client.post(
+            "/llm/send-message/stream/",
+            {"message": "Hi"},
+            content_type="application/json",
+        )
+        events = _collect_sse(response)
+        error_event = next((e for e in events if "error" in e), None)
+
+        self.assertIsNotNone(error_event)
+        mock_logger.exception.assert_called_once_with(
+            "Unexpected error during streaming send_message."
+        )
