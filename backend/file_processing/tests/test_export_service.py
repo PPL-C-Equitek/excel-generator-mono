@@ -868,6 +868,30 @@ class GenerateCSVTest(unittest.TestCase):
                 
                 self.assertEqual(result["files"][0]["name"], expected_name)
 
+    def test_generate_csv_deduplicates_member_filenames_deterministically(self):
+        mapped_output = {
+            "sheets": [
+                {"name": "Sheet", "headers": ["h"], "rows": []},
+                {"name": "Sheet", "headers": ["h"], "rows": []},
+                {"name": "folder/Sheet", "headers": ["h"], "rows": []},
+                {"name": 'S*h?e:e"t', "headers": ["h"], "rows": []},
+                {"name": "S_h_e_e_t", "headers": ["h"], "rows": []},
+            ]
+        }
+        
+        result = export_service.generate_csv(mapped_output)
+        filenames = [file["name"] for file in result["files"]]
+        
+        expected = [
+            "Sheet.csv",
+            "Sheet_1.csv",
+            "Sheet_2.csv",
+            "S_h_e_e_t.csv",
+            "S_h_e_e_t_1.csv",
+        ]
+        
+        self.assertEqual(filenames, expected)
+
     def test_generate_csv_download_artifact_single_sheet_returns_plain_csv(self):
         mapped_output = self._build_mapped_output()
 
