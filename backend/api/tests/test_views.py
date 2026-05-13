@@ -549,6 +549,54 @@ class HistoryDownloadViewTest(BaseApiViewTest):
         mock_export_csv.assert_called_once()
 
     @patch("api.views.open")
+    @patch("api.views.export_csv_to_filesystem")
+    def test_history_download_infers_pdf_source_type_from_original_name_when_filename_missing(
+        self, mock_export_csv, mock_open_file
+    ):
+        self.history.original_name = "evidence-report.pdf"
+        self.history.output_json = {
+            "document_info": {
+                "source_type": "legacy",
+            },
+            "summary": {"table_count": 1},
+            "content_data": [
+                {"table_name": "Sheet1", "headers": ["A"], "rows": [{"A": "1"}]}
+            ],
+        }
+        self.history.save(update_fields=["original_name", "output_json"])
+
+        def export_stub(*, output_json, storage_dir):
+            source_type = output_json.get("document_info", {}).get("source_type")
+            if source_type != "PDF":
+                raise OutputLLMValidationError(
+                    "source_type must be inferred from history original_name."
+                )
+            self.assertEqual(storage_dir, settings.CSV_EXPORT_DIR)
+            return {
+                "file_id": "csv_token",
+                "file_name": "export_token.csv",
+                "artifact_type": "csv",
+                "size_bytes": 12,
+                "created_at": "2026-04-08T10:00:00Z",
+            }
+
+        mock_export_csv.side_effect = export_stub
+        mock_open_file.return_value = BytesIO(b"col\n1\n")
+        self.client.force_authenticate(user=self.verified_user)
+
+        response = self.client.get(
+            f"/history/{self.history.id}/download/?file_format=csv"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn(
+            'attachment; filename="export_token.csv"',
+            response["Content-Disposition"],
+        )
+        mock_export_csv.assert_called_once()
+
+    @patch("api.views.open")
     @patch("api.views.os.remove")
     @patch("api.views.create_history_export_artifact")
     @patch("api.views.get_history_export_artifact")
