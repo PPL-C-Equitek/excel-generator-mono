@@ -8,7 +8,7 @@
  */
 export function sanitizeCSVCell(data: unknown): unknown {
     if (typeof data === 'string') {
-        if (/^[=+\-@]/.test(data)) {
+        if (/^ *[=+\-@]/.test(data)) {
             return "'" + data
         }
     } else if (Array.isArray(data)) {
