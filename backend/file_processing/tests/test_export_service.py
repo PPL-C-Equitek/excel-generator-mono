@@ -819,6 +819,78 @@ class GenerateCSVTest(unittest.TestCase):
                 filename_policy=filename_policy,
             )
 
+    def test_generate_csv_normalizes_path_traversal_member_filenames(self):
+        cases = [
+            ("../evil.csv", "evil.csv"),
+            ("folder/evil.csv", "evil.csv"),
+            ("folder\\evil.csv", "evil.csv"),
+        ]
+        
+        for unsafe_name, expected_name in cases:
+            with self.subTest(unsafe_name=unsafe_name):
+                class UnsafeFilenamePolicy:
+                    def build_filename(self, sheet_name):
+                        return unsafe_name
+                        
+                mapped_output = self._build_mapped_output()
+                result = export_service.generate_csv(
+                    mapped_output,
+                    filename_policy=UnsafeFilenamePolicy(),
+                )
+                
+                self.assertEqual(result["files"][0]["name"], expected_name)
+                self.assertIn("name", result["files"][0]["content"])
+
+    def test_generate_csv_replaces_invalid_filesystem_characters(self):
+        cases = [
+            ("file*.csv", "file_.csv"),
+            ("file?.csv", "file_.csv"),
+            ('file".csv', "file_.csv"),
+            ("file:.csv", "file_.csv"),
+            ("file<.csv", "file_.csv"),
+            ("file>.csv", "file_.csv"),
+            ("file|.csv", "file_.csv"),
+            ("my*awesome?file.csv", "my_awesome_file.csv"),
+        ]
+        
+        for unsafe_name, expected_name in cases:
+            with self.subTest(unsafe_name=unsafe_name):
+                class UnsafeFilenamePolicy:
+                    def build_filename(self, sheet_name):
+                        return unsafe_name
+                        
+                mapped_output = self._build_mapped_output()
+                result = export_service.generate_csv(
+                    mapped_output,
+                    filename_policy=UnsafeFilenamePolicy(),
+                )
+                
+                self.assertEqual(result["files"][0]["name"], expected_name)
+
+    def test_generate_csv_deduplicates_member_filenames_deterministically(self):
+        mapped_output = {
+            "sheets": [
+                {"name": "Sheet", "headers": ["h"], "rows": []},
+                {"name": "Sheet", "headers": ["h"], "rows": []},
+                {"name": "folder/Sheet", "headers": ["h"], "rows": []},
+                {"name": 'S*h?e:e"t', "headers": ["h"], "rows": []},
+                {"name": "S_h_e_e_t", "headers": ["h"], "rows": []},
+            ]
+        }
+        
+        result = export_service.generate_csv(mapped_output)
+        filenames = [file["name"] for file in result["files"]]
+        
+        expected = [
+            "Sheet.csv",
+            "Sheet_1.csv",
+            "Sheet_2.csv",
+            "S_h_e_e_t.csv",
+            "S_h_e_e_t_1.csv",
+        ]
+        
+        self.assertEqual(filenames, expected)
+
     def test_generate_csv_download_artifact_single_sheet_returns_plain_csv(self):
         mapped_output = self._build_mapped_output()
 
@@ -1765,3 +1837,44 @@ class DiscoverExcelDownloadArtifactsTest(unittest.TestCase):
         ):
             with self.assertRaises(export_service.OutputExcelDownloadStorageError):
                 export_service._discover_excel_download_artifacts(r"C:\safe\storage")
+
+
+class BuildCSVFileDefaultSeenNamesTest(unittest.TestCase):
+    def test_build_csv_file_defaults_seen_names_to_empty_set(self):
+        sheet = {
+            "name": "Report",
+            "headers": ["col"],
+            "rows": [["val"]],
+        }
+
+        result = export_service._build_csv_file(
+            sheet=sheet,
+            sheet_index=0,
+            sanitization_policy=export_service._DEFAULT_CSV_SANITIZATION_POLICY,
+            filename_policy=export_service._DEFAULT_CSV_FILENAME_POLICY,
+        )
+
+        self.assertEqual(result["name"], "Report.csv")
+        self.assertIn("col", result["content"])
+
+
+class NormalizeCSVExportFilenameTest(unittest.TestCase):
+    """Covers lines 404-405 and 412 of _normalize_csv_export_filename."""
+
+    def test_normalize_defaults_seen_names_to_empty_set(self):
+        result = export_service._normalize_csv_export_filename("Report.csv")
+
+        self.assertEqual(result, "Report.csv")
+
+    def test_normalize_filename_without_csv_extension(self):
+        result = export_service._normalize_csv_export_filename("data.txt", set())
+
+        self.assertEqual(result, "data.txt")
+
+    def test_normalize_deduplicates_non_csv_filenames(self):
+        seen = set()
+        first = export_service._normalize_csv_export_filename("data.txt", seen)
+        second = export_service._normalize_csv_export_filename("data.txt", seen)
+
+        self.assertEqual(first, "data.txt")
+        self.assertEqual(second, "data.txt_1")

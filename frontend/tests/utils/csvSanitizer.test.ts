@@ -21,12 +21,25 @@ describe('sanitizeCSVCell', () => {
     it('does not modify normal strings', () => {
         expect(sanitizeCSVCell('hello world')).toBe('hello world')
         expect(sanitizeCSVCell('12345')).toBe('12345')
-        expect(sanitizeCSVCell('a=b')).toBe('a=b') // = not at the start
+        expect(sanitizeCSVCell('a=b')).toBe('a=b')
+    })
+
+    it('escapes leading-space formula values', () => {
+        expect(sanitizeCSVCell(' =SUM(A1:A2)')).toBe("' =SUM(A1:A2)")
+        expect(sanitizeCSVCell(' +1')).toBe("' +1")
+        expect(sanitizeCSVCell(' @cmd')).toBe("' @cmd")
+        expect(sanitizeCSVCell(' hello')).toBe(' hello')
     })
 
     it('maps over array elements recursively', () => {
         const input = ['=1', 'hello', ['-2', 'world']]
         const expected = ["'=1", 'hello', ["'-2", 'world']]
+        expect(sanitizeCSVCell(input)).toEqual(expected)
+    })
+
+    it('handles tab-prefixed formulas in nested arrays', () => {
+        const input = ['safe', ['\t=SUM(A1:A2)']]
+        const expected = ['safe', ["'\t=SUM(A1:A2)"]]
         expect(sanitizeCSVCell(input)).toEqual(expected)
     })
 
@@ -50,7 +63,16 @@ describe('sanitizeCSVCell', () => {
         
         const output = sanitizeCSVCell(input)
         expect(output).toEqual(expected)
-        expect(output).not.toBe(input) // checks for deep copy / non-mutating
+        expect(output).not.toBe(input)
+    })
+
+    it('preserves plain object prototype', () => {
+        const input = { a: '=1' }
+        const output = sanitizeCSVCell(input) as Record<string, unknown>
+        
+        expect(output).toEqual({ a: "'=1" })
+        expect(output).not.toBe(input)
+        expect(Object.getPrototypeOf(output)).toBe(Object.prototype)
     })
 
     it('returns null and numbers as is', () => {

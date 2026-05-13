@@ -321,15 +321,20 @@ def _get_history_download_content_type(artifact_type):
 
 
 def _generate_history_download_artifact(history, owner, file_format):
+    normalized_output_json = _normalize_export_payload_source_type(
+        history.output_json,
+        fallback_filename=history.original_name,
+    )
+
     if file_format == "csv":
         artifact = export_csv_to_filesystem(
-            output_json=history.output_json,
+            output_json=normalized_output_json,
             storage_dir=settings.CSV_EXPORT_DIR,
         )
         safe_file_path = safe_join(settings.CSV_EXPORT_DIR, artifact["file_name"])
     else:
         artifact = export_excel_to_filesystem(
-            output_json=history.output_json,
+            output_json=normalized_output_json,
             storage_dir=settings.EXCEL_EXPORT_DIR,
         )
         safe_file_path = safe_join(settings.EXCEL_EXPORT_DIR, artifact["file_name"])
@@ -920,6 +925,10 @@ def _normalize_session_output_export_payload(output):
         raw = getattr(output, "output_json", None)
         if raw:
             payload = build_export_output_json(input_json=raw, output_json=raw)
+    return _normalize_export_payload_source_type(payload)
+
+
+def _normalize_export_payload_source_type(payload, fallback_filename=None):
     if not isinstance(payload, dict):
         return payload
 
@@ -929,19 +938,46 @@ def _normalize_session_output_export_payload(output):
         return normalized_payload
 
     normalized_document_info = dict(document_info)
-    source_type = normalized_document_info.get("source_type")
-    if source_type in {"Excel", "PDF"}:
+    source_type = _canonicalize_source_type(normalized_document_info.get("source_type"))
+    if source_type is not None:
+        normalized_document_info["source_type"] = source_type
         normalized_payload["document_info"] = normalized_document_info
         return normalized_payload
 
-    filename = normalized_document_info.get("filename")
-    if isinstance(filename, str) and filename.strip().lower().endswith(".pdf"):
-        normalized_document_info["source_type"] = "PDF"
-    else:
-        normalized_document_info["source_type"] = "Excel"
+    filename = _resolve_source_type_filename(
+        normalized_document_info.get("filename"),
+        fallback_filename,
+    )
+    normalized_document_info["source_type"] = _infer_source_type_from_filename(filename)
 
     normalized_payload["document_info"] = normalized_document_info
     return normalized_payload
+
+
+def _resolve_source_type_filename(filename, fallback_filename):
+    if isinstance(filename, str) and filename.strip():
+        return filename
+    return fallback_filename
+
+
+_CANONICAL_SOURCE_TYPE_BY_TOKEN = {
+    "excel": "Excel",
+    "pdf": "PDF",
+}
+
+
+def _canonicalize_source_type(source_type):
+    return (
+        _CANONICAL_SOURCE_TYPE_BY_TOKEN.get(source_type.strip().lower())
+        if isinstance(source_type, str)
+        else None
+    )
+
+
+def _infer_source_type_from_filename(filename):
+    if isinstance(filename, str) and filename.strip().lower().endswith(".pdf"):
+        return "PDF"
+    return "Excel"
 
 
 def _build_session_output_download_response(
