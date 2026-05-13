@@ -1,7 +1,6 @@
 import os
 import logging
 from dataclasses import dataclass
-from types import SimpleNamespace
 
 from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
@@ -322,12 +321,7 @@ def _get_history_download_content_type(artifact_type):
 
 
 def _generate_history_download_artifact(history, owner, file_format):
-    normalized_output_json = _normalize_session_output_export_payload(
-        SimpleNamespace(
-            export_output_json=history.output_json,
-            output_json=None,
-        )
-    )
+    normalized_output_json = _normalize_export_payload_source_type(history.output_json)
 
     if file_format == "csv":
         artifact = export_csv_to_filesystem(
@@ -928,6 +922,10 @@ def _normalize_session_output_export_payload(output):
         raw = getattr(output, "output_json", None)
         if raw:
             payload = build_export_output_json(input_json=raw, output_json=raw)
+    return _normalize_export_payload_source_type(payload)
+
+
+def _normalize_export_payload_source_type(payload):
     if not isinstance(payload, dict):
         return payload
 
