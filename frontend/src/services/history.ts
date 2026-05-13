@@ -1,10 +1,12 @@
 import { fetchAPI } from "@/lib/api";
 import { getValidAccessToken } from "@/lib/auth";
+import { resolveDownloadFilename } from "@/utils/downloadFilename";
 
 export interface HistoryItem {
   id: string;
   original_name: string;
   custom_name: string;
+  session_id?: string | null;
   status_processing: string;
   created_at: string;
 }
@@ -14,6 +16,22 @@ export interface HistoryListResponse {
   limit: number;
   offset: number;
   results: HistoryItem[];
+}
+
+interface SessionListItem {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  last_message_at: string | null;
+  last_output_at: string | null;
+}
+
+interface SessionListResponse {
+  count: number;
+  limit: number;
+  offset: number;
+  results: SessionListItem[];
 }
 
 const HISTORY_DOWNLOAD_ERROR_MESSAGE = "Failed to download file.";
@@ -108,32 +126,60 @@ function buildHistoryApiUrl(path: string): string {
   return `${getApiBaseOrigin()}/${normalizedPath}`;
 }
 
-function isValidHistoryItem(data: unknown): data is HistoryItem {
+function buildHistoryDownloadUrl(
+  historyId: string,
+  fileFormat: "csv" | "xlsx",
+  filename: string
+): string {
+  const params = new URLSearchParams({
+    file_format: fileFormat,
+    filename,
+  });
+
+  return buildHistoryApiUrl(`history/${historyId}/download/?${params.toString()}`);
+}
+
+function isValidSessionListItem(data: unknown): data is SessionListItem {
   if (!isRecord(data)) {
     return false;
   }
 
   return (
     typeof data.id === "string" &&
-    typeof data.original_name === "string" &&
-    typeof data.custom_name === "string" &&
-    typeof data.status_processing === "string" &&
-    typeof data.created_at === "string"
+    typeof data.title === "string" &&
+    typeof data.created_at === "string" &&
+    typeof data.updated_at === "string" &&
+    (typeof data.last_message_at === "string" || data.last_message_at === null) &&
+    (typeof data.last_output_at === "string" || data.last_output_at === null)
   );
 }
 
-function isValidHistoryListResponse(data: unknown): data is HistoryListResponse {
-  if (typeof data !== "object" || data === null) {
+function isValidSessionListResponse(data: unknown): data is SessionListResponse {
+  if (!isRecord(data)) {
     return false;
   }
 
-  const response = data as Record<string, unknown>;
   return (
-    typeof response.count === "number" &&
-    typeof response.limit === "number" &&
-    typeof response.offset === "number" &&
-    Array.isArray(response.results)
+    typeof data.count === "number" &&
+    typeof data.limit === "number" &&
+    typeof data.offset === "number" &&
+    Array.isArray(data.results) &&
+    data.results.every(isValidSessionListItem)
   );
+}
+
+function mapSessionToHistoryItem(session: SessionListItem): HistoryItem {
+  return {
+    id: session.id,
+    original_name: session.title,
+    custom_name: "",
+    session_id: session.id,
+    status_processing: "completed",
+    created_at:
+      session.last_output_at ??
+      session.last_message_at ??
+      session.updated_at,
+  };
 }
 
 function assertValidHistoryPagination(limit: number, offset: number): void {
@@ -236,7 +282,7 @@ export async function getHistoryFiles(
     throw new Error("Authentication credentials were not provided.");
   }
 
-  const data = await fetchAPI(`history/?limit=${limit}&offset=${offset}`, {
+  const data = await fetchAPI(`sessions/?limit=${limit}&offset=${offset}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
@@ -244,11 +290,16 @@ export async function getHistoryFiles(
     },
   });
 
-  if (!isValidHistoryListResponse(data)) {
-    throw new Error("The history response is invalid.");
+  if (!isValidSessionListResponse(data)) {
+    throw new Error("The sessions response is invalid.");
   }
 
-  return data;
+  return {
+    count: data.count,
+    limit: data.limit,
+    offset: data.offset,
+    results: data.results.map(mapSessionToHistoryItem),
+  };
 }
 
 export async function downloadHistoryFile(
@@ -257,6 +308,10 @@ export async function downloadHistoryFile(
   filename?: string
 ): Promise<void> {
   assertValidHistoryDownloadFormat(fileFormat);
+  const requestedFilename =
+    typeof filename === "string" && filename.trim().length > 0
+      ? filename
+      : `history-export.${fileFormat}`;
 
   const accessToken = await getValidAccessToken();
   if (!accessToken) {
@@ -269,7 +324,7 @@ export async function downloadHistoryFile(
 
   try {
     const response = await fetch(
-      buildHistoryApiUrl(`history/${historyId}/download/?file_format=${fileFormat}`),
+      buildHistoryDownloadUrl(historyId, fileFormat, requestedFilename),
       {
         method: "GET",
         headers: {
@@ -283,11 +338,15 @@ export async function downloadHistoryFile(
     }
 
     const blob = await response.blob();
+    const downloadFilename = resolveDownloadFilename(
+      response.headers,
+      requestedFilename
+    );
     objectUrl = URL.createObjectURL(blob);
 
     downloadAnchor = document.createElement("a");
     downloadAnchor.href = objectUrl;
-    downloadAnchor.download = filename || `history-export.${fileFormat}`;
+    downloadAnchor.download = downloadFilename;
     document.body.appendChild(downloadAnchor);
     appendedToBody = true;
     downloadAnchor.click();
@@ -312,20 +371,20 @@ export async function renameHistoryFile(
   }
 
   const data = await requestHistoryApi<unknown>(
-    `history/${historyId}/rename/`,
+    `sessions/${historyId}/`,
     accessToken,
     {
       method: "PATCH",
-      body: JSON.stringify({ custom_name: customName }),
+      body: JSON.stringify({ title: customName }),
     },
     HISTORY_RENAME_ERROR_MESSAGE
   );
 
-  if (!isValidHistoryItem(data)) {
+  if (!isValidSessionListItem(data)) {
     throw new Error("The history response is invalid.");
   }
 
-  return data;
+  return mapSessionToHistoryItem(data);
 }
 
 export async function deleteHistoryFile(historyId: string): Promise<void> {
@@ -335,7 +394,7 @@ export async function deleteHistoryFile(historyId: string): Promise<void> {
   }
 
   await requestHistoryApi<void>(
-    `history/${historyId}/delete/`,
+    `sessions/${historyId}/`,
     accessToken,
     {
       method: "DELETE",

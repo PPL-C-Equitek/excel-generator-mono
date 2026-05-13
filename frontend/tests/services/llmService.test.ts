@@ -3,10 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "@/lib/api";
 import * as auth from "@/lib/auth";
 import * as llmService from "@/services/llm";
-import { downloadCsvFile, generateJson, exportToCsv, getDownloadUrl } from "@/services/llm";
+import {
+  downloadCsvFile,
+  downloadSessionOutputCsvFile,
+  downloadSessionOutputExcelFile,
+  generateJson,
+  exportToCsv,
+  getDownloadUrl,
+} from "@/services/llm";
 import { server } from "../mocks/server";
 import {
-  handler401,
   handler429,
   handler504,
   handlerArrayOutput,
@@ -62,6 +68,44 @@ describe("generateJson positive", () => {
       summary: "Data extracted successfully",
       rows: [{ id: 1, value: "test" }],
     });
+  });
+
+  it("accepts optional validated_json refinement output", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      validated_json: { summary: "Validated", rows: [{ id: 1, value: "ok" }] },
+      validation_log: {
+        iteration: 2,
+        verdict: "valid",
+        errors: [],
+        warnings: [],
+        summary: "Output passed strict export schema validation.",
+      },
+      refinement_meta: {
+        iterations_run: 2,
+        max_iterations: 3,
+        early_exit_triggered: true,
+        final_status: "valid",
+      },
+    });
+
+    const result = await generateJson({ key: "value" });
+    expect(result.validated_json).toMatchObject({ summary: "Validated" });
+    fetchSpy.mockRestore();
+  });
+
+  it("accepts optional session and output identifiers from the backend response", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      session_id: "11111111-1111-1111-1111-111111111111",
+      output_id: "22222222-2222-2222-2222-222222222222",
+    });
+
+    const result = await generateJson({ key: "value" });
+
+    expect(result.session_id).toBe("11111111-1111-1111-1111-111111111111");
+    expect(result.output_id).toBe("22222222-2222-2222-2222-222222222222");
+    fetchSpy.mockRestore();
   });
 
   it("sends custom_schema_id when one is selected", async () => {
@@ -152,6 +196,37 @@ describe("generateJson positive", () => {
 
     fetchSpy.mockRestore();
   });
+
+  it("sends session_id and chat_id for follow-up generation when context is provided", async () => {
+    const fetchSpy = vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      session_id: "11111111-1111-1111-1111-111111111111",
+      chat_id: "33333333-3333-3333-3333-333333333333",
+      output_id: "22222222-2222-2222-2222-222222222222",
+    });
+
+    await generateJson(
+      { key: "value" },
+      undefined,
+      undefined,
+      {
+        sessionId: "11111111-1111-1111-1111-111111111111",
+        chatId: "33333333-3333-3333-3333-333333333333",
+      }
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "llm/generate/",
+      expect.objectContaining({
+        body: JSON.stringify({
+          input_json: { key: "value" },
+          session_id: "11111111-1111-1111-1111-111111111111",
+          chat_id: "33333333-3333-3333-3333-333333333333",
+        }),
+      })
+    );
+    fetchSpy.mockRestore();
+  });
 });
 
 describe("generateJson negative (HTTP errors)", () => {
@@ -165,7 +240,8 @@ describe("generateJson negative (HTTP errors)", () => {
   });
 
   it("maps 401 to user-friendly message", async () => {
-    server.use(handler401);
+    const unauthorizedError = Object.assign(new Error("Unauthorized"), { status: 401 });
+    vi.spyOn(api, "fetchAPI").mockRejectedValueOnce(unauthorizedError);
     await expect(generateJson({ key: "value" })).rejects.toThrow("Invalid API key.");
   });
 
@@ -237,6 +313,25 @@ describe("generateJson edge cases", () => {
   it("throws schema error when output_json is missing", async () => {
     server.use(handlerInvalidSchema);
     await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
+  });
+
+  it("throws schema error when validated_json is present but not an object", async () => {
+    vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      validated_json: "invalid",
+    });
+    await expect(generateJson({ key: "value" })).rejects.toThrow("The server returned an invalid response.");
+  });
+
+  it("throws schema error when response identifiers are not uuid-like strings", async () => {
+    vi.spyOn(api, "fetchAPI").mockResolvedValue({
+      output_json: { summary: "Data extracted successfully", rows: [{ id: 1, value: "test" }] },
+      session_id: { invalid: true },
+    });
+
+    await expect(generateJson({ key: "value" })).rejects.toThrow(
+      "The server returned an invalid response."
+    );
   });
 
   it("rethrows non-API Error as-is", async () => {
@@ -749,15 +844,81 @@ describe("downloadExcelFile", () => {
   });
 });
 
+describe("session output downloads", () => {
+  beforeEach(() => {
+    mockGetValidAccessToken.mockResolvedValue("valid-token");
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response("file-content", {
+        status: 200,
+        headers: {
+          "Content-Disposition": 'attachment; filename="export.csv"',
+        },
+      })
+    ) as typeof fetch;
+    URL.createObjectURL = vi.fn(() => "blob:mock-url");
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("downloads CSV from the new session output endpoint", async () => {
+    await downloadSessionOutputCsvFile(
+      "11111111-1111-1111-1111-111111111111",
+      "22222222-2222-2222-2222-222222222222",
+      "report.csv"
+    );
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${API_BASE}/sessions/11111111-1111-1111-1111-111111111111/outputs/22222222-2222-2222-2222-222222222222/download/csv/?filename=report.csv`,
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          Authorization: "Bearer valid-token",
+        },
+      })
+    );
+  });
+
+  it("downloads Excel from the new session output endpoint", async () => {
+    await downloadSessionOutputExcelFile(
+      "11111111-1111-1111-1111-111111111111",
+      "22222222-2222-2222-2222-222222222222",
+      "report.xlsx"
+    );
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${API_BASE}/sessions/11111111-1111-1111-1111-111111111111/outputs/22222222-2222-2222-2222-222222222222/download/excel/?filename=report.xlsx`,
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          Authorization: "Bearer valid-token",
+        },
+      })
+    );
+  });
+});
+
 describe("downloadCsvFile", () => {
   const originalCreateElement = document.createElement.bind(document);
-  const createSuccessfulDownloadResponse = () =>
+  const createSuccessfulDownloadResponse = (
+    contentType = "text/csv",
+    contentDisposition?: string
+  ) =>
     ({
       ok: true,
       status: 200,
-      headers: new Headers({
-        "Content-Type": "text/csv",
-      }),
+      headers: new Headers(
+        contentDisposition
+          ? {
+            "Content-Type": contentType,
+            "Content-Disposition": contentDisposition,
+          }
+          : {
+            "Content-Type": contentType,
+          }
+      ),
       blob: vi.fn().mockResolvedValue(new Blob(["csv-bytes"])),
     }) as unknown as Response;
 
@@ -776,7 +937,12 @@ describe("downloadCsvFile", () => {
 
   it("downloads the csv file from the csv download endpoint with bearer auth", async () => {
     vi.spyOn(auth, "getValidAccessToken").mockResolvedValue("access-token");
-    const fetchMock = vi.fn().mockResolvedValue(createSuccessfulDownloadResponse());
+    const fetchMock = vi.fn().mockResolvedValue(
+      createSuccessfulDownloadResponse(
+        "application/zip",
+        'attachment; filename="report.zip"'
+      )
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const createObjectURL = vi.fn().mockReturnValue("blob:csv-file");
@@ -793,7 +959,7 @@ describe("downloadCsvFile", () => {
     });
 
     const anchor = originalCreateElement("a");
-    const clickSpy = vi.spyOn(anchor, "click").mockImplementation(() => {});
+    const clickSpy = vi.spyOn(anchor, "click").mockImplementation(() => { });
     vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
       if (tagName.toLowerCase() === "a") {
         return anchor;
@@ -805,7 +971,7 @@ describe("downloadCsvFile", () => {
     const appendSpy = vi
       .spyOn(document.body, "appendChild")
       .mockImplementation((node: Node) => node);
-    const removeSpy = vi.spyOn(anchor, "remove").mockImplementation(() => {});
+    const removeSpy = vi.spyOn(anchor, "remove").mockImplementation(() => { });
 
     await downloadCsvFile("csv_12345", "report.csv");
 
@@ -819,7 +985,7 @@ describe("downloadCsvFile", () => {
       }
     );
     expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(anchor.download).toBe("report.csv");
+    expect(anchor.download).toBe("report.zip");
     expect(anchor.href).toBe("blob:csv-file");
     expect(appendSpy).toHaveBeenCalledWith(anchor);
     expect(clickSpy).toHaveBeenCalledTimes(1);

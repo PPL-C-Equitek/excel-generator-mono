@@ -9,12 +9,14 @@ def create_artifact_history(
     custom_name,
     output_json,
     status_processing,
+    session_id=None,
     created_at=None,
 ):
     create_kwargs = {
         "owner": owner,
         "original_name": original_name,
         "custom_name": custom_name or "",
+        "session_id": session_id,
         "output_json": output_json,
         "status_processing": status_processing,
     }

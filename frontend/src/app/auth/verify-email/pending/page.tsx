@@ -18,12 +18,13 @@ function getResendButtonText(isResending: boolean, resendCooldown: number): stri
 function VerifyEmailPendingContent() {
   const searchParams = useSearchParams();
   const email = (searchParams.get('email') || '').trim();
+  const hasJustResent = searchParams.get('resent') === '1';
 
   const [isResending, setIsResending] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const { cooldown: resendCooldown, setCooldown: setResendCooldown } =
-    useResendCooldown(0, 'verify-email-pending-resend-cooldown');
+    useResendCooldown(0, email);
 
   const handleResendVerificationEmail = async () => {
     await resendEmailActionFlow({
@@ -57,8 +58,9 @@ function VerifyEmailPendingContent() {
         >
           <h1 className="text-white font-bold text-2xl">Cek Email Anda</h1>
           <p className="text-sm leading-relaxed text-white/90">
-            Email Anda belum diverifikasi. Kami telah mengirim ulang link verifikasi. Silakan cek inbox
-            dan klik link verifikasi terbaru.
+            {hasJustResent
+              ? 'Email Anda belum diverifikasi. Kami telah mengirim ulang link verifikasi. Silakan cek inbox dan klik link verifikasi terbaru.'
+              : 'Email Anda belum diverifikasi. Silakan cek inbox untuk link verifikasi terbaru atau kirim ulang email setelah cooldown selesai.'}
           </p>
           {email && <p className="text-sm font-semibold text-white">{email}</p>}
 

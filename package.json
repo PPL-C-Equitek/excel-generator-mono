@@ -1,0 +1,13 @@
+{
+  "name": "excel-generator-mono",
+  "private": true,
+  "scripts": {
+    "env:pull:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/env-pull-dev.ps1",
+    "be:dev": "npm run env:pull:dev && cd backend && python manage.py runserver",
+    "fe:dev": "npm run env:pull:dev && cd frontend && npm run dev",
+    "all:dev": "npm run env:pull:dev && concurrently --names \"BE,FE\" --prefix-colors \"blue,green\" \"cd backend && python manage.py runserver\" \"cd frontend && npm run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

@@ -1,28 +1,99 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { getStoredUser } from "@/lib/auth"
 import LogoutButton from "@/components/LogoutButton"
-interface SidebarProps {
-    readonly activeMenu: 'home' | 'convert' | 'schema' | 'history' | 'change-password'
-    readonly onLogout?: () => void
+import HistorySidebarList from "@/components/HistorySidebarList"
+import { useHistoryFiles } from '@/hooks/useHistoryFiles'
+import type { HistoryItem } from '@/services/history'
+import { getMonitoringAccess } from '@/services/monitoring'
+
+interface SidebarHistoryListState {
+    readonly items: HistoryItem[]
+    readonly isLoading: boolean
+    readonly loadError: string | null
+    readonly renamingHistoryId: string | null
+    readonly deletingHistoryId: string | null
+    readonly reloadHistory: () => Promise<void>
+    readonly renameHistory: (historyId: string, customName: string) => Promise<boolean>
+    readonly deleteHistory: (historyId: string) => Promise<boolean>
 }
 
-export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
-    const menus = [
-        { key: 'convert', label: 'Convert', href: '/convert' },
-        { key: 'schema', label: 'Schema', href: '/schema' },
-        { key: 'history', label: 'History', href: '/history' },
-        { key: 'change-password', label: 'Change Password', href: '/change-password' },
-    ]
+interface SidebarProps {
+    readonly activeMenu: 'home' | 'convert' | 'schema' | 'history' | 'monitoring' | 'change-password'
+    readonly onLogout?: () => void
+    readonly selectedHistoryId?: string | null
+    readonly historyListState?: SidebarHistoryListState
+}
+
+type SidebarMenuKey = Exclude<SidebarProps['activeMenu'], 'home' | 'history'>
+
+const SIDEBAR_MENUS: readonly {
+    readonly key: SidebarMenuKey
+    readonly label: string
+    readonly href: string
+}[] = [
+    { key: 'convert', label: 'Convert', href: '/convert' },
+    { key: 'schema', label: 'Schema', href: '/schema' },
+    { key: 'monitoring', label: 'Monitoring', href: '/monitoring' },
+    { key: 'change-password', label: 'Change Password', href: '/change-password' },
+]
+
+export default function Sidebar({ activeMenu, onLogout, selectedHistoryId, historyListState }: SidebarProps) {
+    const [canAccessMonitoring, setCanAccessMonitoring] = useState(false)
 
     const [username] = useState<string>(() => {
         return getStoredUser()?.name ?? 'User'
     })
 
+    useEffect(() => {
+        let isCancelled = false
+
+        const syncMonitoringAccess = async () => {
+            try {
+                const accessDecision = await getMonitoringAccess()
+
+                if (!isCancelled) {
+                    setCanAccessMonitoring(accessDecision.allowed)
+                }
+            } catch {
+                if (!isCancelled) {
+                    setCanAccessMonitoring(false)
+                }
+            }
+        }
+
+        void syncMonitoringAccess()
+
+        return () => {
+            isCancelled = true
+        }
+    }, [])
+
+    const visibleMenus = SIDEBAR_MENUS.filter((menu) => (
+        menu.key !== 'monitoring' || canAccessMonitoring
+    ))
+
+    const localHistoryListState = useHistoryFiles({
+        loadAll: true,
+        pageSize: 50,
+        enabled: !historyListState,
+    })
+
+    const resolvedHistoryListState = historyListState ?? {
+        items: localHistoryListState.items,
+        isLoading: localHistoryListState.isLoading,
+        loadError: localHistoryListState.loadError,
+        renamingHistoryId: localHistoryListState.renamingHistoryId,
+        deletingHistoryId: localHistoryListState.deletingHistoryId,
+        reloadHistory: localHistoryListState.reloadHistory,
+        renameHistory: localHistoryListState.renameHistory,
+        deleteHistory: localHistoryListState.deleteHistory,
+    }
+
     return (
-        <aside className="fixed inset-y-0 left-0 w-56 overflow-y-auto bg-red-700 flex flex-col">
+        <aside className="fixed inset-y-0 left-0 z-50 w-56 overflow-y-auto bg-red-700 flex flex-col">
             <div className="px-6 py-5">
                 <Link
                     href="/"
@@ -33,11 +104,11 @@ export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
             </div>
 
             <nav className="flex flex-col gap-1 px-3">
-                {menus.map((menu) => (
+                {visibleMenus.map((menu) => (
                     <a
                         key={menu.key}
                         href={menu.href}
-                        className={`px-4 py-2 rounded font-semibold text-sm transition
+                        className={`px-4 py-2 rounded font-semibold text-base transition
               ${activeMenu === menu.key
                                 ? 'bg-white text-red-700'
                                 : 'text-white hover:bg-red-600'}`}
@@ -46,6 +117,20 @@ export default function Sidebar({ activeMenu, onLogout }: SidebarProps) {
                     </a>
                 ))}
             </nav>
+
+            <div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-white/20 px-3 pt-3">
+                <HistorySidebarList
+                    selectedHistoryId={selectedHistoryId}
+                    items={resolvedHistoryListState.items}
+                    isLoading={resolvedHistoryListState.isLoading}
+                    loadError={resolvedHistoryListState.loadError}
+                    renamingHistoryId={resolvedHistoryListState.renamingHistoryId}
+                    deletingHistoryId={resolvedHistoryListState.deletingHistoryId}
+                    reloadHistory={resolvedHistoryListState.reloadHistory}
+                    renameHistory={resolvedHistoryListState.renameHistory}
+                    deleteHistory={resolvedHistoryListState.deleteHistory}
+                />
+            </div>
 
             <div className="mt-auto border-t border-white/20 px-4 py-4">
                 <div className="mb-3 flex min-w-0 items-center gap-3">

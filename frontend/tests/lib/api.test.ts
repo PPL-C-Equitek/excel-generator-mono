@@ -76,6 +76,88 @@ describe("fetchAPI", () => {
         expect(calledUrl).toBe("http://localhost:9999/health/");
         expect(result).toEqual({ status: "trimmed" });
     });
+
+    it("clears auth tokens and redirects to /login when a protected request returns 401", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        window.localStorage.setItem("access_token", "access-token");
+        window.localStorage.setItem("refresh_token", "refresh-token");
+
+        const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
+        const assignSpy = vi.fn();
+        Object.defineProperty(window, "location", {
+            configurable: true,
+            value: {
+                ...window.location,
+                assign: assignSpy,
+            },
+        });
+
+        await expect(
+            fetchAPI("history/", {
+                headers: {
+                    Authorization: "Bearer access-token",
+                },
+            })
+        ).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(removeItemSpy).toHaveBeenCalledWith("access_token");
+        expect(removeItemSpy).toHaveBeenCalledWith("refresh_token");
+        expect(assignSpy).toHaveBeenCalledWith("/login");
+    });
+
+    it("still throws the 401 error gracefully when window is unavailable", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+        vi.stubGlobal("window", undefined);
+
+        await expect(fetchAPI("history/")).rejects.toMatchObject({
+            status: 401,
+            message: "Unauthorized",
+        });
+    });
+
+    it("clears auth tokens without redirecting again when already on /login", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 401,
+            json: async () => ({ message: "Unauthorized" }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        window.localStorage.setItem("access_token", "access-token");
+        window.localStorage.setItem("refresh_token", "refresh-token");
+
+        const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
+        const assignSpy = vi.fn();
+        Object.defineProperty(window, "location", {
+            configurable: true,
+            value: {
+                ...window.location,
+                pathname: "/login",
+                assign: assignSpy,
+            },
+        });
+
+        await expect(fetchAPI("history/")).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(removeItemSpy).toHaveBeenCalledWith("access_token");
+        expect(removeItemSpy).toHaveBeenCalledWith("refresh_token");
+        expect(assignSpy).not.toHaveBeenCalled();
+    });
 });
 
 describe("uploadFile", () => {
@@ -237,6 +319,19 @@ describe("uploadFile", () => {
         await expect(uploadFile(file)).rejects.toThrow("PDF file is corrupted or invalid.");
     });
 
+    it("maps PDF invalid structure error when message does not include exact corrupt phrase", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "PDF parser encountered invalid structure in cross-reference table." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "invalid.pdf", { type: "application/pdf" });
+
+        await expect(uploadFile(file)).rejects.toThrow("PDF file is corrupted or invalid.");
+    });
+
     it("maps corrupted Word error to dedicated FE message", async () => {
         const mockedFetch = vi.fn().mockResolvedValue({
             ok: false,
@@ -246,6 +341,21 @@ describe("uploadFile", () => {
         vi.stubGlobal("fetch", mockedFetch);
 
         const file = new File(["file-content"], "corrupt.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow("Word file is corrupt or has an invalid structure.");
+    });
+
+    it("maps Word invalid structure error when message does not include corrupt keyword", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "Word parser error: invalid structure detected." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "invalid.docx", {
             type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         });
 
@@ -341,6 +451,23 @@ describe("uploadFile", () => {
 
         await expect(uploadFile(file)).rejects.toThrow(
             "Rate limit exceeded. Please try again later."
+        );
+    });
+
+    it("maps generic password-protected error when file type is unspecified", async () => {
+        const mockedFetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            json: async () => ({ message: "This file is password-protected." }),
+        });
+        vi.stubGlobal("fetch", mockedFetch);
+
+        const file = new File(["file-content"], "archive.bin", {
+            type: "application/octet-stream",
+        });
+
+        await expect(uploadFile(file)).rejects.toThrow(
+            "File is password-protected. Please remove the password and try again."
         );
     });
 

@@ -62,6 +62,7 @@ jobs:
           POSTGRES_PASSWORD: test_password
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          MONITORING_METRICS_BACKEND: memory
           DJANGO_SECRET_KEY: test-secret-key
           DJANGO_DEBUG: 'True'
           DJANGO_ALLOWED_HOSTS: localhost
@@ -76,6 +77,7 @@ jobs:
           POSTGRES_PASSWORD: test_password
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          MONITORING_METRICS_BACKEND: memory
           DJANGO_SECRET_KEY: test-secret-key
           DJANGO_DEBUG: 'True'
           DJANGO_ALLOWED_HOSTS: localhost
@@ -178,16 +180,52 @@ jobs:
   sonar:
     runs-on: ubuntu-latest
     needs: test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Download backend coverage artifact
-        uses: actions/download-artifact@v8
+      - name: Setup Python
+        uses: actions/setup-python@v6
         with:
-          name: backend-coverage
-          path: backend
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Generate coverage for Sonar
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          MONITORING_METRICS_BACKEND: memory
+          DJANGO_SECRET_KEY: test-secret-key
+          DJANGO_DEBUG: 'True'
+          DJANGO_ALLOWED_HOSTS: localhost
+        run: |
+          cd backend
+          coverage run --rcfile=.coveragerc manage.py test
+          coverage xml
+          test -f coverage.xml
+          ls -la
 
       - name: SonarCloud scan (backend)
         uses: SonarSource/sonarqube-scan-action@v7
@@ -238,11 +276,18 @@ jobs:
             GOOGLE_OAUTH_CLIENT_ID=${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
             NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            OPENAI_BASE_URL=${{ vars.OPENAI_BASE_URL }}
             OPENAI_MODEL=${{ vars.OPENAI_MODEL }}
             OPENAI_SYSTEM_PROMPT=${{ vars.OPENAI_SYSTEM_PROMPT }}
             LLM_CACHE_TTL_SECONDS=${{ vars.LLM_CACHE_TTL_SECONDS }}
             RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
             RESEND_FROM_EMAIL=${{ vars.RESEND_FROM_EMAIL }}
+            MONITORING_MAX_ROUTES_PER_SNAPSHOT=${{ vars.MONITORING_MAX_ROUTES_PER_SNAPSHOT }}
+            MONITORING_STATS_CACHE_TTL_SECONDS=${{ vars.MONITORING_STATS_CACHE_TTL_SECONDS }}
+            MONITORING_DISCORD_WEBHOOK_URL=${{ secrets.MONITORING_DISCORD_WEBHOOK_URL }}
+            MONITORING_DISCORD_WEBHOOK_USERNAME=${{ vars.MONITORING_DISCORD_WEBHOOK_USERNAME }}
+            MONITORING_DISCORD_WEBHOOK_TIMEOUT_SECONDS=${{ vars.MONITORING_DISCORD_WEBHOOK_TIMEOUT_SECONDS }}
+            MONITORING_READINESS_ALERT_COOLDOWN_SECONDS=${{ vars.MONITORING_READINESS_ALERT_COOLDOWN_SECONDS }}
             MEDIA_ROOT=${{ vars.MEDIA_ROOT }}
             CSV_EXPORT_DIR=${{ vars.CSV_EXPORT_DIR }}
             EXCEL_EXPORT_DIR=${{ vars.EXCEL_EXPORT_DIR }}

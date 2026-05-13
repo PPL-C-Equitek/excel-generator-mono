@@ -1,3 +1,10 @@
 node_modules/
 .next/
 .env
+coverage/
+*.log
+out
+build
+npm-debug.log
+Dockerfile
+.dockerignore

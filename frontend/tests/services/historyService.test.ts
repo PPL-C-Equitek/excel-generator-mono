@@ -25,11 +25,12 @@ describe("history service", () => {
         offset: 0,
         results: [
           {
-            id: "history-1",
-            original_name: "invoice.pdf",
-            custom_name: "",
-            status_processing: "completed",
+            id: "11111111-1111-1111-1111-111111111111",
+            title: "invoice.pdf",
             created_at: "2026-04-10T13:00:00Z",
+            updated_at: "2026-04-10T13:00:00Z",
+            last_message_at: null,
+            last_output_at: null,
           },
         ],
       });
@@ -37,7 +38,7 @@ describe("history service", () => {
       const historyService = await import("@/services/history");
       const result = await historyService.getHistoryFiles(10, 0);
 
-      expect(fetchSpy).toHaveBeenCalledWith("history/?limit=10&offset=0", {
+      expect(fetchSpy).toHaveBeenCalledWith("sessions/?limit=10&offset=0", {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -50,9 +51,10 @@ describe("history service", () => {
         offset: 0,
         results: [
           {
-            id: "history-1",
+            id: "11111111-1111-1111-1111-111111111111",
             original_name: "invoice.pdf",
             custom_name: "",
+            session_id: "11111111-1111-1111-1111-111111111111",
             status_processing: "completed",
             created_at: "2026-04-10T13:00:00Z",
           },
@@ -100,9 +102,10 @@ describe("history service", () => {
       const historyService = await import("@/services/history");
 
       await expect(historyService.getHistoryFiles(10, 0)).rejects.toThrow(
-        "The history response is invalid."
+        "The sessions response is invalid."
       );
     });
+
 
     it("throws an error when the history list response is null", async () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
@@ -111,7 +114,7 @@ describe("history service", () => {
       const historyService = await import("@/services/history");
 
       await expect(historyService.getHistoryFiles(10, 0)).rejects.toThrow(
-        "The history response is invalid."
+        "The sessions response is invalid."
       );
     });
 
@@ -143,13 +146,23 @@ describe("history service", () => {
   describe("downloadHistoryFile", () => {
     const originalCreateElement = document.createElement.bind(document);
 
-    const createSuccessfulDownloadResponse = (contentType: string) =>
+    const createSuccessfulDownloadResponse = (
+      contentType: string,
+      contentDisposition?: string
+    ) =>
       ({
         ok: true,
         status: 200,
-        headers: new Headers({
-          "Content-Type": contentType,
-        }),
+        headers: new Headers(
+          contentDisposition
+            ? {
+                "Content-Type": contentType,
+                "Content-Disposition": contentDisposition,
+              }
+            : {
+                "Content-Type": contentType,
+              }
+        ),
         blob: vi.fn().mockResolvedValue(new Blob(["file-bytes"])),
       }) as unknown as Response;
 
@@ -157,7 +170,12 @@ describe("history service", () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(createSuccessfulDownloadResponse("text/csv"));
+        .mockResolvedValue(
+          createSuccessfulDownloadResponse(
+            "application/zip",
+            'attachment; filename="invoice.zip"'
+          )
+        );
       vi.stubGlobal("fetch", fetchMock);
 
       const createObjectURL = vi.fn().mockReturnValue("blob:history-csv");
@@ -192,7 +210,7 @@ describe("history service", () => {
       await historyService.downloadHistoryFile("history-1", "csv", "invoice.csv");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        `${API_BASE}/history/history-1/download/?file_format=csv`,
+        `${API_BASE}/history/history-1/download/?file_format=csv&filename=invoice.csv`,
         {
           method: "GET",
           headers: {
@@ -200,7 +218,7 @@ describe("history service", () => {
           },
         }
       );
-      expect(anchor.download).toBe("invoice.csv");
+      expect(anchor.download).toBe("invoice.zip");
       expect(appendSpy).toHaveBeenCalledWith(anchor);
       expect(clickSpy).toHaveBeenCalledTimes(1);
       expect(removeSpy).toHaveBeenCalledTimes(1);
@@ -246,7 +264,7 @@ describe("history service", () => {
       await historyService.downloadHistoryFile("history-1", "xlsx", "invoice.xlsx");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        `${API_BASE}/history/history-1/download/?file_format=xlsx`,
+        `${API_BASE}/history/history-1/download/?file_format=xlsx&filename=invoice.xlsx`,
         {
           method: "GET",
           headers: {
@@ -406,7 +424,12 @@ describe("history service", () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(createSuccessfulDownloadResponse("text/csv"));
+        .mockResolvedValue(
+          createSuccessfulDownloadResponse(
+            "application/zip",
+            'attachment; filename="history-export.zip"'
+          )
+        );
       vi.stubGlobal("fetch", fetchMock);
 
       const createObjectURL = vi.fn().mockReturnValue("blob:history-csv");
@@ -437,7 +460,16 @@ describe("history service", () => {
       const historyService = await import("@/services/history");
       await historyService.downloadHistoryFile("history-1", "csv");
 
-      expect(anchor.download).toBe("history-export.csv");
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${API_BASE}/history/history-1/download/?file_format=csv&filename=history-export.csv`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: "Bearer access-token",
+          },
+        }
+      );
+      expect(anchor.download).toBe("history-export.zip");
     });
 
     it("preserves the configured API path when downloading history files", async () => {
@@ -478,7 +510,7 @@ describe("history service", () => {
       await historyService.downloadHistoryFile("history-1", "csv", "invoice.csv");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://example.com/api/v1/history/history-1/download/?file_format=csv",
+        "https://example.com/api/v1/history/history-1/download/?file_format=csv&filename=invoice.csv",
         {
           method: "GET",
           headers: {
@@ -497,12 +529,14 @@ describe("history service", () => {
         status: 200,
         json: vi.fn().mockResolvedValue({
           id: "history-1",
-          original_name: "invoice.pdf",
-          custom_name: "Renamed Invoice",
-          status_processing: "completed",
+          title: "Renamed Invoice",
           created_at: "2026-04-10T13:00:00Z",
-        }),
-      });
+            updated_at: "2026-04-10T13:10:00Z",
+            last_message_at: null,
+            last_output_at: null,
+            session_id: "history-1",
+          }),
+        });
       vi.stubGlobal("fetch", fetchMock);
 
       const historyService = await import("@/services/history");
@@ -511,12 +545,38 @@ describe("history service", () => {
         "Renamed Invoice"
       );
 
-      expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/history/history-1/rename/`, {
+      expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/sessions/history-1/`, {
         method: "PATCH",
         headers: expect.any(Headers),
-        body: JSON.stringify({ custom_name: "Renamed Invoice" }),
+        body: JSON.stringify({ title: "Renamed Invoice" }),
       });
-      expect(result.custom_name).toBe("Renamed Invoice");
+      expect(result.original_name).toBe("Renamed Invoice");
+    });
+
+    it("renames a history item successfully when session_id is null", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          id: "history-2",
+          title: "Renamed Invoice",
+          session_id: null,
+          created_at: "2026-04-10T13:00:00Z",
+          updated_at: "2026-04-10T13:10:00Z",
+          last_message_at: null,
+          last_output_at: null,
+        }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+      const result = await historyService.renameHistoryFile(
+        "history-2",
+        "Renamed Invoice"
+      );
+
+      expect(result.session_id).toBe("history-2");
     });
 
     it("throws an authentication error when renaming without a token", async () => {
@@ -619,6 +679,51 @@ describe("history service", () => {
       ).rejects.toThrow("The history response is invalid.");
     });
 
+    it("throws an error when rename response id is not a string", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          id: 123,
+          original_name: "invoice.pdf",
+          custom_name: "Renamed Invoice",
+          status_processing: "completed",
+          created_at: "2026-04-10T13:00:00Z",
+        }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(
+        historyService.renameHistoryFile("history-1", "Renamed Invoice")
+      ).rejects.toThrow("The history response is invalid.");
+    });
+
+    it("throws an error when rename response session_id type is invalid", async () => {
+      mockGetValidAccessToken.mockResolvedValue("access-token");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          id: "history-3",
+          original_name: "invoice.pdf",
+          custom_name: "Renamed Invoice",
+          session_id: 42,
+          status_processing: "completed",
+          created_at: "2026-04-10T13:00:00Z",
+        }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const historyService = await import("@/services/history");
+
+      await expect(
+        historyService.renameHistoryFile("history-3", "Renamed Invoice")
+      ).rejects.toThrow("The history response is invalid.");
+    });
+
     it("throws an error when the rename response body is not an object", async () => {
       mockGetValidAccessToken.mockResolvedValue("access-token");
       const fetchMock = vi.fn().mockResolvedValue({
@@ -649,7 +754,7 @@ describe("history service", () => {
       const historyService = await import("@/services/history");
       await historyService.deleteHistoryFile("history-1");
 
-      expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/history/history-1/delete/`, {
+      expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/sessions/history-1/`, {
         method: "DELETE",
         headers: expect.any(Headers),
       });

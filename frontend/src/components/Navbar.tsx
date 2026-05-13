@@ -2,7 +2,10 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { AUTH_STATE_CHANGE_EVENT, getStoredAccessToken } from '@/lib/auth'
+import {
+    AUTH_STATE_CHANGE_EVENT,
+    hasValidSession,
+} from '@/lib/auth'
 import LogoutButton from '@/components/LogoutButton'
 import { AUTHENTICATED_NAV_LINKS, type AppPage, type NavLink } from '@/constants/landing'
 
@@ -17,20 +20,34 @@ export default function Navbar({
     brandName = 'EQUITEK',
     activePage,
 }: NavbarProps) {
-    const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getStoredAccessToken()))
+    const [isAuthenticated, setIsAuthenticated] = useState(false)
     const visibleLinks = isAuthenticated ? AUTHENTICATED_NAV_LINKS : links
 
     useEffect(() => {
-        const syncAuthState = () => {
-            setIsAuthenticated(Boolean(getStoredAccessToken()))
+        let isCancelled = false
+        let latestSyncId = 0
+
+        const syncAuthState = async () => {
+            const currentSyncId = ++latestSyncId
+            const isSessionValid = await hasValidSession()
+
+            if (!isCancelled && currentSyncId === latestSyncId) {
+                setIsAuthenticated(isSessionValid)
+            }
         }
 
-        globalThis.window.addEventListener('storage', syncAuthState)
-        globalThis.window.addEventListener(AUTH_STATE_CHANGE_EVENT, syncAuthState)
+        const revalidateAuthState = () => {
+            void syncAuthState()
+        }
+
+        void syncAuthState()
+        globalThis.window.addEventListener('storage', revalidateAuthState)
+        globalThis.window.addEventListener(AUTH_STATE_CHANGE_EVENT, revalidateAuthState)
 
         return () => {
-            globalThis.window.removeEventListener('storage', syncAuthState)
-            globalThis.window.removeEventListener(AUTH_STATE_CHANGE_EVENT, syncAuthState)
+            isCancelled = true
+            globalThis.window.removeEventListener('storage', revalidateAuthState)
+            globalThis.window.removeEventListener(AUTH_STATE_CHANGE_EVENT, revalidateAuthState)
         }
     }, [])
 

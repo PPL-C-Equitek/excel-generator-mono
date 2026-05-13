@@ -28,6 +28,7 @@ from authentication.password_reset.constants import (
     PASSWORD_RESET_USER_NOT_FOUND_MESSAGE,
 )
 from authentication.serializers import EmailRequestSerializer, ResetPasswordSerializer
+from monitoring.interfaces.http.decorators import track_auth_metric
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ class ForgotPasswordView(APIView):
     def get_request_password_reset_use_case(self):
         return build_request_password_reset_use_case()
 
+    @track_auth_metric("auth.forgot_password")
     def post(self, request):
         serializer = EmailRequestSerializer(data=request.data)
         if not serializer.is_valid():
@@ -118,6 +120,7 @@ class ResendPasswordResetView(APIView):
     def get_resend_password_reset_use_case(self):
         return build_resend_password_reset_use_case()
 
+    @track_auth_metric("auth.resend_password_reset")
     def post(self, request):
         serializer = EmailRequestSerializer(data=request.data)
         if not serializer.is_valid():
@@ -154,6 +157,7 @@ class ResetPasswordView(APIView):
     def get_complete_password_reset_use_case(self):
         return build_complete_password_reset_use_case()
 
+    @track_auth_metric("auth.reset_password")
     @apply_rate_limit_to_method(
         max_requests=5,
         per="minutes",

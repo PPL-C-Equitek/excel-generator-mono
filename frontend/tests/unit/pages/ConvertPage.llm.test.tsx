@@ -13,7 +13,7 @@
  * - Timely: ditulis bersamaan implementasi refactor
  */
 
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -32,9 +32,13 @@ vi.mock('../../../src/components/UploadZone', () => ({
     default: ({
         onFileSelect,
         footerContent,
+        resultContent,
+        validationError,
     }: {
         onFileSelect?: (file: File) => void
         footerContent?: ReactNode
+        resultContent?: ReactNode
+        validationError?: string | null
     }) => {
         const file = new File(['content'], 'report.pdf', { type: 'application/pdf' })
         return (
@@ -43,6 +47,8 @@ vi.mock('../../../src/components/UploadZone', () => ({
                     Upload File
                 </button>
                 {footerContent}
+                {validationError && <div role="alert">{validationError}</div>}
+                {resultContent}
             </div>
         )
     },
@@ -54,6 +60,9 @@ const mockHandleCsvDownload = vi.fn()
 const mockHandleExcelDownload = vi.fn()
 const mockHookReturn = {
     isConverting: false,
+    isValidating: false,
+    isGenerating: false,
+    errorPhase: null as 'idle' | 'validating' | 'generating' | null,
     isExcelDownloading: false,
     canDownloadCsv: false,
     canDownloadExcel: false,
@@ -61,8 +70,11 @@ const mockHookReturn = {
     excelError: null as string | null,
     excelSuccessMessage: null as string | null,
     outputFile: null as OutputFile | null,
+    thinkingLog: null as string | null,
+    reasoningSteps: [] as string[],
     csvMetadata: null as { file_id: string } | null,
     handleFileSelect: mockHandleFileSelect,
+    resetConversionState: vi.fn(),
     handleCsvDownload: mockHandleCsvDownload,
     handleExcelDownload: mockHandleExcelDownload,
     llmService: { getDownloadUrl: vi.fn() }
@@ -91,6 +103,9 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
         vi.clearAllMocks()
         // Reset hook state to idle
         mockHookReturn.isConverting = false
+        mockHookReturn.isValidating = false
+        mockHookReturn.isGenerating = false
+        mockHookReturn.errorPhase = null
         mockHookReturn.isExcelDownloading = false
         mockHookReturn.canDownloadCsv = false
         mockHookReturn.canDownloadExcel = false
@@ -98,6 +113,8 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
         mockHookReturn.excelError = null
         mockHookReturn.excelSuccessMessage = null
         mockHookReturn.outputFile = null
+        mockHookReturn.thinkingLog = null
+        mockHookReturn.reasoningSteps = []
         mockHookReturn.csvMetadata = null
         mockHookReturn.handleCsvDownload = mockHandleCsvDownload
         mockHookReturn.handleExcelDownload = mockHandleExcelDownload
@@ -108,10 +125,10 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
     // Static layout
     // -----------------------------------------------------------------------
     describe('static layout', () => {
-        it('renders heading and subtitle', () => {
+        it('renders schema selector content in the convert chat shell', () => {
             render(<ConvertPage />)
-            expect(screen.getByText('Automate Your Data Structuring')).toBeInTheDocument()
-            expect(screen.getByText(/Replace manual entry/i)).toBeInTheDocument()
+            expect(screen.getByText('Choose A Schema')).toBeInTheDocument()
+            expect(screen.getByText(/Use a saved schema/i)).toBeInTheDocument()
         })
 
         it('renders Sidebar and UploadZone components', () => {
@@ -120,11 +137,10 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(screen.getByTestId('upload-zone')).toBeInTheDocument()
         })
 
-        it('uses semantic HTML with single h1', () => {
+        it('uses semantic main content without the removed workspace heading', () => {
             const { container } = render(<ConvertPage />)
-            expect(container.querySelector('h1')).toBeInTheDocument()
-            expect(container.querySelectorAll('h1')).toHaveLength(1)
             expect(container.querySelector('main')).toBeInTheDocument()
+            expect(container.querySelectorAll('h1')).toHaveLength(0)
         })
     })
 
@@ -151,21 +167,24 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
     // -----------------------------------------------------------------------
     // Loading state
     // -----------------------------------------------------------------------
-    describe('loading state (isConverting=true)', () => {
-        it('shows loading indicator with role="status"', () => {
+    describe('loading state (isGenerating=true)', () => {
+        it('shows reasoning steps loading UI', () => {
             mockHookReturn.isConverting = true
+            mockHookReturn.isGenerating = true
             render(<ConvertPage />)
-            expect(screen.getByRole('status')).toBeInTheDocument()
+            expect(screen.getByTestId('reasoning-steps')).toBeInTheDocument()
         })
 
-        it('shows "Converting..." text', () => {
+        it('shows backend reasoning wait text', () => {
             mockHookReturn.isConverting = true
+            mockHookReturn.isGenerating = true
             render(<ConvertPage />)
-            expect(screen.getByText(/converting/i)).toBeInTheDocument()
+            expect(screen.getByText(/waiting for backend reasoning steps/i)).toBeInTheDocument()
         })
 
         it('does not show error or output while loading', () => {
             mockHookReturn.isConverting = true
+            mockHookReturn.isGenerating = true
             render(<ConvertPage />)
             expect(screen.queryByRole('alert')).not.toBeInTheDocument()
             expect(screen.queryByTestId('download-csv-btn')).not.toBeInTheDocument()
@@ -178,6 +197,7 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
     describe('error state (error set)', () => {
         it('shows role="alert" with error message', () => {
             mockHookReturn.error = 'Upload failed'
+            mockHookReturn.errorPhase = 'generating'
             render(<ConvertPage />)
             expect(screen.getByRole('alert')).toBeInTheDocument()
             expect(screen.getByText('Upload failed')).toBeInTheDocument()
@@ -185,6 +205,7 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
 
         it('shows role="alert" for schema validation error', () => {
             mockHookReturn.error = 'The server returned an invalid upload response.'
+            mockHookReturn.errorPhase = 'validating'
             render(<ConvertPage />)
             expect(screen.getByRole('alert')).toBeInTheDocument()
             expect(screen.getByText('The server returned an invalid upload response.')).toBeInTheDocument()
@@ -192,6 +213,7 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
 
         it('shows role="alert" for LLM conversion error', () => {
             mockHookReturn.error = 'LLM quota exceeded'
+            mockHookReturn.errorPhase = 'generating'
             render(<ConvertPage />)
             expect(screen.getByRole('alert')).toBeInTheDocument()
             expect(screen.getByText('LLM quota exceeded')).toBeInTheDocument()
@@ -213,6 +235,72 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             mockHookReturn.outputFile = sampleOutput
             render(<ConvertPage />)
             expect(screen.getByText('report.pdf')).toBeInTheDocument()
+        })
+
+        it('shows the final thinking log when output is ready', () => {
+            mockHookReturn.outputFile = sampleOutput
+            mockHookReturn.thinkingLog = 'Final reasoning summary.'
+
+            render(<ConvertPage />)
+
+            expect(screen.getByText('Thinking log')).toBeInTheDocument()
+            expect(screen.getByText('Final reasoning summary.')).toBeInTheDocument()
+        })
+
+        it('completes reasoning playback when the thinking log is absent', async () => {
+            const setTimeoutSpy = vi
+                .spyOn(globalThis, 'setTimeout')
+                .mockImplementation((handler: TimerHandler) => {
+                    if (typeof handler === 'function') {
+                        handler()
+                        handler()
+                        handler()
+                    }
+
+                    return 1 as unknown as ReturnType<typeof globalThis.setTimeout>
+                })
+            const clearTimeoutSpy = vi
+                .spyOn(globalThis, 'clearTimeout')
+                .mockImplementation(() => undefined)
+
+            try {
+                mockHookReturn.outputFile = sampleOutput
+                mockHookReturn.reasoningSteps = ['Reviewed the uploaded file.']
+                mockHookReturn.thinkingLog = null
+
+                render(<ConvertPage />)
+
+                expect(screen.getByText('Your file is ready.')).toBeInTheDocument()
+                expect(screen.queryByText('Thinking log')).not.toBeInTheDocument()
+            } finally {
+                setTimeoutSpy.mockRestore()
+                clearTimeoutSpy.mockRestore()
+            }
+        })
+
+        it('reveals reasoning steps before the final thinking log', async () => {
+            vi.useFakeTimers()
+
+            try {
+                mockHookReturn.outputFile = sampleOutput
+                mockHookReturn.reasoningSteps = [
+                    'Reviewed the uploaded file.',
+                    'Mapped the output columns.',
+                ]
+                mockHookReturn.thinkingLog = 'Final reasoning summary.'
+
+                render(<ConvertPage />)
+
+                await act(async () => {
+                    vi.advanceTimersByTime(250)
+                })
+
+                expect(screen.getByText('Reviewed the uploaded file.')).toBeInTheDocument()
+                expect(screen.getByText('Preparing the thinking log...')).toBeInTheDocument()
+                expect(screen.queryByText('Thinking log')).not.toBeInTheDocument()
+            } finally {
+                vi.useRealTimers()
+            }
         })
 
         it('shows output format', () => {
@@ -361,7 +449,7 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             render(<ConvertPage />)
             await user.click(screen.getByTestId('upload-btn'))
             expect(mockHandleFileSelect).toHaveBeenCalledTimes(1)
-            expect(mockHandleFileSelect).toHaveBeenCalledWith(expect.any(File), null)
+            expect(mockHandleFileSelect).toHaveBeenCalledWith(expect.any(File), null, null)
         })
     })
 })
