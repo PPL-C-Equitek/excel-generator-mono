@@ -839,7 +839,6 @@ class GenerateCSVTest(unittest.TestCase):
                 )
                 
                 self.assertEqual(result["files"][0]["name"], expected_name)
-                # Verify CSV content is still generated correctly
                 self.assertIn("name", result["files"][0]["content"])
 
     def test_generate_csv_replaces_invalid_filesystem_characters(self):
