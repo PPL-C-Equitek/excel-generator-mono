@@ -943,16 +943,26 @@ def _normalize_export_payload_source_type(payload, fallback_filename=None):
         normalized_payload["document_info"] = normalized_document_info
         return normalized_payload
 
-    filename = normalized_document_info.get("filename")
-    if not (isinstance(filename, str) and filename.strip()):
-        filename = fallback_filename
-    if isinstance(filename, str) and filename.strip().lower().endswith(".pdf"):
-        normalized_document_info["source_type"] = "PDF"
-    else:
-        normalized_document_info["source_type"] = "Excel"
+    filename = _resolve_source_type_filename(
+        normalized_document_info.get("filename"),
+        fallback_filename,
+    )
+    normalized_document_info["source_type"] = _infer_source_type_from_filename(filename)
 
     normalized_payload["document_info"] = normalized_document_info
     return normalized_payload
+
+
+def _resolve_source_type_filename(filename, fallback_filename):
+    if isinstance(filename, str) and filename.strip():
+        return filename
+    return fallback_filename
+
+
+def _infer_source_type_from_filename(filename):
+    if isinstance(filename, str) and filename.strip().lower().endswith(".pdf"):
+        return "PDF"
+    return "Excel"
 
 
 def _build_session_output_download_response(
