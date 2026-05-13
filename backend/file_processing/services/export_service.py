@@ -354,6 +354,7 @@ def generate_csv(mapped_output, sanitization_policy=None, filename_policy=None):
     )
 
     files = []
+    seen_names = set()
     for sheet_index, sheet in enumerate(sheets):
         files.append(
             _build_csv_file(
@@ -361,13 +362,14 @@ def generate_csv(mapped_output, sanitization_policy=None, filename_policy=None):
                 sheet_index=sheet_index,
                 sanitization_policy=sanitization_policy,
                 filename_policy=filename_policy,
+                seen_names=seen_names,
             )
         )
 
     return {"files": files}
 
 
-def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
+def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy, seen_names):
     sheet_name, headers, rows = _validate_sheet_structure(
         sheet, sheet_index, OutputCSVGenerationError
     )
@@ -387,7 +389,7 @@ def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
             "filename_policy.build_filename must return a non-empty string."
         )
         
-    filename = _normalize_csv_export_filename(filename)
+    filename = _normalize_csv_export_filename(filename, seen_names)
 
     return {
         "name": filename,
@@ -395,9 +397,25 @@ def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
     }
 
 
-def _normalize_csv_export_filename(filename):
+def _normalize_csv_export_filename(filename, seen_names):
     basename = filename.replace("\\", "/").split("/")[-1]
-    return _CSV_FILENAME_INVALID_CHARS.sub("_", basename)
+    safe_name = _CSV_FILENAME_INVALID_CHARS.sub("_", basename)
+    
+    name_part = safe_name
+    ext_part = ""
+    if safe_name.lower().endswith(".csv"):
+        name_part = safe_name[:-4]
+        ext_part = safe_name[-4:]
+        
+    candidate = safe_name
+    duplicate_index = 1
+    
+    while candidate.lower() in seen_names:
+        candidate = f"{name_part}_{duplicate_index}{ext_part}"
+        duplicate_index += 1
+        
+    seen_names.add(candidate.lower())
+    return candidate
 
 
 def _validate_sheet_structure(sheet, sheet_index, error_class):
