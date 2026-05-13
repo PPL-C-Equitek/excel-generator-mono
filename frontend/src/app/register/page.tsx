@@ -161,7 +161,7 @@ export default function RegisterPage() {
       const trimmedEmail = value.trim();
       setErrors((prev) => ({
         ...prev,
-        email: trimmedEmail && !EMAIL_REGEX.test(trimmedEmail) ? 'Email format is not valid' : '',
+        email: trimmedEmail && !EMAIL_REGEX.test(trimmedEmail) ? 'Invalid email format' : '',
       }));
     }
   };
