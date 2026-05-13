@@ -1,3 +1,4 @@
+import itertools
 import json
 import logging
 from typing import Any, cast
@@ -7,6 +8,7 @@ from django.conf import settings
 from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
 from django.db import transaction
+from django.http import StreamingHttpResponse
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -31,6 +33,7 @@ from .serializers import (
     LlmGenerateResponseSerializer,
     SendMessageRequestSerializer,
     SendMessageResponseSerializer,
+    StreamSendMessageRequestSerializer,
     LlmReasoningRequestSerializer,
     LlmReasoningResponseSerializer,
     ThinkingLogItemSerializer,
@@ -56,6 +59,7 @@ from .services.openai_client import (
     OpenAIServiceError,
     OpenAIUpstreamError,
     generate_chat_response,
+    generate_streaming_chat_response,
 )
 
 from .services.export_service import (
@@ -83,6 +87,7 @@ INVALID_PROMPT_DETAIL = "Invalid prompt payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
 REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
 SESSION_NOT_FOUND_DETAIL = "Session not found."
+_SSE_DONE = "data: [DONE]\n\n"
 THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
 INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."
@@ -93,6 +98,13 @@ def get_authenticated_user_id(user) -> object | None:
     if user is None or not getattr(user, "is_authenticated", False):
         return None
     return getattr(user, "id", None)
+
+
+def _require_json_content_type(request):
+    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type != _JSON_CONTENT_TYPE:
+        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    return None
 
 
 def build_llm_generation_service(user=None) -> LlmGenerationService:
@@ -595,9 +607,9 @@ def _execute_llm_generate_flow(
 @api_view(["POST"])
 @require_http_methods(["POST"])
 def llm_generate(request):
-    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != _JSON_CONTENT_TYPE:
-        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
 
     request_serializer = LlmGenerateRequestSerializer(data=request.data)
     if not request_serializer.is_valid():
@@ -698,9 +710,9 @@ def llm_generate(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def send_message(request):
-    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != _JSON_CONTENT_TYPE:
-        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
 
     serializer = SendMessageRequestSerializer(data=request.data)
     if not serializer.is_valid():
@@ -759,13 +771,96 @@ def send_message(request):
     return Response(response_serializer.data)
 
 
+def _build_stream_event_generator(request, session, history, message):
+    reply_chunks = []
+
+    prepared_history = build_history_with_summary(session, history) if session is not None else history
+    prepared_history = _inject_file_context_if_available(session, prepared_history)
+
+    try:
+        stream = generate_streaming_chat_response(prepared_history)
+        for chunk in stream:
+            if getattr(request, 'is_aborted', lambda: False)():
+                stream.close()
+                return
+            reply_chunks.append(chunk)
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+    except OpenAIConfigurationError:
+        raise
+    except OpenAIServiceError:
+        yield f"data: {json.dumps({'error': UPSTREAM_FAILURE_DETAIL})}\n\n"
+        yield _SSE_DONE
+        return
+    except GeneratorExit:
+        return
+    except Exception:
+        logger.exception("Unexpected error during streaming send_message.")
+        yield f"data: {json.dumps({'error': INTERNAL_FAILURE_DETAIL})}\n\n"
+        yield _SSE_DONE
+        return
+
+    reply = "".join(reply_chunks)
+    if not reply:
+        return
+
+    with transaction.atomic():
+        if session is None:
+            title = generate_session_title_from_message(message)
+            session = create_session_for_user(request.user, title=title)
+        append_user_message(session, message)
+        append_assistant_message(session, reply)
+
+    yield f"data: {json.dumps({'session_id': str(session.id), 'done': True})}\n\n"
+    yield _SSE_DONE
+
+
+@require_http_methods(["POST"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def stream_send_message(request):
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
+
+    serializer = StreamSendMessageRequestSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"detail": INVALID_REQUEST_DETAIL, "errors": serializer.errors},
+            status=400,
+        )
+
+    message = serializer.validated_data["message"]
+    session_id = serializer.validated_data.get("session_id")
+    session, history = _resolve_send_message_session_context(request.user, session_id)
+    if session_id and session is None:
+        return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+
+    history.append({"role": "user", "content": message})
+
+    gen = _build_stream_event_generator(request, session, history, message)
+    try:
+        first_event = next(gen)
+    except OpenAIConfigurationError:
+        return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
+    except StopIteration:
+        first_event = None
+
+    response = StreamingHttpResponse(
+        itertools.chain([first_event] if first_event is not None else [], gen),
+        content_type="text/event-stream",
+    )
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
+
+
 @require_http_methods(["POST"])
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def llm_reasoning(request):
-    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != _JSON_CONTENT_TYPE:
-        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
 
     request_serializer = LlmReasoningRequestSerializer(data=request.data)
     if not request_serializer.is_valid():
