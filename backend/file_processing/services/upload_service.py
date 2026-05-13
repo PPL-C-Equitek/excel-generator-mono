@@ -323,10 +323,11 @@ def _process_stored_upload(ext, file_path, uploaded_file) -> ExtractionResult:
         if extraction_result.success:
             return extraction_result
         raise UploadExtractionError(extraction_result.error or "Failed to process uploaded file")
-    except UploadValidationError:
-        # Re-raise validation errors from PDF processing
+    except UploadValidationError as exc:
+        logger.warning("Validation error during stored upload processing: %s", exc)
         raise
-    except UploadExtractionError:
+    except UploadExtractionError as exc:
+        logger.warning("Extraction error during stored upload processing: %s", exc)
         raise
 
 
