@@ -395,7 +395,8 @@ def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
 
 
 def _normalize_csv_export_filename(filename):
-    return filename.replace("\\", "/").split("/")[-1]
+    basename = filename.replace("\\", "/").split("/")[-1]
+    return re.sub(r'[*?:"<>|]', "_", basename)
 
 
 def _validate_sheet_structure(sheet, sheet_index, error_class):
