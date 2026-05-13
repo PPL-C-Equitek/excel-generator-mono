@@ -1,3 +1,4 @@
+import itertools
 import json
 import logging
 from typing import Any, cast
@@ -6,6 +7,7 @@ from uuid import UUID
 from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
 from django.db import transaction
+from django.http import StreamingHttpResponse
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -51,6 +53,7 @@ from .services.openai_client import (
     OpenAIServiceError,
     OpenAIUpstreamError,
     generate_chat_response,
+    generate_streaming_chat_response,
 )
 
 from .services.export_service import (
@@ -78,6 +81,7 @@ INVALID_PROMPT_DETAIL = "Invalid prompt payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
 REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
 SESSION_NOT_FOUND_DETAIL = "Session not found."
+_SSE_DONE = "data: [DONE]\n\n"
 THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
 INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."
@@ -602,6 +606,84 @@ def send_message(request):
     if not response_serializer.is_valid():
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
     return Response(response_serializer.data)
+
+
+def _build_stream_event_generator(request, session, history, message):
+    full_reply_parts = []
+
+    try:
+        stream = generate_streaming_chat_response(history)
+        for chunk in stream:
+            if getattr(request, 'is_aborted', lambda: False)():
+                stream.close()
+                return
+            full_reply_parts.append(chunk)
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+    except OpenAIConfigurationError:
+        raise
+    except OpenAIUpstreamError:
+        yield f"data: {json.dumps({'error': UPSTREAM_FAILURE_DETAIL})}\n\n"
+        yield _SSE_DONE
+        return
+    except OpenAIServiceError:
+        yield f"data: {json.dumps({'error': UPSTREAM_FAILURE_DETAIL})}\n\n"
+        yield _SSE_DONE
+        return
+    except GeneratorExit:
+        return
+    except Exception:
+        logger.exception("Unexpected error during streaming send_message.")
+        yield f"data: {json.dumps({'error': INTERNAL_FAILURE_DETAIL})}\n\n"
+        yield _SSE_DONE
+        return
+
+    reply = "".join(full_reply_parts)
+    with transaction.atomic():
+        if session is None:
+            title = generate_session_title_from_message(message)
+            session = create_session_for_user(request.user, title=title)
+        append_user_message(session, message)
+        append_assistant_message(session, reply)
+
+    yield f"data: {json.dumps({'session_id': str(session.id), 'done': True})}\n\n"
+    yield _SSE_DONE
+
+
+@require_http_methods(["POST"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def stream_send_message(request):
+    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type != _JSON_CONTENT_TYPE:
+        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+
+    serializer = SendMessageRequestSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"detail": INVALID_REQUEST_DETAIL, "errors": serializer.errors},
+            status=400,
+        )
+
+    message = serializer.validated_data["message"]
+    session_id = serializer.validated_data.get("session_id")
+    session, history = _resolve_send_message_session_context(request.user, session_id)
+    if session_id and session is None:
+        return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+
+    history.append({"role": "user", "content": message})
+
+    gen = _build_stream_event_generator(request, session, history, message)
+    try:
+        first_event = next(gen)
+    except OpenAIConfigurationError:
+        return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
+    except StopIteration:
+        first_event = None
+
+    return StreamingHttpResponse(
+        itertools.chain([first_event] if first_event is not None else [], gen),
+        content_type="text/event-stream",
+    )
 
 
 @require_http_methods(["POST"])

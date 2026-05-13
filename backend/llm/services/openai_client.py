@@ -166,6 +166,29 @@ def generate_text(prompt: str, system_prompt: str | None = None) -> str:
     return provider.generate_text(prompt=prompt, system_prompt=system_prompt)
 
 
+def generate_streaming_chat_response(messages: list[dict]):
+    """Generator that yields text chunks from OpenAI with stream=True."""
+    if not messages:
+        raise ValueError("messages must be a non-empty list.")
+
+    client = _build_client()
+
+    with handle_openai_exceptions():
+        stream = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=messages,
+            stream=True,
+        )
+
+    for chunk in stream:
+        try:
+            delta = chunk.choices[0].delta.content
+        except (AttributeError, IndexError):
+            delta = None
+        if delta:
+            yield delta
+
+
 def generate_chat_response(messages: list[dict]) -> str:
     if not messages:
         raise ValueError("messages must be a non-empty list.")
