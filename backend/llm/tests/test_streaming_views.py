@@ -156,11 +156,12 @@ class StreamSendMessageNegativeTest(TestCase):
 
         mock_stream.return_value = _raise()
 
-        self.client.post(
+        response = self.client.post(
             "/llm/send-message/stream/",
             {"message": "Hi"},
             content_type="application/json",
         )
+        list(response.streaming_content)  # consume stream to trigger generator
 
         self.assertFalse(Session.objects.filter(owner=self.user).exists())
 

@@ -33,6 +33,7 @@ from .serializers import (
     LlmGenerateResponseSerializer,
     SendMessageRequestSerializer,
     SendMessageResponseSerializer,
+    StreamSendMessageRequestSerializer,
     LlmReasoningRequestSerializer,
     LlmReasoningResponseSerializer,
     ThinkingLogItemSerializer,
@@ -764,7 +765,7 @@ def send_message(request):
 
 
 def _build_stream_event_generator(request, session, history, message):
-    full_reply_parts = []
+    reply = ""
 
     try:
         stream = generate_streaming_chat_response(history)
@@ -772,7 +773,7 @@ def _build_stream_event_generator(request, session, history, message):
             if getattr(request, 'is_aborted', lambda: False)():
                 stream.close()
                 return
-            full_reply_parts.append(chunk)
+            reply += chunk
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
     except OpenAIConfigurationError:
         raise
@@ -792,7 +793,6 @@ def _build_stream_event_generator(request, session, history, message):
         yield _SSE_DONE
         return
 
-    reply = "".join(full_reply_parts)
     with transaction.atomic():
         if session is None:
             title = generate_session_title_from_message(message)
@@ -812,7 +812,7 @@ def stream_send_message(request):
     if content_type != _JSON_CONTENT_TYPE:
         return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
 
-    serializer = SendMessageRequestSerializer(data=request.data)
+    serializer = StreamSendMessageRequestSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(
             {"detail": INVALID_REQUEST_DETAIL, "errors": serializer.errors},
@@ -835,10 +835,13 @@ def stream_send_message(request):
     except StopIteration:
         first_event = None
 
-    return StreamingHttpResponse(
+    response = StreamingHttpResponse(
         itertools.chain([first_event] if first_event is not None else [], gen),
         content_type="text/event-stream",
     )
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
 
 
 @require_http_methods(["POST"])

@@ -180,13 +180,16 @@ def generate_streaming_chat_response(messages: list[dict]):
             stream=True,
         )
 
-    for chunk in stream:
-        try:
-            delta = chunk.choices[0].delta.content
-        except (AttributeError, IndexError):
-            delta = None
-        if delta:
-            yield delta
+    try:
+        for chunk in stream:
+            try:
+                delta = chunk.choices[0].delta.content
+            except (AttributeError, IndexError):
+                delta = None
+            if delta:
+                yield delta
+    finally:
+        stream.close()
 
 
 def generate_chat_response(messages: list[dict]) -> str:
