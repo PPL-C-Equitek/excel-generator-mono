@@ -10,6 +10,14 @@ function shouldEscapeCSVFormulaCell(value: string): boolean {
     return /^\s*[=+\-@]/.test(value)
 }
 
+function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
+    const newObj: Record<string, unknown> = Object.create(null)
+    for (const key of Object.keys(obj)) {
+        newObj[key] = sanitizeCSVCell(obj[key])
+    }
+    return newObj
+}
+
 export function sanitizeCSVCell(data: unknown): unknown {
     if (typeof data === 'string') {
         if (shouldEscapeCSVFormulaCell(data)) {
@@ -18,12 +26,7 @@ export function sanitizeCSVCell(data: unknown): unknown {
     } else if (Array.isArray(data)) {
         return data.map(sanitizeCSVCell)
     } else if (data !== null && typeof data === 'object') {
-        const obj = data as Record<string, unknown>
-        const newObj: Record<string, unknown> = Object.create(null)
-        for (const key of Object.keys(obj)) {
-            newObj[key] = sanitizeCSVCell(obj[key])
-        }
-        return newObj
+        return sanitizeObject(data as Record<string, unknown>)
     }
     return data
 }
