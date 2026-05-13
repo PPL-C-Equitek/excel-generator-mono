@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 from unittest.mock import patch, MagicMock
+from backend.file_processing.services import upload_file_types
 from file_processing.services.upload_service import _has_binary_signature
 from file_processing.services import upload_service
 
@@ -536,7 +537,7 @@ class TxtValidationTests(TestCase):
         uploaded = _txt_file("bad.txt", b"plain text", "application/octet-stream")
         is_valid, error = upload_service.validate_mime_type(uploaded, ".txt")
         self.assertFalse(is_valid)
-        self.assertEqual(error, upload_service.TXT_CORRUPT_ERROR)
+        self.assertEqual(error, upload_file_types.TXT_CORRUPT_ERROR)
 
     def test_has_binary_signature_exception_handled_real(self):
         mock_file = MagicMock()
