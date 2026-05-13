@@ -942,6 +942,14 @@ def _normalize_export_payload_source_type(payload, fallback_filename=None):
     if source_type in {"Excel", "PDF"}:
         normalized_payload["document_info"] = normalized_document_info
         return normalized_payload
+    if isinstance(source_type, str):
+        canonical_source_type = source_type.strip().lower()
+        if canonical_source_type in {"excel", "pdf"}:
+            normalized_document_info["source_type"] = (
+                "PDF" if canonical_source_type == "pdf" else "Excel"
+            )
+            normalized_payload["document_info"] = normalized_document_info
+            return normalized_payload
 
     filename = _resolve_source_type_filename(
         normalized_document_info.get("filename"),
