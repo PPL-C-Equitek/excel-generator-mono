@@ -10,32 +10,51 @@ export interface LoginFormData {
 interface LoginFormProps {
     onSubmit?: (data: LoginFormData) => void
     onGoogleSignIn?: () => void
+    isLoading?: boolean
+    apiError?: string | null
+    onClearApiError?: () => void
 }
 
-export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFormProps>) {
+export default function LoginForm({ 
+    onSubmit, 
+    onGoogleSignIn, 
+    isLoading = false,
+    apiError = null,
+    onClearApiError 
+}: Readonly<LoginFormProps>) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
-    const [error, setError] = useState<string | null>(null)
+    const [validationError, setValidationError] = useState<string | null>(null)
+
+    const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setEmail(e.target.value)
+        onClearApiError?.()
+    }
+
+    const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setPassword(e.target.value)
+        onClearApiError?.()
+    }
 
     const handleSubmit = () => {
-        setError(null)
+        setValidationError(null)
 
         // Batasi panjang email
         if (!email || email.length > 254) {
-            setError('Please enter a valid email address.')
+            setValidationError('Please enter a valid email address.')
             return
         }
 
         // Validasi email
         const emailRegex = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$/
         if (!emailRegex.test(email)) {
-            setError('Please enter a valid email address.')
+            setValidationError('Please enter a valid email address.')
             return
         }
 
         // Validasi password
         if (!password) {
-            setError('Password is required.')
+            setValidationError('Password is required.')
             return
         }
 
@@ -53,21 +72,6 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
                 Sign in to continue to your workspace.
             </p>
 
-            {/* Error */}
-            {error && (
-                <div
-                    role="alert"
-                    className="mb-4 rounded-lg border p-3 text-sm"
-                    style={{
-                        backgroundColor: 'var(--danger-bg)',
-                        borderColor: 'var(--danger-border)',
-                        color: 'var(--danger-text)',
-                    }}
-                >
-                    {error}
-                </div>
-            )}
-
             {/* Email */}
             <div className="mb-4">
                 <label
@@ -81,8 +85,8 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
                     type="email"
                     placeholder="Enter your email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                    onChange={handleEmailChange}
+                    className="w-full px-4 py-3 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-600"
                     style={{
                         backgroundColor: 'var(--surface-2)',
                         color: 'var(--foreground)',
@@ -91,7 +95,7 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
             </div>
 
             {/* Password */}
-            <div className="mb-4">
+            <div className="mb-6">
                 <label
                     htmlFor="password"
                     className="block text-white font-bold text-sm mb-2"
@@ -102,19 +106,35 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
                     id="password"
                     data-testid="password-input"
                     type="password"
-                    placeholder="••••••••"
+                    placeholder="Enter your password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                    onChange={handlePasswordChange}
+                    disabled={isLoading}
+                    className="w-full px-4 py-3 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
                     style={{
                         backgroundColor: 'var(--surface-2)',
                         color: 'var(--foreground)',
                     }}
                 />
+
+                {/* Error - Below Password Field */}
+                {(validationError || apiError) && (
+                    <div
+                        role="alert"
+                        className="mt-2 rounded-lg border p-3 text-sm"
+                        style={{
+                            backgroundColor: 'var(--danger-bg)',
+                            borderColor: 'var(--danger-border)',
+                            color: 'var(--danger-text)',
+                        }}
+                    >
+                        {validationError || apiError}
+                    </div>
+                )}
             </div>
 
             {/* Forgot password */}
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-4">
                 <a
                     href="/forgot-password"
                     className="text-white font-bold text-sm hover:underline"
@@ -126,17 +146,19 @@ export default function LoginForm({ onSubmit, onGoogleSignIn }: Readonly<LoginFo
             {/* Sign in */}
             <button
                 onClick={handleSubmit}
-                className="w-full py-3 rounded-xl font-bold text-sm mb-3 transition active:scale-[0.98]"
+                disabled={isLoading}
+                className="w-full py-3 rounded-xl font-bold text-sm mb-3 transition active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-600"
                 style={{ backgroundColor: '#ffffff', color: 'var(--brand-primary)' }}
             >
-                Sign In
+                {isLoading ? 'Signing In...' : 'Sign In'}
             </button>
 
             {/* Sign in with Google */}
             <button
                 type="button"
                 onClick={() => onGoogleSignIn?.()}
-                className="w-full py-3 rounded-xl font-bold text-sm mb-6 flex items-center justify-center gap-2 transition active:scale-[0.98]"
+                disabled={isLoading}
+                className="w-full py-3 rounded-xl font-bold text-sm mb-6 flex items-center justify-center gap-2 transition active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-600"
                 style={{ backgroundColor: '#ffffff', color: '#111827' }}
             >
                 <span className="text-base">G</span>{' '}
