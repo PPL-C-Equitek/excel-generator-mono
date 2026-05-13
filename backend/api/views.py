@@ -321,7 +321,10 @@ def _get_history_download_content_type(artifact_type):
 
 
 def _generate_history_download_artifact(history, owner, file_format):
-    normalized_output_json = _normalize_export_payload_source_type(history.output_json)
+    normalized_output_json = _normalize_export_payload_source_type(
+        history.output_json,
+        fallback_filename=history.original_name,
+    )
 
     if file_format == "csv":
         artifact = export_csv_to_filesystem(
@@ -925,7 +928,7 @@ def _normalize_session_output_export_payload(output):
     return _normalize_export_payload_source_type(payload)
 
 
-def _normalize_export_payload_source_type(payload):
+def _normalize_export_payload_source_type(payload, fallback_filename=None):
     if not isinstance(payload, dict):
         return payload
 
@@ -941,6 +944,8 @@ def _normalize_export_payload_source_type(payload):
         return normalized_payload
 
     filename = normalized_document_info.get("filename")
+    if not (isinstance(filename, str) and filename.strip()):
+        filename = fallback_filename
     if isinstance(filename, str) and filename.strip().lower().endswith(".pdf"):
         normalized_document_info["source_type"] = "PDF"
     else:
