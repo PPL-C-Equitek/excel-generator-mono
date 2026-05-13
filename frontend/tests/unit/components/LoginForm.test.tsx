@@ -121,6 +121,19 @@ describe('LoginForm', () => {
             expect(screen.getByRole('alert')).toBeInTheDocument()
         })
 
+        it('renders errors as a red box immediately after the password field', async () => {
+            render(<LoginForm apiError="Invalid email or password." />)
+
+            const passwordInput = screen.getByTestId('password-input')
+            const alert = screen.getByRole('alert')
+
+            expect(passwordInput.compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+            expect(alert).toHaveClass('rounded-lg', 'border', 'p-3')
+            expect(alert).toHaveAttribute('style', expect.stringContaining('background-color: var(--danger-bg)'))
+            expect(alert).toHaveAttribute('style', expect.stringContaining('border-color: var(--danger-border)'))
+            expect(alert).toHaveAttribute('style', expect.stringContaining('color: var(--danger-text)'))
+        })
+
         it('does not show error on initial render', () => {
             render(<LoginForm />)
             expect(screen.queryByRole('alert')).not.toBeInTheDocument()

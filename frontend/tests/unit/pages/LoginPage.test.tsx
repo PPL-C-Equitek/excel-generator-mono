@@ -157,6 +157,27 @@ describe('LoginPage', () => {
             delete process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
         })
 
+        it('shows English error when Google loginWithGoogle returns Indonesian missing-token error', async () => {
+            process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID = 'mock-client-id'
+
+            vi.mocked(useGoogleLogin).mockImplementation((options) => {
+                return () => options.onSuccess?.({ access_token: 'google-token' } as never)
+            })
+
+            vi.mocked(api.loginWithGoogle).mockRejectedValueOnce(new Error('Token tidak ditemukan'))
+
+            render(<LoginPage />)
+            fireEvent.click(screen.getByRole('button', { name: /sign in with google/i }))
+
+            await waitFor(() => {
+                expect(screen.getByRole('alert')).toHaveTextContent(
+                    'Google sign-in token is required. Please try again.'
+                )
+            })
+
+            delete process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+        })
+
         it('shows an error when Google onError is triggered', async () => {
             process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID = 'mock-client-id'
 
@@ -350,6 +371,26 @@ describe('handleLogin', () => {
 
         await waitFor(() => {
             expect(screen.getByRole('alert')).toHaveTextContent('Invalid credentials')
+        })
+    })
+
+    it('shows English error when login receives an Indonesian session error', async () => {
+        vi.mocked(api.login).mockRejectedValueOnce(new Error('Refresh token tidak valid.'))
+
+        render(<LoginPage />)
+
+        fireEvent.change(screen.getByLabelText(/email/i), {
+            target: { value: 'user1@gmail.com' },
+        })
+        fireEvent.change(screen.getByLabelText(/password/i), {
+            target: { value: 'wrongpassword' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
+
+        await waitFor(() => {
+            expect(screen.getByRole('alert')).toHaveTextContent(
+                'Your session is invalid. Please log in again.'
+            )
         })
     })
 

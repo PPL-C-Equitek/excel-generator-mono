@@ -8,19 +8,27 @@ import { useGoogleLogin } from '@react-oauth/google'
 import { login, loginWithGoogle } from '@/lib/api'
 import { storeAuthTokens } from '@/lib/auth'
 
-const GOOGLE_TOKEN_VERIFICATION_ERROR = 'invalid token atau gagal memverifikasi google token'
 const GOOGLE_SIGN_IN_FAILED_MESSAGE = 'Google sign-in failed. Please try again.'
+const LOGIN_ERROR_TRANSLATIONS: Array<[string, string]> = [
+    ['invalid token atau gagal memverifikasi google token', GOOGLE_SIGN_IN_FAILED_MESSAGE],
+    ['token tidak ditemukan', 'Google sign-in token is required. Please try again.'],
+    ['format token tidak valid', 'Google sign-in token format is invalid. Please try again.'],
+    ['token expired. silakan login ulang', 'Your session has expired. Please log in again.'],
+    ['refresh token sudah logout', 'Your session has already been signed out. Please log in again.'],
+    ['refresh token tidak valid', 'Your session is invalid. Please log in again.'],
+]
 
-function getGoogleSignInErrorMessage(error: unknown) {
+function getLoginErrorMessage(error: unknown, fallback: string) {
     if (!(error instanceof Error)) {
-        return GOOGLE_SIGN_IN_FAILED_MESSAGE
+        return fallback
     }
 
-    if (error.message.toLowerCase().includes(GOOGLE_TOKEN_VERIFICATION_ERROR)) {
-        return GOOGLE_SIGN_IN_FAILED_MESSAGE
-    }
+    const normalizedMessage = error.message.trim().toLowerCase()
+    const translated = LOGIN_ERROR_TRANSLATIONS.find(([source]) =>
+        normalizedMessage.includes(source)
+    )
 
-    return error.message
+    return translated?.[1] ?? error.message
 }
 
 export default function LoginPage() {
@@ -55,11 +63,7 @@ export default function LoginPage() {
             saveTokensAndRedirect(res.access_token, res.refresh_token, res.user)
         } catch (err: unknown) {
             setIsLoading(false)
-            if (err instanceof Error) {
-                setApiError(err.message)
-            } else {
-                setApiError('Something went wrong. Please try again.')
-            }
+            setApiError(getLoginErrorMessage(err, 'Something went wrong. Please try again.'))
         }
     }
 
@@ -72,7 +76,7 @@ export default function LoginPage() {
                 saveTokensAndRedirect(res.access_token, res.refresh_token, res.user)
             } catch (err: unknown) {
                 setIsLoading(false)
-                setApiError(getGoogleSignInErrorMessage(err))
+                setApiError(getLoginErrorMessage(err, GOOGLE_SIGN_IN_FAILED_MESSAGE))
             }
         },
         onError: () => {
