@@ -819,6 +819,29 @@ class GenerateCSVTest(unittest.TestCase):
                 filename_policy=filename_policy,
             )
 
+    def test_generate_csv_normalizes_path_traversal_member_filenames(self):
+        cases = [
+            ("../evil.csv", "evil.csv"),
+            ("folder/evil.csv", "evil.csv"),
+            ("folder\\evil.csv", "evil.csv"),
+        ]
+        
+        for unsafe_name, expected_name in cases:
+            with self.subTest(unsafe_name=unsafe_name):
+                class UnsafeFilenamePolicy:
+                    def build_filename(self, sheet_name):
+                        return unsafe_name
+                        
+                mapped_output = self._build_mapped_output()
+                result = export_service.generate_csv(
+                    mapped_output,
+                    filename_policy=UnsafeFilenamePolicy(),
+                )
+                
+                self.assertEqual(result["files"][0]["name"], expected_name)
+                # Verify CSV content is still generated correctly
+                self.assertIn("name", result["files"][0]["content"])
+
     def test_generate_csv_download_artifact_single_sheet_returns_plain_csv(self):
         mapped_output = self._build_mapped_output()
 
