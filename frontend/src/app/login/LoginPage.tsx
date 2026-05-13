@@ -8,6 +8,21 @@ import { useGoogleLogin } from '@react-oauth/google'
 import { login, loginWithGoogle } from '@/lib/api'
 import { storeAuthTokens } from '@/lib/auth'
 
+const GOOGLE_TOKEN_VERIFICATION_ERROR = 'invalid token atau gagal memverifikasi google token'
+const GOOGLE_SIGN_IN_FAILED_MESSAGE = 'Google sign-in failed. Please try again.'
+
+function getGoogleSignInErrorMessage(error: unknown) {
+    if (!(error instanceof Error)) {
+        return GOOGLE_SIGN_IN_FAILED_MESSAGE
+    }
+
+    if (error.message.toLowerCase().includes(GOOGLE_TOKEN_VERIFICATION_ERROR)) {
+        return GOOGLE_SIGN_IN_FAILED_MESSAGE
+    }
+
+    return error.message
+}
+
 export default function LoginPage() {
     const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
     const [isLoading, setIsLoading] = useState(false)
@@ -57,11 +72,7 @@ export default function LoginPage() {
                 saveTokensAndRedirect(res.access_token, res.refresh_token, res.user)
             } catch (err: unknown) {
                 setIsLoading(false)
-                if (err instanceof Error) {
-                    setApiError(err.message)
-                } else {
-                    setApiError('Google sign-in failed. Please try again.')
-                }
+                setApiError(getGoogleSignInErrorMessage(err))
             }
         },
         onError: () => {
@@ -98,7 +109,7 @@ export default function LoginPage() {
                     onSubmit={handleLogin}
                     onGoogleSignIn={() => {
                         if (!googleClientId) {
-                            setApiError('NEXT_PUBLIC_GOOGLE_CLIENT_ID is not configured')
+                            setApiError('Google sign-in is not configured. Please contact support.')
                             return
                         }
 

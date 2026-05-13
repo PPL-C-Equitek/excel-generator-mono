@@ -31,6 +31,21 @@ vi.mock('@/lib/auth', async () => {
     }
 })
 
+function mockRedirectTimeout() {
+    const originalSetTimeout = globalThis.setTimeout
+
+    return vi
+        .spyOn(globalThis, 'setTimeout')
+        .mockImplementation((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+            if (timeout === 2000 && typeof handler === 'function') {
+                handler(...args)
+                return 0 as unknown as ReturnType<typeof setTimeout>
+            }
+
+            return originalSetTimeout(handler, timeout, ...args)
+        })
+}
+
 describe('LoginPage', () => {
     beforeEach(() => {
         vi.clearAllMocks()
@@ -69,6 +84,7 @@ describe('LoginPage', () => {
 
         it('saves tokens and redirects on successful Google sign-in', async () => {
             process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID = 'mock-client-id'
+            const timeoutSpy = mockRedirectTimeout()
             Object.defineProperty(globalThis, 'location', {
                 value: { href: '' },
                 writable: true,
@@ -96,6 +112,7 @@ describe('LoginPage', () => {
                 expect(globalThis.location.href).toBe('/convert')
             })
 
+            timeoutSpy.mockRestore()
             delete process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
         })
     })
@@ -117,29 +134,31 @@ describe('LoginPage', () => {
             expect(screen.queryByTestId('drop-zone')).not.toBeInTheDocument()
         })
 
-        it('alerts error message when Google loginWithGoogle throws an Error', async () => {
+        it('shows English error when Google loginWithGoogle returns Indonesian token error', async () => {
             process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID = 'mock-client-id'
-            vi.spyOn(window, 'alert').mockImplementation(() => { })
 
             vi.mocked(useGoogleLogin).mockImplementation((options) => {
                 return () => options.onSuccess?.({ access_token: 'google-token' } as never)
             })
 
-            vi.mocked(api.loginWithGoogle).mockRejectedValueOnce(new Error('Google auth failed'))
+            vi.mocked(api.loginWithGoogle).mockRejectedValueOnce(
+                new Error('Invalid token atau gagal memverifikasi Google Token')
+            )
 
             render(<LoginPage />)
             fireEvent.click(screen.getByRole('button', { name: /sign in with google/i }))
 
             await waitFor(() => {
-                expect(window.alert).toHaveBeenCalledWith('Google auth failed')
+                expect(screen.getByRole('alert')).toHaveTextContent(
+                    'Google sign-in failed. Please try again.'
+                )
             })
 
             delete process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
         })
 
-        it('alerts when Google onError is triggered', () => {
+        it('shows an error when Google onError is triggered', async () => {
             process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID = 'mock-client-id'
-            vi.spyOn(window, 'alert').mockImplementation(() => { })
 
             vi.mocked(useGoogleLogin).mockImplementation((options) => {
                 return () => options.onError?.({} as never)
@@ -148,7 +167,9 @@ describe('LoginPage', () => {
             render(<LoginPage />)
             fireEvent.click(screen.getByRole('button', { name: /sign in with google/i }))
 
-            expect(window.alert).toHaveBeenCalledWith('Google sign-in cancelled or failed')
+            expect(await screen.findByRole('alert')).toHaveTextContent(
+                'Google sign-in cancelled or failed. Please try again.'
+            )
 
             delete process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
         })
@@ -159,7 +180,6 @@ describe('LoginPage', () => {
             vi.clearAllMocks()
             localStorage.clear()
             sessionStorage.clear()
-            vi.spyOn(window, 'alert').mockImplementation(() => { })
             Object.defineProperty(globalThis, 'location', {
                 value: { href: '' },
                 writable: true,
@@ -213,7 +233,7 @@ describe('LoginPage', () => {
             })
         })
 
-        it('alerts when Google Client ID is not configured', async () => {
+        it('shows an error when Google Client ID is not configured', async () => {
             const originalEnv = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
             delete process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
 
@@ -221,14 +241,14 @@ describe('LoginPage', () => {
 
             fireEvent.click(screen.getByRole('button', { name: /google/i }))
 
-            expect(window.alert).toHaveBeenCalledWith(
-                expect.stringContaining('NEXT_PUBLIC_GOOGLE_CLIENT_ID')
+            expect(await screen.findByRole('alert')).toHaveTextContent(
+                'Google sign-in is not configured. Please contact support.'
             )
 
             process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID = originalEnv
         })
 
-        it('alerts fallback message when Google loginWithGoogle throws a non-Error', async () => {
+        it('shows fallback message when Google loginWithGoogle throws a non-Error', async () => {
             const { useGoogleLogin } = await import('@react-oauth/google')
             vi.mocked(useGoogleLogin).mockImplementation((options) => {
                 return () => options.onSuccess?.({ access_token: 'google-token' } as never)
@@ -241,7 +261,9 @@ describe('LoginPage', () => {
             fireEvent.click(screen.getByRole('button', { name: /google/i }))
 
             await waitFor(() => {
-                expect(window.alert).toHaveBeenCalledWith('Google sign-in failed')
+                expect(screen.getByRole('alert')).toHaveTextContent(
+                    'Google sign-in failed. Please try again.'
+                )
             })
         })
     })
@@ -258,9 +280,6 @@ describe('handleLogin', () => {
         vi.clearAllMocks()
         localStorage.clear()
         sessionStorage.clear()
-
-        // Spy alert & location
-        vi.spyOn(window, 'alert').mockImplementation(() => { })
         Object.defineProperty(globalThis, 'location', {
             value: { href: '' },
             writable: true,
@@ -291,6 +310,7 @@ describe('handleLogin', () => {
     })
 
     it('saves tokens to localStorage and redirects on successful login', async () => {
+        const timeoutSpy = mockRedirectTimeout()
         vi.mocked(api.login).mockResolvedValueOnce({
             access_token: 'mock-access',
             refresh_token: 'mock-refresh',
@@ -311,9 +331,11 @@ describe('handleLogin', () => {
             expect(localStorage.getItem('refresh_token')).toBe('mock-refresh')
             expect(globalThis.location.href).toBe('/convert')
         })
+
+        timeoutSpy.mockRestore()
     })
 
-    it('alerts error message when login throws an Error', async () => {
+    it('shows error message when login throws an Error', async () => {
         vi.mocked(api.login).mockRejectedValueOnce(new Error('Invalid credentials'))
 
         render(<LoginPage />)
@@ -327,11 +349,11 @@ describe('handleLogin', () => {
         fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
         await waitFor(() => {
-            expect(window.alert).toHaveBeenCalledWith('Invalid credentials')
+            expect(screen.getByRole('alert')).toHaveTextContent('Invalid credentials')
         })
     })
 
-    it('alerts fallback message when login throws a non-Error', async () => {
+    it('shows fallback message when login throws a non-Error', async () => {
         vi.mocked(api.login).mockRejectedValueOnce('unexpected string error')
 
         render(<LoginPage />)
@@ -345,7 +367,9 @@ describe('handleLogin', () => {
         fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
         await waitFor(() => {
-            expect(window.alert).toHaveBeenCalledWith('Something went wrong')
+            expect(screen.getByRole('alert')).toHaveTextContent(
+                'Something went wrong. Please try again.'
+            )
         })
     })
 
@@ -371,7 +395,8 @@ describe('handleLogin', () => {
             })
         })
 
-        it('does not alert when login succeeds', async () => {
+        it('does not show an error when login succeeds', async () => {
+            const timeoutSpy = mockRedirectTimeout()
             vi.mocked(api.login).mockResolvedValueOnce({
                 access_token: 'mock-access',
                 refresh_token: 'mock-refresh',
@@ -391,7 +416,8 @@ describe('handleLogin', () => {
                 expect(globalThis.location.href).toBe('/convert')
             })
 
-            expect(window.alert).not.toHaveBeenCalled()
+            expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+            timeoutSpy.mockRestore()
         })
 
         it('does not redirect when login throws an Error', async () => {
@@ -408,7 +434,7 @@ describe('handleLogin', () => {
             fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
 
             await waitFor(() => {
-                expect(window.alert).toHaveBeenCalledWith('Invalid credentials')
+                expect(screen.getByRole('alert')).toHaveTextContent('Invalid credentials')
             })
 
             expect(globalThis.location.href).not.toBe('/convert')
