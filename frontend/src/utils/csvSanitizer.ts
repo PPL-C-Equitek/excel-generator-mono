@@ -20,13 +20,16 @@ function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
 
 export function sanitizeCSVCell(data: unknown): unknown {
     if (typeof data === 'string') {
-        if (shouldEscapeCSVFormulaCell(data)) {
-            return "'" + data
-        }
-    } else if (Array.isArray(data)) {
+        return shouldEscapeCSVFormulaCell(data) ? "'" + data : data
+    }
+    
+    if (Array.isArray(data)) {
         return data.map(sanitizeCSVCell)
-    } else if (data !== null && typeof data === 'object') {
+    }
+    
+    if (data !== null && typeof data === 'object') {
         return sanitizeObject(data as Record<string, unknown>)
     }
+    
     return data
 }
