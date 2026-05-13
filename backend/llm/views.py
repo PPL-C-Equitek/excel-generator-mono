@@ -772,15 +772,18 @@ def send_message(request):
 
 
 def _build_stream_event_generator(request, session, history, message):
-    reply = ""
+    reply_chunks = []
+
+    prepared_history = build_history_with_summary(session, history) if session is not None else history
+    prepared_history = _inject_file_context_if_available(session, prepared_history)
 
     try:
-        stream = generate_streaming_chat_response(history)
+        stream = generate_streaming_chat_response(prepared_history)
         for chunk in stream:
             if getattr(request, 'is_aborted', lambda: False)():
                 stream.close()
                 return
-            reply += chunk
+            reply_chunks.append(chunk)
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
     except OpenAIConfigurationError:
         raise
@@ -794,6 +797,10 @@ def _build_stream_event_generator(request, session, history, message):
         logger.exception("Unexpected error during streaming send_message.")
         yield f"data: {json.dumps({'error': INTERNAL_FAILURE_DETAIL})}\n\n"
         yield _SSE_DONE
+        return
+
+    reply = "".join(reply_chunks)
+    if not reply:
         return
 
     with transaction.atomic():

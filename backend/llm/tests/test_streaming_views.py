@@ -274,6 +274,19 @@ class StreamSendMessageEdgeCaseTest(TestCase):
         done_events = [c for c in parsed if c.get("done")]
         self.assertEqual(len(done_events), 0)
 
+    @patch("llm.views.generate_streaming_chat_response")
+    def test_edge_empty_stream_does_not_persist_session(self, mock_stream):
+        mock_stream.return_value = iter([])
+
+        response = self.client.post(
+            "/llm/send-message/stream/",
+            {"message": "Hi"},
+            content_type="application/json",
+        )
+        list(response.streaming_content)
+
+        self.assertFalse(Session.objects.filter(owner=self.user).exists())
+
 
 class StreamSendMessageNegativeSessionTest(TestCase):
     def setUp(self):
