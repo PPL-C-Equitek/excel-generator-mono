@@ -1,7 +1,7 @@
 import json
 import uuid
 from unittest.mock import MagicMock, patch
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 from authentication.models import User
 from chat_sessions.models import Session
@@ -355,3 +355,97 @@ class StreamSendMessageNegativeSessionTest(TestCase):
         mock_logger.exception.assert_called_once_with(
             "Unexpected error during streaming send_message."
         )
+
+
+class BuildSseEventTest(SimpleTestCase):
+    def test_positive_formats_chunk_event(self):
+        from llm.views import _build_sse_event
+        result = _build_sse_event({"chunk": "hello"})
+        self.assertEqual(result, 'data: {"chunk": "hello"}\n\n')
+
+    def test_positive_formats_error_event(self):
+        from llm.views import _build_sse_event
+        result = _build_sse_event({"error": "failed"})
+        self.assertEqual(result, 'data: {"error": "failed"}\n\n')
+
+    def test_positive_formats_done_event(self):
+        from llm.views import _build_sse_event
+        result = _build_sse_event({"session_id": "abc-123", "done": True})
+        parsed = json.loads(result[6:].strip())
+        self.assertEqual(parsed, {"session_id": "abc-123", "done": True})
+
+    def test_edge_empty_dict_produces_valid_sse_line(self):
+        from llm.views import _build_sse_event
+        result = _build_sse_event({})
+        self.assertTrue(result.startswith("data: "))
+        self.assertTrue(result.endswith("\n\n"))
+
+
+class PrepareStreamHistoryTest(SimpleTestCase):
+    def test_positive_returns_history_unchanged_when_no_session(self):
+        from llm.views import _prepare_stream_history
+        history = [{"role": "user", "content": "hi"}]
+        result = _prepare_stream_history(None, history)
+        self.assertEqual(result, history)
+
+    @patch("llm.views._inject_file_context_if_available")
+    @patch("llm.views.build_history_with_summary")
+    def test_positive_calls_build_history_and_inject_when_session_exists(
+        self, mock_build, mock_inject
+    ):
+        from llm.views import _prepare_stream_history
+        mock_build.return_value = [{"role": "user", "content": "summarized"}]
+        mock_inject.return_value = [{"role": "system", "content": "ctx"}, {"role": "user", "content": "summarized"}]
+
+        session = MagicMock()
+        history = [{"role": "user", "content": "hi"}]
+        result = _prepare_stream_history(session, history)
+
+        mock_build.assert_called_once_with(session, history)
+        mock_inject.assert_called_once_with(session, mock_build.return_value)
+        self.assertEqual(result, mock_inject.return_value)
+
+    @patch("llm.views._inject_file_context_if_available")
+    @patch("llm.views.build_history_with_summary")
+    def test_negative_does_not_call_build_history_when_session_is_none(
+        self, mock_build, mock_inject
+    ):
+        from llm.views import _prepare_stream_history
+        _prepare_stream_history(None, [])
+        mock_build.assert_not_called()
+
+
+class PersistStreamSessionTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="persist-stream@example.com",
+            name="Persist User",
+            password="secret",
+            status="verified",
+        )
+
+    def test_positive_creates_new_session_when_none(self):
+        from llm.views import _persist_and_finalize_stream
+        session = _persist_and_finalize_stream(self.user, None, "Hello", "Response")
+        self.assertIsNotNone(session)
+        self.assertEqual(Session.objects.filter(owner=self.user).count(), 1)
+
+    def test_positive_reuses_existing_session(self):
+        from llm.views import _persist_and_finalize_stream
+        existing = Session.objects.create(owner=self.user, title="Existing")
+        session = _persist_and_finalize_stream(self.user, existing, "Hello", "Response")
+        self.assertEqual(session.id, existing.id)
+        self.assertEqual(Session.objects.filter(owner=self.user).count(), 1)
+
+    def test_positive_persists_user_and_assistant_messages(self):
+        from llm.views import _persist_and_finalize_stream
+        session = _persist_and_finalize_stream(self.user, None, "Hello", "World")
+        roles = list(session.messages.values_list("role", flat=True))
+        self.assertIn("user", roles)
+        self.assertIn("assistant", roles)
+
+    def test_edge_assistant_message_content_matches_reply(self):
+        from llm.views import _persist_and_finalize_stream
+        session = _persist_and_finalize_stream(self.user, None, "Q", "Answer text")
+        assistant_msg = session.messages.filter(role="assistant").first()
+        self.assertEqual(assistant_msg.content, "Answer text")
