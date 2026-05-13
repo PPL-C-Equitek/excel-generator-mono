@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 from unittest.mock import patch, MagicMock
-from backend.file_processing.services import upload_file_types
+from file_processing.services import upload_file_types
 from file_processing.services.upload_service import _has_binary_signature
 from file_processing.services import upload_service
 
