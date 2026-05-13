@@ -56,6 +56,7 @@ _SCALAR_TYPES = (str, int, float, bool, type(None))
 _ALLOWED_SOURCE_TYPES = {"Excel", "PDF"}
 _REQUIRED_TOP_LEVEL_KEYS = {"document_info", "summary", "content_data"}
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+_CSV_FILENAME_INVALID_CHARS = re.compile(r'[*?:"<>|]')
 _EXCEL_SHEET_INVALID_CHARS = re.compile(r"[\\/*?:\[\]]")
 _EXCEL_ARTIFACT_TYPE = "xlsx"
 _EXCEL_FILE_ID_PREFIX = "xlsx_"
@@ -396,7 +397,7 @@ def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
 
 def _normalize_csv_export_filename(filename):
     basename = filename.replace("\\", "/").split("/")[-1]
-    return re.sub(r'[*?:"<>|]', "_", basename)
+    return _CSV_FILENAME_INVALID_CHARS.sub("_", basename)
 
 
 def _validate_sheet_structure(sheet, sheet_index, error_class):
