@@ -9,6 +9,7 @@ export interface ILLMService {
         context?: {
             sessionId?: string | null;
             chatId?: string | null;
+            targetOutputId?: string | null;
         }
     ) => Promise<LLMResponse>;
     exportToCsv?: (

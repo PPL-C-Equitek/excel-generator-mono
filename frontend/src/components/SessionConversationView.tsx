@@ -55,6 +55,10 @@ function formatHistoryTimestamp(value: string) {
   });
 }
 
+function isTemporaryOutputId(value: string): boolean {
+  return value.startsWith("temp-output-");
+}
+
 function getReasoningSteps(
   item: Extract<SessionResumeHistoryItem, { type: "output" }>,
   thinkingLogRecord?: ThinkingLogItem,
@@ -497,16 +501,24 @@ export default function SessionConversationView({
     setLocalHistory((prev) => [...prev, optimisticUserMessage]);
 
     try {
-      const followUpPayload = {
-        previous_output: latestOutput.output_json,
-        user_prompt: trimmedMessage,
-      };
+      const useTargetOutputId = !isTemporaryOutputId(latestOutput.id);
+      const followUpPayload = useTargetOutputId
+        ? {
+            user_prompt: trimmedMessage,
+          }
+        : {
+            previous_output: latestOutput.output_json,
+            user_prompt: trimmedMessage,
+          };
 
       const llmResult = await generateJson(
         followUpPayload,
         undefined,
         undefined,
-        { sessionId: session.id },
+        {
+          sessionId: session.id,
+          targetOutputId: useTargetOutputId ? latestOutput.id : undefined,
+        },
       );
 
       const generatedOutput: SessionResumeHistoryItem = {
