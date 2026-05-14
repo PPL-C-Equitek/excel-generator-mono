@@ -798,7 +798,6 @@ describe('SessionConversationView', () => {
         await waitFor(() => {
             expect(mockGenerateJson).toHaveBeenCalledWith(
                 {
-                    target_output_id: 'output-1',
                     user_prompt: 'Lanjutkan analisisnya',
                 },
                 undefined,
