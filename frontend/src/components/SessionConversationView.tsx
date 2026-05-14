@@ -504,7 +504,6 @@ export default function SessionConversationView({
       const useTargetOutputId = !isTemporaryOutputId(latestOutput.id);
       const followUpPayload = useTargetOutputId
         ? {
-            target_output_id: latestOutput.id,
             user_prompt: trimmedMessage,
           }
         : {
