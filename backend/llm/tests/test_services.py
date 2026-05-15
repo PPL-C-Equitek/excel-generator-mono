@@ -5,6 +5,7 @@ from django.test import SimpleTestCase, override_settings
 from unittest.mock import Mock, patch
 
 from llm.services.generation_service import (
+    _compact_input_json_for_prompt,
     CustomSchemaNotFoundError,
     DjangoCustomSchemaPromptSource,
     JsonGenerationService,
@@ -12,6 +13,7 @@ from llm.services.generation_service import (
     compose_system_prompt,
 )
 from llm.services.openai_client import (
+    OpenAITextGenerationProvider,
     OpenAIServiceError,
     OpenAIUpstreamError,
     generate_chat_response,
@@ -45,6 +47,151 @@ class DummyAPIError(Exception):
 
 class DummyAPIConnectionError(Exception):
     pass
+
+
+class CompactInputJsonForPromptTest(SimpleTestCase):
+    def test_compact_input_json_for_prompt_isp_partitions(self):
+        scenarios = (
+            {
+                "name": "non_dict_payload_is_passthrough",
+                "input_json": [{"sheet": "Sheet1"}],
+                "expected": [{"sheet": "Sheet1"}],
+            },
+            {
+                "name": "dict_without_extracted_is_passthrough",
+                "input_json": {"filename": "report.pdf", "format": "pdf"},
+                "expected": {"filename": "report.pdf", "format": "pdf"},
+            },
+            {
+                "name": "dict_with_extracted_drops_upload_wrapper_noise",
+                "input_json": {
+                    "status": "success",
+                    "message": "uploaded",
+                    "size": 100,
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                },
+                "expected": {
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                },
+            },
+            {
+                "name": "trimmed_user_prompt_is_preserved",
+                "input_json": {
+                    "status": "success",
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                    "user_prompt": "  Only paid rows  ",
+                },
+                "expected": {
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                    "user_prompt": "Only paid rows",
+                },
+            },
+            {
+                "name": "blank_user_prompt_is_removed",
+                "input_json": {
+                    "status": "success",
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                    "user_prompt": "   ",
+                },
+                "expected": {
+                    "filename": "report.pdf",
+                    "extracted": {"Sheet1": [["a"], ["1"]]},
+                },
+            },
+        )
+
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["name"]):
+                result = _compact_input_json_for_prompt(scenario["input_json"])
+                self.assertEqual(result, scenario["expected"])
+
+    def test_compact_input_json_for_prompt_compacts_nested_refinement_original_input(self):
+        input_json = {
+            "original_input_json": {
+                "status": "success",
+                "message": "uploaded",
+                "size": 100,
+                "filename": "report.pdf",
+                "extracted": {"Sheet1": [["a"], ["1"]]},
+                "user_prompt": "  Keep only paid rows  ",
+            },
+            "previous_output_json": {"content_data": []},
+            "validation_log": {"iteration": 1, "verdict": "invalid"},
+        }
+
+        result = _compact_input_json_for_prompt(input_json)
+
+        self.assertEqual(
+            result["original_input_json"],
+            {
+                "filename": "report.pdf",
+                "extracted": {"Sheet1": [["a"], ["1"]]},
+                "user_prompt": "Keep only paid rows",
+            },
+        )
+        self.assertEqual(result["previous_output_json"], {"content_data": []})
+        self.assertEqual(result["validation_log"], {"iteration": 1, "verdict": "invalid"})
+
+    def test_compact_input_json_for_prompt_handles_refinement_wrapper_with_list_original_input(self):
+        input_json = {
+            "original_input_json": [
+                {"table_name": "Sheet1", "rows": [{"id": 1}]},
+            ],
+            "previous_output_json": {"content_data": []},
+            "validation_log": {"iteration": 1, "verdict": "invalid"},
+        }
+
+        result = _compact_input_json_for_prompt(input_json)
+
+        self.assertEqual(result["original_input_json"], input_json["original_input_json"])
+        self.assertEqual(result["previous_output_json"], {"content_data": []})
+        self.assertEqual(result["validation_log"], {"iteration": 1, "verdict": "invalid"})
+
+    def test_compact_input_json_for_prompt_keeps_wrapper_when_original_input_not_dict_or_list(self):
+        input_json = {
+            "original_input_json": "raw-content",
+            "previous_output_json": {"content_data": []},
+            "validation_log": {"iteration": 1, "verdict": "invalid"},
+        }
+
+        result = _compact_input_json_for_prompt(input_json)
+
+        self.assertEqual(result, input_json)
+
+    def test_compact_input_json_for_prompt_does_not_mutate_original_payload(self):
+        input_json = {
+            "status": "success",
+            "message": "uploaded",
+            "size": 100,
+            "filename": "report.pdf",
+            "extracted": {"Sheet1": [["a"], ["1"]]},
+            "user_prompt": "  Keep only paid rows  ",
+        }
+        expected_original = {
+            "status": "success",
+            "message": "uploaded",
+            "size": 100,
+            "filename": "report.pdf",
+            "extracted": {"Sheet1": [["a"], ["1"]]},
+            "user_prompt": "  Keep only paid rows  ",
+        }
+
+        result = _compact_input_json_for_prompt(input_json)
+
+        self.assertEqual(
+            result,
+            {
+                "filename": "report.pdf",
+                "extracted": {"Sheet1": [["a"], ["1"]]},
+                "user_prompt": "Keep only paid rows",
+            },
+        )
+        self.assertEqual(input_json, expected_original)
 
 
 class OpenAIClientServiceTest(SimpleTestCase):
@@ -162,6 +309,51 @@ class OpenAIClientServiceTest(SimpleTestCase):
             api_key="test-key",
             base_url="https://proxy.example.test/v1",
         )
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_text_generation_provider_reuses_cached_client_for_same_settings(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = [
+            Mock(output_text="first"),
+            Mock(output_text="second"),
+        ]
+        provider = OpenAITextGenerationProvider()
+
+        first_result = provider.generate_text("First prompt")
+        second_result = provider.generate_text("Second prompt")
+
+        self.assertEqual(first_result, "first")
+        self.assertEqual(second_result, "second")
+        mock_openai.assert_called_once_with(api_key="test-key")
+        self.assertEqual(mock_client.responses.create.call_count, 2)
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_BASE_URL="https://proxy-a.example/v1",
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_text_generation_provider_rebuilds_client_when_base_url_changes(self, mock_openai):
+        first_client = Mock()
+        second_client = Mock()
+        mock_openai.side_effect = [first_client, second_client]
+        first_client.responses.create.return_value = Mock(output_text="first")
+        second_client.responses.create.return_value = Mock(output_text="second")
+        provider = OpenAITextGenerationProvider()
+
+        first_result = provider.generate_text("First prompt")
+        with override_settings(OPENAI_BASE_URL="https://proxy-b.example/v1"):
+            second_result = provider.generate_text("Second prompt")
+
+        self.assertEqual(first_result, "first")
+        self.assertEqual(second_result, "second")
+        self.assertEqual(mock_openai.call_count, 2)
+        first_call_kwargs = mock_openai.call_args_list[0].kwargs
+        second_call_kwargs = mock_openai.call_args_list[1].kwargs
+        self.assertEqual(first_call_kwargs["base_url"], "https://proxy-a.example/v1")
+        self.assertEqual(second_call_kwargs["base_url"], "https://proxy-b.example/v1")
 
     def test_generate_text_raises_for_empty_prompt(self):
         with self.assertRaises(ValueError):
@@ -517,21 +709,24 @@ class LlmGenerationServiceTest(SimpleTestCase):
             },
         )
 
-    def test_json_generation_service_preserves_follow_up_fields_when_compacting(self):
+    def test_json_generation_service_compacts_nested_original_input_for_refinement_payload(self):
         text_provider = Mock()
         text_provider.generate_text.return_value = '{"status":"ok"}'
         service = JsonGenerationService(text_provider=text_provider)
 
         service.generate(
             {
-                "status": "success",
-                "message": "File uploaded successfully",
-                "filename": "report.pdf",
-                "size": 20480,
-                "format": "pdf",
-                "extracted": {"Sheet1": [["name"], ["A"]]},
-                "user_prompt": "Only keep paid invoices",
-                "previous_output": {"content_data": [{"rows": [{"status": "all"}]}]},
+                "original_input_json": {
+                    "status": "success",
+                    "message": "File uploaded successfully",
+                    "filename": "report.pdf",
+                    "size": 20480,
+                    "format": "pdf",
+                    "extracted": {"Sheet1": [["name"], ["A"]]},
+                    "user_prompt": "  Only keep paid invoices  ",
+                },
+                "previous_output_json": {"content_data": []},
+                "validation_log": {"iteration": 1, "verdict": "invalid"},
             }
         )
 
@@ -539,14 +734,18 @@ class LlmGenerationServiceTest(SimpleTestCase):
         prompt = text_provider.generate_text.call_args.kwargs["prompt"]
         parsed_prompt = json.loads(prompt)
         self.assertEqual(
-            parsed_prompt,
+            parsed_prompt["original_input_json"],
             {
                 "filename": "report.pdf",
                 "format": "pdf",
                 "extracted": {"Sheet1": [["name"], ["A"]]},
                 "user_prompt": "Only keep paid invoices",
-                "previous_output": {"content_data": [{"rows": [{"status": "all"}]}]},
             },
+        )
+        self.assertEqual(parsed_prompt["previous_output_json"], {"content_data": []})
+        self.assertEqual(
+            parsed_prompt["validation_log"],
+            {"iteration": 1, "verdict": "invalid"},
         )
 
     def test_json_generation_service_drops_blank_user_prompt_when_compacting(self):
@@ -755,6 +954,62 @@ class LlmGenerationServiceTest(SimpleTestCase):
         json_generator.generate.assert_called_once_with(
             input_json={"name": "Pen", "price": 5000},
             system_prompt="Extraction prompt.",
+        )
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_caches_schema_fragment_for_repeated_schema_id(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.side_effect = [{"status": "ok-1"}, {"status": "ok-2"}]
+        schema_prompt_source = Mock()
+        schema_prompt_source.get_prompt_fragment.return_value = (
+            "Use only invoice_number and total_amount."
+        )
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "",
+        )
+
+        first_result = service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-1")
+        second_result = service.generate({"sheet": "Sheet2"}, custom_schema_id="schema-1")
+
+        self.assertEqual(first_result, {"status": "ok-1"})
+        self.assertEqual(second_result, {"status": "ok-2"})
+        schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
+        self.assertEqual(json_generator.generate.call_count, 2)
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_fetches_schema_fragment_for_distinct_schema_ids(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.side_effect = [{"status": "ok-1"}, {"status": "ok-2"}]
+        schema_prompt_source = Mock()
+        schema_prompt_source.get_prompt_fragment.side_effect = [
+            "Prompt A",
+            "Prompt B",
+        ]
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "",
+        )
+
+        service.generate({"sheet": "Sheet1"}, custom_schema_id="schema-a")
+        service.generate({"sheet": "Sheet2"}, custom_schema_id="schema-b")
+
+        self.assertEqual(schema_prompt_source.get_prompt_fragment.call_count, 2)
+        self.assertEqual(
+            schema_prompt_source.get_prompt_fragment.call_args_list[0].args[0],
+            "schema-a",
+        )
+        self.assertEqual(
+            schema_prompt_source.get_prompt_fragment.call_args_list[1].args[0],
+            "schema-b",
         )
 
     @patch("llm.services.generation_service.CustomSchema.objects.get")

@@ -225,8 +225,71 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(result, history)
         self.assertIs(result, history)
 
-    def test_extract_follow_up_prompt_returns_empty_for_non_object_payload(self):
-        self.assertEqual(_extract_follow_up_prompt(["not-an-object"]), "")
+    def test_extract_follow_up_prompt_isp_partitions(self):
+        scenarios = (
+            {
+                "name": "non_object_payload",
+                "payload": ["not-an-object"],
+                "expected": "",
+            },
+            {
+                "name": "missing_user_prompt",
+                "payload": {"filename": "invoice.pdf"},
+                "expected": "",
+            },
+            {
+                "name": "non_string_user_prompt",
+                "payload": {"user_prompt": 123},
+                "expected": "",
+            },
+            {
+                "name": "whitespace_user_prompt",
+                "payload": {"user_prompt": "   "},
+                "expected": "",
+            },
+            {
+                "name": "trimmed_user_prompt",
+                "payload": {"user_prompt": "  refine output  "},
+                "expected": "refine output",
+            },
+        )
+
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["name"]):
+                self.assertEqual(
+                    _extract_follow_up_prompt(scenario["payload"]),
+                    scenario["expected"],
+                )
+
+    def test_hydrate_previous_output_from_target_does_not_override_existing_previous_output(self):
+        existing_previous_output = {"content_data": [{"rows": [{"status": "paid"}]}]}
+        input_json = {
+            "filename": "invoice.pdf",
+            "previous_output": existing_previous_output,
+        }
+        target_output = SimpleNamespace(output_json={"content_data": [{"rows": [{"status": "all"}]}]})
+
+        hydrated = _hydrate_previous_output_from_target(input_json, target_output)
+
+        self.assertIs(hydrated, input_json)
+        self.assertEqual(hydrated["previous_output"], existing_previous_output)
+
+    def test_hydrate_previous_output_from_target_handles_non_dict_or_missing_target(self):
+        list_payload = ["not-a-dict"]
+        target_output = SimpleNamespace(output_json={"rows": [["A"]]})
+
+        hydrated_list_payload = _hydrate_previous_output_from_target(list_payload, target_output)
+        self.assertIs(hydrated_list_payload, list_payload)
+
+        dict_payload = {"filename": "invoice.pdf"}
+        hydrated_without_target = _hydrate_previous_output_from_target(dict_payload, None)
+        self.assertIs(hydrated_without_target, dict_payload)
+
+    def test_estimate_payload_size_bytes_returns_zero_for_non_serializable_payload(self):
+        class _NonSerializable:
+            pass
+
+        self.assertEqual(_estimate_payload_size_bytes(_NonSerializable()), 0)
 
     def test_hydrate_previous_output_keeps_existing_previous_output(self):
         existing_previous_output = {"content_data": [{"rows": [{"status": "paid"}]}]}
@@ -241,12 +304,6 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertIs(hydrated_payload, payload)
         self.assertEqual(hydrated_payload["previous_output"], existing_previous_output)
-
-    def test_estimate_payload_size_bytes_returns_zero_for_non_serializable_payload(self):
-        class _NonSerializable:
-            pass
-
-        self.assertEqual(_estimate_payload_size_bytes(_NonSerializable()), 0)
 
     @patch("llm.views._build_chat_context_from_session")
     @patch("llm.views._resolve_message_target_output")

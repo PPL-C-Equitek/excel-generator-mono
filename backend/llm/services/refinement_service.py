@@ -27,6 +27,10 @@ _AMBIGUOUS_STRING_VALUES = {
 _PATH_PATTERN = re.compile(
     r"((?:document_info|content_data\[\d+\])(?:\.[A-Za-z_]\w*)?|summary(?:\['[^']+'\])?)"
 )
+_REFINEMENT_PREVIOUS_OUTPUT_MAX_CHARS = 6000
+_REFINEMENT_VALIDATION_LOG_MAX_CHARS = 3000
+_REFINEMENT_MAX_ISSUES_IN_INSTRUCTION = 12
+_DEFAULT_REFINEMENT_PLATEAU_PATIENCE = 2
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,8 @@ class RefinementConfig:
     enabled: bool
     max_iterations: int
     early_exit_on_valid: bool
+    early_exit_on_plateau: bool = True
+    plateau_patience: int = _DEFAULT_REFINEMENT_PLATEAU_PATIENCE
 
 
 def _sanitize_reasoning_meta_keys(payload: Any) -> Any:
@@ -319,18 +325,71 @@ def _to_compact_json(value: Any, max_chars: int = 12000) -> str:
     return text[:max_chars] + "... [TRUNCATED]"
 
 
+def _compact_validation_issues(issues: Any, max_items: int) -> list[dict[str, str]]:
+    if not isinstance(issues, list):
+        return []
+
+    compact_issues: list[dict[str, str]] = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        path = issue.get("path")
+        message = issue.get("message")
+        severity = issue.get("severity")
+        if not all(isinstance(value, str) and value.strip() for value in (path, message, severity)):
+            continue
+        compact_issues.append(
+            {
+                "path": path.strip(),
+                "message": message.strip(),
+                "severity": severity.strip(),
+            }
+        )
+        if len(compact_issues) >= max_items:
+            break
+
+    return compact_issues
+
+
+def _compact_validation_log_for_instruction(validation_log: Any) -> Any:
+    if not isinstance(validation_log, dict):
+        return validation_log
+
+    errors = validation_log.get("errors")
+    warnings = validation_log.get("warnings")
+    compact_errors = _compact_validation_issues(
+        errors,
+        max_items=_REFINEMENT_MAX_ISSUES_IN_INSTRUCTION,
+    )
+    compact_warnings = _compact_validation_issues(
+        warnings,
+        max_items=max(1, _REFINEMENT_MAX_ISSUES_IN_INSTRUCTION // 3),
+    )
+
+    return {
+        "iteration": validation_log.get("iteration"),
+        "verdict": validation_log.get("verdict"),
+        "summary": validation_log.get("summary"),
+        "error_count": len(errors) if isinstance(errors, list) else 0,
+        "warning_count": len(warnings) if isinstance(warnings, list) else 0,
+        "errors": compact_errors,
+        "warnings": compact_warnings,
+    }
+
+
 def build_refinement_instruction(
     previous_output_json: Any,
     validation_log: dict[str, Any],
 ) -> str:
+    compact_validation_log = _compact_validation_log_for_instruction(validation_log)
     return (
         "Use the validation feedback to repair schema issues.\n"
         "Keep top-level output keys exactly: document_info, summary, content_data.\n"
         "Do not include markdown or explanatory text.\n"
         "PREVIOUS_OUTPUT_JSON:\n"
-        f"{_to_compact_json(previous_output_json)}\n"
+        f"{_to_compact_json(previous_output_json, max_chars=_REFINEMENT_PREVIOUS_OUTPUT_MAX_CHARS)}\n"
         "VALIDATION_LOG:\n"
-        f"{_to_compact_json(validation_log)}\n"
+        f"{_to_compact_json(compact_validation_log, max_chars=_REFINEMENT_VALIDATION_LOG_MAX_CHARS)}\n"
     )
 
 
@@ -349,7 +408,7 @@ def _build_iteration_input(
     current_input_json: dict[str, Any] = {
         "original_input_json": original_input_json,
         "previous_output_json": previous_candidate,
-        "validation_log": previous_validation_log,
+        "validation_log": _compact_validation_log_for_instruction(previous_validation_log),
     }
     return current_input_json, refinement_instruction
 
@@ -360,11 +419,11 @@ def _update_best_candidate(
     best_log: dict[str, Any] | None,
     candidate: Any,
     validation_log: dict[str, Any],
-) -> tuple[int, Any, dict[str, Any] | None, bool]:
+) -> tuple[int, Any, dict[str, Any] | None]:
     score = _compute_validation_score(validation_log)
     if score < best_score:
-        return best_score, best_candidate, best_log, False
-    return score, candidate, validation_log, True
+        return best_score, best_candidate, best_log
+    return score, candidate, validation_log
 
 
 def _maybe_generate_reasoning(
@@ -422,11 +481,11 @@ class RefinementOrchestrator:
         best_candidate = None
         best_log = None
         best_score = -1
-        latest_reasoning = None
-        best_reasoning = None
         iterations_run = 0
         early_exit_triggered = False
         has_valid_candidate = False
+        stagnation_count = 0
+        plateau_patience = max(1, int(refinement_config.plateau_patience))
 
         previous_candidate = None
         previous_validation_log = None
@@ -454,28 +513,30 @@ class RefinementOrchestrator:
                 iteration=iteration,
                 input_json=input_json,
             )
-            latest_reasoning = _maybe_generate_reasoning(
-                current_reasoning=latest_reasoning,
-                include_reasoning=include_reasoning,
-                reasoning_service=self.reasoning_service,
-                input_json=input_json,
-                output_json=sanitized_candidate,
-                file_name=file_name,
-                document_type=document_type,
-            )
-            best_score, best_candidate, best_log, did_update_best = _update_best_candidate(
+            previous_best_score = best_score
+            best_score, best_candidate, best_log = _update_best_candidate(
                 best_score=best_score,
                 best_candidate=best_candidate,
                 best_log=best_log,
                 candidate=sanitized_candidate,
                 validation_log=validation_log,
             )
-            if did_update_best:
-                best_reasoning = latest_reasoning
+            if best_score > previous_best_score:
+                stagnation_count = 0
+            else:
+                stagnation_count += 1
 
             is_valid = validation_log["verdict"] == "valid"
             has_valid_candidate = has_valid_candidate or is_valid
             if is_valid and refinement_config.early_exit_on_valid:
+                early_exit_triggered = iteration < max_iterations
+                break
+            if (
+                not has_valid_candidate
+                and refinement_config.early_exit_on_plateau
+                and iteration < max_iterations
+                and stagnation_count >= plateau_patience
+            ):
                 early_exit_triggered = True
                 break
 
@@ -486,13 +547,22 @@ class RefinementOrchestrator:
             has_valid_candidate=has_valid_candidate,
             best_candidate=best_candidate,
         )
+        reasoning_payload = _maybe_generate_reasoning(
+            current_reasoning=None,
+            include_reasoning=include_reasoning,
+            reasoning_service=self.reasoning_service,
+            input_json=input_json,
+            output_json=best_candidate,
+            file_name=file_name,
+            document_type=document_type,
+        )
 
         return {
             "raw_json": first_candidate,
             "validated_json": best_candidate,
             "output_json": best_candidate,
             "validation_log": best_log,
-            "reasoning": best_reasoning if include_reasoning else None,
+            "reasoning": reasoning_payload if include_reasoning else None,
             "refinement_meta": {
                 "iterations_run": iterations_run,
                 "max_iterations": max_iterations,

@@ -167,6 +167,27 @@ class MonitoringServiceTest(SimpleTestCase):
             now=self.now,
         )
 
+    def _build_service(
+        self,
+        *,
+        readiness=None,
+        repo=None,
+        notifier=None,
+        now=None,
+        readiness_alert_cooldown_seconds=300,
+        stats_cache_ttl_seconds=2.0,
+        snapshot_readiness_cache_ttl_seconds=2.0,
+    ):
+        return MonitoringService(
+            readiness_service=readiness or self.readiness,
+            metrics_repository=repo or self.repo,
+            alert_notifier=notifier,
+            readiness_alert_cooldown_seconds=readiness_alert_cooldown_seconds,
+            stats_cache_ttl_seconds=stats_cache_ttl_seconds,
+            snapshot_readiness_cache_ttl_seconds=snapshot_readiness_cache_ttl_seconds,
+            now=now or self.now,
+        )
+
     def test_live_returns_status_and_timestamp(self):
         payload = self.service.live()
 
@@ -318,13 +339,21 @@ class MonitoringServiceTest(SimpleTestCase):
         self.assertEqual(service._last_readiness_status, "down")
         self.assertEqual(service._last_readiness_alert_time, now)
 
-    def test_should_send_readiness_alert_without_previous_alert_time(self):
-        service = MonitoringService(
-            readiness_service=self.readiness,
-            metrics_repository=self.repo,
-            alert_notifier=Mock(),
-            now=self.now,
+    def test_readiness_non_ok_without_notifier_tracks_status_without_alert_timestamp(self):
+        readiness = _ReadinessSequenceDouble(
+            [(503, {"status": "down", "checks": [{"name": "db", "status": "error"}]})]
         )
+        service = self._build_service(readiness=readiness, notifier=None)
+
+        status_code, payload = service.readiness()
+
+        self.assertEqual(status_code, 503)
+        self.assertEqual(payload["status"], "down")
+        self.assertEqual(service._last_readiness_status, "down")
+        self.assertIsNone(service._last_readiness_alert_time)
+
+    def test_should_send_readiness_alert_without_previous_alert_time(self):
+        service = self._build_service(notifier=Mock())
         service._last_readiness_status = "down"
         service._last_readiness_alert_time = None
 
@@ -334,6 +363,55 @@ class MonitoringServiceTest(SimpleTestCase):
                 status="down",
             )
         )
+
+    def test_should_send_readiness_alert_isp_partitions(self):
+        now = datetime(2026, 4, 20, 10, 5, 0)
+        service = self._build_service(notifier=Mock(), now=lambda: now)
+        scenarios = (
+            {
+                "name": "status_changed_always_alerts",
+                "last_status": "degraded",
+                "last_alert_time": now,
+                "candidate_status": "down",
+                "cooldown_seconds": 60,
+                "expected": True,
+            },
+            {
+                "name": "same_status_without_previous_alert_time_alerts",
+                "last_status": "down",
+                "last_alert_time": None,
+                "candidate_status": "down",
+                "cooldown_seconds": 60,
+                "expected": True,
+            },
+            {
+                "name": "same_status_below_cooldown_does_not_alert",
+                "last_status": "down",
+                "last_alert_time": now - timedelta(seconds=59),
+                "candidate_status": "down",
+                "cooldown_seconds": 60,
+                "expected": False,
+            },
+            {
+                "name": "same_status_exactly_at_cooldown_alerts",
+                "last_status": "down",
+                "last_alert_time": now - timedelta(seconds=60),
+                "candidate_status": "down",
+                "cooldown_seconds": 60,
+                "expected": True,
+            },
+        )
+
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["name"]):
+                service._last_readiness_status = scenario["last_status"]
+                service._last_readiness_alert_time = scenario["last_alert_time"]
+                service._readiness_alert_cooldown_seconds = scenario["cooldown_seconds"]
+                result = service._should_send_readiness_alert(
+                    now=now,
+                    status=scenario["candidate_status"],
+                )
+                self.assertEqual(result, scenario["expected"])
 
     def test_snapshot_readiness_uses_short_lived_cache(self):
         clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
@@ -363,28 +441,52 @@ class MonitoringServiceTest(SimpleTestCase):
         self.assertEqual(third_payload["status"], "ok")
         self.assertEqual(readiness.run_calls, 2)
 
-    def test_snapshot_readiness_skips_cache_when_ttl_is_zero(self):
+    def test_snapshot_readiness_skips_cache_for_non_positive_ttl_partitions(self):
+        for ttl in (0, -1):
+            with self.subTest(ttl=ttl):
+                readiness = _ReadinessSequenceDouble(
+                    [
+                        (503, {"status": "down", "checks": [{"name": "db", "status": "error"}]}),
+                        (200, {"status": "ok", "checks": []}),
+                    ]
+                )
+                service = self._build_service(
+                    readiness=readiness,
+                    now=self.now,
+                    snapshot_readiness_cache_ttl_seconds=ttl,
+                )
+
+                first_status, first_payload = service.snapshot_readiness()
+                second_status, second_payload = service.snapshot_readiness()
+
+                self.assertEqual(first_status, 503)
+                self.assertEqual(first_payload["status"], "down")
+                self.assertEqual(second_status, 200)
+                self.assertEqual(second_payload["status"], "ok")
+                self.assertEqual(readiness.run_calls, 2)
+
+    def test_snapshot_readiness_uses_cache_when_age_equals_ttl_boundary(self):
+        clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
         readiness = _ReadinessSequenceDouble(
             [
                 (503, {"status": "down", "checks": [{"name": "db", "status": "error"}]}),
                 (200, {"status": "ok", "checks": []}),
             ]
         )
-        service = MonitoringService(
-            readiness_service=readiness,
-            metrics_repository=self.repo,
-            now=self.now,
-            snapshot_readiness_cache_ttl_seconds=0,
+        service = self._build_service(
+            readiness=readiness,
+            now=clock,
+            snapshot_readiness_cache_ttl_seconds=5,
         )
 
         first_status, first_payload = service.snapshot_readiness()
+        clock.tick(seconds=5)
         second_status, second_payload = service.snapshot_readiness()
 
         self.assertEqual(first_status, 503)
-        self.assertEqual(first_payload["status"], "down")
-        self.assertEqual(second_status, 200)
-        self.assertEqual(second_payload["status"], "ok")
-        self.assertEqual(readiness.run_calls, 2)
+        self.assertEqual(second_status, 503)
+        self.assertIs(first_payload, second_payload)
+        self.assertEqual(readiness.run_calls, 1)
 
     def test_readiness_bypasses_snapshot_readiness_cache(self):
         readiness = _ReadinessSequenceDouble(
@@ -424,58 +526,71 @@ class MonitoringServiceTest(SimpleTestCase):
 
         self.assertEqual(self.repo.get_snapshot_calls, 2)
 
-    def test_stats_skips_cache_when_ttl_is_zero(self):
-        repo = _RepositoryDouble()
-        service = MonitoringService(
-            readiness_service=self.readiness,
-            metrics_repository=repo,
-            now=lambda: datetime(2026, 4, 20, 10, 5, 0),
-            stats_cache_ttl_seconds=0,
-        )
-
-        service.stats()
-        service.stats()
-
-        self.assertEqual(repo.get_snapshot_calls, 2)
-
-    def test_stats_cache_invalidated_after_record_request(self):
+    def test_stats_uses_cache_when_age_equals_ttl_boundary(self):
         clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
-        service = MonitoringService(
-            readiness_service=self.readiness,
-            metrics_repository=self.repo,
+        service = self._build_service(
             now=clock,
-            stats_cache_ttl_seconds=300,
+            stats_cache_ttl_seconds=5,
         )
 
         service.stats()
-        service.record_request(
-            route="/upload",
-            method="POST",
-            status_code=200,
-            duration_ms=10.0,
-        )
+        clock.tick(seconds=5)
         service.stats()
 
-        self.assertEqual(self.repo.get_snapshot_calls, 2)
+        self.assertEqual(self.repo.get_snapshot_calls, 1)
 
-    def test_stats_cache_invalidated_after_record_event(self):
-        clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
-        service = MonitoringService(
-            readiness_service=self.readiness,
-            metrics_repository=self.repo,
-            now=clock,
-            stats_cache_ttl_seconds=300,
+    def test_stats_skips_cache_for_non_positive_ttl_partitions(self):
+        for ttl in (0, -1):
+            with self.subTest(ttl=ttl):
+                repo = _RepositoryDouble()
+                service = self._build_service(
+                    repo=repo,
+                    now=lambda: datetime(2026, 4, 20, 10, 5, 0),
+                    stats_cache_ttl_seconds=ttl,
+                )
+
+                service.stats()
+                service.stats()
+
+                self.assertEqual(repo.get_snapshot_calls, 2)
+
+    def test_stats_cache_invalidated_after_mutating_events_partitions(self):
+        scenarios = (
+            {
+                "name": "record_request_invalidates_cache",
+                "action": lambda service: service.record_request(
+                    route="/upload",
+                    method="POST",
+                    status_code=200,
+                    duration_ms=10.0,
+                ),
+            },
+            {
+                "name": "record_event_invalidates_cache",
+                "action": lambda service: service.record_event(
+                    event_name="login",
+                    outcome="success",
+                    endpoint="/auth/login/",
+                ),
+            },
         )
 
-        service.stats()
-        service.record_event(
-            event_name="login",
-            outcome="success",
-            endpoint="/auth/login/",
-        )
-        service.stats()
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["name"]):
+                clock = _Clock(datetime(2026, 4, 20, 10, 5, 0))
+                repo = _RepositoryDouble()
+                service = MonitoringService(
+                    readiness_service=self.readiness,
+                    metrics_repository=repo,
+                    now=clock,
+                    stats_cache_ttl_seconds=300,
+                )
 
-        self.assertEqual(self.repo.get_snapshot_calls, 2)
+                service.stats()
+                scenario["action"](service)
+                service.stats()
+
+                self.assertEqual(repo.get_snapshot_calls, 2)
 
     def test_record_request_sends_event_to_repository(self):
         self.service.record_request(
