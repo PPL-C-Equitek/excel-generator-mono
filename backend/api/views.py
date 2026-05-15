@@ -24,6 +24,8 @@ from artifact_history.services import (
     update_artifact_history_custom_name,
 )
 from authentication.permissions import IsVerifiedUser
+from file_processing.services.upload_service import process_upload
+from file_processing.utils.upload_constants import FILE_TOO_LARGE_ERROR, MAX_FILE_SIZE
 from chat_sessions.serializers import (
     SessionDetailSerializer,
     SessionListItemSerializer,
@@ -45,11 +47,6 @@ from chat_sessions.services import (
     SESSION_LIST_MAX_LIMIT,
     update_session_title,
     validate_session_detail_pagination_params as validate_session_detail_pagination_params_service,
-)
-from file_processing.services.upload_service import (
-    FILE_TOO_LARGE_ERROR,
-    MAX_FILE_SIZE,
-    process_upload,
 )
 from file_processing.serializers import (
     CsvExportRequestSerializer,

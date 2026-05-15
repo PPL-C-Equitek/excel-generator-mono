@@ -40,8 +40,7 @@ from file_processing.services.export_service import (
     OutputExcelGenerationError,
     OutputLLMValidationError,
 )
-
-from file_processing.services.upload_service import MAX_FILE_SIZE
+from file_processing.utils.upload_constants import MAX_FILE_SIZE
 
 
 class BaseApiViewTest(TestCase):
