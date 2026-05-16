@@ -101,6 +101,12 @@ DEFAULT_LLM_GENERATE_RATE_LIMIT_PER_MINUTE = 20
 DEFAULT_LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS = 300
 _LLM_GENERATE_IDEMPOTENCY_HEADER = "Idempotency-Key"
 _LLM_GENERATE_IDEMPOTENCY_KEY_NAMESPACE = "llm_generate:idempotency"
+_LLM_GENERATE_IDEMPOTENCY_KEY_REUSED_DETAIL = (
+    "Idempotency-Key has already been used for a different request payload."
+)
+_LLM_GENERATE_IDEMPOTENCY_IN_PROGRESS_DETAIL = (
+    "Request with the same Idempotency-Key is still in progress."
+)
 
 
 def _resolve_llm_generate_rate_limit_per_minute(default: int = DEFAULT_LLM_GENERATE_RATE_LIMIT_PER_MINUTE) -> int:
@@ -208,14 +214,14 @@ def _resolve_cached_llm_generate_idempotency_response(
     cached_hash = cached_record.get("request_hash")
     if cached_hash is not None and cached_hash != request_hash:
         return _build_llm_generate_idempotency_response(
-            detail="Idempotency-Key has already been used for a different request payload.",
+            detail=_LLM_GENERATE_IDEMPOTENCY_KEY_REUSED_DETAIL,
             code="llm_generate_idempotency_key_reused",
         )
 
     cached_state = cached_record.get("state")
     if cached_state == "in_progress":
         return _build_llm_generate_idempotency_response(
-            detail="Request with the same Idempotency-Key is still in progress.",
+            detail=_LLM_GENERATE_IDEMPOTENCY_IN_PROGRESS_DETAIL,
             code="llm_generate_idempotency_in_progress",
         )
     if cached_state != "completed":
@@ -265,7 +271,7 @@ def _run_llm_generate_with_idempotency(
         if cached_response is not None:
             return cached_response
         return _build_llm_generate_idempotency_response(
-            detail="Request with the same Idempotency-Key is still in progress.",
+            detail=_LLM_GENERATE_IDEMPOTENCY_IN_PROGRESS_DETAIL,
             code="llm_generate_idempotency_in_progress",
         )
 
