@@ -424,6 +424,28 @@ class OpenAIClientServiceTest(SimpleTestCase):
         )
         self.assertEqual(mock_client.responses.create.call_count, 2)
 
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_reuses_singleton_provider_client_for_same_settings(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.side_effect = [
+            Mock(output_text="first"),
+            Mock(output_text="second"),
+        ]
+
+        first_result = generate_text("First prompt")
+        second_result = generate_text("Second prompt")
+
+        self.assertEqual(first_result, "first")
+        self.assertEqual(second_result, "second")
+        mock_openai.assert_called_once_with(
+            api_key="test-key",
+            timeout=30.0,
+            max_retries=2,
+        )
+        self.assertEqual(mock_client.responses.create.call_count, 2)
+
     @override_settings(
         OPENAI_API_KEY="test-key",
         OPENAI_MODEL="gpt-4.1-mini",
