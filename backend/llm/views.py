@@ -1,12 +1,14 @@
 import itertools
 import json
 import logging
+import hashlib
 import time
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Callable, cast
 from uuid import UUID
 
 from django.conf import settings
+from django.core.cache import cache
 from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
 from django.db import transaction
@@ -96,6 +98,9 @@ INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination reques
 INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."
 MAX_THINKING_LOG_PAGE_SIZE = 100
 DEFAULT_LLM_GENERATE_RATE_LIMIT_PER_MINUTE = 20
+DEFAULT_LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS = 300
+_LLM_GENERATE_IDEMPOTENCY_HEADER = "Idempotency-Key"
+_LLM_GENERATE_IDEMPOTENCY_KEY_NAMESPACE = "llm_generate:idempotency"
 
 
 def _resolve_llm_generate_rate_limit_per_minute(default: int = DEFAULT_LLM_GENERATE_RATE_LIMIT_PER_MINUTE) -> int:
@@ -107,7 +112,19 @@ def _resolve_llm_generate_rate_limit_per_minute(default: int = DEFAULT_LLM_GENER
     return parsed_rate if parsed_rate > 0 else default
 
 
+def _resolve_llm_generate_idempotency_ttl_seconds(
+    default: int = DEFAULT_LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS,
+) -> int:
+    raw_ttl = getattr(settings, "LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS", default)
+    try:
+        parsed_ttl = int(raw_ttl)
+    except (TypeError, ValueError):
+        return default
+    return parsed_ttl if parsed_ttl > 0 else default
+
+
 LLM_GENERATE_RATE_LIMIT_PER_MINUTE = _resolve_llm_generate_rate_limit_per_minute()
+LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS = _resolve_llm_generate_idempotency_ttl_seconds()
 
 
 def get_authenticated_user_id(user) -> object | None:
@@ -133,6 +150,146 @@ def _llm_generate_rate_limit_key(request):
     if forwarded_for:
         return f"ip:{forwarded_for.split(',', 1)[0].strip()}"
     return f"ip:{request.META.get('REMOTE_ADDR', 'unknown')}"
+
+
+def _extract_llm_generate_idempotency_key(request) -> str | None:
+    raw_key = None
+    request_headers = getattr(request, "headers", None)
+    if hasattr(request_headers, "get"):
+        raw_key = request_headers.get(_LLM_GENERATE_IDEMPOTENCY_HEADER)
+    if raw_key is None:
+        raw_key = request.META.get("HTTP_IDEMPOTENCY_KEY")
+
+    if not isinstance(raw_key, str):
+        return None
+    normalized_key = raw_key.strip()
+    return normalized_key or None
+
+
+def _build_llm_generate_idempotency_cache_key(user, idempotency_key: str) -> str:
+    user_id = get_authenticated_user_id(user)
+    user_segment = str(user_id) if user_id is not None else "anonymous"
+    key_digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+    return f"{_LLM_GENERATE_IDEMPOTENCY_KEY_NAMESPACE}:{user_segment}:{key_digest}"
+
+
+def _compute_llm_generate_idempotency_request_hash(validated_data: dict[str, Any]) -> str:
+    serialized_payload = json.dumps(
+        validated_data,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(serialized_payload.encode("utf-8")).hexdigest()
+
+
+def _build_llm_generate_idempotency_response(
+    detail: str,
+    code: str,
+    status_code: int = 409,
+) -> Response:
+    return Response(
+        {
+            "detail": detail,
+            "code": code,
+        },
+        status=status_code,
+    )
+
+
+def _resolve_cached_llm_generate_idempotency_response(
+    cached_record: Any,
+    request_hash: str,
+) -> Response | None:
+    if not isinstance(cached_record, dict):
+        return None
+
+    cached_hash = cached_record.get("request_hash")
+    if cached_hash is not None and cached_hash != request_hash:
+        return _build_llm_generate_idempotency_response(
+            detail="Idempotency-Key has already been used for a different request payload.",
+            code="llm_generate_idempotency_key_reused",
+        )
+
+    cached_state = cached_record.get("state")
+    if cached_state == "in_progress":
+        return _build_llm_generate_idempotency_response(
+            detail="Request with the same Idempotency-Key is still in progress.",
+            code="llm_generate_idempotency_in_progress",
+        )
+    if cached_state != "completed":
+        return None
+
+    cached_status = cached_record.get("status_code")
+    if not isinstance(cached_status, int):
+        return None
+
+    replayed_response = Response(cached_record.get("data"), status=cached_status)
+    replayed_response["X-Idempotency-Replayed"] = "true"
+    return replayed_response
+
+
+def _run_llm_generate_with_idempotency(
+    request,
+    validated_data: dict[str, Any],
+    execute_workflow: Callable[[], Response],
+) -> Response:
+    idempotency_key = _extract_llm_generate_idempotency_key(request)
+    if idempotency_key is None:
+        return execute_workflow()
+
+    request_hash = _compute_llm_generate_idempotency_request_hash(validated_data)
+    cache_key = _build_llm_generate_idempotency_cache_key(request.user, idempotency_key)
+    cached_response = _resolve_cached_llm_generate_idempotency_response(
+        cache.get(cache_key),
+        request_hash,
+    )
+    if cached_response is not None:
+        return cached_response
+
+    in_progress_record = {
+        "state": "in_progress",
+        "request_hash": request_hash,
+    }
+    lock_acquired = cache.add(
+        cache_key,
+        in_progress_record,
+        timeout=LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS,
+    )
+    if not lock_acquired:
+        cached_response = _resolve_cached_llm_generate_idempotency_response(
+            cache.get(cache_key),
+            request_hash,
+        )
+        if cached_response is not None:
+            return cached_response
+        return _build_llm_generate_idempotency_response(
+            detail="Request with the same Idempotency-Key is still in progress.",
+            code="llm_generate_idempotency_in_progress",
+        )
+
+    try:
+        workflow_response = execute_workflow()
+    except Exception:
+        cache.delete(cache_key)
+        raise
+
+    if workflow_response.status_code >= 500:
+        cache.delete(cache_key)
+        return workflow_response
+
+    cache.set(
+        cache_key,
+        {
+            "state": "completed",
+            "request_hash": request_hash,
+            "status_code": workflow_response.status_code,
+            "data": workflow_response.data,
+        },
+        timeout=LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS,
+    )
+    return workflow_response
 
 
 def build_llm_generation_service(user=None) -> LlmGenerationService:
@@ -937,8 +1094,11 @@ def llm_generate(request):
         )
 
     validated_data = cast(dict[str, Any], request_serializer.validated_data)
-    workflow = _LlmGenerateWorkflow(request, validated_data)
-    return workflow.run()
+    return _run_llm_generate_with_idempotency(
+        request=request,
+        validated_data=validated_data,
+        execute_workflow=lambda: _LlmGenerateWorkflow(request, validated_data).run(),
+    )
 
 @require_http_methods(["POST"])
 @api_view(["POST"])

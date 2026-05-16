@@ -21,6 +21,8 @@ from llm.services.openai_client import (
 from llm.views import (
     LLM_GENERATE_RATE_LIMIT_PER_MINUTE,
     _LlmGenerateWorkflow,
+    _build_llm_generate_idempotency_cache_key,
+    _compute_llm_generate_idempotency_request_hash,
     _run_llm_generate_with_idempotency,
     _generate_reply_and_title_for_new_session,
     _estimate_payload_size_bytes,
@@ -276,6 +278,43 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             "llm_generate_idempotency_key_reused",
         )
         self.assertEqual(execute_workflow.call_count, 1)
+
+    def test_run_llm_generate_with_idempotency_returns_in_progress_conflict(self):
+        request = SimpleNamespace(
+            user=self._build_verified_user(user_id=uuid4()),
+            headers={"Idempotency-Key": "abc-123"},
+            META={"HTTP_IDEMPOTENCY_KEY": "abc-123"},
+        )
+        validated_data = {"input_json": {"sheet": "Sheet1"}, "include_reasoning": False}
+        request_hash = _compute_llm_generate_idempotency_request_hash(validated_data)
+        cache_key = _build_llm_generate_idempotency_cache_key(
+            request.user,
+            "abc-123",
+        )
+        cache.set(
+            cache_key,
+            {"state": "in_progress", "request_hash": request_hash},
+            timeout=60,
+        )
+        execute_workflow = Mock(
+            return_value=Response(
+                {"output_json": {"status": "ok"}, "reasoning": None},
+                status=200,
+            )
+        )
+
+        conflict_response = _run_llm_generate_with_idempotency(
+            request=request,
+            validated_data=validated_data,
+            execute_workflow=execute_workflow,
+        )
+
+        self.assertEqual(conflict_response.status_code, 409)
+        self.assertEqual(
+            conflict_response.data["code"],
+            "llm_generate_idempotency_in_progress",
+        )
+        execute_workflow.assert_not_called()
 
     def test_build_table_context_lines_skips_headers_when_empty_and_includes_row_samples(self):
         lines = _build_table_context_lines(
