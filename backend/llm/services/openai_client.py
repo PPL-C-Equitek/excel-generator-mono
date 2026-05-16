@@ -14,6 +14,8 @@ from openai import (
 
 
 _LLM_PROVIDER_FAILED = "LLM provider request failed."
+_DEFAULT_OPENAI_TIMEOUT_SECONDS = 30.0
+_DEFAULT_OPENAI_MAX_RETRIES = 2
 
 
 class OpenAIServiceError(Exception):
@@ -52,7 +54,7 @@ def handle_openai_exceptions():
 class OpenAITextGenerationProvider:
     def __init__(self):
         self._client: OpenAI | None = None
-        self._client_signature: tuple[str, str] | None = None
+        self._client_signature: tuple[str, str, float, int] | None = None
 
     def _get_client(self) -> OpenAI:
         signature = _resolve_client_signature()
@@ -70,6 +72,7 @@ class OpenAITextGenerationProvider:
             "model": settings.OPENAI_MODEL,
             "input": prompt,
         }
+        request_payload.update(_build_response_generation_options())
 
         effective_system_prompt = _resolve_system_prompt(system_prompt)
         if effective_system_prompt:
@@ -101,25 +104,171 @@ def _resolve_system_prompt(system_prompt: str | None = None) -> str:
     return raw_prompt.strip()
 
 
-def _resolve_client_signature() -> tuple[str, str]:
-    api_key = settings.OPENAI_API_KEY.strip()
+def _resolve_client_signature() -> tuple[str, str, float, int]:
+    api_key_raw = getattr(settings, "OPENAI_API_KEY", "")
+    api_key = api_key_raw.strip() if isinstance(api_key_raw, str) else ""
     if not api_key:
         raise OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
 
     base_url = getattr(settings, "OPENAI_BASE_URL", "")
     normalized_base_url = base_url.strip() if isinstance(base_url, str) else ""
-    return api_key, normalized_base_url
+    timeout_seconds = _resolve_openai_timeout_seconds()
+    max_retries = _resolve_openai_max_retries()
+    return api_key, normalized_base_url, timeout_seconds, max_retries
 
 
-def _build_client_from_signature(api_key: str, normalized_base_url: str) -> OpenAI:
+def _build_client_from_signature(
+    api_key: str,
+    normalized_base_url: str,
+    timeout_seconds: float,
+    max_retries: int,
+) -> OpenAI:
+    client_kwargs: dict[str, Any] = {
+        "api_key": api_key,
+        "timeout": timeout_seconds,
+        "max_retries": max_retries,
+    }
     if normalized_base_url:
-        return OpenAI(api_key=api_key, base_url=normalized_base_url)
-    return OpenAI(api_key=api_key)
+        client_kwargs["base_url"] = normalized_base_url
+    return OpenAI(**client_kwargs)
 
 
 def _build_client() -> OpenAI:
-    api_key, normalized_base_url = _resolve_client_signature()
-    return _build_client_from_signature(api_key, normalized_base_url)
+    signature = _resolve_client_signature()
+    return _build_client_from_signature(*signature)
+
+
+def _resolve_openai_timeout_seconds() -> float:
+    raw_value = getattr(settings, "OPENAI_TIMEOUT_SECONDS", _DEFAULT_OPENAI_TIMEOUT_SECONDS)
+    if isinstance(raw_value, bool):
+        return _DEFAULT_OPENAI_TIMEOUT_SECONDS
+    if isinstance(raw_value, (int, float)):
+        numeric_value = float(raw_value)
+        if numeric_value > 0:
+            return numeric_value
+        return _DEFAULT_OPENAI_TIMEOUT_SECONDS
+    if isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return _DEFAULT_OPENAI_TIMEOUT_SECONDS
+        try:
+            numeric_value = float(stripped_value)
+        except ValueError:
+            return _DEFAULT_OPENAI_TIMEOUT_SECONDS
+        if numeric_value > 0:
+            return numeric_value
+    return _DEFAULT_OPENAI_TIMEOUT_SECONDS
+
+
+def _resolve_openai_max_retries() -> int:
+    raw_value = getattr(settings, "OPENAI_MAX_RETRIES", _DEFAULT_OPENAI_MAX_RETRIES)
+    if isinstance(raw_value, bool):
+        return _DEFAULT_OPENAI_MAX_RETRIES
+    if isinstance(raw_value, int):
+        return raw_value if raw_value >= 0 else _DEFAULT_OPENAI_MAX_RETRIES
+    if isinstance(raw_value, float):
+        numeric_value = int(raw_value)
+        return numeric_value if numeric_value >= 0 else _DEFAULT_OPENAI_MAX_RETRIES
+    if isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return _DEFAULT_OPENAI_MAX_RETRIES
+        try:
+            numeric_value = int(stripped_value)
+        except ValueError:
+            return _DEFAULT_OPENAI_MAX_RETRIES
+        return numeric_value if numeric_value >= 0 else _DEFAULT_OPENAI_MAX_RETRIES
+    return _DEFAULT_OPENAI_MAX_RETRIES
+
+
+def _resolve_optional_openai_temperature() -> float | None:
+    raw_value = getattr(settings, "OPENAI_TEMPERATURE", None)
+    if raw_value in (None, "") or isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, (int, float)):
+        numeric_value = float(raw_value)
+    elif isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return None
+        try:
+            numeric_value = float(stripped_value)
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if 0 <= numeric_value <= 2:
+        return numeric_value
+    return None
+
+
+def _resolve_optional_openai_seed() -> int | None:
+    raw_value = getattr(settings, "OPENAI_SEED", None)
+    if raw_value in (None, "") or isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        return raw_value
+    if isinstance(raw_value, float):
+        return int(raw_value)
+    if isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return None
+        try:
+            return int(stripped_value)
+        except ValueError:
+            return None
+    return None
+
+
+def _resolve_optional_openai_max_output_tokens() -> int | None:
+    raw_value = getattr(settings, "OPENAI_MAX_OUTPUT_TOKENS", None)
+    if raw_value in (None, "") or isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        return raw_value if raw_value > 0 else None
+    if isinstance(raw_value, float):
+        numeric_value = int(raw_value)
+        return numeric_value if numeric_value > 0 else None
+    if isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return None
+        try:
+            numeric_value = int(stripped_value)
+        except ValueError:
+            return None
+        return numeric_value if numeric_value > 0 else None
+    return None
+
+
+def _build_response_generation_options() -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    temperature = _resolve_optional_openai_temperature()
+    seed = _resolve_optional_openai_seed()
+    max_output_tokens = _resolve_optional_openai_max_output_tokens()
+    if temperature is not None:
+        options["temperature"] = temperature
+    if seed is not None:
+        options["seed"] = seed
+    if max_output_tokens is not None:
+        options["max_output_tokens"] = max_output_tokens
+    return options
+
+
+def _build_chat_generation_options() -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    temperature = _resolve_optional_openai_temperature()
+    seed = _resolve_optional_openai_seed()
+    max_output_tokens = _resolve_optional_openai_max_output_tokens()
+    if temperature is not None:
+        options["temperature"] = temperature
+    if seed is not None:
+        options["seed"] = seed
+    if max_output_tokens is not None:
+        options["max_completion_tokens"] = max_output_tokens
+    return options
 
 
 def _map_api_status_to_http(status_code: int | None) -> int:
@@ -146,6 +295,7 @@ def _generate_text_via_chat_completions(
         response = client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=messages,
+            **_build_chat_generation_options(),
         )
 
     try:
@@ -198,6 +348,7 @@ def generate_streaming_chat_response(messages: list[dict]):
             model=settings.OPENAI_MODEL,
             messages=messages,
             stream=True,
+            **_build_chat_generation_options(),
         )
 
     try:
@@ -223,6 +374,7 @@ def generate_chat_response(messages: list[dict]) -> str:
         response = client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=messages,
+            **_build_chat_generation_options(),
         )
 
     try:
