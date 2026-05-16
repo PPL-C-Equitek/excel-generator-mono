@@ -243,11 +243,16 @@ def _resolve_optional_openai_max_output_tokens() -> int | None:
     return None
 
 
-def _build_response_generation_options() -> dict[str, Any]:
-    options: dict[str, Any] = {}
+def _resolve_common_generation_options() -> tuple[float | None, int | None, int | None]:
     temperature = _resolve_optional_openai_temperature()
     seed = _resolve_optional_openai_seed()
     max_output_tokens = _resolve_optional_openai_max_output_tokens()
+    return temperature, seed, max_output_tokens
+
+
+def _build_response_generation_options() -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    temperature, seed, max_output_tokens = _resolve_common_generation_options()
     if temperature is not None:
         options["temperature"] = temperature
     if seed is not None:
@@ -259,9 +264,7 @@ def _build_response_generation_options() -> dict[str, Any]:
 
 def _build_chat_generation_options() -> dict[str, Any]:
     options: dict[str, Any] = {}
-    temperature = _resolve_optional_openai_temperature()
-    seed = _resolve_optional_openai_seed()
-    max_output_tokens = _resolve_optional_openai_max_output_tokens()
+    temperature, seed, max_output_tokens = _resolve_common_generation_options()
     if temperature is not None:
         options["temperature"] = temperature
     if seed is not None:
