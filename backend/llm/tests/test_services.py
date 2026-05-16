@@ -209,7 +209,11 @@ class OpenAIClientServiceTest(SimpleTestCase):
         result = generate_text("Say hi")
 
         self.assertEqual(result, "ok result")
-        mock_openai.assert_called_once_with(api_key="test-key")
+        mock_openai.assert_called_once_with(
+            api_key="test-key",
+            timeout=30.0,
+            max_retries=2,
+        )
         mock_client.responses.create.assert_called_once_with(
             model="gpt-4.1-mini",
             input="Say hi",
@@ -308,6 +312,93 @@ class OpenAIClientServiceTest(SimpleTestCase):
         mock_openai.assert_called_once_with(
             api_key="test-key",
             base_url="https://proxy.example.test/v1",
+            timeout=30.0,
+            max_retries=2,
+        )
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_TIMEOUT_SECONDS="45.5",
+        OPENAI_MAX_RETRIES="4",
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_builds_client_with_configured_timeout_and_retries(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.return_value = Mock(output_text="ok result")
+
+        generate_text("Say hi")
+
+        mock_openai.assert_called_once_with(
+            api_key="test-key",
+            timeout=45.5,
+            max_retries=4,
+        )
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_TIMEOUT_SECONDS="invalid",
+        OPENAI_MAX_RETRIES="-9",
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_builds_client_with_default_timeout_and_retries_on_invalid_config(
+        self, mock_openai
+    ):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.return_value = Mock(output_text="ok result")
+
+        generate_text("Say hi")
+
+        mock_openai.assert_called_once_with(
+            api_key="test-key",
+            timeout=30.0,
+            max_retries=2,
+        )
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_TEMPERATURE="0.2",
+        OPENAI_SEED="7",
+        OPENAI_MAX_OUTPUT_TOKENS="333",
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_passes_optional_generation_limits_when_configured(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.return_value = Mock(output_text="ok result")
+
+        generate_text("Say hi")
+
+        mock_client.responses.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            input="Say hi",
+            temperature=0.2,
+            seed=7,
+            max_output_tokens=333,
+        )
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_TEMPERATURE="bad",
+        OPENAI_SEED="invalid-seed",
+        OPENAI_MAX_OUTPUT_TOKENS="-1",
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_ignores_invalid_optional_generation_limits(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.return_value = Mock(output_text="ok result")
+
+        generate_text("Say hi")
+
+        mock_client.responses.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            input="Say hi",
         )
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
@@ -326,7 +417,11 @@ class OpenAIClientServiceTest(SimpleTestCase):
 
         self.assertEqual(first_result, "first")
         self.assertEqual(second_result, "second")
-        mock_openai.assert_called_once_with(api_key="test-key")
+        mock_openai.assert_called_once_with(
+            api_key="test-key",
+            timeout=30.0,
+            max_retries=2,
+        )
         self.assertEqual(mock_client.responses.create.call_count, 2)
 
     @override_settings(
@@ -1082,6 +1177,34 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
             messages=messages,
         )
 
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_TEMPERATURE="0.4",
+        OPENAI_SEED="99",
+        OPENAI_MAX_OUTPUT_TOKENS="450",
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_passes_optional_generation_limits_when_configured(
+        self, mock_openai
+    ):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="ok"))]
+        )
+        messages = [{"role": "user", "content": "Halo"}]
+
+        generate_chat_response(messages)
+
+        mock_client.chat.completions.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            messages=messages,
+            temperature=0.4,
+            seed=99,
+            max_completion_tokens=450,
+        )
+
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.OpenAI")
     def test_generate_chat_response_passes_full_history_to_api(self, mock_openai):
@@ -1287,4 +1410,8 @@ class GenerateStreamingChatResponseTest(SimpleTestCase):
 
         list(generate_streaming_chat_response([{"role": "user", "content": "Hi"}]))
 
-        mock_openai.assert_called_once_with(api_key="test-key")
+        mock_openai.assert_called_once_with(
+            api_key="test-key",
+            timeout=30.0,
+            max_retries=2,
+        )
