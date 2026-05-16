@@ -38,16 +38,24 @@ QUALITY_SECTION = """## QUALITY_RULES
 - each row object must use keys that match headers exactly
 - row values must be scalar only: string, number, boolean, or null
 - no nested objects and no nested arrays in rows
+- preserve table boundaries: if the document contains multiple distinct tables, emit one content_data entry per table
+- do not collapse separate tables into one table just because they share a similar subject or headers
+- keep the original table order as it appears in the source document
 
 ### Source-Specific Rules
 - Excel: if multiple sheets exist, each sheet must be a separate table in content_data
 - Excel: table_name must use the real sheet name
 - Excel: do not merge sheets together
-- PDF: combine all extracted content into a single table object in content_data regardless of page count
+- PDF: if distinct tables are present, represent each as a separate table in content_data
+- PDF: if table boundaries are unclear, group conservatively rather than inventing splits
+- PDF: only merge rows when they are clearly part of the same visual table across pages; otherwise preserve separate tables
 
 ### Normalization / Unpivot Rules
 If columns represent categorical groupings (department names, regions, units, or similar),
 unpivot those columns into long-format rows.
+
+Apply unpivoting only within a single detected table.
+Do not use unpivoting as a reason to merge multiple distinct tables into one content_data item.
 
 The normalized table must use these exact column names:
 [
