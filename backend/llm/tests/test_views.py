@@ -30,6 +30,7 @@ from llm.views import (
     _extract_follow_up_prompt,
     _generate_output_json,
     _hydrate_previous_output_from_target,
+    _schedule_artifact_history_creation,
     _sanitize_output_json,
     build_llm_generation_service,
     build_llm_reasoning_service,
@@ -445,6 +446,60 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             pass
 
         self.assertEqual(_estimate_payload_size_bytes(_NonSerializable()), 0)
+
+    @patch("llm.views.create_artifact_history")
+    @patch("llm.views.transaction.on_commit")
+    def test_schedule_artifact_history_creation_registers_on_commit_callback(
+        self,
+        mock_on_commit,
+        mock_create_artifact_history,
+    ):
+        request_user = self._build_verified_user(user_id=uuid4())
+        callbacks = []
+        mock_on_commit.side_effect = callbacks.append
+
+        _schedule_artifact_history_creation(
+            user=request_user,
+            input_json={"filename": "invoice.pdf"},
+            output_json={"headers": ["A"], "rows": [["1"]]},
+            session_id=uuid4(),
+        )
+
+        mock_on_commit.assert_called_once()
+        mock_create_artifact_history.assert_not_called()
+        self.assertEqual(len(callbacks), 1)
+
+        callbacks[0]()
+
+        mock_create_artifact_history.assert_called_once()
+
+    @patch("llm.views.logger")
+    @patch("llm.views.create_artifact_history")
+    @patch("llm.views.transaction.on_commit")
+    def test_schedule_artifact_history_creation_swallows_callback_errors(
+        self,
+        mock_on_commit,
+        mock_create_artifact_history,
+        mock_logger,
+    ):
+        request_user = self._build_verified_user(user_id=uuid4())
+        callbacks = []
+        mock_on_commit.side_effect = callbacks.append
+        mock_create_artifact_history.side_effect = RuntimeError("history failure")
+
+        _schedule_artifact_history_creation(
+            user=request_user,
+            input_json={"filename": "invoice.pdf"},
+            output_json={"headers": ["A"], "rows": [["1"]]},
+            session_id=uuid4(),
+        )
+
+        self.assertEqual(len(callbacks), 1)
+        callbacks[0]()
+
+        mock_logger.exception.assert_called_once_with(
+            "Unexpected error while creating artifact history after llm_generate persistence."
+        )
 
     def test_hydrate_previous_output_keeps_existing_previous_output(self):
         existing_previous_output = {"content_data": [{"rows": [{"status": "paid"}]}]}

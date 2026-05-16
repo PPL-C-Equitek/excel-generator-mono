@@ -1151,6 +1151,32 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
         self.assertEqual(self.session.history_summary, "New rolled summary.")
 
     @patch("chat_sessions.services.summarize_old_messages")
+    def test_does_not_overwrite_summary_when_concurrent_refresh_persists_first(
+        self, mock_sum
+    ):
+        history = self._make_history(get_summary_threshold() + SUMMARY_REFRESH_THRESHOLD + 1)
+        old_count = len(history) - SUMMARY_RECENT_MESSAGES_KEEP
+        self.session.history_summary = "Old summary."
+        self.session.history_summary_watermark = old_count - SUMMARY_REFRESH_THRESHOLD
+        self.session.save(update_fields=["history_summary", "history_summary_watermark"])
+
+        def _simulate_concurrent_refresh(_messages):
+            Session.objects.filter(id=self.session.id).update(
+                history_summary="Concurrent summary.",
+                history_summary_watermark=old_count,
+            )
+            return "Stale refresh summary."
+
+        mock_sum.side_effect = _simulate_concurrent_refresh
+
+        result = build_history_with_summary(self.session, history)
+
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.history_summary, "Concurrent summary.")
+        self.assertEqual(self.session.history_summary_watermark, old_count)
+        self.assertIn("Concurrent summary.", result[0]["content"])
+
+    @patch("chat_sessions.services.summarize_old_messages")
     def test_does_not_refresh_when_new_messages_below_refresh_threshold(
         self, mock_sum
     ):
