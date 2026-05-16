@@ -530,6 +530,17 @@ def _reload_persisted_summary_state(session) -> tuple[str, int]:
     )
 
 
+def _resolve_summary_state_after_conflict(
+    session,
+    fallback_summary: str,
+    fallback_watermark: int,
+) -> tuple[str, int]:
+    cached_summary, summarized_watermark = _reload_persisted_summary_state(session)
+    if cached_summary:
+        return cached_summary, summarized_watermark
+    return fallback_summary, fallback_watermark
+
+
 def _persist_summary_if_unchanged(
     session,
     expected_summary: str,
@@ -582,10 +593,11 @@ def build_history_with_summary(session, full_history: list[dict]) -> list[dict]:
             cached_summary = refreshed_summary
             summarized_watermark = old_count
         else:
-            cached_summary, summarized_watermark = _reload_persisted_summary_state(session)
-            if not cached_summary:
-                cached_summary = refreshed_summary
-                summarized_watermark = old_count
+            cached_summary, summarized_watermark = _resolve_summary_state_after_conflict(
+                session,
+                fallback_summary=refreshed_summary,
+                fallback_watermark=old_count,
+            )
 
     summary_message = _build_summary_message(cached_summary)
     if summarized_watermark < old_count:
