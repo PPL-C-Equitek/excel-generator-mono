@@ -1,4 +1,6 @@
 from contextlib import contextmanager
+import math
+import json
 from threading import Lock
 from typing import Any
 
@@ -17,6 +19,10 @@ from openai import (
 _LLM_PROVIDER_FAILED = "LLM provider request failed."
 _DEFAULT_OPENAI_TIMEOUT_SECONDS = 30.0
 _DEFAULT_OPENAI_MAX_RETRIES = 2
+_DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_THRESHOLD_CHARS = 4000
+_DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MIN = 512
+_DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MAX = 4096
+_DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_RATIO = 1.0
 
 
 class OpenAIServiceError(Exception):
@@ -69,13 +75,17 @@ class OpenAITextGenerationProvider:
             raise ValueError("Prompt must be a non-empty string.")
 
         client = self._get_client()
+        effective_system_prompt = _resolve_system_prompt(system_prompt)
         request_payload = {
             "model": settings.OPENAI_MODEL,
             "input": prompt,
         }
-        request_payload.update(_build_response_generation_options())
-
-        effective_system_prompt = _resolve_system_prompt(system_prompt)
+        request_payload.update(
+            _build_response_generation_options(
+                prompt=prompt,
+                system_prompt=effective_system_prompt,
+            )
+        )
         if effective_system_prompt:
             request_payload["instructions"] = effective_system_prompt
 
@@ -186,6 +196,46 @@ def _resolve_openai_max_retries() -> int:
     return _DEFAULT_OPENAI_MAX_RETRIES
 
 
+def _resolve_positive_int_setting(name: str, default: int) -> int:
+    raw_value = getattr(settings, name, default)
+    if isinstance(raw_value, bool):
+        return default
+    if isinstance(raw_value, int):
+        return raw_value if raw_value > 0 else default
+    if isinstance(raw_value, float):
+        numeric_value = int(raw_value)
+        return numeric_value if numeric_value > 0 else default
+    if isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return default
+        try:
+            numeric_value = int(stripped_value)
+        except ValueError:
+            return default
+        return numeric_value if numeric_value > 0 else default
+    return default
+
+
+def _resolve_positive_float_setting(name: str, default: float) -> float:
+    raw_value = getattr(settings, name, default)
+    if isinstance(raw_value, bool):
+        return default
+    if isinstance(raw_value, (int, float)):
+        numeric_value = float(raw_value)
+        return numeric_value if numeric_value > 0 else default
+    if isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return default
+        try:
+            numeric_value = float(stripped_value)
+        except ValueError:
+            return default
+        return numeric_value if numeric_value > 0 else default
+    return default
+
+
 def _resolve_optional_openai_temperature() -> float | None:
     raw_value = getattr(settings, "OPENAI_TEMPERATURE", None)
     if raw_value in (None, "") or isinstance(raw_value, bool):
@@ -248,16 +298,67 @@ def _resolve_optional_openai_max_output_tokens() -> int | None:
     return None
 
 
-def _resolve_common_generation_options() -> tuple[float | None, int | None, int | None]:
+def _resolve_adaptive_max_output_tokens(prompt_context: str | None) -> int | None:
+    if not isinstance(prompt_context, str):
+        return None
+
+    normalized_prompt_context = prompt_context.strip()
+    if not normalized_prompt_context:
+        return None
+
+    threshold_chars = _resolve_positive_int_setting(
+        "OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_THRESHOLD_CHARS",
+        _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_THRESHOLD_CHARS,
+    )
+    if len(normalized_prompt_context) < threshold_chars:
+        return None
+
+    minimum_tokens = _resolve_positive_int_setting(
+        "OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_MIN",
+        _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MIN,
+    )
+    maximum_tokens = _resolve_positive_int_setting(
+        "OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_MAX",
+        _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MAX,
+    )
+    ratio = _resolve_positive_float_setting(
+        "OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_RATIO",
+        _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_RATIO,
+    )
+
+    if maximum_tokens < minimum_tokens:
+        maximum_tokens = minimum_tokens
+
+    estimated_prompt_tokens = max(1, math.ceil(len(normalized_prompt_context) / 4))
+    adaptive_tokens = int(estimated_prompt_tokens * ratio)
+    adaptive_tokens = max(minimum_tokens, adaptive_tokens)
+    adaptive_tokens = min(maximum_tokens, adaptive_tokens)
+    return adaptive_tokens
+
+
+def _resolve_common_generation_options(
+    prompt_context: str | None = None,
+) -> tuple[float | None, int | None, int | None]:
     temperature = _resolve_optional_openai_temperature()
     seed = _resolve_optional_openai_seed()
     max_output_tokens = _resolve_optional_openai_max_output_tokens()
+    if max_output_tokens is None:
+        max_output_tokens = _resolve_adaptive_max_output_tokens(prompt_context)
     return temperature, seed, max_output_tokens
 
 
-def _build_response_generation_options() -> dict[str, Any]:
+def _build_response_generation_options(
+    prompt: str,
+    system_prompt: str | None = None,
+) -> dict[str, Any]:
     options: dict[str, Any] = {}
-    temperature, seed, max_output_tokens = _resolve_common_generation_options()
+    prompt_context = prompt
+    if isinstance(system_prompt, str) and system_prompt.strip():
+        prompt_context = f"{system_prompt.strip()}\n{prompt}"
+
+    temperature, seed, max_output_tokens = _resolve_common_generation_options(
+        prompt_context
+    )
     if temperature is not None:
         options["temperature"] = temperature
     if seed is not None:
@@ -267,9 +368,37 @@ def _build_response_generation_options() -> dict[str, Any]:
     return options
 
 
-def _build_chat_generation_options() -> dict[str, Any]:
+def _extract_message_content_for_budget(message: Any) -> str:
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        return json.dumps(content) if content is not None else ""
+    if isinstance(message, str):
+        return message
+    return ""
+
+
+def _build_prompt_context_from_messages(messages: list[dict]) -> str:
+    parts: list[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        content = _extract_message_content_for_budget(message)
+        if isinstance(role, str) and role.strip():
+            parts.append(f"{role.strip()}: {content}")
+        else:
+            parts.append(content)
+    return "\n".join(parts)
+
+
+def _build_chat_generation_options(messages: list[dict]) -> dict[str, Any]:
     options: dict[str, Any] = {}
-    temperature, seed, max_output_tokens = _resolve_common_generation_options()
+    prompt_context = _build_prompt_context_from_messages(messages)
+    temperature, seed, max_output_tokens = _resolve_common_generation_options(
+        prompt_context
+    )
     if temperature is not None:
         options["temperature"] = temperature
     if seed is not None:
@@ -303,7 +432,7 @@ def _generate_text_via_chat_completions(
         response = client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=messages,
-            **_build_chat_generation_options(),
+            **_build_chat_generation_options(messages),
         )
 
     try:
@@ -373,7 +502,7 @@ def generate_streaming_chat_response(messages: list[dict]):
             model=settings.OPENAI_MODEL,
             messages=messages,
             stream=True,
-            **_build_chat_generation_options(),
+            **_build_chat_generation_options(messages),
         )
 
     try:
@@ -399,7 +528,7 @@ def generate_chat_response(messages: list[dict]) -> str:
         response = client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=messages,
-            **_build_chat_generation_options(),
+            **_build_chat_generation_options(messages),
         )
 
     try:

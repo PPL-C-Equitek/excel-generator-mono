@@ -1327,7 +1327,7 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
         mock_client.chat.completions.create.assert_called_once_with(
             model="gpt-4.1-mini",
             messages=messages,
-            max_completion_tokens=100,
+            max_completion_tokens=102,
         )
 
     @override_settings(
