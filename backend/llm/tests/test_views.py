@@ -21,6 +21,7 @@ from llm.services.openai_client import (
 from llm.views import (
     LLM_GENERATE_RATE_LIMIT_PER_MINUTE,
     _LlmGenerateWorkflow,
+    _run_llm_generate_with_idempotency,
     _generate_reply_and_title_for_new_session,
     _estimate_payload_size_bytes,
     _build_generate_bootstrap_message,
@@ -213,6 +214,68 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(title, "New Chat")
         mock_generate.assert_called_once()
         mock_generate_title.assert_called_once_with("Halo")
+
+    def test_run_llm_generate_with_idempotency_replays_cached_success_response(self):
+        request = SimpleNamespace(
+            user=self._build_verified_user(user_id=uuid4()),
+            headers={"Idempotency-Key": "abc-123"},
+            META={"HTTP_IDEMPOTENCY_KEY": "abc-123"},
+        )
+        validated_data = {"input_json": {"sheet": "Sheet1"}, "include_reasoning": False}
+        execute_workflow = Mock(
+            return_value=Response(
+                {"output_json": {"status": "ok"}, "reasoning": None},
+                status=200,
+            )
+        )
+
+        first_response = _run_llm_generate_with_idempotency(
+            request=request,
+            validated_data=validated_data,
+            execute_workflow=execute_workflow,
+        )
+        second_response = _run_llm_generate_with_idempotency(
+            request=request,
+            validated_data=validated_data,
+            execute_workflow=execute_workflow,
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.data["output_json"], {"status": "ok"})
+        self.assertEqual(execute_workflow.call_count, 1)
+
+    def test_run_llm_generate_with_idempotency_rejects_same_key_for_different_payload(self):
+        request = SimpleNamespace(
+            user=self._build_verified_user(user_id=uuid4()),
+            headers={"Idempotency-Key": "abc-123"},
+            META={"HTTP_IDEMPOTENCY_KEY": "abc-123"},
+        )
+        execute_workflow = Mock(
+            return_value=Response(
+                {"output_json": {"status": "ok"}, "reasoning": None},
+                status=200,
+            )
+        )
+
+        first_response = _run_llm_generate_with_idempotency(
+            request=request,
+            validated_data={"input_json": {"sheet": "Sheet1"}, "include_reasoning": False},
+            execute_workflow=execute_workflow,
+        )
+        conflict_response = _run_llm_generate_with_idempotency(
+            request=request,
+            validated_data={"input_json": {"sheet": "Sheet2"}, "include_reasoning": False},
+            execute_workflow=execute_workflow,
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(conflict_response.status_code, 409)
+        self.assertEqual(
+            conflict_response.data["code"],
+            "llm_generate_idempotency_key_reused",
+        )
+        self.assertEqual(execute_workflow.call_count, 1)
 
     def test_build_table_context_lines_skips_headers_when_empty_and_includes_row_samples(self):
         lines = _build_table_context_lines(
