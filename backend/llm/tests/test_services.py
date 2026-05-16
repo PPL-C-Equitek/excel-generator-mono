@@ -16,6 +16,7 @@ from llm.services.openai_client import (
     OpenAITextGenerationProvider,
     OpenAIServiceError,
     OpenAIUpstreamError,
+    reset_text_generation_provider_cache,
     generate_chat_response,
     generate_json,
     generate_streaming_chat_response,
@@ -195,6 +196,14 @@ class CompactInputJsonForPromptTest(SimpleTestCase):
 
 
 class OpenAIClientServiceTest(SimpleTestCase):
+    def setUp(self):
+        super().setUp()
+        reset_text_generation_provider_cache()
+
+    def tearDown(self):
+        reset_text_generation_provider_cache()
+        super().tearDown()
+
     @override_settings(
         OPENAI_API_KEY="test-key",
         OPENAI_MODEL="gpt-4.1-mini",

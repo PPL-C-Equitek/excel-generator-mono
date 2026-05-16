@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from threading import Lock
 from typing import Any
 
 from django.conf import settings
@@ -95,6 +96,10 @@ class OpenAITextGenerationProvider:
         if not output_text:
             raise OpenAIServiceError("OpenAI response did not include output_text.")
         return output_text
+
+
+_TEXT_PROVIDER_SINGLETON: OpenAITextGenerationProvider | None = None
+_TEXT_PROVIDER_LOCK = Lock()
 
 
 def _resolve_system_prompt(system_prompt: str | None = None) -> str:
@@ -334,8 +339,25 @@ def _normalize_chat_message_content(content: Any) -> str | None:
     return None
 
 
+def _get_text_generation_provider() -> OpenAITextGenerationProvider:
+    global _TEXT_PROVIDER_SINGLETON
+    if _TEXT_PROVIDER_SINGLETON is not None:
+        return _TEXT_PROVIDER_SINGLETON
+
+    with _TEXT_PROVIDER_LOCK:
+        if _TEXT_PROVIDER_SINGLETON is None:
+            _TEXT_PROVIDER_SINGLETON = OpenAITextGenerationProvider()
+        return _TEXT_PROVIDER_SINGLETON
+
+
+def reset_text_generation_provider_cache() -> None:
+    global _TEXT_PROVIDER_SINGLETON
+    with _TEXT_PROVIDER_LOCK:
+        _TEXT_PROVIDER_SINGLETON = None
+
+
 def generate_text(prompt: str, system_prompt: str | None = None) -> str:
-    provider = OpenAITextGenerationProvider()
+    provider = _get_text_generation_provider()
     return provider.generate_text(prompt=prompt, system_prompt=system_prompt)
 
 
