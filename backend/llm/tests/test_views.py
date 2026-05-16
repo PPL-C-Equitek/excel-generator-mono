@@ -21,6 +21,7 @@ from llm.services.openai_client import (
 from llm.views import (
     LLM_GENERATE_RATE_LIMIT_PER_MINUTE,
     _LlmGenerateWorkflow,
+    _generate_reply_and_title_for_new_session,
     _estimate_payload_size_bytes,
     _build_generate_bootstrap_message,
     _extract_follow_up_prompt,
@@ -192,6 +193,26 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         result = _build_generate_bootstrap_message([], "Convert generated-output")
 
         self.assertEqual(result, "Convert generated-output")
+
+    @patch("llm.views.generate_session_title_from_message")
+    @patch("llm.views.generate_chat_response")
+    def test_generate_reply_and_title_fallback_reuses_first_response_when_json_parse_fails(
+        self,
+        mock_generate,
+        mock_generate_title,
+    ):
+        mock_generate.return_value = "Balasan aman"
+        mock_generate_title.return_value = "New Chat"
+
+        reply, title = _generate_reply_and_title_for_new_session(
+            history=[{"role": "user", "content": "Halo"}],
+            message="Halo",
+        )
+
+        self.assertEqual(reply, "Balasan aman")
+        self.assertEqual(title, "New Chat")
+        mock_generate.assert_called_once()
+        mock_generate_title.assert_called_once_with("Halo")
 
     def test_build_table_context_lines_skips_headers_when_empty_and_includes_row_samples(self):
         lines = _build_table_context_lines(
@@ -3291,7 +3312,7 @@ class SendMessageSessionTitleGenerationTest(TestCase):
         session_id = response.data["session_id"]
         session = Session.objects.get(id=session_id)
         self.assertEqual(session.title, "New Chat")
-        self.assertEqual(mock_generate.call_count, 2)
+        mock_generate.assert_called_once()
         mock_generate_title.assert_called_once_with("Halo")
 
 
