@@ -16,6 +16,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from api.decorators import rate_limit
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
@@ -94,6 +95,19 @@ THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
 INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."
 MAX_THINKING_LOG_PAGE_SIZE = 100
+DEFAULT_LLM_GENERATE_RATE_LIMIT_PER_MINUTE = 20
+
+
+def _resolve_llm_generate_rate_limit_per_minute(default: int = DEFAULT_LLM_GENERATE_RATE_LIMIT_PER_MINUTE) -> int:
+    raw_rate = getattr(settings, "LLM_GENERATE_RATE_LIMIT_PER_MINUTE", default)
+    try:
+        parsed_rate = int(raw_rate)
+    except (TypeError, ValueError):
+        return default
+    return parsed_rate if parsed_rate > 0 else default
+
+
+LLM_GENERATE_RATE_LIMIT_PER_MINUTE = _resolve_llm_generate_rate_limit_per_minute()
 
 
 def get_authenticated_user_id(user) -> object | None:
@@ -107,6 +121,18 @@ def _require_json_content_type(request):
     if content_type != _JSON_CONTENT_TYPE:
         return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
     return None
+
+
+def _llm_generate_rate_limit_key(request):
+    request_user = getattr(request, "user", None)
+    user_id = getattr(request_user, "id", None)
+    if getattr(request_user, "is_authenticated", False) and user_id is not None:
+        return f"user:{user_id}"
+
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if forwarded_for:
+        return f"ip:{forwarded_for.split(',', 1)[0].strip()}"
+    return f"ip:{request.META.get('REMOTE_ADDR', 'unknown')}"
 
 
 def build_llm_generation_service(user=None) -> LlmGenerationService:
@@ -883,8 +909,18 @@ def _execute_llm_generate_flow(
         )
     except Exception as exc:
         return _llm_generate_error_response(exc)
+
+
 @api_view(["POST"])
 @require_http_methods(["POST"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+@rate_limit(
+    max_requests=LLM_GENERATE_RATE_LIMIT_PER_MINUTE,
+    per="minute",
+    key_func=_llm_generate_rate_limit_key,
+    error_detail="Too many llm_generate requests. Please try again later.",
+    error_code="llm_generate_rate_limited",
+)
 def llm_generate(request):
     content_type_error = _require_json_content_type(request)
     if content_type_error is not None:
