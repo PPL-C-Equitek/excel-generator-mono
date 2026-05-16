@@ -1218,6 +1218,29 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
             1 + SUMMARY_REFRESH_THRESHOLD + SUMMARY_RECENT_MESSAGES_KEEP,
         )
 
+    @patch("chat_sessions.services._schedule_async_summary_refresh")
+    @patch("chat_sessions.services.summarize_old_messages")
+    def test_async_mode_falls_back_to_sync_refresh_when_cached_summary_missing(
+        self,
+        mock_sum,
+        mock_schedule_async_refresh,
+    ):
+        history = self._make_history(get_summary_threshold() + SUMMARY_REFRESH_THRESHOLD + 1)
+        mock_sum.return_value = "Fresh summary from sync path."
+        self.session.history_summary = ""
+        self.session.history_summary_watermark = 0
+        self.session.save(update_fields=["history_summary", "history_summary_watermark"])
+
+        result = build_history_with_summary(
+            self.session,
+            history,
+            allow_async_refresh=True,
+        )
+
+        mock_schedule_async_refresh.assert_not_called()
+        mock_sum.assert_called_once()
+        self.assertIn("Fresh summary from sync path.", result[0]["content"])
+
 class SessionTitleHelperServiceTest(SimpleTestCase):
     
     def test_sanitize_session_title_trims_whitespace(self):

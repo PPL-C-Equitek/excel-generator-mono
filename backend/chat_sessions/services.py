@@ -1,9 +1,11 @@
 import re
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from heapq import merge
 from threading import Lock
 from types import SimpleNamespace
+from typing import Protocol
 
 from django.conf import settings
 from django.db.models import Prefetch
@@ -595,6 +597,65 @@ def _persist_summary_if_unchanged(
     return False
 
 
+@dataclass(frozen=True)
+class SummaryRefreshContext:
+    session: Session
+    old_messages: list[dict]
+    cached_summary: str
+    summarized_watermark: int
+    old_count: int
+
+
+class SummaryRefreshStrategy(Protocol):
+    def refresh(self, context: SummaryRefreshContext) -> tuple[str, int]:
+        """Return (cached_summary, summarized_watermark) after refresh step."""
+
+
+class SyncSummaryRefreshStrategy:
+    def refresh(self, context: SummaryRefreshContext) -> tuple[str, int]:
+        refreshed_summary = summarize_old_messages(context.old_messages)
+        persisted = _persist_summary_if_unchanged(
+            session=context.session,
+            expected_summary=context.cached_summary,
+            expected_watermark=context.summarized_watermark,
+            new_summary=refreshed_summary,
+            new_watermark=context.old_count,
+        )
+        if persisted:
+            return refreshed_summary, context.old_count
+        return _resolve_summary_state_after_conflict(
+            context.session,
+            fallback_summary=refreshed_summary,
+            fallback_watermark=context.old_count,
+        )
+
+
+class AsyncSummaryRefreshStrategy:
+    def refresh(self, context: SummaryRefreshContext) -> tuple[str, int]:
+        _schedule_async_summary_refresh(
+            session=context.session,
+            old_messages=context.old_messages,
+            expected_summary=context.cached_summary,
+            expected_watermark=context.summarized_watermark,
+            new_watermark=context.old_count,
+        )
+        return context.cached_summary, context.summarized_watermark
+
+
+_SYNC_SUMMARY_REFRESH_STRATEGY = SyncSummaryRefreshStrategy()
+_ASYNC_SUMMARY_REFRESH_STRATEGY = AsyncSummaryRefreshStrategy()
+
+
+def _resolve_summary_refresh_strategy(
+    *,
+    allow_async_refresh: bool,
+    cached_summary: str,
+) -> SummaryRefreshStrategy:
+    if allow_async_refresh and cached_summary:
+        return _ASYNC_SUMMARY_REFRESH_STRATEGY
+    return _SYNC_SUMMARY_REFRESH_STRATEGY
+
+
 def _refresh_summary_async_task(
     *,
     session_id,
@@ -661,32 +722,19 @@ def build_history_with_summary(
     )
 
     if needs_refresh:
-        if allow_async_refresh and cached_summary:
-            _schedule_async_summary_refresh(
+        strategy = _resolve_summary_refresh_strategy(
+            allow_async_refresh=allow_async_refresh,
+            cached_summary=cached_summary,
+        )
+        cached_summary, summarized_watermark = strategy.refresh(
+            SummaryRefreshContext(
                 session=session,
                 old_messages=old_messages,
-                expected_summary=cached_summary,
-                expected_watermark=summarized_watermark,
-                new_watermark=old_count,
+                cached_summary=cached_summary,
+                summarized_watermark=summarized_watermark,
+                old_count=old_count,
             )
-        else:
-            refreshed_summary = summarize_old_messages(old_messages)
-            persisted = _persist_summary_if_unchanged(
-                session=session,
-                expected_summary=cached_summary,
-                expected_watermark=summarized_watermark,
-                new_summary=refreshed_summary,
-                new_watermark=old_count,
-            )
-            if persisted:
-                cached_summary = refreshed_summary
-                summarized_watermark = old_count
-            else:
-                cached_summary, summarized_watermark = _resolve_summary_state_after_conflict(
-                    session,
-                    fallback_summary=refreshed_summary,
-                    fallback_watermark=old_count,
-                )
+        )
 
     summary_message = _build_summary_message(cached_summary)
     if summarized_watermark < old_count:
