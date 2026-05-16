@@ -606,6 +606,33 @@ def _persist_generate_output_for_authenticated_user(
         return None, None, None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
 
 
+def _schedule_artifact_history_creation(
+    *,
+    user,
+    input_json,
+    output_json,
+    session_id,
+) -> None:
+    original_name = extract_original_name(input_json, output_json)
+
+    def _create_artifact_history_callback() -> None:
+        try:
+            create_artifact_history(
+                owner=user,
+                original_name=original_name,
+                custom_name=None,
+                session_id=session_id,
+                output_json=output_json,
+                status_processing="completed",
+            )
+        except Exception:
+            logger.exception(
+                "Unexpected error while creating artifact history after llm_generate persistence."
+            )
+
+    transaction.on_commit(_create_artifact_history_callback)
+
+
 def _build_generate_bootstrap_message(input_json, title):
     filename = None
     if isinstance(input_json, dict):
@@ -838,13 +865,11 @@ class _LlmGenerateWorkflow:
         runtime.response_chat_id = response_chat_id
 
         if getattr(self.request.user, "is_authenticated", False):
-            create_artifact_history(
-                owner=self.request.user,
-                original_name=extract_original_name(runtime.input_json, runtime.output_json),
-                custom_name=None,
-                session_id=response_session_id,
+            _schedule_artifact_history_creation(
+                user=self.request.user,
+                input_json=runtime.input_json,
                 output_json=runtime.output_json,
-                status_processing="completed",
+                session_id=response_session_id,
             )
 
         return None

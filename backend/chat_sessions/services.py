@@ -501,6 +501,58 @@ def summarize_old_messages(messages: list[dict]) -> str:
     return generate_chat_response([{"role": "user", "content": prompt}])
 
 
+def _build_summary_message(summary: str) -> dict[str, str]:
+    return {
+        "role": "system",
+        "content": f"[Summary of earlier conversation]: {summary}",
+    }
+
+
+def _normalize_summary_watermark(value) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return normalized if normalized >= 0 else 0
+
+
+def _reload_persisted_summary_state(session) -> tuple[str, int]:
+    persisted_state = (
+        Session.objects.filter(id=session.id)
+        .values("history_summary", "history_summary_watermark")
+        .first()
+    )
+    if persisted_state is None:
+        return "", 0
+    return (
+        persisted_state.get("history_summary") or "",
+        _normalize_summary_watermark(persisted_state.get("history_summary_watermark")),
+    )
+
+
+def _persist_summary_if_unchanged(
+    session,
+    expected_summary: str,
+    expected_watermark: int,
+    new_summary: str,
+    new_watermark: int,
+) -> bool:
+    updated_rows = Session.objects.filter(
+        id=session.id,
+        history_summary=expected_summary,
+        history_summary_watermark=expected_watermark,
+    ).update(
+        history_summary=new_summary,
+        history_summary_watermark=new_watermark,
+        updated_at=timezone.now(),
+    )
+    if updated_rows:
+        session.history_summary = new_summary
+        session.history_summary_watermark = new_watermark
+        return True
+    return False
+
+
 def build_history_with_summary(session, full_history: list[dict]) -> list[dict]:
     if len(full_history) <= get_summary_threshold():
         return full_history
@@ -510,7 +562,7 @@ def build_history_with_summary(session, full_history: list[dict]) -> list[dict]:
 
     cached_summary = session.history_summary or ""
     old_count = len(old_messages)
-    summarized_watermark = session.history_summary_watermark
+    summarized_watermark = _normalize_summary_watermark(session.history_summary_watermark)
 
     needs_refresh = (
         not cached_summary
@@ -518,20 +570,25 @@ def build_history_with_summary(session, full_history: list[dict]) -> list[dict]:
     )
 
     if needs_refresh:
-        cached_summary = summarize_old_messages(old_messages)
-        session.history_summary = cached_summary
-        session.history_summary_watermark = old_count
-        session.save(update_fields=["history_summary", "history_summary_watermark", "updated_at"])
-    elif summarized_watermark < old_count:
-        gap_messages = old_messages[summarized_watermark:]
-        summary_message = {
-            "role": "system",
-            "content": f"[Summary of earlier conversation]: {cached_summary}",
-        }
-        return [summary_message] + gap_messages + recent_messages
+        refreshed_summary = summarize_old_messages(old_messages)
+        persisted = _persist_summary_if_unchanged(
+            session=session,
+            expected_summary=cached_summary,
+            expected_watermark=summarized_watermark,
+            new_summary=refreshed_summary,
+            new_watermark=old_count,
+        )
+        if persisted:
+            cached_summary = refreshed_summary
+            summarized_watermark = old_count
+        else:
+            cached_summary, summarized_watermark = _reload_persisted_summary_state(session)
+            if not cached_summary:
+                cached_summary = refreshed_summary
+                summarized_watermark = old_count
 
-    summary_message = {
-        "role": "system",
-        "content": f"[Summary of earlier conversation]: {cached_summary}",
-    }
+    summary_message = _build_summary_message(cached_summary)
+    if summarized_watermark < old_count:
+        gap_messages = old_messages[summarized_watermark:]
+        return [summary_message] + gap_messages + recent_messages
     return [summary_message] + recent_messages
