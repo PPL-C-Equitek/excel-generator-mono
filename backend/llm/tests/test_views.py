@@ -3361,6 +3361,8 @@ class SendMessageEdgeCaseTest(TestCase):
         )
 
         mock_build_summary.assert_called_once()
+        _, kwargs = mock_build_summary.call_args
+        self.assertTrue(kwargs["allow_async_refresh"])
         mock_generate.assert_called_once_with(summarized_history)
 
 class SendMessageSessionTitleGenerationTest(TestCase):

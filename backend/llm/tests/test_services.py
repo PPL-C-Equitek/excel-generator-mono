@@ -16,6 +16,7 @@ from llm.services.openai_client import (
     OpenAITextGenerationProvider,
     OpenAIServiceError,
     OpenAIUpstreamError,
+    reset_chat_completion_client_cache,
     reset_text_generation_provider_cache,
     generate_chat_response,
     generate_json,
@@ -1270,6 +1271,10 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
 
 class GenerateChatResponseServiceTest(SimpleTestCase):
+    def setUp(self):
+        super().setUp()
+        reset_chat_completion_client_cache()
+
     # Positive
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
@@ -1379,6 +1384,21 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
             model="gpt-4.1-mini",
             messages=messages,
         )
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_reuses_cached_chat_client_within_same_runtime(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="ok"))]
+        )
+
+        generate_chat_response([{"role": "user", "content": "Halo"}])
+        generate_chat_response([{"role": "user", "content": "Halo lagi"}])
+
+        mock_openai.assert_called_once()
+        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
     @patch("llm.services.openai_client.OpenAI")
@@ -1516,6 +1536,10 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
 
 
 class GenerateStreamingChatResponseTest(SimpleTestCase):
+    def setUp(self):
+        super().setUp()
+        reset_chat_completion_client_cache()
+
     def test_negative_raises_value_error_for_empty_messages(self):
         with self.assertRaises(ValueError):
             next(generate_streaming_chat_response([]))

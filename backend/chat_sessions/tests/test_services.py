@@ -1191,6 +1191,33 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
 
         mock_sum.assert_not_called()
 
+    @patch("chat_sessions.services._schedule_async_summary_refresh")
+    @patch("chat_sessions.services.summarize_old_messages")
+    def test_async_refresh_uses_cached_summary_without_blocking_llm_call(
+        self,
+        mock_sum,
+        mock_schedule_async_refresh,
+    ):
+        history = self._make_history(get_summary_threshold() + SUMMARY_REFRESH_THRESHOLD + 1)
+        old_count = len(history) - SUMMARY_RECENT_MESSAGES_KEEP
+        self.session.history_summary = "Cached summary."
+        self.session.history_summary_watermark = old_count - SUMMARY_REFRESH_THRESHOLD
+        self.session.save(update_fields=["history_summary", "history_summary_watermark"])
+
+        result = build_history_with_summary(
+            self.session,
+            history,
+            allow_async_refresh=True,
+        )
+
+        mock_sum.assert_not_called()
+        mock_schedule_async_refresh.assert_called_once()
+        self.assertIn("Cached summary.", result[0]["content"])
+        self.assertEqual(
+            len(result),
+            1 + SUMMARY_REFRESH_THRESHOLD + SUMMARY_RECENT_MESSAGES_KEEP,
+        )
+
 class SessionTitleHelperServiceTest(SimpleTestCase):
     
     def test_sanitize_session_title_trims_whitespace(self):
