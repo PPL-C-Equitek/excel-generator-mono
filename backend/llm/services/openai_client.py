@@ -110,6 +110,9 @@ class OpenAITextGenerationProvider:
 
 _TEXT_PROVIDER_SINGLETON: OpenAITextGenerationProvider | None = None
 _TEXT_PROVIDER_LOCK = Lock()
+_CHAT_COMPLETION_CLIENT_SINGLETON: OpenAI | None = None
+_CHAT_COMPLETION_CLIENT_SIGNATURE: tuple[str, str, float, int, int] | None = None
+_CHAT_COMPLETION_CLIENT_LOCK = Lock()
 
 
 def _resolve_system_prompt(system_prompt: str | None = None) -> str:
@@ -130,6 +133,13 @@ def _resolve_client_signature() -> tuple[str, str, float, int]:
     timeout_seconds = _resolve_openai_timeout_seconds()
     max_retries = _resolve_openai_max_retries()
     return api_key, normalized_base_url, timeout_seconds, max_retries
+
+
+def _resolve_chat_completion_client_signature() -> tuple[str, str, float, int, int]:
+    api_key, normalized_base_url, timeout_seconds, max_retries = _resolve_client_signature()
+    # Include runtime OpenAI class identity so test patching and runtime swaps
+    # invalidate the cached chat client deterministically.
+    return api_key, normalized_base_url, timeout_seconds, max_retries, id(OpenAI)
 
 
 def _build_client_from_signature(
@@ -496,10 +506,36 @@ def _get_text_generation_provider() -> OpenAITextGenerationProvider:
         return _TEXT_PROVIDER_SINGLETON
 
 
+def _get_chat_completion_client() -> OpenAI:
+    global _CHAT_COMPLETION_CLIENT_SINGLETON, _CHAT_COMPLETION_CLIENT_SIGNATURE
+    signature = _resolve_chat_completion_client_signature()
+    if (
+        _CHAT_COMPLETION_CLIENT_SINGLETON is not None
+        and _CHAT_COMPLETION_CLIENT_SIGNATURE == signature
+    ):
+        return _CHAT_COMPLETION_CLIENT_SINGLETON
+
+    with _CHAT_COMPLETION_CLIENT_LOCK:
+        if (
+            _CHAT_COMPLETION_CLIENT_SINGLETON is None
+            or _CHAT_COMPLETION_CLIENT_SIGNATURE != signature
+        ):
+            _CHAT_COMPLETION_CLIENT_SINGLETON = _build_client()
+            _CHAT_COMPLETION_CLIENT_SIGNATURE = signature
+        return _CHAT_COMPLETION_CLIENT_SINGLETON
+
+
 def reset_text_generation_provider_cache() -> None:
     global _TEXT_PROVIDER_SINGLETON
     with _TEXT_PROVIDER_LOCK:
         _TEXT_PROVIDER_SINGLETON = None
+
+
+def reset_chat_completion_client_cache() -> None:
+    global _CHAT_COMPLETION_CLIENT_SINGLETON, _CHAT_COMPLETION_CLIENT_SIGNATURE
+    with _CHAT_COMPLETION_CLIENT_LOCK:
+        _CHAT_COMPLETION_CLIENT_SINGLETON = None
+        _CHAT_COMPLETION_CLIENT_SIGNATURE = None
 
 
 def generate_text(prompt: str, system_prompt: str | None = None) -> str:
@@ -512,7 +548,7 @@ def generate_streaming_chat_response(messages: list[dict]):
     if not messages:
         raise ValueError("messages must be a non-empty list.")
 
-    client = _build_client()
+    client = _get_chat_completion_client()
 
     with handle_openai_exceptions():
         stream = client.chat.completions.create(
@@ -539,7 +575,7 @@ def generate_chat_response(messages: list[dict]) -> str:
     if not messages:
         raise ValueError("messages must be a non-empty list.")
 
-    client = _build_client()
+    client = _get_chat_completion_client()
 
     with handle_openai_exceptions():
         response = client.chat.completions.create(

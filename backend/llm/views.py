@@ -371,7 +371,9 @@ def _resolve_send_message_session_context(user, session_id):
 
 def _generate_send_message_reply_and_title(session, history, message):
     prepared_history = (
-        build_history_with_summary(session, history) if session is not None else history
+        build_history_with_summary(session, history, allow_async_refresh=True)
+        if session is not None
+        else history
     )
     prepared_history = _inject_file_context_if_available(session, prepared_history)
     if session is None:
@@ -1199,7 +1201,11 @@ def send_message(request):
 def _build_stream_event_generator(request, session, history, message):
     reply_chunks = []
 
-    prepared_history = build_history_with_summary(session, history) if session is not None else history
+    prepared_history = (
+        build_history_with_summary(session, history, allow_async_refresh=True)
+        if session is not None
+        else history
+    )
     prepared_history = _inject_file_context_if_available(session, prepared_history)
 
     try:
