@@ -347,6 +347,23 @@ def _resolve_common_generation_options(
     return temperature, seed, max_output_tokens
 
 
+def _apply_generation_options(
+    options: dict[str, Any],
+    temperature: float | None,
+    seed: int | None,
+    max_output_tokens: int | None,
+    *,
+    token_key: str,
+) -> dict[str, Any]:
+    if temperature is not None:
+        options["temperature"] = temperature
+    if seed is not None:
+        options["seed"] = seed
+    if max_output_tokens is not None:
+        options[token_key] = max_output_tokens
+    return options
+
+
 def _build_response_generation_options(
     prompt: str,
     system_prompt: str | None = None,
@@ -359,13 +376,13 @@ def _build_response_generation_options(
     temperature, seed, max_output_tokens = _resolve_common_generation_options(
         prompt_context
     )
-    if temperature is not None:
-        options["temperature"] = temperature
-    if seed is not None:
-        options["seed"] = seed
-    if max_output_tokens is not None:
-        options["max_output_tokens"] = max_output_tokens
-    return options
+    return _apply_generation_options(
+        options,
+        temperature,
+        seed,
+        max_output_tokens,
+        token_key="max_output_tokens",
+    )
 
 
 def _extract_message_content_for_budget(message: Any) -> str:
@@ -399,13 +416,13 @@ def _build_chat_generation_options(messages: list[dict]) -> dict[str, Any]:
     temperature, seed, max_output_tokens = _resolve_common_generation_options(
         prompt_context
     )
-    if temperature is not None:
-        options["temperature"] = temperature
-    if seed is not None:
-        options["seed"] = seed
-    if max_output_tokens is not None:
-        options["max_completion_tokens"] = max_output_tokens
-    return options
+    return _apply_generation_options(
+        options,
+        temperature,
+        seed,
+        max_output_tokens,
+        token_key="max_completion_tokens",
+    )
 
 
 def _map_api_status_to_http(status_code: int | None) -> int:
