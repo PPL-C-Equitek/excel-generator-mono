@@ -189,7 +189,10 @@ def _generate_reply_and_title_for_new_session(history, message):
         title = sanitize_session_title(data.get("title", "")) or "New Chat"
         return reply, title
     except Exception:
-        return generate_chat_response(history), generate_session_title_from_message(message)
+        fallback_reply = raw_result.strip() if isinstance(raw_result, str) else ""
+        if not fallback_reply:
+            fallback_reply = "Sorry, I couldn't generate a response."
+        return fallback_reply, generate_session_title_from_message(message)
 
 
 def _resolve_send_message_session_context(user, session_id):
