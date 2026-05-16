@@ -393,6 +393,31 @@ class OpenAIClientServiceTest(SimpleTestCase):
     @override_settings(
         OPENAI_API_KEY="test-key",
         OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_MAX_OUTPUT_TOKENS="",
+        OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_THRESHOLD_CHARS=10,
+        OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_MIN=50,
+        OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_MAX=200,
+        OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_RATIO=1.0,
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_text_applies_adaptive_max_output_tokens_for_large_prompt(
+        self, mock_openai
+    ):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.responses.create.return_value = Mock(output_text="ok result")
+
+        generate_text("x" * 400)
+
+        mock_client.responses.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            input="x" * 400,
+            max_output_tokens=100,
+        )
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
         OPENAI_TEMPERATURE="bad",
         OPENAI_SEED="invalid-seed",
         OPENAI_MAX_OUTPUT_TOKENS="-1",
@@ -903,6 +928,75 @@ class LlmGenerationServiceTest(SimpleTestCase):
             },
         )
 
+    @override_settings(
+        LLM_PROMPT_MAX_CHARS=500,
+        LLM_PROMPT_MAX_TABLES=1,
+        LLM_PROMPT_MAX_ROWS_PER_TABLE=2,
+        LLM_PROMPT_MAX_COLUMNS_PER_ROW=2,
+        LLM_PROMPT_MAX_CELL_CHARS=5,
+    )
+    def test_json_generation_service_applies_prompt_budget_sampling_for_large_payload(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+        large_rows = [["very-long-cell-value"] * 6 for _ in range(30)]
+
+        service.generate(
+            {
+                "status": "success",
+                "message": "File uploaded successfully",
+                "filename": "report.pdf",
+                "size": 20480,
+                "format": "pdf",
+                "extracted": {
+                    "Sheet1": large_rows,
+                    "Sheet2": large_rows,
+                },
+                "user_prompt": "keep important fields",
+            }
+        )
+
+        prompt = text_provider.generate_text.call_args.kwargs["prompt"]
+        parsed_prompt = json.loads(prompt)
+        self.assertEqual(parsed_prompt["_prompt_budget"]["mode"], "sampled")
+        self.assertEqual(len(parsed_prompt["extracted"]), 1)
+        first_table_rows = parsed_prompt["extracted"]["Sheet1"]
+        self.assertEqual(len(first_table_rows), 2)
+        self.assertEqual(len(first_table_rows[0]), 2)
+        self.assertEqual(first_table_rows[0][0], "very-...")
+
+    @override_settings(
+        LLM_PROMPT_MAX_CHARS=80,
+        LLM_PROMPT_MAX_TABLES=1,
+        LLM_PROMPT_MAX_ROWS_PER_TABLE=1,
+        LLM_PROMPT_MAX_COLUMNS_PER_ROW=1,
+        LLM_PROMPT_MAX_CELL_CHARS=5,
+    )
+    def test_json_generation_service_falls_back_to_summary_payload_when_budget_is_still_too_large(
+        self,
+    ):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = '{"status":"ok"}'
+        service = JsonGenerationService(text_provider=text_provider)
+
+        service.generate(
+            {
+                "status": "success",
+                "filename": "report.pdf",
+                "format": "pdf",
+                "extracted": {
+                    "Sheet1": [["very-long-cell-value"] * 8 for _ in range(100)],
+                    "Sheet2": [["very-long-cell-value"] * 8 for _ in range(100)],
+                },
+                "user_prompt": "y" * 400,
+            }
+        )
+
+        prompt = text_provider.generate_text.call_args.kwargs["prompt"]
+        parsed_prompt = json.loads(prompt)
+        self.assertEqual(parsed_prompt["_prompt_budget"]["mode"], "summary")
+        self.assertIn("extracted_summary", parsed_prompt)
+
     @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_uses_base_prompt_when_no_schema_selected(
         self, mock_build_extraction_prompt
@@ -1206,6 +1300,34 @@ class GenerateChatResponseServiceTest(SimpleTestCase):
         mock_client.chat.completions.create.assert_called_once_with(
             model="gpt-4.1-mini",
             messages=messages,
+        )
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="gpt-4.1-mini",
+        OPENAI_MAX_OUTPUT_TOKENS="",
+        OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_THRESHOLD_CHARS=10,
+        OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_MIN=50,
+        OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_MAX=200,
+        OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_RATIO=1.0,
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_generate_chat_response_applies_adaptive_max_completion_tokens_for_large_history(
+        self, mock_openai
+    ):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="ok"))]
+        )
+        messages = [{"role": "user", "content": "y" * 400}]
+
+        generate_chat_response(messages)
+
+        mock_client.chat.completions.create.assert_called_once_with(
+            model="gpt-4.1-mini",
+            messages=messages,
+            max_completion_tokens=100,
         )
 
     @override_settings(
