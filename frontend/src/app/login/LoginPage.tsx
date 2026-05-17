@@ -9,26 +9,28 @@ import { login, loginWithGoogle } from '@/lib/api'
 import { storeAuthTokens } from '@/lib/auth'
 
 const GOOGLE_SIGN_IN_FAILED_MESSAGE = 'Google sign-in failed. Please try again.'
-const LOGIN_ERROR_TRANSLATIONS: Array<[string, string]> = [
+const LOGIN_ERROR_TRANSLATIONS = new Map<string, string>([
     ['invalid token atau gagal memverifikasi google token', GOOGLE_SIGN_IN_FAILED_MESSAGE],
     ['token tidak ditemukan', 'Google sign-in token is required. Please try again.'],
     ['format token tidak valid', 'Google sign-in token format is invalid. Please try again.'],
     ['token expired. silakan login ulang', 'Your session has expired. Please log in again.'],
     ['refresh token sudah logout', 'Your session has already been signed out. Please log in again.'],
     ['refresh token tidak valid', 'Your session is invalid. Please log in again.'],
-]
+])
+
+function normalizeLoginErrorMessage(message: string) {
+    return message.trim().toLowerCase().replace(/[.!?]+$/, '')
+}
 
 function getLoginErrorMessage(error: unknown, fallback: string) {
     if (!(error instanceof Error)) {
         return fallback
     }
 
-    const normalizedMessage = error.message.trim().toLowerCase()
-    const translated = LOGIN_ERROR_TRANSLATIONS.find(([source]) =>
-        normalizedMessage.includes(source)
-    )
+    const normalizedMessage = normalizeLoginErrorMessage(error.message)
+    const translated = LOGIN_ERROR_TRANSLATIONS.get(normalizedMessage)
 
-    return translated?.[1] ?? error.message
+    return translated ?? error.message
 }
 
 export default function LoginPage() {

@@ -394,6 +394,28 @@ describe('handleLogin', () => {
         })
     })
 
+    it('keeps backend error text when it only contains a translated key as a substring', async () => {
+        vi.mocked(api.login).mockRejectedValueOnce(
+            new Error('Unexpected refresh token tidak valid details')
+        )
+
+        render(<LoginPage />)
+
+        fireEvent.change(screen.getByLabelText(/email/i), {
+            target: { value: 'user1@gmail.com' },
+        })
+        fireEvent.change(screen.getByLabelText(/password/i), {
+            target: { value: 'wrongpassword' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
+
+        await waitFor(() => {
+            expect(screen.getByRole('alert')).toHaveTextContent(
+                'Unexpected refresh token tidak valid details'
+            )
+        })
+    })
+
     it('shows fallback message when login throws a non-Error', async () => {
         vi.mocked(api.login).mockRejectedValueOnce('unexpected string error')
 

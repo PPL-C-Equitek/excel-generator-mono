@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import useLoginForm from '@/hooks/useLoginForm'
 
 export interface LoginFormData {
     email: string
@@ -16,34 +16,16 @@ interface LoginFormProps {
 }
 
 export default function LoginForm({ onSubmit, onGoogleSignIn, isLoading = false, apiError = null, onClearApiError }: Readonly<LoginFormProps>) {
-    const [email, setEmail] = useState('')
-    const [password, setPassword] = useState('')
-    const [validationError, setValidationError] = useState<string | null>(null)
-
-    const handleSubmit = () => {
-        setValidationError(null)
-
-        // Keep the email within the common maximum length.
-        if (!email || email.length > 254) {
-            setValidationError('Please enter a valid email address.')
-            return
-        }
-
-        // Validate email format before submitting to the API.
-        const emailRegex = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$/
-        if (!emailRegex.test(email)) {
-            setValidationError('Please enter a valid email address.')
-            return
-        }
-
-        // Require a password for email sign-in.
-        if (!password) {
-            setValidationError('Password is required.')
-            return
-        }
-
-        onSubmit?.({ email, password })
-    }
+    const {
+        email,
+        setEmail,
+        password,
+        setPassword,
+        error: validationError,
+        handleSubmit,
+    } = useLoginForm({
+        onSubmit: ({ email, password }) => onSubmit?.({ email, password }),
+    })
 
     return (
         <div

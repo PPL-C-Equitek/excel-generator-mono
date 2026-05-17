@@ -121,6 +121,18 @@ describe('LoginForm', () => {
             expect(screen.getByRole('alert')).toBeInTheDocument()
         })
 
+        it('does not call onSubmit when password only contains whitespace', async () => {
+            const mockOnSubmit = vi.fn()
+            render(<LoginForm onSubmit={mockOnSubmit} />)
+
+            await userEvent.type(screen.getByLabelText(/email/i), 'test@example.com')
+            await userEvent.type(screen.getByTestId('password-input'), '   ')
+            await userEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
+
+            expect(screen.getByRole('alert')).toHaveTextContent('Password is required.')
+            expect(mockOnSubmit).not.toHaveBeenCalled()
+        })
+
         it('renders errors as a red box immediately after the password field', async () => {
             render(<LoginForm apiError="Invalid email or password." />)
 
