@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from django.test import SimpleTestCase, override_settings
 from unittest.mock import Mock, patch
 
+from llm.services import openai_client
 from llm.services.generation_service import (
     _compact_input_json_for_prompt,
     CustomSchemaNotFoundError,
@@ -280,6 +281,10 @@ class OpenAIClientServiceTest(SimpleTestCase):
         self.assertEqual(_resolve_optional_openai_seed(), 7)
         self.assertEqual(_resolve_optional_openai_max_output_tokens(), 512)
 
+    @override_settings(OPENAI_TIMEOUT_SECONDS="6.5")
+    def test_resolve_openai_timeout_seconds_returns_positive_string_value(self):
+        self.assertEqual(_resolve_openai_timeout_seconds(), 6.5)
+
     @override_settings(
         OPENAI_TIMEOUT_SECONDS="",
         OPENAI_MAX_RETRIES="",
@@ -385,6 +390,20 @@ class OpenAIClientServiceTest(SimpleTestCase):
             timeout=30.0,
             max_retries=2,
         )
+
+    def test_text_generation_provider_cache_uses_provider_created_while_locked(self):
+        reset_text_generation_provider_cache()
+        provider = OpenAITextGenerationProvider()
+
+        class PopulateProviderLock:
+            def __enter__(self):
+                openai_client._TEXT_PROVIDER_SINGLETON = provider
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        with patch.object(openai_client, "_TEXT_PROVIDER_LOCK", PopulateProviderLock()):
+            self.assertIs(openai_client._get_text_generation_provider(), provider)
 
     @override_settings(
         OPENAI_API_KEY="test-key",
