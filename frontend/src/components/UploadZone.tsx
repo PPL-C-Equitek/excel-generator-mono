@@ -42,20 +42,27 @@ interface StagedUploadViewProps {
     readonly selectedFile: File
     readonly disabled?: boolean
     readonly footerContent?: ReactNode
+    readonly chatInput: string
+    readonly trimmedChatInput: string
     readonly stagedFileZoneClassName: string
     readonly isValidationFeedbackVisible: boolean
     readonly validationError?: string | null
+    readonly onChatInputChange: (value: string) => void
+    readonly onChatSubmit: () => void
     readonly onReset: () => void
-    readonly onSubmit: () => void
 }
 
 interface UploadPromptViewProps {
     readonly disabled?: boolean
     readonly footerContent?: ReactNode
+    readonly chatInput: string
+    readonly trimmedChatInput: string
     readonly dropZoneClassName: string
     readonly onDragStateChange: (isDragging: boolean) => void
     readonly onDrop: (event: DragEvent<HTMLLabelElement>) => void
     readonly onChange: (event: ChangeEvent<HTMLInputElement>) => void
+    readonly onChatInputChange: (value: string) => void
+    readonly onChatSubmit: () => void
 }
 
 function FileIcon({ className = 'h-12 w-12' }: Readonly<{ className?: string }>) {
@@ -108,7 +115,17 @@ function UserAvatar() {
     )
 }
 
-function AttachedFileCard({ file, variant = 'light' }: Readonly<{ file: File; variant?: 'light' | 'dark' }>) {
+function AttachedFileCard({
+    file,
+    variant = 'light',
+    onRemove,
+    removeDisabled,
+}: Readonly<{
+    file: File
+    variant?: 'light' | 'dark'
+    onRemove?: () => void
+    removeDisabled?: boolean
+}>) {
     const isDark = variant === 'dark'
 
     return (
@@ -122,8 +139,19 @@ function AttachedFileCard({ file, variant = 'light' }: Readonly<{ file: File; va
                     {formatFileSize(file.size)}
                 </p>
             </div>
-            {!isDark && (
-                <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+            {!isDark && onRemove && (
+                <button
+                    type="button"
+                    onClick={onRemove}
+                    disabled={removeDisabled}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-red-200 bg-red-50 text-sm font-bold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                    <span className="sr-only">Change File</span>
+                    <span aria-hidden="true">X</span>
+                </button>
+            )}
+            {!isDark && !onRemove && (
+                <span className="shrink-0 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
                     Attached
                 </span>
             )}
@@ -283,38 +311,121 @@ function AssistantResultBubble({ resultContent }: Readonly<{ resultContent: Reac
     )
 }
 
-function FollowUpComposer({
+interface ChatComposerProps {
+    readonly id: string
+    readonly label: string
+    readonly placeholder: string
+    readonly buttonLabel: string
+    readonly buttonTestId?: string
+    readonly chatInput: string
+    readonly trimmedChatInput: string
+    readonly disabled?: boolean
+    readonly allowEmptySubmit?: boolean
+    readonly onChatInputChange: (value: string) => void
+    readonly onSubmit: () => void
+}
+
+function ChatComposer({
+    id,
+    label,
+    placeholder,
+    buttonLabel,
+    buttonTestId,
     chatInput,
     trimmedChatInput,
     disabled,
+    allowEmptySubmit = false,
     onChatInputChange,
-    onFollowUpSubmit,
-}: Readonly<Pick<ConversationViewProps, 'chatInput' | 'trimmedChatInput' | 'disabled' | 'onChatInputChange' | 'onFollowUpSubmit'>>) {
+    onSubmit,
+}: Readonly<ChatComposerProps>) {
+    const isSubmitDisabled = disabled || (!allowEmptySubmit && trimmedChatInput.length === 0)
+
     return (
-        <div className="border-t border-gray-200 bg-gray-50/95 px-4 py-4 backdrop-blur sm:px-6 lg:px-8">
-            <label htmlFor="follow-up-chat" className="sr-only">
-                Follow-up message
+        <div className="bg-gray-50/95 backdrop-blur">
+            <label htmlFor={id} className="sr-only">
+                {label}
             </label>
             <div className="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-end">
                 <textarea
-                    id="follow-up-chat"
-                    aria-label="Follow-up message"
+                    id={id}
+                    aria-label={label}
                     value={chatInput}
                     onChange={(event) => onChatInputChange(event.target.value)}
                     disabled={disabled}
                     rows={2}
-                    placeholder="Ask a follow-up question or refine the output..."
+                    placeholder={placeholder}
                     className="min-h-12 flex-1 resize-none rounded-2xl border border-gray-300 bg-gray-100 px-4 py-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 />
                 <button
                     type="button"
-                    onClick={onFollowUpSubmit}
-                    disabled={disabled || trimmedChatInput.length === 0}
+                    data-testid={buttonTestId}
+                    onClick={onSubmit}
+                    disabled={isSubmitDisabled}
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-700 px-5 py-3 text-sm font-bold text-white shadow-md transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                    Send
+                    {buttonLabel}
                     <SendIcon />
                 </button>
+            </div>
+        </div>
+    )
+}
+
+interface InitialChatBarProps {
+    readonly chatInput: string
+    readonly trimmedChatInput: string
+    readonly disabled?: boolean
+    readonly isChatLocked: boolean
+    readonly onChatInputChange: (value: string) => void
+    readonly onChatSubmit: () => void
+}
+
+function InitialChatBar({
+    chatInput,
+    trimmedChatInput,
+    disabled,
+    isChatLocked,
+    onChatInputChange,
+    onChatSubmit,
+}: InitialChatBarProps) {
+    const composerDisabled = disabled || isChatLocked
+
+    return (
+        <div className="border-t border-gray-200 bg-gray-50/95 px-4 py-4 backdrop-blur sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-5xl">
+                <ChatComposer
+                    id="initial-file-chat"
+                    label="Initial file message"
+                    placeholder={isChatLocked ? 'Upload a valid file before chatting...' : 'Add details for the output you want...'}
+                    buttonLabel="Send"
+                    buttonTestId={isChatLocked ? undefined : 'convert-btn'}
+                    chatInput={chatInput}
+                    trimmedChatInput={trimmedChatInput}
+                    disabled={composerDisabled}
+                    allowEmptySubmit={true}
+                    onChatInputChange={onChatInputChange}
+                    onSubmit={onChatSubmit}
+                />
+            </div>
+        </div>
+    )
+}
+
+function FollowUpComposer(props: Readonly<Pick<ConversationViewProps, 'chatInput' | 'trimmedChatInput' | 'disabled' | 'onChatInputChange' | 'onFollowUpSubmit'>>) {
+    return (
+        <div className="border-t border-gray-200 px-4 py-4 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-5xl">
+                <ChatComposer
+                    id="follow-up-chat"
+                    label="Follow-up message"
+                    placeholder="Ask a follow-up question or refine the output..."
+                    buttonLabel="Send"
+                    chatInput={props.chatInput}
+                    trimmedChatInput={props.trimmedChatInput}
+                    disabled={props.disabled}
+                    onChatInputChange={props.onChatInputChange}
+                    onSubmit={props.onFollowUpSubmit}
+                />
             </div>
         </div>
     )
@@ -348,15 +459,13 @@ function ConversationView({
                 {resultContent ? <AssistantResultBubble resultContent={resultContent} /> : null}
             </div>
 
-            {resultContent ? (
-                <FollowUpComposer
-                    chatInput={chatInput}
-                    trimmedChatInput={trimmedChatInput}
-                    disabled={disabled}
-                    onChatInputChange={onChatInputChange}
-                    onFollowUpSubmit={onFollowUpSubmit}
-                />
-            ) : null}
+            <FollowUpComposer
+                chatInput={chatInput}
+                trimmedChatInput={trimmedChatInput}
+                disabled={disabled || !resultContent}
+                onChatInputChange={onChatInputChange}
+                onFollowUpSubmit={onFollowUpSubmit}
+            />
         </section>
     )
 }
@@ -365,47 +474,48 @@ function StagedUploadView({
     selectedFile,
     disabled,
     footerContent,
+    chatInput,
+    trimmedChatInput,
     stagedFileZoneClassName,
     isValidationFeedbackVisible,
     validationError,
+    onChatInputChange,
+    onChatSubmit,
     onReset,
-    onSubmit,
 }: StagedUploadViewProps) {
     return (
-        <section className="flex min-h-screen items-center justify-center px-6 py-8 lg:px-12">
-            <div className="w-full max-w-3xl space-y-6">
-                <div className={stagedFileZoneClassName}>
-                    <div className="w-full max-w-sm">
-                        <AttachedFileCard file={selectedFile} />
+        <section className="flex h-screen flex-col">
+            <div className="flex-1 overflow-y-auto px-6 py-8 lg:px-12">
+                <div className="flex min-h-full items-center justify-center">
+                    <div className="w-full max-w-3xl space-y-6">
+                        <div className={stagedFileZoneClassName}>
+                            <div className="w-full max-w-sm">
+                                <AttachedFileCard
+                                    file={selectedFile}
+                                    onRemove={onReset}
+                                    removeDisabled={disabled}
+                                />
+                            </div>
+                        </div>
+
+                        {isValidationFeedbackVisible && (
+                            <ValidationFeedback validationError={validationError} />
+                        )}
+
+                        {footerContent}
+
                     </div>
                 </div>
-
-                {footerContent}
-
-                {isValidationFeedbackVisible && (
-                    <ValidationFeedback validationError={validationError} />
-                )}
-
-                <div className="flex justify-center gap-3">
-                    <button
-                        type="button"
-                        onClick={onReset}
-                        disabled={disabled}
-                        className="rounded-xl border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                        Change File
-                    </button>
-                    <button
-                        type="button"
-                        data-testid="convert-btn"
-                        onClick={onSubmit}
-                        disabled={disabled}
-                        className="rounded-xl bg-red-700 px-8 py-2.5 text-sm font-bold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                        Generate File
-                    </button>
-                </div>
             </div>
+
+            <InitialChatBar
+                chatInput={chatInput}
+                trimmedChatInput={trimmedChatInput}
+                disabled={disabled}
+                isChatLocked={Boolean(validationError)}
+                onChatInputChange={onChatInputChange}
+                onChatSubmit={onChatSubmit}
+            />
         </section>
     )
 }
@@ -413,24 +523,41 @@ function StagedUploadView({
 function UploadPromptView({
     disabled,
     footerContent,
+    chatInput,
+    trimmedChatInput,
     dropZoneClassName,
     onDragStateChange,
     onDrop,
     onChange,
+    onChatInputChange,
+    onChatSubmit,
 }: UploadPromptViewProps) {
     return (
-        <section className="flex min-h-[calc(100vh-8rem)] items-center justify-center">
-            <div className="w-full max-w-3xl space-y-6">
-                <FileDropTarget
-                    disabled={disabled}
-                    className={dropZoneClassName}
-                    onDragStateChange={onDragStateChange}
-                    onDrop={onDrop}
-                    onChange={onChange}
-                />
+        <section className="flex h-screen flex-col">
+            <div className="flex-1 overflow-y-auto px-6 py-8 lg:px-12">
+                <div className="flex min-h-full items-center justify-center">
+                    <div className="w-full max-w-3xl space-y-6">
+                        <FileDropTarget
+                            disabled={disabled}
+                            className={dropZoneClassName}
+                            onDragStateChange={onDragStateChange}
+                            onDrop={onDrop}
+                            onChange={onChange}
+                        />
 
-                {footerContent}
+                        {footerContent}
+                    </div>
+                </div>
             </div>
+
+            <InitialChatBar
+                chatInput={chatInput}
+                trimmedChatInput={trimmedChatInput}
+                disabled={disabled}
+                isChatLocked={true}
+                onChatInputChange={onChatInputChange}
+                onChatSubmit={onChatSubmit}
+            />
         </section>
     )
 }
@@ -501,14 +628,30 @@ export default function UploadZone({
         onFileChange?.()
     }
 
-    const handleSubmit = (file: File) => {
-        setSubmittedFile(file)
+    const handleInitialChatSubmit = (file: File) => {
+        const prompt = trimmedChatInput
+
         resetChatTranscript()
-        onFileSelect?.(file)
+        setSubmittedFile(file)
+        if (prompt.length > 0) {
+            setChatMessages([
+                {
+                    id: createMessageId(),
+                    role: 'user',
+                    text: prompt,
+                },
+            ])
+            onFileSelect?.(file, prompt)
+        } else {
+            onFileSelect?.(file)
+        }
+        setChatInput('')
     }
 
     const handleFollowUpSubmit = (file: File) => {
         const prompt = trimmedChatInput
+        if (prompt.length === 0) return
+
         setChatMessages((messages) => createFollowUpMessages(
             messages,
             resultContent,
@@ -546,11 +689,14 @@ export default function UploadZone({
                 selectedFile={selectedFile}
                 disabled={disabled}
                 footerContent={footerContent}
+                chatInput={chatInput}
+                trimmedChatInput={trimmedChatInput}
                 stagedFileZoneClassName={stagedFileZoneClassName}
                 isValidationFeedbackVisible={isValidationFeedbackVisible}
                 validationError={validationError}
+                onChatInputChange={setChatInput}
+                onChatSubmit={() => handleInitialChatSubmit(selectedFile)}
                 onReset={handleReset}
-                onSubmit={() => handleSubmit(selectedFile)}
             />
         )
     }
@@ -559,10 +705,14 @@ export default function UploadZone({
         <UploadPromptView
             disabled={disabled}
             footerContent={footerContent}
+            chatInput={chatInput}
+            trimmedChatInput={trimmedChatInput}
             dropZoneClassName={dropZoneClassName}
             onDragStateChange={setIsDragging}
             onDrop={handleDrop}
             onChange={handleChange}
+            onChatInputChange={setChatInput}
+            onChatSubmit={() => undefined}
         />
     )
 }
