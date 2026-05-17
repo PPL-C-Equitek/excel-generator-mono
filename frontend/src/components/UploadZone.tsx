@@ -62,7 +62,6 @@ interface UploadPromptViewProps {
     readonly onDrop: (event: DragEvent<HTMLLabelElement>) => void
     readonly onChange: (event: ChangeEvent<HTMLInputElement>) => void
     readonly onChatInputChange: (value: string) => void
-    readonly onChatSubmit: () => void
 }
 
 function FileIcon({ className = 'h-12 w-12' }: Readonly<{ className?: string }>) {
@@ -118,13 +117,11 @@ function UserAvatar() {
 function AttachedFileCard({
     file,
     variant = 'light',
-    onRemove,
-    removeDisabled,
+    trailingContent,
 }: Readonly<{
     file: File
     variant?: 'light' | 'dark'
-    onRemove?: () => void
-    removeDisabled?: boolean
+    trailingContent?: ReactNode
 }>) {
     const isDark = variant === 'dark'
 
@@ -139,22 +136,7 @@ function AttachedFileCard({
                     {formatFileSize(file.size)}
                 </p>
             </div>
-            {!isDark && onRemove && (
-                <button
-                    type="button"
-                    onClick={onRemove}
-                    disabled={removeDisabled}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-red-200 bg-red-50 text-sm font-bold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                    <span className="sr-only">Change File</span>
-                    <span aria-hidden="true">X</span>
-                </button>
-            )}
-            {!isDark && !onRemove && (
-                <span className="shrink-0 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-                    Attached
-                </span>
-            )}
+            {trailingContent}
         </div>
     )
 }
@@ -322,7 +304,7 @@ interface ChatComposerProps {
     readonly disabled?: boolean
     readonly allowEmptySubmit?: boolean
     readonly onChatInputChange: (value: string) => void
-    readonly onSubmit: () => void
+    readonly onSubmit?: () => void
 }
 
 function ChatComposer({
@@ -377,7 +359,7 @@ interface InitialChatBarProps {
     readonly disabled?: boolean
     readonly isChatLocked: boolean
     readonly onChatInputChange: (value: string) => void
-    readonly onChatSubmit: () => void
+    readonly onChatSubmit?: () => void
 }
 
 function InitialChatBar({
@@ -492,8 +474,17 @@ function StagedUploadView({
                             <div className="w-full max-w-sm">
                                 <AttachedFileCard
                                     file={selectedFile}
-                                    onRemove={onReset}
-                                    removeDisabled={disabled}
+                                    trailingContent={(
+                                        <button
+                                            type="button"
+                                            onClick={onReset}
+                                            disabled={disabled}
+                                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-red-200 bg-red-50 text-sm font-bold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            <span className="sr-only">Change File</span>
+                                            <span aria-hidden="true">X</span>
+                                        </button>
+                                    )}
                                 />
                             </div>
                         </div>
@@ -530,7 +521,6 @@ function UploadPromptView({
     onDrop,
     onChange,
     onChatInputChange,
-    onChatSubmit,
 }: UploadPromptViewProps) {
     return (
         <section className="flex h-screen flex-col">
@@ -556,7 +546,6 @@ function UploadPromptView({
                 disabled={disabled}
                 isChatLocked={true}
                 onChatInputChange={onChatInputChange}
-                onChatSubmit={onChatSubmit}
             />
         </section>
     )
@@ -650,8 +639,6 @@ export default function UploadZone({
 
     const handleFollowUpSubmit = (file: File) => {
         const prompt = trimmedChatInput
-        if (prompt.length === 0) return
-
         setChatMessages((messages) => createFollowUpMessages(
             messages,
             resultContent,
@@ -712,7 +699,6 @@ export default function UploadZone({
             onDrop={handleDrop}
             onChange={handleChange}
             onChatInputChange={setChatInput}
-            onChatSubmit={() => undefined}
         />
     )
 }
