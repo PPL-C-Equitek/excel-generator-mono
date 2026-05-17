@@ -317,15 +317,16 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         validated_data = {"input_json": {"sheet": "Sheet1"}}
         request_hash = _compute_llm_generate_idempotency_request_hash(validated_data)
         execute_workflow = Mock(return_value=Response({"ok": False}, status=200))
+        completed_cache_record = {
+            "state": "completed",
+            "request_hash": request_hash,
+            "status_code": 200,
+            "data": {"ok": True},
+        }
 
         with patch("llm.views.cache.add", return_value=False), patch(
             "llm.views.cache.get",
-            return_value={
-                "state": "completed",
-                "request_hash": request_hash,
-                "status_code": 200,
-                "data": {"ok": True},
-            },
+            side_effect=[None, completed_cache_record],
         ):
             response = _run_llm_generate_with_idempotency(
                 request=request,
