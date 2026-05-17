@@ -134,7 +134,7 @@ function extractUploadedFileName(content: string): string | null {
   }
 
   const fileName = normalizedContent.slice(uploadPrefix.length).trim();
-  return fileName ? fileName : null;
+  return fileName || null;
 }
 
 function isUploadBootstrapMessage(item: Extract<SessionResumeHistoryItem, { type: "message" }>) {
@@ -202,9 +202,9 @@ function HistoryAttachedFileCard({
         <p className="break-all text-sm font-semibold leading-snug text-white">
           {fileName}
         </p>
-        {fileSizeBytes !== null ? (
+        {fileSizeBytes === null ? null : (
           <p className="mt-1 text-xs text-blue-100">{formatFileSize(fileSizeBytes)}</p>
-        ) : null}
+        )}
       </div>
     </div>
   );
