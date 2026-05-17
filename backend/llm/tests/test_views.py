@@ -2511,17 +2511,18 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         mock_service.generate.return_value = raw_output_json
         self.client.force_authenticate(user=self.user)
 
-        response = self.client.post(
-            "/llm/generate/",
-            {
-                "input_json": {
-                    "filename": "invoice.pdf",
-                    "extracted": "raw upload text",
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/llm/generate/",
+                {
+                    "input_json": {
+                        "filename": "invoice.pdf",
+                        "extracted": "raw upload text",
+                    },
+                    "refinement": {"enabled": False},
                 },
-                "refinement": {"enabled": False},
-            },
-            format="json",
-        )
+                format="json",
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("session_id", response.data)
@@ -2812,18 +2813,19 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         }
         self.client.force_authenticate(user=self.user)
 
-        response = self.client.post(
-            "/llm/generate/",
-            {
-                "input_json": {
-                    "filename": "invoice.pdf",
-                    "extracted": "raw upload text",
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/llm/generate/",
+                {
+                    "input_json": {
+                        "filename": "invoice.pdf",
+                        "extracted": "raw upload text",
+                    },
+                    "include_reasoning": False,
+                    "refinement": {"enabled": False},
                 },
-                "include_reasoning": False,
-                "refinement": {"enabled": False},
-            },
-            format="json",
-        )
+                format="json",
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(ArtifactHistory.objects.count(), 1)
@@ -2854,15 +2856,16 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         session = Session.objects.create(owner=self.user, title="Existing Session")
         self.client.force_authenticate(user=self.user)
 
-        response = self.client.post(
-            "/llm/generate/",
-            {
-                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
-                "session_id": str(session.id),
-                "refinement": {"enabled": False},
-            },
-            format="json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/llm/generate/",
+                {
+                    "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                    "session_id": str(session.id),
+                    "refinement": {"enabled": False},
+                },
+                format="json",
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["session_id"], str(session.id))
