@@ -1,14 +1,15 @@
 import json
 from typing import Any, Callable, Protocol
 
-from django.conf import settings
-
 from custom_schemas.models import CustomSchema
 
 from llm.prompts.extraction import build_extraction_prompt
 
 from .openai_client import OpenAIServiceError
 from .reasoning_service import TextGenerationProvider, compose_system_prompt, get_base_system_prompt
+from .settings_resolvers import (
+    resolve_positive_int_setting as _resolve_positive_int_setting,
+)
 
 
 _UPLOAD_PROMPT_NOISE_KEYS = {"status", "message", "size"}
@@ -17,27 +18,6 @@ _DEFAULT_PROMPT_MAX_TABLES = 12
 _DEFAULT_PROMPT_MAX_ROWS_PER_TABLE = 60
 _DEFAULT_PROMPT_MAX_COLUMNS_PER_ROW = 20
 _DEFAULT_PROMPT_MAX_CELL_CHARS = 160
-
-
-def _resolve_positive_int_setting(name: str, default: int) -> int:
-    raw_value = getattr(settings, name, default)
-    if isinstance(raw_value, bool):
-        return default
-    if isinstance(raw_value, int):
-        return raw_value if raw_value > 0 else default
-    if isinstance(raw_value, float):
-        numeric_value = int(raw_value)
-        return numeric_value if numeric_value > 0 else default
-    if isinstance(raw_value, str):
-        stripped_value = raw_value.strip()
-        if not stripped_value:
-            return default
-        try:
-            numeric_value = int(stripped_value)
-        except ValueError:
-            return default
-        return numeric_value if numeric_value > 0 else default
-    return default
 
 
 def _truncate_text_cell(value: Any, max_chars: int) -> Any:

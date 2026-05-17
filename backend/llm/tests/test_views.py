@@ -309,6 +309,53 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.data["code"], "llm_generate_idempotency_in_progress")
 
+    def test_run_llm_generate_with_idempotency_replays_cache_when_lock_missing(self):
+        request = SimpleNamespace(
+            user=self._build_verified_user(user_id=uuid4()),
+            headers={"Idempotency-Key": "abc-123"},
+            META={},
+        )
+        validated_data = {"input_json": {"sheet": "Sheet1"}}
+        request_hash = _compute_llm_generate_idempotency_request_hash(validated_data)
+        execute_workflow = Mock(return_value=Response({"ok": False}, status=200))
+
+        with patch("llm.views.cache.add", return_value=False), patch(
+            "llm.views.cache.get",
+            return_value={
+                "state": "completed",
+                "request_hash": request_hash,
+                "status_code": 200,
+                "data": {"ok": True},
+            },
+        ):
+            response = _run_llm_generate_with_idempotency(
+                request=request,
+                validated_data=validated_data,
+                execute_workflow=execute_workflow,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {"ok": True})
+        execute_workflow.assert_not_called()
+
+    def test_run_llm_generate_with_idempotency_deletes_lock_when_workflow_raises(self):
+        request = SimpleNamespace(
+            user=self._build_verified_user(user_id=uuid4()),
+            headers={"Idempotency-Key": "abc-123"},
+            META={},
+        )
+        execute_workflow = Mock(side_effect=RuntimeError("boom"))
+
+        with self.assertRaises(RuntimeError):
+            _run_llm_generate_with_idempotency(
+                request=request,
+                validated_data={"input_json": {"sheet": "Sheet1"}},
+                execute_workflow=execute_workflow,
+            )
+
+        cache_key = _build_llm_generate_idempotency_cache_key(request.user, "abc-123")
+        self.assertIsNone(cache.get(cache_key))
+
     def test_parse_send_message_json_result_handles_markdown_fences(self):
         self.assertEqual(
             _parse_send_message_json_result('```json\n{"reply":"Hi","title":"T"}\n```'),
