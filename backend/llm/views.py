@@ -139,6 +139,14 @@ def get_authenticated_user_id(user) -> object | None:
     return getattr(user, "id", None)
 
 
+def _is_persistable_authenticated_user(user) -> bool:
+    return (
+        getattr(user, "is_authenticated", False)
+        and hasattr(user, "_meta")
+        and getattr(user, "pk", None) is not None
+    )
+
+
 def _require_json_content_type(request):
     content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
     if content_type != _JSON_CONTENT_TYPE:
@@ -576,7 +584,7 @@ def _persist_generate_output_for_authenticated_user(
     bootstrap_message_content="",
     title="",
 ):
-    if not getattr(user, "is_authenticated", False):
+    if not _is_persistable_authenticated_user(user):
         return None, None, None, None
 
     try:
@@ -837,7 +845,7 @@ class _LlmGenerateWorkflow:
         runtime.response_output_id = response_output_id
         runtime.response_chat_id = response_chat_id
 
-        if getattr(self.request.user, "is_authenticated", False):
+        if _is_persistable_authenticated_user(self.request.user):
             create_artifact_history(
                 owner=self.request.user,
                 original_name=extract_original_name(runtime.input_json, runtime.output_json),
