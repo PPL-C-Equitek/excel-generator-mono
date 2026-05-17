@@ -285,6 +285,10 @@ class OpenAIClientServiceTest(SimpleTestCase):
     def test_resolve_openai_timeout_seconds_returns_positive_string_value(self):
         self.assertEqual(_resolve_openai_timeout_seconds(), 6.5)
 
+    @override_settings(OPENAI_TIMEOUT_SECONDS="0")
+    def test_resolve_openai_timeout_seconds_uses_default_for_zero_string(self):
+        self.assertEqual(_resolve_openai_timeout_seconds(), 30.0)
+
     @override_settings(
         OPENAI_TIMEOUT_SECONDS="",
         OPENAI_MAX_RETRIES="",
