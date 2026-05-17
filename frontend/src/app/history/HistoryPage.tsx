@@ -63,7 +63,7 @@ export default function HistoryPage() {
         : (loadError || 'Choose a history item from the left panel to see details and actions.')
 
     return (
-        <div className="flex min-h-screen bg-gray-50">
+        <div className="flex h-screen overflow-hidden bg-gray-50">
             <Sidebar
                 activeMenu="history"
                 selectedHistoryId={selectedHistoryId}
@@ -78,9 +78,9 @@ export default function HistoryPage() {
                     deleteHistory,
                 }}
             />
-            <main className="ml-56 flex min-h-screen flex-1 flex-col bg-gray-50">
+            <main className="ml-56 flex h-screen min-h-0 flex-1 flex-col overflow-hidden bg-gray-50">
                 <section className="flex min-h-0 flex-1 min-w-0 flex-col bg-gray-50">
-                    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                         {actionError ? (
                             <div className="mx-4 mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:mx-6 lg:mx-8">
                                 {actionError}

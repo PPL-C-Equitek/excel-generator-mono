@@ -262,6 +262,20 @@ describe('HistoryPage', () => {
         expect(screen.getByText('Failed to rename history item.')).toBeInTheDocument()
     })
 
+    it('keeps the history conversation panel fixed while the message list owns scrolling', () => {
+        render(<HistoryPage />)
+
+        const fallbackMessage = screen.getByText(
+            'Session context is not available for this history item, so per-session thinking logs cannot be loaded yet.'
+        )
+        const mainPanel = fallbackMessage.closest('main')
+        const detailViewport = mainPanel?.querySelector('section > div')
+
+        expect(mainPanel).toHaveClass('h-screen', 'overflow-hidden')
+        expect(detailViewport).toHaveClass('overflow-hidden')
+        expect(detailViewport).not.toHaveClass('overflow-y-auto')
+    })
+
     it('does not render the removed detail metadata and action controls', () => {
         render(<HistoryPage />)
 
