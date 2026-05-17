@@ -3672,3 +3672,163 @@ class SessionEndpointTests(TestCase):
             response.data["history"][0]["thinking_log"],
             "Only output context",
         )
+
+class DownloadFilenameResolutionTest(APISimpleTestCase):
+    """Tests for _resolve_download_filename and _extract_original_filename_from_export_output."""
+
+    def test_resolve_download_filename_with_export_output_json_csv(self):
+        """When no filename param is provided, should extract from export_output_json for CSV."""
+        export_output_json = {
+            "document_info": {
+                "filename": "invoice.pdf",
+                "source_type": "PDF"
+            },
+            "summary": {},
+            "content_data": []
+        }
+        
+        result = _resolve_download_filename(
+            requested_name=None,
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+            export_output_json=export_output_json
+        )
+        
+        self.assertEqual(result, "invoice.csv")
+
+    def test_resolve_download_filename_with_export_output_json_xlsx(self):
+        """When no filename param is provided, should extract from export_output_json for XLSX."""
+        export_output_json = {
+            "document_info": {
+                "filename": "report.pdf",
+                "source_type": "PDF"
+            }
+        }
+        
+        result = _resolve_download_filename(
+            requested_name=None,
+            default_name="export_xyz789.xlsx",
+            artifact_type="xlsx",
+            export_output_json=export_output_json
+        )
+        
+        self.assertEqual(result, "report.xlsx")
+
+    def test_resolve_download_filename_requested_name_overrides_export_output(self):
+        """When filename param is provided, should use it instead of export_output_json."""
+        export_output_json = {
+            "document_info": {
+                "filename": "ignored.pdf",
+                "source_type": "PDF"
+            }
+        }
+        
+        result = _resolve_download_filename(
+            requested_name="my-file.csv",
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+            export_output_json=export_output_json
+        )
+        
+        self.assertEqual(result, "my-file.csv")
+
+    def test_resolve_download_filename_no_export_output_json(self):
+        """When no export_output_json provided, should use default_name."""
+        result = _resolve_download_filename(
+            requested_name=None,
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+            export_output_json=None
+        )
+        
+        self.assertEqual(result, "export_abc123.csv")
+
+    def test_resolve_download_filename_with_path_in_filename(self):
+        """Should sanitize path components from filename."""
+        export_output_json = {
+            "document_info": {
+                "filename": "/path/to/document.pdf"
+            }
+        }
+        
+        result = _resolve_download_filename(
+            requested_name=None,
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+            export_output_json=export_output_json
+        )
+        
+        self.assertEqual(result, "document.csv")
+
+    def test_resolve_download_filename_with_zip_artifact(self):
+        """Should handle zip artifact type correctly."""
+        export_output_json = {
+            "document_info": {
+                "filename": "data.xlsx"
+            }
+        }
+        
+        result = _resolve_download_filename(
+            requested_name=None,
+            default_name="export_abc123.zip",
+            artifact_type="zip",
+            export_output_json=export_output_json
+        )
+        
+        self.assertEqual(result, "data.zip")
+
+    def test_resolve_download_filename_requested_name_wrong_extension(self):
+        """When requested name has wrong extension, should fix it."""
+        result = _resolve_download_filename(
+            requested_name="my-file.pdf",
+            default_name="export_abc123.csv",
+            artifact_type="csv"
+        )
+        
+        self.assertEqual(result, "my-file.csv")
+
+    def test_resolve_download_filename_invalid_export_output_json(self):
+        """When export_output_json is invalid, should use default_name."""
+        result = _resolve_download_filename(
+            requested_name=None,
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+            export_output_json="not a dict"
+        )
+        
+        self.assertEqual(result, "export_abc123.csv")
+
+    def test_resolve_download_filename_missing_document_info(self):
+        """When export_output_json missing document_info, should use default_name."""
+        export_output_json = {
+            "summary": {},
+            "content_data": []
+        }
+        
+        result = _resolve_download_filename(
+            requested_name=None,
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+            export_output_json=export_output_json
+        )
+        
+        self.assertEqual(result, "export_abc123.csv")
+
+    def test_resolve_download_filename_empty_filename(self):
+        """When filename in document_info is empty, should use default_name."""
+        export_output_json = {
+            "document_info": {
+                "filename": "",
+                "source_type": "PDF"
+            }
+        }
+        
+        result = _resolve_download_filename(
+            requested_name=None,
+            default_name="export_abc123.csv",
+            artifact_type="csv",
+            export_output_json=export_output_json
+        )
+        
+        self.assertEqual(result, "export_abc123.csv")
+
