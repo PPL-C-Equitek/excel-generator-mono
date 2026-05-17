@@ -30,6 +30,7 @@ from llm.views import (
     _extract_follow_up_prompt,
     _generate_output_json,
     _hydrate_previous_output_from_target,
+    _is_persistable_authenticated_user,
     _schedule_artifact_history_creation,
     _sanitize_output_json,
     build_llm_generation_service,
@@ -99,6 +100,14 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         result = get_authenticated_user_id(SimpleNamespace(is_authenticated=False))
 
         self.assertIsNone(result)
+
+    def test_is_persistable_authenticated_user_partitions(self):
+        model_like_user = SimpleNamespace(is_authenticated=True, pk=uuid4(), _meta=object())
+
+        self.assertTrue(_is_persistable_authenticated_user(model_like_user))
+        self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=False, pk=uuid4(), _meta=object())))
+        self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=True, pk=None, _meta=object())))
+        self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=True, pk=uuid4())))
 
     def test_generate_output_json_returns_generated_output_when_successful(self):
         generation_service = Mock()
