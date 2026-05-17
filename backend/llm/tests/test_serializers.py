@@ -11,6 +11,7 @@ from llm.serializers import (
     LlmReasoningRequestSerializer,
     LlmReasoningResponseSerializer,
     SendMessageRequestSerializer,
+    StreamSendMessageRequestSerializer,
     ThinkingLogItemSerializer,
     _resolve_positive_int_setting,
     _safe_thinking_log_summary,
@@ -104,6 +105,15 @@ class LlmGenerateSerializerTest(SimpleTestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("session_id", serializer.errors)
+
+    def test_generate_request_serializer_accepts_valid_target_output_id(self):
+        target_output_id = uuid4()
+        serializer = LlmGenerateRequestSerializer(
+            data={"input_json": {"sheet": "Sheet1"}, "target_output_id": str(target_output_id)}
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["target_output_id"], target_output_id)
 
     def test_generate_response_serializer_accepts_session_and_output_ids(self):
         chat_id = uuid4()
@@ -701,3 +711,31 @@ class SendMessageSerializerTest(SimpleTestCase):
         serializer = ThinkingLogItemSerializer(instance)
 
         self.assertEqual(serializer.data["reasoning"], ["Step one", "Step two"])
+
+
+class StreamSendMessageSerializerTest(SimpleTestCase):
+    def test_positive_accepts_valid_message(self):
+        serializer = StreamSendMessageRequestSerializer(data={"message": "Halo"})
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["message"], "Halo")
+
+    def test_negative_rejects_whitespace_only_message(self):
+        serializer = StreamSendMessageRequestSerializer(data={"message": "   \n\t"})
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("message", serializer.errors)
+
+    def test_negative_rejects_missing_message(self):
+        serializer = StreamSendMessageRequestSerializer(data={})
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("message", serializer.errors)
+
+    def test_edge_accepts_optional_session_id(self):
+        from uuid import uuid4
+        sid = str(uuid4())
+        serializer = StreamSendMessageRequestSerializer(data={"message": "Hi", "session_id": sid})
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(str(serializer.validated_data["session_id"]), sid)

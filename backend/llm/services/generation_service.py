@@ -31,6 +31,20 @@ def _compact_input_json_for_prompt(
     if not isinstance(input_json, dict):
         return input_json
 
+    # Refinement wrapper payload keeps the same keys, but compacts nested upload input.
+    if {
+        "original_input_json",
+        "previous_output_json",
+        "validation_log",
+    }.issubset(input_json.keys()):
+        compact_payload = dict(input_json)
+        original_input = compact_payload.get("original_input_json")
+        if isinstance(original_input, (dict, list)):
+            compact_payload["original_input_json"] = _compact_input_json_for_prompt(
+                original_input
+            )
+        return compact_payload
+
     # Upload API wraps extracted data with transport metadata.
     # Keep semantic payload for LLM prompt and drop known wrapper noise.
     if "extracted" not in input_json:
@@ -41,9 +55,7 @@ def _compact_input_json_for_prompt(
         for key, value in input_json.items()
         if key not in _UPLOAD_PROMPT_NOISE_KEYS
     }
-
     _normalize_user_prompt(compact_payload)
-
     return compact_payload
 
 
@@ -120,6 +132,14 @@ class LlmGenerationService:
         self.base_system_prompt_provider = (
             base_system_prompt_provider or get_base_system_prompt
         )
+        self._schema_prompt_fragment_cache: dict[object, str] = {}
+
+    def _get_schema_prompt_fragment(self, custom_schema_id) -> str:
+        if custom_schema_id not in self._schema_prompt_fragment_cache:
+            self._schema_prompt_fragment_cache[custom_schema_id] = (
+                self.schema_prompt_source.get_prompt_fragment(custom_schema_id)
+            )
+        return self._schema_prompt_fragment_cache[custom_schema_id]
 
     def generate(
         self,
@@ -130,9 +150,7 @@ class LlmGenerationService:
     ) -> dict[str, Any] | list[Any]:
         schema_prompt_fragment = None
         if custom_schema_id is not None:
-            schema_prompt_fragment = self.schema_prompt_source.get_prompt_fragment(
-                custom_schema_id
-            )
+            schema_prompt_fragment = self._get_schema_prompt_fragment(custom_schema_id)
 
         extraction_prompt = build_extraction_prompt(
             schema_hint=schema_prompt_fragment,

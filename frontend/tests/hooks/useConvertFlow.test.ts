@@ -297,12 +297,16 @@ describe('useConvertFlow', () => {
             )
         })
 
-        it('sends the latest generated output as previous_output for follow-up prompts', async () => {
+        it('uses target_output_id for follow-up prompts when output_id is available', async () => {
             const firstOutput = { rows: [{ status: 'all' }] }
             const secondOutput = { rows: [{ status: 'paid' }] }
             const service = makeMockService({
                 generate: vi.fn()
-                    .mockResolvedValueOnce({ output_json: firstOutput })
+                    .mockResolvedValueOnce({
+                        output_json: firstOutput,
+                        session_id: '11111111-1111-1111-1111-111111111111',
+                        output_id: '22222222-2222-2222-2222-222222222222',
+                    })
                     .mockResolvedValueOnce({ output_json: secondOutput }),
             })
             const { result } = renderHook(() => useConvertFlow(service))
@@ -320,11 +324,14 @@ describe('useConvertFlow', () => {
                 2,
                 expect.objectContaining({
                     ...validUploadResponse,
-                    previous_output: firstOutput,
                     user_prompt: 'Only keep paid invoices',
                 }),
                 undefined,
-                expect.any(AbortSignal)
+                expect.any(AbortSignal),
+                {
+                    sessionId: '11111111-1111-1111-1111-111111111111',
+                    targetOutputId: '22222222-2222-2222-2222-222222222222',
+                }
             )
         })
 
@@ -354,13 +361,13 @@ describe('useConvertFlow', () => {
                 2,
                 expect.objectContaining({
                     ...validUploadResponse,
-                    previous_output: firstOutput,
                     user_prompt: 'Refine this output',
                 }),
                 undefined,
                 expect.any(AbortSignal),
                 {
                     sessionId: '11111111-1111-1111-1111-111111111111',
+                    targetOutputId: '22222222-2222-2222-2222-222222222222',
                 }
             )
         })

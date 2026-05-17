@@ -10,9 +10,9 @@ import { useResendCooldown } from '@/hooks/useResendCooldown';
 import { resendEmailActionFlow } from '@/lib/authEmailAction';
 
 function getResendButtonText(isResending: boolean, resendCooldown: number): string {
-  if (isResending) return 'Mengirim...';
-  if (resendCooldown > 0) return `Kirim Ulang (${resendCooldown}s)`;
-  return 'Kirim Ulang Email';
+  if (isResending) return 'Sending...';
+  if (resendCooldown > 0) return `Resend (${resendCooldown}s)`;
+  return 'Resend Email';
 }
 
 function VerifyEmailPendingContent() {
@@ -38,8 +38,8 @@ function VerifyEmailPendingContent() {
         );
         return { message: response.data?.message };
       },
-      successFallbackMessage: 'Email verifikasi berhasil dikirim ulang.',
-      errorFallbackMessage: 'Gagal mengirim ulang email verifikasi.',
+      successFallbackMessage: 'Verification email sent successfully.',
+      errorFallbackMessage: 'Failed to resend verification email.',
       setIsSubmitting: setIsResending,
       setStatusMessage,
       setErrorMessage,
@@ -56,11 +56,11 @@ function VerifyEmailPendingContent() {
           className="mx-auto w-full max-w-lg space-y-6 rounded-2xl p-10 text-center"
           style={{ backgroundColor: 'var(--brand-primary)' }}
         >
-          <h1 className="text-white font-bold text-2xl">Cek Email Anda</h1>
+          <h1 className="text-white font-bold text-2xl">Check Your Email</h1>
           <p className="text-sm leading-relaxed text-white/90">
             {hasJustResent
-              ? 'Email Anda belum diverifikasi. Kami telah mengirim ulang link verifikasi. Silakan cek inbox dan klik link verifikasi terbaru.'
-              : 'Email Anda belum diverifikasi. Silakan cek inbox untuk link verifikasi terbaru atau kirim ulang email setelah cooldown selesai.'}
+              ? 'Your email is not verified yet. We have resent the verification link. Please check your inbox and click the latest verification link.'
+              : 'Your email is not verified yet. Please check your inbox for the latest verification link or resend the email after the cooldown period ends.'}
           </p>
           {email && <p className="text-sm font-semibold text-white">{email}</p>}
 
@@ -95,13 +95,13 @@ function VerifyEmailPendingContent() {
               className="flex w-full justify-center rounded-xl border border-transparent bg-white px-4 py-3 text-sm font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2"
               style={{ color: 'var(--brand-primary)' }}
             >
-              Kembali ke Register
+              Back to Register
             </Link>
             <Link
               href="/login"
               className="flex w-full justify-center rounded-xl border border-white/20 bg-transparent px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2"
             >
-              Ke Login
+              Go to Login
             </Link>
           </div>
         </div>

@@ -1,5 +1,8 @@
+import itertools
 import json
 import logging
+import time
+from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
@@ -7,6 +10,7 @@ from django.conf import settings
 from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
 from django.db import transaction
+from django.http import StreamingHttpResponse
 from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -31,6 +35,7 @@ from .serializers import (
     LlmGenerateResponseSerializer,
     SendMessageRequestSerializer,
     SendMessageResponseSerializer,
+    StreamSendMessageRequestSerializer,
     LlmReasoningRequestSerializer,
     LlmReasoningResponseSerializer,
     ThinkingLogItemSerializer,
@@ -56,6 +61,7 @@ from .services.openai_client import (
     OpenAIServiceError,
     OpenAIUpstreamError,
     generate_chat_response,
+    generate_streaming_chat_response,
 )
 
 from .services.export_service import (
@@ -83,6 +89,7 @@ INVALID_PROMPT_DETAIL = "Invalid prompt payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
 REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
 SESSION_NOT_FOUND_DETAIL = "Session not found."
+_SSE_DONE = "data: [DONE]\n\n"
 THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
 INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."
@@ -93,6 +100,13 @@ def get_authenticated_user_id(user) -> object | None:
     if user is None or not getattr(user, "is_authenticated", False):
         return None
     return getattr(user, "id", None)
+
+
+def _require_json_content_type(request):
+    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type != _JSON_CONTENT_TYPE:
+        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    return None
 
 
 def build_llm_generation_service(user=None) -> LlmGenerationService:
@@ -424,6 +438,17 @@ def _extract_follow_up_prompt(input_json):
     return prompt.strip()
 
 
+def _hydrate_previous_output_from_target(input_json, target_output):
+    if target_output is None or not isinstance(input_json, dict):
+        return input_json
+    if "previous_output" in input_json:
+        return input_json
+
+    hydrated_input = dict(input_json)
+    hydrated_input["previous_output"] = target_output.output_json
+    return hydrated_input
+
+
 def _build_generate_success_response(
     response_payload,
     session_id,
@@ -441,6 +466,274 @@ def _build_generate_success_response(
     if not response_serializer.is_valid():
         return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
     return Response(response_serializer.data)
+
+
+@dataclass
+class _LlmGenerateRuntime:
+    input_json: Any
+    include_reasoning: bool
+    session_id: Any = None
+    chat_id: Any = None
+    target_output_id: Any = None
+    custom_schema_id: Any = None
+    session: Any = None
+    source_message: Any = None
+    target_output: Any = None
+    chat_context: str | None = None
+    output_json: Any = None
+    export_output_json: Any = None
+    reasoning_response: Any = None
+    thinking_log: str = ""
+    response_session_id: Any = None
+    response_output_id: Any = None
+    response_chat_id: Any = None
+    response_payload: dict[str, Any] | None = None
+    generation_duration_ms: int = 0
+    reasoning_duration_ms: int = 0
+
+
+class _LlmGenerateWorkflow:
+    def __init__(self, request, validated_data: dict[str, Any]):
+        self.request = request
+        self._validated_data = dict(validated_data)
+        self.runtime = _LlmGenerateRuntime(
+            input_json=validated_data["input_json"],
+            include_reasoning=validated_data.get("include_reasoning", True),
+            session_id=validated_data.get("session_id"),
+            chat_id=validated_data.get("chat_id"),
+            target_output_id=validated_data.get("target_output_id"),
+            custom_schema_id=validated_data.get("custom_schema_id"),
+        )
+        self._request_started_at = time.perf_counter()
+
+    def run(self) -> Response:
+        error_response = self._resolve_context()
+        if error_response is not None:
+            return error_response
+
+        error_response = self._generate_and_persist()
+        if error_response is not None:
+            return error_response
+
+        self._log_success_telemetry()
+        response_payload = self.runtime.response_payload or {
+            "output_json": self.runtime.output_json,
+            "reasoning": self.runtime.reasoning_response,
+        }
+        return _build_generate_success_response(
+            response_payload,
+            self.runtime.response_session_id,
+            self.runtime.response_chat_id,
+            self.runtime.response_output_id,
+        )
+
+    def _resolve_context(self) -> Response | None:
+        runtime = self.runtime
+        request_user = self.request.user
+
+        session, error_response = _resolve_generate_session(request_user, runtime.session_id)
+        if error_response is not None:
+            return error_response
+
+        source_message, session, error_response = _resolve_generate_source_message(
+            request_user,
+            session,
+            runtime.chat_id,
+        )
+        if error_response is not None:
+            return error_response
+
+        target_output, error_response = _resolve_message_target_output(
+            request_user,
+            session,
+            runtime.target_output_id,
+        )
+        if error_response is not None:
+            return error_response
+
+        if session is None and target_output is not None:
+            session = target_output.session
+
+        runtime.session = session
+        runtime.source_message = source_message
+        runtime.target_output = target_output
+        runtime.input_json = _hydrate_previous_output_from_target(
+            runtime.input_json,
+            target_output,
+        )
+        runtime.chat_context = _build_chat_context_from_session(session)
+        return None
+
+    def _generate_and_persist(self) -> Response | None:
+        runtime = self.runtime
+        flow_payload = dict(self._validated_data)
+        flow_payload["input_json"] = runtime.input_json
+        flow_payload["include_reasoning"] = runtime.include_reasoning
+        flow_payload["custom_schema_id"] = runtime.custom_schema_id
+        generation_started_at = time.perf_counter()
+        result = _execute_llm_generate_flow(
+            flow_payload,
+            self.request.user,
+            chat_context=runtime.chat_context,
+        )
+        runtime.generation_duration_ms = _elapsed_ms(generation_started_at)
+        if isinstance(result, Response):
+            self._log_failure_telemetry()
+            return result
+
+        runtime.response_payload = _build_llm_generate_response_payload(result)
+        runtime.output_json = _sanitize_output_json(result["output_json"])
+        runtime.reasoning_response = result["reasoning_response"]
+        runtime.export_output_json = build_export_output_json(
+            input_json=runtime.input_json,
+            output_json=runtime.output_json,
+        )
+
+        runtime.reasoning_duration_ms = 0
+        runtime.thinking_log = ""
+        if isinstance(runtime.reasoning_response, dict):
+            raw_thinking_log = runtime.reasoning_response.get("thinking_log")
+            if isinstance(raw_thinking_log, str):
+                runtime.thinking_log = raw_thinking_log
+
+        self._attach_follow_up_source_message_if_needed()
+        return self._persist_outputs_and_history()
+
+    def _attach_follow_up_source_message_if_needed(self) -> None:
+        runtime = self.runtime
+        follow_up_prompt = _extract_follow_up_prompt(runtime.input_json)
+        if (
+            runtime.session is not None
+            and runtime.source_message is None
+            and follow_up_prompt
+            and getattr(self.request.user, "is_authenticated", False)
+        ):
+            runtime.source_message = append_user_message(
+                runtime.session,
+                follow_up_prompt,
+                target_output=runtime.target_output,
+            )
+
+    def _persist_outputs_and_history(self) -> Response | None:
+        runtime = self.runtime
+        parent_output = getattr(runtime.source_message, "target_output", None) or runtime.target_output
+        conversion_title = self._resolve_conversion_title()
+        (
+            response_session_id,
+            response_output_id,
+            response_chat_id,
+            error_response,
+        ) = _persist_generate_output_for_authenticated_user(
+            self.request.user,
+            runtime.session,
+            runtime.output_json,
+            runtime.thinking_log,
+            runtime.reasoning_response,
+            runtime.export_output_json,
+            source_message=runtime.source_message,
+            parent_output=parent_output,
+            bootstrap_message_content=_build_generate_bootstrap_message(
+                runtime.input_json,
+                conversion_title,
+            ),
+            title=conversion_title,
+        )
+        if error_response is not None:
+            return error_response
+
+        runtime.response_session_id = response_session_id
+        runtime.response_output_id = response_output_id
+        runtime.response_chat_id = response_chat_id
+
+        if getattr(self.request.user, "is_authenticated", False):
+            create_artifact_history(
+                owner=self.request.user,
+                original_name=extract_original_name(runtime.input_json, runtime.output_json),
+                custom_name=None,
+                session_id=response_session_id,
+                output_json=runtime.output_json,
+                status_processing="completed",
+            )
+
+        return None
+
+    def _resolve_conversion_title(self) -> str:
+        return resolve_session_title(
+            f"Convert {extract_original_name(self.runtime.input_json, self.runtime.output_json)}"
+        )
+
+    def _log_failure_telemetry(self) -> None:
+        runtime = self.runtime
+        _log_llm_generate_telemetry(
+            status="failure",
+            total_ms=_elapsed_ms(self._request_started_at),
+            generation_ms=runtime.generation_duration_ms,
+            reasoning_ms=runtime.reasoning_duration_ms,
+            input_payload=runtime.input_json,
+            output_payload=None,
+            include_reasoning=runtime.include_reasoning,
+            session_id=getattr(runtime.session, "id", None),
+            chat_id=getattr(runtime.source_message, "id", None),
+            output_id=None,
+            target_output_id=getattr(runtime.target_output, "id", None),
+        )
+
+    def _log_success_telemetry(self) -> None:
+        runtime = self.runtime
+        _log_llm_generate_telemetry(
+            status="success",
+            total_ms=_elapsed_ms(self._request_started_at),
+            generation_ms=runtime.generation_duration_ms,
+            reasoning_ms=runtime.reasoning_duration_ms,
+            input_payload=runtime.input_json,
+            output_payload=runtime.output_json,
+            include_reasoning=runtime.include_reasoning,
+            session_id=runtime.response_session_id,
+            chat_id=runtime.response_chat_id,
+            output_id=runtime.response_output_id,
+            target_output_id=getattr(runtime.target_output, "id", None),
+        )
+
+
+def _estimate_payload_size_bytes(payload: Any) -> int:
+    try:
+        return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((time.perf_counter() - started_at) * 1000)
+
+
+def _log_llm_generate_telemetry(
+    *,
+    status: str,
+    total_ms: int,
+    generation_ms: int,
+    reasoning_ms: int,
+    input_payload: Any,
+    output_payload: Any,
+    include_reasoning: bool,
+    session_id: Any = None,
+    chat_id: Any = None,
+    output_id: Any = None,
+    target_output_id: Any = None,
+):
+    logger.info(
+        "llm_generate telemetry: status=%s total_ms=%s generation_ms=%s reasoning_ms=%s input_size_bytes=%s output_size_bytes=%s include_reasoning=%s session_id=%s chat_id=%s output_id=%s target_output_id=%s",
+        status,
+        total_ms,
+        generation_ms,
+        reasoning_ms,
+        _estimate_payload_size_bytes(input_payload),
+        _estimate_payload_size_bytes(output_payload),
+        include_reasoning,
+        str(session_id) if session_id is not None else None,
+        str(chat_id) if chat_id is not None else None,
+        str(output_id) if output_id is not None else None,
+        str(target_output_id) if target_output_id is not None else None,
+    )
 
 
 def _should_expose_validation_log() -> bool:
@@ -590,14 +883,12 @@ def _execute_llm_generate_flow(
         )
     except Exception as exc:
         return _llm_generate_error_response(exc)
-
-
 @api_view(["POST"])
 @require_http_methods(["POST"])
 def llm_generate(request):
-    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != _JSON_CONTENT_TYPE:
-        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
 
     request_serializer = LlmGenerateRequestSerializer(data=request.data)
     if not request_serializer.is_valid():
@@ -607,100 +898,16 @@ def llm_generate(request):
         )
 
     validated_data = cast(dict[str, Any], request_serializer.validated_data)
-    input_json = validated_data["input_json"]
-    session_id = validated_data.get("session_id")
-    chat_id = validated_data.get("chat_id")
-
-    session, error_response = _resolve_generate_session(request.user, session_id)
-    if error_response is not None:
-        return error_response
-
-    source_message, session, error_response = _resolve_generate_source_message(
-        request.user,
-        session,
-        chat_id,
-    )
-    if error_response is not None:
-        return error_response
-
-    chat_context = _build_chat_context_from_session(session)
-    result = _execute_llm_generate_flow(
-        validated_data,
-        request.user,
-        chat_context=chat_context,
-    )
-    if isinstance(result, Response):
-        return result
-
-    output_json = result["output_json"]
-    response_payload = _build_llm_generate_response_payload(result)
-    reasoning_response = result["reasoning_response"]
-
-    output_json = _sanitize_output_json(output_json)
-    export_output_json = build_export_output_json(
-        input_json=input_json,
-        output_json=output_json,
-    )
-    thinking_log = ""
-    if isinstance(reasoning_response, dict):
-        raw_thinking_log = reasoning_response.get("thinking_log")
-        if isinstance(raw_thinking_log, str):
-            thinking_log = raw_thinking_log
-
-    follow_up_prompt = _extract_follow_up_prompt(input_json)
-    if (
-        session is not None
-        and source_message is None
-        and follow_up_prompt
-        and getattr(request.user, "is_authenticated", False)
-    ):
-        source_message = append_user_message(
-            session,
-            follow_up_prompt,
-        )
-
-    response_session_id, response_output_id, response_chat_id, error_response = _persist_generate_output_for_authenticated_user(
-        request.user,
-        session,
-        output_json,
-        thinking_log,
-        reasoning_response,
-        export_output_json,
-        source_message=source_message,
-        parent_output=getattr(source_message, "target_output", None),
-        bootstrap_message_content=_build_generate_bootstrap_message(
-            input_json,
-            resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
-        ),
-        title=resolve_session_title(f"Convert {extract_original_name(input_json, output_json)}"),
-    )
-    if error_response is not None:
-        return error_response
-
-    if getattr(request.user, "is_authenticated", False):
-        create_artifact_history(
-            owner=request.user,
-            original_name=extract_original_name(input_json, output_json),
-            custom_name=None,
-            session_id=response_session_id,
-            output_json=output_json,
-            status_processing="completed",
-        )
-
-    return _build_generate_success_response(
-        response_payload,
-        response_session_id,
-        response_chat_id,
-        response_output_id,
-    )
+    workflow = _LlmGenerateWorkflow(request, validated_data)
+    return workflow.run()
 
 @require_http_methods(["POST"])
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def send_message(request):
-    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != _JSON_CONTENT_TYPE:
-        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
 
     serializer = SendMessageRequestSerializer(data=request.data)
     if not serializer.is_valid():
@@ -759,13 +966,96 @@ def send_message(request):
     return Response(response_serializer.data)
 
 
+def _build_stream_event_generator(request, session, history, message):
+    reply_chunks = []
+
+    prepared_history = build_history_with_summary(session, history) if session is not None else history
+    prepared_history = _inject_file_context_if_available(session, prepared_history)
+
+    try:
+        stream = generate_streaming_chat_response(prepared_history)
+        for chunk in stream:
+            if getattr(request, 'is_aborted', lambda: False)():
+                stream.close()
+                return
+            reply_chunks.append(chunk)
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+    except OpenAIConfigurationError:
+        raise
+    except OpenAIServiceError:
+        yield f"data: {json.dumps({'error': UPSTREAM_FAILURE_DETAIL})}\n\n"
+        yield _SSE_DONE
+        return
+    except GeneratorExit:
+        return
+    except Exception:
+        logger.exception("Unexpected error during streaming send_message.")
+        yield f"data: {json.dumps({'error': INTERNAL_FAILURE_DETAIL})}\n\n"
+        yield _SSE_DONE
+        return
+
+    reply = "".join(reply_chunks)
+    if not reply:
+        return
+
+    with transaction.atomic():
+        if session is None:
+            title = generate_session_title_from_message(message)
+            session = create_session_for_user(request.user, title=title)
+        append_user_message(session, message)
+        append_assistant_message(session, reply)
+
+    yield f"data: {json.dumps({'session_id': str(session.id), 'done': True})}\n\n"
+    yield _SSE_DONE
+
+
+@require_http_methods(["POST"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def stream_send_message(request):
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
+
+    serializer = StreamSendMessageRequestSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"detail": INVALID_REQUEST_DETAIL, "errors": serializer.errors},
+            status=400,
+        )
+
+    message = serializer.validated_data["message"]
+    session_id = serializer.validated_data.get("session_id")
+    session, history = _resolve_send_message_session_context(request.user, session_id)
+    if session_id and session is None:
+        return Response({"detail": SESSION_NOT_FOUND_DETAIL}, status=404)
+
+    history.append({"role": "user", "content": message})
+
+    gen = _build_stream_event_generator(request, session, history, message)
+    try:
+        first_event = next(gen)
+    except OpenAIConfigurationError:
+        return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
+    except StopIteration:
+        first_event = None
+
+    response = StreamingHttpResponse(
+        itertools.chain([first_event] if first_event is not None else [], gen),
+        content_type="text/event-stream",
+    )
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
+
+
 @require_http_methods(["POST"])
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def llm_reasoning(request):
-    content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
-    if content_type != _JSON_CONTENT_TYPE:
-        return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
+    content_type_error = _require_json_content_type(request)
+    if content_type_error is not None:
+        return content_type_error
 
     request_serializer = LlmReasoningRequestSerializer(data=request.data)
     if not request_serializer.is_valid():
@@ -901,4 +1191,3 @@ def thinking_log_detail(request, output_id):
         return _thinking_log_not_found_response()
 
     return Response(ThinkingLogItemSerializer(record).data, status=200)
-

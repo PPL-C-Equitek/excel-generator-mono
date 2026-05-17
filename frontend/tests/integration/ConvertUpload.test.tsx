@@ -62,7 +62,11 @@ describe('Integration: ConvertPage & UploadZone', () => {
         const firstOutput = { rows: [{ status: 'all' }] }
         const secondOutput = { rows: [{ status: 'paid' }] }
         mockGenerateJson
-            .mockResolvedValueOnce({ output_json: firstOutput })
+            .mockResolvedValueOnce({
+                output_json: firstOutput,
+                session_id: '11111111-1111-1111-1111-111111111111',
+                output_id: '22222222-2222-2222-2222-222222222222',
+            })
             .mockResolvedValueOnce({ output_json: secondOutput })
 
         render(<ConvertPage />)
@@ -87,11 +91,14 @@ describe('Integration: ConvertPage & UploadZone', () => {
         expect(mockGenerateJson).toHaveBeenNthCalledWith(
             2,
             expect.objectContaining({
-                previous_output: firstOutput,
                 user_prompt: 'Only keep paid invoices',
             }),
             undefined,
-            expect.any(AbortSignal)
+            expect.any(AbortSignal),
+            {
+                sessionId: '11111111-1111-1111-1111-111111111111',
+                targetOutputId: '22222222-2222-2222-2222-222222222222',
+            }
         )
     })
 

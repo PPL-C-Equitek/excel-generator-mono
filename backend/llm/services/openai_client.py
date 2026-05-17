@@ -50,11 +50,22 @@ def handle_openai_exceptions():
 
 
 class OpenAITextGenerationProvider:
+    def __init__(self):
+        self._client: OpenAI | None = None
+        self._client_signature: tuple[str, str] | None = None
+
+    def _get_client(self) -> OpenAI:
+        signature = _resolve_client_signature()
+        if self._client is None or self._client_signature != signature:
+            self._client = _build_client_from_signature(*signature)
+            self._client_signature = signature
+        return self._client
+
     def generate_text(self, prompt: str, system_prompt: str | None = None) -> str:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Prompt must be a non-empty string.")
 
-        client = _build_client()
+        client = self._get_client()
         request_payload = {
             "model": settings.OPENAI_MODEL,
             "input": prompt,
@@ -90,16 +101,25 @@ def _resolve_system_prompt(system_prompt: str | None = None) -> str:
     return raw_prompt.strip()
 
 
-def _build_client() -> OpenAI:
+def _resolve_client_signature() -> tuple[str, str]:
     api_key = settings.OPENAI_API_KEY.strip()
     if not api_key:
         raise OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
 
     base_url = getattr(settings, "OPENAI_BASE_URL", "")
     normalized_base_url = base_url.strip() if isinstance(base_url, str) else ""
+    return api_key, normalized_base_url
+
+
+def _build_client_from_signature(api_key: str, normalized_base_url: str) -> OpenAI:
     if normalized_base_url:
         return OpenAI(api_key=api_key, base_url=normalized_base_url)
     return OpenAI(api_key=api_key)
+
+
+def _build_client() -> OpenAI:
+    api_key, normalized_base_url = _resolve_client_signature()
+    return _build_client_from_signature(api_key, normalized_base_url)
 
 
 def _map_api_status_to_http(status_code: int | None) -> int:
@@ -164,6 +184,33 @@ def _normalize_chat_message_content(content: Any) -> str | None:
 def generate_text(prompt: str, system_prompt: str | None = None) -> str:
     provider = OpenAITextGenerationProvider()
     return provider.generate_text(prompt=prompt, system_prompt=system_prompt)
+
+
+def generate_streaming_chat_response(messages: list[dict]):
+    """Generator that yields text chunks from OpenAI with stream=True."""
+    if not messages:
+        raise ValueError("messages must be a non-empty list.")
+
+    client = _build_client()
+
+    with handle_openai_exceptions():
+        stream = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=messages,
+            stream=True,
+        )
+
+    try:
+        with handle_openai_exceptions():
+            for chunk in stream:
+                try:
+                    delta = chunk.choices[0].delta.content
+                except (AttributeError, IndexError):
+                    delta = None
+                if delta:
+                    yield delta
+    finally:
+        stream.close()
 
 
 def generate_chat_response(messages: list[dict]) -> str:

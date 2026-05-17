@@ -88,12 +88,12 @@ function TokenPasswordActionContent({
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500 ${
-                  errors.password ? 'border-rose-400 bg-rose-50/70' : 'border-slate-300'
-                }`}
-                style={{ backgroundColor: '#ffffff' }}
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-blue-500"
+                style={{ 
+                  backgroundColor: 'var(--surface-2)',
+                  color: 'var(--foreground)',
+                }}
               />
-              {errors.password && <AuthActionFormError>{errors.password}</AuthActionFormError>}
             </div>
 
             <div>
@@ -106,13 +106,14 @@ function TokenPasswordActionContent({
                 type="password"
                 value={passwordConfirm}
                 onChange={(event) => setPasswordConfirm(event.target.value)}
-                className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-red-500 ${
-                  errors.passwordConfirm ? 'border-rose-400 bg-rose-50/70' : 'border-slate-300'
-                }`}
-                style={{ backgroundColor: '#ffffff' }}
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-blue-500"
+                style={{ 
+                  backgroundColor: 'var(--surface-2)',
+                  color: 'var(--foreground)',
+                }}
               />
-              {errors.passwordConfirm && (
-                <AuthActionFormError>{errors.passwordConfirm}</AuthActionFormError>
+              {(errors.password || errors.passwordConfirm) && (
+                <AuthActionFormError>{errors.password || errors.passwordConfirm}</AuthActionFormError>
               )}
             </div>
           </div>

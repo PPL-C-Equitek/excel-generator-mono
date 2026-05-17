@@ -133,6 +133,7 @@ class LlmGenerateRequestSerializer(serializers.Serializer):
     input_json = serializers.JSONField()
     session_id = serializers.UUIDField(required=False, allow_null=True)
     chat_id = serializers.UUIDField(required=False, allow_null=True)
+    target_output_id = serializers.UUIDField(required=False, allow_null=True)
     custom_schema_id = serializers.UUIDField(required=False, allow_null=True)
     include_reasoning = serializers.BooleanField(required=False, default=True)
     refinement = LlmGenerateRefinementRequestSerializer(required=False)
@@ -239,6 +240,20 @@ class LlmGenerateResponseSerializer(serializers.Serializer):
 class SendMessageRequestSerializer(serializers.Serializer):
     session_id = serializers.UUIDField(required=False, allow_null=True)
     target_output_id = serializers.UUIDField(required=False, allow_null=True)
+    message = serializers.CharField(
+        max_length=MAX_MESSAGE_LENGTH,
+        allow_blank=False,
+        trim_whitespace=False,
+    )
+
+    def validate_message(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("This field may not be blank.")
+        return value
+
+
+class StreamSendMessageRequestSerializer(serializers.Serializer):
+    session_id = serializers.UUIDField(required=False, allow_null=True)
     message = serializers.CharField(
         max_length=MAX_MESSAGE_LENGTH,
         allow_blank=False,
