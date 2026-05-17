@@ -2053,6 +2053,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                     "extracted": "raw upload text",
                 },
                 "chat_id": str(source_message.id),
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2075,6 +2076,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                     "extracted": "raw upload text",
                 },
                 "chat_id": str(uuid4()),
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2102,6 +2104,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                 },
                 "session_id": str(session.id),
                 "chat_id": str(source_message.id),
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2123,7 +2126,10 @@ class LlmGenerateSessionIntegrationTest(TestCase):
 
         response = self.client.post(
             "/llm/generate/",
-            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "refinement": {"enabled": False},
+            },
             format="json",
         )
 
@@ -2156,6 +2162,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                     "extracted": "raw upload text",
                 },
                 "include_reasoning": False,
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2194,6 +2201,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             {
                 "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
                 "session_id": str(session.id),
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2239,6 +2247,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                     "user_prompt": "Lanjutkan untuk sheet berikutnya.",
                 },
                 "include_reasoning": False,
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2379,6 +2388,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                 "target_output_id": str(parent_output.id),
                 "input_json": {"filename": "invoice.pdf", "user_prompt": "Refine"},
                 "include_reasoning": False,
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2411,6 +2421,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
                     "user_prompt": "   ",
                 },
                 "include_reasoning": False,
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2431,7 +2442,10 @@ class LlmGenerateSessionIntegrationTest(TestCase):
 
         response = self.client.post(
             "/llm/generate/",
-            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "refinement": {"enabled": False},
+            },
             format="json",
         )
 
@@ -2451,6 +2465,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             {
                 "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
                 "session_id": str(session.id),
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2459,6 +2474,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             {
                 "input_json": {"filename": "invoice-2.pdf", "extracted": "raw upload text 2"},
                 "session_id": str(session.id),
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2479,7 +2495,10 @@ class LlmGenerateSessionIntegrationTest(TestCase):
 
         response = self.client.post(
             "/llm/generate/",
-            {"input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"}},
+            {
+                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                "refinement": {"enabled": False},
+            },
             format="json",
         )
 
@@ -2496,6 +2515,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             {
                 "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
                 "session_id": str(uuid4()),
+                "refinement": {"enabled": False},
             },
             format="json",
         )
@@ -2522,6 +2542,7 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             {
                 "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
                 "session_id": str(foreign_session.id),
+                "refinement": {"enabled": False},
             },
             format="json",
         )
