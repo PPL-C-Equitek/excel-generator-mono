@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import { getLoginValidationError } from '@/lib/loginValidation'
 
-interface LoginFormData {
+export interface LoginFormData {
     email: string
     password: string
     rememberMe: boolean
@@ -19,30 +20,12 @@ export default function useLoginForm(options?: UseLoginFormOptions) {
     const handleSubmit = () => {
         setError(null)
 
-        // Batasi panjang email
-        if (!email || email.length > 254) {
-            setError('Please enter a valid email address.')
+        const validationError = getLoginValidationError({ email, password })
+        if (validationError) {
+            setError(validationError)
             return
         }
 
-        // Validasi email
-        const emailRegex = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$/
-        if (!email || !emailRegex.test(email)) {
-            setError('Please enter a valid email address.')
-            return
-        }
-
-        // Validasi password
-        if (!password) {
-            setError('Password is required.')
-            return
-        }
-
-        // Validasi password tidak hanya spasi
-        if (!password.trim()) {
-            setError('Password is required.')
-            return
-        }
         options?.onSubmit?.({ email, password, rememberMe })
     }
 
