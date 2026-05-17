@@ -28,6 +28,7 @@ from llm.views import (
     _hydrate_previous_output_from_target,
     _is_persistable_authenticated_user,
     _llm_generate_rate_limit_key,
+    _resolve_llm_generate_rate_limit_per_minute,
     _sanitize_output_json,
     build_llm_generation_service,
     build_llm_reasoning_service,
@@ -104,6 +105,10 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=False, pk=uuid4(), _meta=object())))
         self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=True, pk=None, _meta=object())))
         self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=True, pk=uuid4())))
+
+    @override_settings(LLM_GENERATE_RATE_LIMIT_PER_MINUTE="not-a-number")
+    def test_resolve_llm_generate_rate_limit_uses_default_for_invalid_config(self):
+        self.assertEqual(_resolve_llm_generate_rate_limit_per_minute(default=17), 17)
 
     def test_llm_generate_rate_limit_key_partitions(self):
         user_id = uuid4()
