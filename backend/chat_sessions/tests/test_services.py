@@ -1087,6 +1087,32 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
         finally:
             chat_services._summary_refresh_executor = previous_executor
 
+    def test_get_summary_refresh_executor_uses_executor_created_while_locked(self):
+        previous_executor = chat_services._summary_refresh_executor
+        executor = object()
+
+        class PopulateExecutorLock:
+            def __enter__(self):
+                chat_services._summary_refresh_executor = executor
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        try:
+            chat_services._summary_refresh_executor = None
+            with patch.object(
+                chat_services,
+                "_summary_refresh_executor_lock",
+                PopulateExecutorLock(),
+            ), patch(
+                "chat_sessions.services.ThreadPoolExecutor",
+            ) as mock_executor_class:
+                self.assertIs(chat_services._get_summary_refresh_executor(), executor)
+
+            mock_executor_class.assert_not_called()
+        finally:
+            chat_services._summary_refresh_executor = previous_executor
+
     def test_normalize_summary_watermark_partitions(self):
         self.assertEqual(chat_services._normalize_summary_watermark("7"), 7)
         self.assertEqual(chat_services._normalize_summary_watermark("bad"), 0)
