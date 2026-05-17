@@ -19,7 +19,20 @@ const LOGIN_ERROR_TRANSLATIONS = new Map<string, string>([
 ])
 
 function normalizeLoginErrorMessage(message: string) {
-    return message.trim().toLowerCase().replace(/[.!?]+$/, '')
+    const trimmedMessage = message.trim().toLowerCase()
+    let endIndex = trimmedMessage.length
+
+    while (endIndex > 0) {
+        const character = trimmedMessage[endIndex - 1]
+
+        if (character !== '.' && character !== '!' && character !== '?') {
+            break
+        }
+
+        endIndex -= 1
+    }
+
+    return trimmedMessage.slice(0, endIndex)
 }
 
 function getLoginErrorMessage(error: unknown, fallback: string) {
