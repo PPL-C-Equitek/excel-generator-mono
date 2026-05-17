@@ -17,6 +17,7 @@ export interface SessionResumeHistoryOutput {
   chat_id?: string | null;
   parent_output_id?: string | null;
   output_json: Record<string, unknown>;
+  export_output_json?: Record<string, unknown>;
   thinking_log: string;
   reasoning: Record<string, unknown>;
   created_at: string;

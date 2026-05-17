@@ -7,6 +7,7 @@ import {
   downloadSessionOutputExcelFile,
   generateJson,
 } from "@/services/llm";
+import { buildSessionOutputDownloadFilename } from "@/utils/sessionDownloadFilename";
 import { isJsonObject, type JsonValue } from "@/utils/schemaValidator";
 
 interface SessionConversationViewProps {
@@ -212,7 +213,7 @@ function SessionHistoryBubble({
                 void downloadSessionOutputCsvFile(
                   sessionId,
                   item.id,
-                  `session-${sessionId}-output-${item.id}.csv`,
+                  buildSessionOutputDownloadFilename(item, "csv"),
                 );
               }}
               className="rounded-lg bg-red-700 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-red-800"
@@ -225,7 +226,7 @@ function SessionHistoryBubble({
                 void downloadSessionOutputExcelFile(
                   sessionId,
                   item.id,
-                  `session-${sessionId}-output-${item.id}.xlsx`,
+                  buildSessionOutputDownloadFilename(item, "xlsx"),
                 );
               }}
               className="rounded-lg border border-red-700 bg-white px-4 py-2 text-xs font-bold text-red-700 transition-colors hover:bg-red-50"
