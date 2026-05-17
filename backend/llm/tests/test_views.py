@@ -1772,6 +1772,11 @@ class LlmReasoningEndpointTest(SimpleTestCase):
 
 class LlmGenerateSessionIntegrationTest(TestCase):
     def setUp(self):
+        self._default_reasoning_patch = patch(
+            "llm.views._generate_optional_reasoning",
+            return_value=None,
+        )
+        self._default_reasoning_patch.start()
         self.client = APIClient()
         self.user = User.objects.create_user(
             email="session-generate@example.com",
@@ -1784,6 +1789,10 @@ class LlmGenerateSessionIntegrationTest(TestCase):
             "summary": {"table_count": 1},
             "content_data": [{"table_name": "Sheet1", "headers": ["A"], "rows": [["1"]]}],
         }
+
+    def tearDown(self):
+        self._default_reasoning_patch.stop()
+        super().tearDown()
 
     @patch("llm.views.build_llm_generation_service")
     def test_llm_generate_creates_session_and_generated_output_for_authenticated_user(
