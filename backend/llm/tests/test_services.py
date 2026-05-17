@@ -267,6 +267,20 @@ class OpenAIClientServiceTest(SimpleTestCase):
         self.assertEqual(_resolve_optional_openai_max_output_tokens(), 12)
 
     @override_settings(
+        OPENAI_TIMEOUT_SECONDS="7.25",
+        OPENAI_MAX_RETRIES=3.9,
+        OPENAI_TEMPERATURE="1.5",
+        OPENAI_SEED=7,
+        OPENAI_MAX_OUTPUT_TOKENS="512",
+    )
+    def test_openai_option_resolvers_handle_positive_config_values(self):
+        self.assertEqual(_resolve_openai_timeout_seconds(), 7.25)
+        self.assertEqual(_resolve_openai_max_retries(), 3)
+        self.assertEqual(_resolve_optional_openai_temperature(), 1.5)
+        self.assertEqual(_resolve_optional_openai_seed(), 7)
+        self.assertEqual(_resolve_optional_openai_max_output_tokens(), 512)
+
+    @override_settings(
         OPENAI_TIMEOUT_SECONDS="",
         OPENAI_MAX_RETRIES="",
         OPENAI_TEMPERATURE="",
@@ -274,6 +288,34 @@ class OpenAIClientServiceTest(SimpleTestCase):
         OPENAI_MAX_OUTPUT_TOKENS="",
     )
     def test_openai_option_resolvers_handle_blank_strings(self):
+        self.assertEqual(_resolve_openai_timeout_seconds(), 30.0)
+        self.assertEqual(_resolve_openai_max_retries(), 2)
+        self.assertIsNone(_resolve_optional_openai_temperature())
+        self.assertIsNone(_resolve_optional_openai_seed())
+        self.assertIsNone(_resolve_optional_openai_max_output_tokens())
+
+    @override_settings(
+        OPENAI_TIMEOUT_SECONDS="  ",
+        OPENAI_MAX_RETRIES="  ",
+        OPENAI_TEMPERATURE="  ",
+        OPENAI_SEED="  ",
+        OPENAI_MAX_OUTPUT_TOKENS="  ",
+    )
+    def test_openai_option_resolvers_handle_whitespace_strings(self):
+        self.assertEqual(_resolve_openai_timeout_seconds(), 30.0)
+        self.assertEqual(_resolve_openai_max_retries(), 2)
+        self.assertIsNone(_resolve_optional_openai_temperature())
+        self.assertIsNone(_resolve_optional_openai_seed())
+        self.assertIsNone(_resolve_optional_openai_max_output_tokens())
+
+    @override_settings(
+        OPENAI_TIMEOUT_SECONDS="invalid",
+        OPENAI_MAX_RETRIES="invalid",
+        OPENAI_TEMPERATURE="invalid",
+        OPENAI_SEED="invalid",
+        OPENAI_MAX_OUTPUT_TOKENS="invalid",
+    )
+    def test_openai_option_resolvers_handle_invalid_strings(self):
         self.assertEqual(_resolve_openai_timeout_seconds(), 30.0)
         self.assertEqual(_resolve_openai_max_retries(), 2)
         self.assertIsNone(_resolve_optional_openai_temperature())
