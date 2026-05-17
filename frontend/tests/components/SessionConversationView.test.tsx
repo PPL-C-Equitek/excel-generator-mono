@@ -245,6 +245,118 @@ describe('SessionConversationView', () => {
         expect(screen.queryByText('Uploaded file for conversion')).not.toBeInTheDocument()
     })
 
+    it('falls back to a generic uploaded file label when no filename or output is available', () => {
+        const session = makeSession({
+            history: [
+                {
+                    type: 'message',
+                    id: 'message-upload',
+                    role: 'user',
+                    content: 'Uploaded file:',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:00:00Z',
+                },
+            ],
+        })
+
+        render(
+            <SessionConversationView
+                session={session}
+                isLoadingSession={false}
+                sessionError={null}
+                isSessionNotFound={false}
+                thinkingLogsByOutputId={{}}
+                isLoadingThinkingLogs={false}
+                thinkingLogsError={null}
+            />
+        )
+
+        expect(screen.getByText('Generate this file.')).toBeInTheDocument()
+        expect(screen.getByText('Uploaded file')).toBeInTheDocument()
+        expect(screen.queryByText('Uploaded file:')).not.toBeInTheDocument()
+    })
+
+    it('formats uploaded file sizes across byte, kilobyte, and megabyte ranges', () => {
+        const session = makeSession({
+            history: [
+                {
+                    type: 'message',
+                    id: 'message-byte',
+                    role: 'user',
+                    content: 'Uploaded file: tiny.txt',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:00:00Z',
+                },
+                {
+                    type: 'output',
+                    id: 'output-byte',
+                    chat_id: 'message-byte',
+                    parent_output_id: null,
+                    output_json: { size_bytes: 512 },
+                    thinking_log: 'done',
+                    reasoning: {},
+                    created_at: '2026-04-10T10:01:00Z',
+                },
+                {
+                    type: 'message',
+                    id: 'message-kilobyte',
+                    role: 'user',
+                    content: 'Uploaded file: medium.xlsx',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:02:00Z',
+                },
+                {
+                    type: 'output',
+                    id: 'output-kilobyte',
+                    chat_id: 'message-kilobyte',
+                    parent_output_id: null,
+                    output_json: { size_bytes: 1024 },
+                    thinking_log: 'done',
+                    reasoning: {},
+                    created_at: '2026-04-10T10:03:00Z',
+                },
+                {
+                    type: 'message',
+                    id: 'message-megabyte',
+                    role: 'user',
+                    content: 'Uploaded file: large.xlsx',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:04:00Z',
+                },
+                {
+                    type: 'output',
+                    id: 'output-megabyte',
+                    chat_id: 'message-megabyte',
+                    parent_output_id: null,
+                    output_json: { size_bytes: 1024 * 1024 },
+                    thinking_log: 'done',
+                    reasoning: {},
+                    created_at: '2026-04-10T10:05:00Z',
+                },
+            ],
+        })
+
+        render(
+            <SessionConversationView
+                session={session}
+                isLoadingSession={false}
+                sessionError={null}
+                isSessionNotFound={false}
+                thinkingLogsByOutputId={{}}
+                isLoadingThinkingLogs={false}
+                thinkingLogsError={null}
+            />
+        )
+
+        expect(screen.getByText('512 B')).toBeInTheDocument()
+        expect(screen.getByText('1.0 KB')).toBeInTheDocument()
+        expect(screen.getByText('1.0 MB')).toBeInTheDocument()
+    })
+
     it('shows loading and error states for output thinking logs when no content is available', () => {
         const session = makeSession({
             history: [
