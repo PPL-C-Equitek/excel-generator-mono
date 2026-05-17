@@ -22,18 +22,42 @@ from llm.views import (
     LLM_GENERATE_RATE_LIMIT_PER_MINUTE,
     _LlmGenerateWorkflow,
     _build_llm_generate_idempotency_cache_key,
+    _build_llm_generate_idempotency_response,
+    _build_llm_generate_response_payload,
     _compute_llm_generate_idempotency_request_hash,
+    _execute_llm_generate_flow,
+    _extract_llm_generate_idempotency_key,
     _run_llm_generate_with_idempotency,
     _generate_reply_and_title_for_new_session,
     _estimate_payload_size_bytes,
     _build_generate_bootstrap_message,
+    _build_generate_success_response,
+    _build_refinement_config,
     _extract_follow_up_prompt,
     _generate_output_json,
+    _generate_optional_reasoning,
+    _generate_send_message_reply_and_title,
     _hydrate_previous_output_from_target,
+    _invalid_thinking_log_identifier_response,
+    _invalid_thinking_log_pagination_response,
     _is_persistable_authenticated_user,
     _llm_generate_rate_limit_key,
+    _llm_generate_error_response,
+    _parse_send_message_json_result,
+    _parse_thinking_log_identifier,
+    _parse_thinking_log_page_size,
+    _parse_thinking_log_positive_int,
+    _persist_generate_output_for_authenticated_user,
+    _resolve_cached_llm_generate_idempotency_response,
+    _resolve_generate_session,
+    _resolve_generate_source_message,
     _resolve_llm_generate_rate_limit_per_minute,
+    _resolve_llm_generate_idempotency_ttl_seconds,
+    _resolve_message_target_output,
+    _resolve_send_message_session_context,
+    _run_basic_generation,
     _sanitize_output_json,
+    _thinking_log_not_found_response,
     build_llm_generation_service,
     build_llm_reasoning_service,
     get_authenticated_user_id,
@@ -114,6 +138,14 @@ class LlmGenerateEndpointTest(SimpleTestCase):
     def test_resolve_llm_generate_rate_limit_uses_default_for_invalid_config(self):
         self.assertEqual(_resolve_llm_generate_rate_limit_per_minute(default=17), 17)
 
+    @override_settings(LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS="not-a-number")
+    def test_resolve_llm_generate_idempotency_ttl_uses_default_for_invalid_config(self):
+        self.assertEqual(_resolve_llm_generate_idempotency_ttl_seconds(default=31), 31)
+
+    @override_settings(LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS="45")
+    def test_resolve_llm_generate_idempotency_ttl_uses_positive_config(self):
+        self.assertEqual(_resolve_llm_generate_idempotency_ttl_seconds(default=31), 45)
+
     def test_llm_generate_rate_limit_key_partitions(self):
         user_id = uuid4()
 
@@ -144,6 +176,266 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             ),
             "ip:198.51.100.7",
         )
+
+    def test_extract_llm_generate_idempotency_key_partitions(self):
+        self.assertEqual(
+            _extract_llm_generate_idempotency_key(
+                SimpleNamespace(
+                    headers={"Idempotency-Key": "  header-key  "},
+                    META={"HTTP_IDEMPOTENCY_KEY": "meta-key"},
+                )
+            ),
+            "header-key",
+        )
+        self.assertEqual(
+            _extract_llm_generate_idempotency_key(
+                SimpleNamespace(headers={}, META={"HTTP_IDEMPOTENCY_KEY": " meta-key "})
+            ),
+            "meta-key",
+        )
+        self.assertIsNone(
+            _extract_llm_generate_idempotency_key(
+                SimpleNamespace(headers={}, META={"HTTP_IDEMPOTENCY_KEY": "   "})
+            )
+        )
+        self.assertIsNone(
+            _extract_llm_generate_idempotency_key(
+                SimpleNamespace(headers={"Idempotency-Key": 123}, META={})
+            )
+        )
+
+    def test_resolve_cached_llm_generate_idempotency_response_partitions(self):
+        request_hash = "hash-a"
+
+        self.assertIsNone(_resolve_cached_llm_generate_idempotency_response(None, request_hash))
+        self.assertIsNone(
+            _resolve_cached_llm_generate_idempotency_response(
+                {"state": "unknown", "request_hash": request_hash},
+                request_hash,
+            )
+        )
+        self.assertIsNone(
+            _resolve_cached_llm_generate_idempotency_response(
+                {"state": "completed", "request_hash": request_hash, "status_code": "200"},
+                request_hash,
+            )
+        )
+
+        reused_response = _resolve_cached_llm_generate_idempotency_response(
+            {"request_hash": "hash-b"},
+            request_hash,
+        )
+        self.assertEqual(reused_response.status_code, 409)
+        self.assertEqual(reused_response.data["code"], "llm_generate_idempotency_key_reused")
+
+        in_progress_response = _resolve_cached_llm_generate_idempotency_response(
+            {"state": "in_progress", "request_hash": request_hash},
+            request_hash,
+        )
+        self.assertEqual(in_progress_response.status_code, 409)
+        self.assertEqual(in_progress_response.data["code"], "llm_generate_idempotency_in_progress")
+
+        completed_response = _resolve_cached_llm_generate_idempotency_response(
+            {
+                "state": "completed",
+                "request_hash": request_hash,
+                "status_code": 201,
+                "data": {"ok": True},
+            },
+            request_hash,
+        )
+        self.assertEqual(completed_response.status_code, 201)
+        self.assertEqual(completed_response.data, {"ok": True})
+        self.assertEqual(completed_response["X-Idempotency-Replayed"], "true")
+
+    def test_build_llm_generate_idempotency_response_uses_custom_status(self):
+        response = _build_llm_generate_idempotency_response(
+            "Busy",
+            "busy",
+            status_code=425,
+        )
+
+        self.assertEqual(response.status_code, 425)
+        self.assertEqual(response.data, {"detail": "Busy", "code": "busy"})
+
+    def test_run_llm_generate_with_idempotency_without_key_executes_workflow(self):
+        execute_workflow = Mock(return_value=Response({"ok": True}, status=200))
+        response = _run_llm_generate_with_idempotency(
+            request=SimpleNamespace(
+                user=self._build_verified_user(user_id=uuid4()),
+                headers={},
+                META={},
+            ),
+            validated_data={"input_json": {"sheet": "Sheet1"}},
+            execute_workflow=execute_workflow,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        execute_workflow.assert_called_once()
+
+    def test_run_llm_generate_with_idempotency_deletes_lock_on_server_error(self):
+        request = SimpleNamespace(
+            user=self._build_verified_user(user_id=uuid4()),
+            headers={"Idempotency-Key": "abc-123"},
+            META={},
+        )
+        response = _run_llm_generate_with_idempotency(
+            request=request,
+            validated_data={"input_json": {"sheet": "Sheet1"}},
+            execute_workflow=Mock(return_value=Response({"detail": "fail"}, status=503)),
+        )
+
+        self.assertEqual(response.status_code, 503)
+        cache_key = _build_llm_generate_idempotency_cache_key(request.user, "abc-123")
+        self.assertIsNone(cache.get(cache_key))
+
+    def test_run_llm_generate_with_idempotency_returns_conflict_when_lock_missing_and_cache_empty(self):
+        request = SimpleNamespace(
+            user=self._build_verified_user(user_id=uuid4()),
+            headers={"Idempotency-Key": "abc-123"},
+            META={},
+        )
+        with patch("llm.views.cache.add", return_value=False), patch(
+            "llm.views.cache.get",
+            return_value=None,
+        ):
+            response = _run_llm_generate_with_idempotency(
+                request=request,
+                validated_data={"input_json": {"sheet": "Sheet1"}},
+                execute_workflow=Mock(return_value=Response({"ok": True}, status=200)),
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "llm_generate_idempotency_in_progress")
+
+    def test_parse_send_message_json_result_handles_markdown_fences(self):
+        self.assertEqual(
+            _parse_send_message_json_result('```json\n{"reply":"Hi","title":"T"}\n```'),
+            {"reply": "Hi", "title": "T"},
+        )
+        self.assertEqual(
+            _parse_send_message_json_result('```\n{"reply":"Hi","title":"T"}\n```'),
+            {"reply": "Hi", "title": "T"},
+        )
+
+    @patch("llm.views.generate_chat_response")
+    def test_generate_reply_and_title_parses_valid_json_response(self, mock_generate):
+        mock_generate.return_value = '{"reply":"Hi","title":"Quick Title"}'
+
+        reply, title = _generate_reply_and_title_for_new_session([], "Hello")
+
+        self.assertEqual(reply, "Hi")
+        self.assertEqual(title, "Quick Title")
+
+    @patch("llm.views.generate_session_title_from_message", return_value="Fallback Title")
+    @patch("llm.views.generate_chat_response")
+    def test_generate_reply_and_title_uses_default_reply_when_fallback_blank(
+        self,
+        mock_generate,
+        _mock_title,
+    ):
+        mock_generate.return_value = "   "
+
+        reply, title = _generate_reply_and_title_for_new_session([], "Hello")
+
+        self.assertEqual(reply, "Sorry, I couldn't generate a response.")
+        self.assertEqual(title, "Fallback Title")
+
+    def test_resolve_send_message_session_context_partitions(self):
+        self.assertEqual(_resolve_send_message_session_context(object(), None), (None, []))
+
+        with patch("llm.views.get_session_for_user", return_value=None):
+            self.assertEqual(
+                _resolve_send_message_session_context(object(), "missing-session"),
+                (None, None),
+            )
+
+        session = SimpleNamespace(messages=Mock())
+        with patch("llm.views.get_session_for_user", return_value=session), patch(
+            "llm.views._build_session_message_history",
+            return_value=[{"role": "user", "content": "Hi"}],
+        ):
+            self.assertEqual(
+                _resolve_send_message_session_context(object(), "session-1"),
+                (session, [{"role": "user", "content": "Hi"}]),
+            )
+
+    @patch("llm.views.generate_chat_response", return_value="Reply")
+    @patch("llm.views._inject_file_context_if_available")
+    @patch("llm.views.build_history_with_summary")
+    def test_generate_send_message_reply_and_title_for_existing_session(
+        self,
+        mock_build_history,
+        mock_inject_context,
+        mock_generate,
+    ):
+        session = SimpleNamespace(id="session-1")
+        mock_build_history.return_value = [{"role": "user", "content": "Hi"}]
+        mock_inject_context.return_value = [{"role": "user", "content": "Hi"}]
+
+        reply, title = _generate_send_message_reply_and_title(
+            session,
+            [{"role": "user", "content": "Hi"}],
+            "Hi",
+        )
+
+        self.assertEqual((reply, title), ("Reply", "New Chat"))
+        mock_build_history.assert_called_once()
+        mock_inject_context.assert_called_once()
+        mock_generate.assert_called_once()
+
+    @patch("llm.views._generate_reply_and_title_for_new_session", return_value=("Reply", "Title"))
+    @patch("llm.views._inject_file_context_if_available")
+    def test_generate_send_message_reply_and_title_for_new_session(
+        self,
+        mock_inject_context,
+        mock_generate_reply_title,
+    ):
+        mock_inject_context.return_value = [{"role": "user", "content": "Hi"}]
+
+        reply, title = _generate_send_message_reply_and_title(
+            None,
+            [{"role": "user", "content": "Hi"}],
+            "Hi",
+        )
+
+        self.assertEqual((reply, title), ("Reply", "Title"))
+        mock_generate_reply_title.assert_called_once()
+
+    @patch("llm.views.generate_conversion_reasoning_response")
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_generate_optional_reasoning_success_and_skip_partitions(
+        self,
+        mock_build_service,
+        mock_generate_reasoning,
+    ):
+        mock_generate_reasoning.return_value = {"thinking_log": "ok"}
+
+        self.assertIsNone(_generate_optional_reasoning(False, {}, {}))
+        self.assertEqual(
+            _generate_optional_reasoning(True, {"filename": "report.pdf"}, {"rows": []}),
+            {"thinking_log": "ok"},
+        )
+        mock_build_service.assert_called_once()
+        mock_generate_reasoning.assert_called_once()
+
+    @patch("llm.views.logger")
+    @patch("llm.views.generate_conversion_reasoning_response")
+    @patch("llm.views.build_llm_reasoning_service")
+    def test_generate_optional_reasoning_swallows_expected_and_unexpected_errors(
+        self,
+        _mock_build_service,
+        mock_generate_reasoning,
+        mock_logger,
+    ):
+        for exception, expected_message in (
+            (OpenAIServiceError("bad"), "Automatic reasoning failed while handling llm_generate request."),
+            (RuntimeError("boom"), "Unexpected error while generating automatic reasoning."),
+        ):
+            with self.subTest(exception=exception.__class__.__name__):
+                mock_generate_reasoning.side_effect = exception
+                self.assertIsNone(_generate_optional_reasoning(True, {}, {}))
+                mock_logger.exception.assert_called_with(expected_message)
 
     def test_generate_output_json_returns_generated_output_when_successful(self):
         generation_service = Mock()
@@ -215,6 +507,269 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertIsNone(output_json)
         self.assertIsInstance(error_response, Response)
         self.assertEqual(error_response.status_code, 500)
+
+    def test_thinking_log_response_and_parser_helpers(self):
+        self.assertEqual(_thinking_log_not_found_response().status_code, 404)
+        self.assertEqual(_invalid_thinking_log_pagination_response().status_code, 400)
+        self.assertEqual(
+            _invalid_thinking_log_identifier_response("session_id").data["errors"],
+            {"session_id": ["Invalid thinking log identifier."]},
+        )
+        self.assertEqual(_parse_thinking_log_positive_int(None, default=2), 2)
+        self.assertEqual(_parse_thinking_log_positive_int("3", default=2), 3)
+        with self.assertRaises(ValueError):
+            _parse_thinking_log_positive_int("0", default=2)
+        self.assertEqual(_parse_thinking_log_page_size("5"), 5)
+        with self.assertRaises(ValueError):
+            _parse_thinking_log_page_size("101")
+
+        output_id = uuid4()
+        self.assertEqual(_parse_thinking_log_identifier(str(output_id), "request_id"), output_id)
+        self.assertIsNone(_parse_thinking_log_identifier("   ", "request_id"))
+        with self.assertRaises(ValueError):
+            _parse_thinking_log_identifier("not-a-uuid", "request_id")
+
+    def test_resolve_generate_session_partitions(self):
+        user = self._build_verified_user(user_id=uuid4())
+        self.assertEqual(_resolve_generate_session(user, None), (None, None))
+        self.assertEqual(
+            _resolve_generate_session(SimpleNamespace(is_authenticated=False), uuid4()),
+            (None, None),
+        )
+
+        with patch("llm.views.get_session_for_user", return_value=None):
+            session, error_response = _resolve_generate_session(user, uuid4())
+            self.assertIsNone(session)
+            self.assertEqual(error_response.status_code, 404)
+
+        owned_session = SimpleNamespace(id=uuid4())
+        with patch("llm.views.get_session_for_user", return_value=owned_session):
+            self.assertEqual(
+                _resolve_generate_session(user, owned_session.id),
+                (owned_session, None),
+            )
+
+    def test_resolve_message_target_output_partitions(self):
+        user = self._build_verified_user(user_id=uuid4())
+        self.assertEqual(_resolve_message_target_output(user, None, None), (None, None))
+
+        with patch("llm.views.get_generated_output_for_user", return_value=None):
+            target_output, error_response = _resolve_message_target_output(user, None, uuid4())
+            self.assertIsNone(target_output)
+            self.assertEqual(error_response.status_code, 404)
+
+        requested_session = SimpleNamespace(id=uuid4())
+        target_output = SimpleNamespace(id=uuid4(), session_id=uuid4())
+        with patch("llm.views.get_generated_output_for_user", return_value=target_output):
+            resolved_output, error_response = _resolve_message_target_output(
+                user,
+                requested_session,
+                target_output.id,
+            )
+            self.assertIsNone(resolved_output)
+            self.assertEqual(error_response.status_code, 400)
+
+        target_output = SimpleNamespace(id=uuid4(), session_id=requested_session.id)
+        with patch("llm.views.get_generated_output_for_user", return_value=target_output):
+            self.assertEqual(
+                _resolve_message_target_output(user, requested_session, target_output.id),
+                (target_output, None),
+            )
+
+    def test_resolve_generate_source_message_partitions(self):
+        user = self._build_verified_user(user_id=uuid4())
+        session = SimpleNamespace(id=uuid4())
+        self.assertEqual(_resolve_generate_source_message(user, session, None), (None, session, None))
+
+        with patch("llm.views.get_chat_message_for_user", return_value=None):
+            source_message, resolved_session, error_response = _resolve_generate_source_message(
+                user,
+                session,
+                uuid4(),
+            )
+            self.assertIsNone(source_message)
+            self.assertEqual(resolved_session, session)
+            self.assertEqual(error_response.status_code, 404)
+
+        source_message = SimpleNamespace(id=uuid4(), session_id=uuid4(), session=SimpleNamespace(id=uuid4()))
+        with patch("llm.views.get_chat_message_for_user", return_value=source_message):
+            resolved_message, resolved_session, error_response = _resolve_generate_source_message(
+                user,
+                session,
+                source_message.id,
+            )
+            self.assertIsNone(resolved_message)
+            self.assertEqual(resolved_session, session)
+            self.assertEqual(error_response.status_code, 400)
+
+        source_message = SimpleNamespace(id=uuid4(), session_id=session.id, session=session)
+        with patch("llm.views.get_chat_message_for_user", return_value=source_message):
+            self.assertEqual(
+                _resolve_generate_source_message(user, session, source_message.id),
+                (source_message, session, None),
+            )
+
+    def test_persist_generate_output_returns_none_for_non_persistable_user(self):
+        self.assertEqual(
+            _persist_generate_output_for_authenticated_user(
+                SimpleNamespace(is_authenticated=True, pk=None),
+                None,
+                {},
+                "",
+                None,
+                {},
+            ),
+            (None, None, None, None),
+        )
+
+    @patch("llm.views.LlmGenerateResponseSerializer")
+    def test_build_generate_success_response_returns_502_when_serializer_invalid(
+        self,
+        mock_serializer_class,
+    ):
+        mock_serializer = mock_serializer_class.return_value
+        mock_serializer.is_valid.return_value = False
+
+        response = _build_generate_success_response(
+            {"output_json": {"ok": True}, "reasoning": None},
+            None,
+            None,
+            None,
+        )
+
+        self.assertEqual(response.status_code, 502)
+
+    def test_build_refinement_config_maps_payload(self):
+        config = _build_refinement_config(
+            {"max_iterations": "2", "early_exit_on_valid": False}
+        )
+
+        self.assertTrue(config.enabled)
+        self.assertEqual(config.max_iterations, 2)
+        self.assertFalse(config.early_exit_on_valid)
+
+    @patch("llm.views._generate_optional_reasoning", return_value={"thinking_log": "ok"})
+    def test_run_basic_generation_returns_sanitized_output(self, mock_generate_reasoning):
+        generation_service = Mock()
+        generation_service.generate.return_value = {
+            "headers": ["A"],
+            "final_answer": "remove",
+        }
+
+        result = _run_basic_generation(
+            generation_service,
+            {"sheet": "Sheet1"},
+            custom_schema_id="schema-1",
+            include_reasoning=True,
+            chat_context="context",
+        )
+
+        self.assertEqual(result["output_json"], {"headers": ["A"]})
+        self.assertEqual(result["reasoning_response"], {"thinking_log": "ok"})
+        generation_service.generate.assert_called_once_with(
+            input_json={"sheet": "Sheet1"},
+            custom_schema_id="schema-1",
+            chat_context="context",
+        )
+        mock_generate_reasoning.assert_called_once()
+
+    @patch("llm.views.logger")
+    def test_llm_generate_error_response_partitions(self, mock_logger):
+        cases = (
+            (CustomSchemaNotFoundError(), 404),
+            (OpenAIConfigurationError("missing"), 503),
+            (OpenAIUpstreamError("rate", status_code=429), 429),
+            (OpenAIServiceError("bad"), 502),
+            (ValueError("bad input"), 400),
+            (RuntimeError("boom"), 500),
+        )
+
+        for exception, expected_status in cases:
+            with self.subTest(exception=exception.__class__.__name__):
+                self.assertEqual(
+                    _llm_generate_error_response(exception).status_code,
+                    expected_status,
+                )
+        self.assertTrue(mock_logger.exception.called)
+
+    def test_build_llm_generate_response_payload_partitions(self):
+        self.assertEqual(
+            _build_llm_generate_response_payload(
+                {
+                    "refinement_enabled": False,
+                    "output_json": {"ok": True},
+                    "reasoning_response": None,
+                }
+            ),
+            {"output_json": {"ok": True}, "reasoning": None},
+        )
+
+        result = _build_llm_generate_response_payload(
+            {
+                "refinement_enabled": True,
+                "output_json": {"ok": True},
+                "reasoning_response": {"thinking_log": "ok"},
+                "validated_json": {"ok": True},
+                "raw_json": {"raw": True},
+                "validation_log": {"verdict": "valid"},
+                "refinement_meta": {"iterations_run": 1},
+            }
+        )
+        self.assertEqual(result["validated_json"], {"ok": True})
+        self.assertNotIn("raw_json", result)
+
+    @override_settings(LLM_EXPOSE_VALIDATION_LOG=True)
+    def test_build_llm_generate_response_payload_exposes_debug_fields_when_enabled(self):
+        result = _build_llm_generate_response_payload(
+            {
+                "refinement_enabled": True,
+                "output_json": {"ok": True},
+                "reasoning_response": None,
+                "validated_json": {"ok": True},
+                "raw_json": {"raw": True},
+                "validation_log": {"verdict": "valid"},
+                "refinement_meta": {"iterations_run": 1},
+            }
+        )
+
+        self.assertEqual(result["raw_json"], {"raw": True})
+        self.assertEqual(result["validation_log"], {"verdict": "valid"})
+        self.assertEqual(result["refinement_meta"], {"iterations_run": 1})
+
+    @patch("llm.views._run_refinement_generation", return_value={"refinement_enabled": True})
+    @patch("llm.views.build_llm_generation_service")
+    def test_execute_llm_generate_flow_uses_refinement_path(
+        self,
+        mock_build_service,
+        mock_run_refinement,
+    ):
+        result = _execute_llm_generate_flow(
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "include_reasoning": False,
+                "refinement": {"enabled": True},
+            },
+            user=self._build_verified_user(),
+            chat_context="context",
+        )
+
+        self.assertEqual(result, {"refinement_enabled": True})
+        mock_run_refinement.assert_called_once()
+        mock_build_service.assert_called_once()
+
+    @patch("llm.views._run_basic_generation", side_effect=OpenAIServiceError("bad"))
+    @patch("llm.views.build_llm_generation_service")
+    def test_execute_llm_generate_flow_maps_generation_errors(
+        self,
+        _mock_build_service,
+        _mock_run_basic_generation,
+    ):
+        response = _execute_llm_generate_flow(
+            {"input_json": {"sheet": "Sheet1"}, "refinement": {"enabled": False}},
+            user=self._build_verified_user(),
+        )
+
+        self.assertEqual(response.status_code, 502)
 
     @patch("llm.views.extract_original_name", return_value="")
     def test_build_generate_bootstrap_message_returns_title_when_filename_missing(self, _mock_extract_original_name):
