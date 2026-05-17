@@ -31,6 +31,7 @@ from llm.services.openai_client import (
     _build_prompt_context_from_messages,
     _build_response_generation_options,
     _extract_message_content_for_budget,
+    _get_chat_completion_client,
     _map_api_status_to_http,
     _normalize_chat_message_content,
     _resolve_adaptive_max_output_tokens,
@@ -792,6 +793,28 @@ class OpenAIClientServiceTest(SimpleTestCase):
 
         with patch.object(openai_client, "_TEXT_PROVIDER_LOCK", PopulateProviderLock()):
             self.assertIs(openai_client._get_text_generation_provider(), provider)
+
+    @override_settings(OPENAI_API_KEY="test-key")
+    def test_chat_completion_client_cache_uses_client_created_while_locked(self):
+        reset_chat_completion_client_cache()
+        client = Mock()
+
+        class PopulateClientLock:
+            def __enter__(self):
+                openai_client._CHAT_COMPLETION_CLIENT_SINGLETON = client
+                openai_client._CHAT_COMPLETION_CLIENT_SIGNATURE = (
+                    openai_client._resolve_chat_completion_client_signature()
+                )
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        with patch.object(openai_client, "_CHAT_COMPLETION_CLIENT_LOCK", PopulateClientLock()), patch(
+            "llm.services.openai_client._build_client"
+        ) as mock_build_client:
+            self.assertIs(_get_chat_completion_client(), client)
+
+        mock_build_client.assert_not_called()
 
     @override_settings(
         OPENAI_API_KEY="test-key",

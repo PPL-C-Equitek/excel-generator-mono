@@ -1,9 +1,12 @@
+from uuid import uuid4
+
 from django.core.exceptions import ValidationError
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from authentication.models import User
+from chat_sessions import services as chat_services
 from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from chat_sessions.services import (
     _build_fallback_thinking_log,
@@ -1045,6 +1048,164 @@ class BuildHistoryWithSummaryServiceTest(TestCase):
     def _make_history(self, n):
         roles = ["user", "assistant"]
         return [{"role": roles[i % 2], "content": f"msg {i}"} for i in range(n)]
+
+    def test_summary_refresh_workers_normalizes_config_partitions(self):
+        cases = [
+            ("3", 3),
+            ("not-a-number", 5),
+            (None, 5),
+            (0, 5),
+            ("-1", 5),
+        ]
+
+        for raw_workers, expected_workers in cases:
+            with self.subTest(raw_workers=raw_workers), override_settings(
+                CHAT_HISTORY_SUMMARY_REFRESH_WORKERS=raw_workers
+            ):
+                self.assertEqual(
+                    chat_services._resolve_summary_refresh_workers(default=5),
+                    expected_workers,
+                )
+
+    def test_get_summary_refresh_executor_creates_and_reuses_singleton(self):
+        previous_executor = chat_services._summary_refresh_executor
+        executor = object()
+
+        try:
+            chat_services._summary_refresh_executor = None
+            with patch(
+                "chat_sessions.services.ThreadPoolExecutor",
+                return_value=executor,
+            ) as mock_executor_class:
+                self.assertIs(chat_services._get_summary_refresh_executor(), executor)
+                self.assertIs(chat_services._get_summary_refresh_executor(), executor)
+
+            mock_executor_class.assert_called_once_with(
+                max_workers=chat_services._resolve_summary_refresh_workers(),
+                thread_name_prefix="chat-summary-refresh",
+            )
+        finally:
+            chat_services._summary_refresh_executor = previous_executor
+
+    def test_normalize_summary_watermark_partitions(self):
+        self.assertEqual(chat_services._normalize_summary_watermark("7"), 7)
+        self.assertEqual(chat_services._normalize_summary_watermark("bad"), 0)
+        self.assertEqual(chat_services._normalize_summary_watermark(-1), 0)
+
+    def test_reload_persisted_summary_state_returns_empty_when_session_missing(self):
+        missing_session = Session(id=uuid4())
+
+        self.assertEqual(
+            chat_services._reload_persisted_summary_state(missing_session),
+            ("", 0),
+        )
+
+    def test_resolve_summary_state_after_conflict_partitions(self):
+        with patch(
+            "chat_sessions.services._reload_persisted_summary_state",
+            return_value=("Cached summary.", 4),
+        ):
+            self.assertEqual(
+                chat_services._resolve_summary_state_after_conflict(
+                    self.session,
+                    fallback_summary="Fallback summary.",
+                    fallback_watermark=2,
+                ),
+                ("Cached summary.", 4),
+            )
+
+        with patch(
+            "chat_sessions.services._reload_persisted_summary_state",
+            return_value=("", 0),
+        ):
+            self.assertEqual(
+                chat_services._resolve_summary_state_after_conflict(
+                    self.session,
+                    fallback_summary="Fallback summary.",
+                    fallback_watermark=2,
+                ),
+                ("Fallback summary.", 2),
+            )
+
+    @patch("chat_sessions.services.summarize_old_messages", return_value="Async summary.")
+    def test_refresh_summary_async_task_persists_when_expected_state_matches(
+        self,
+        mock_summarize,
+    ):
+        chat_services._refresh_summary_async_task(
+            session_id=self.session.id,
+            old_messages=self._make_history(3),
+            expected_summary="",
+            expected_watermark=0,
+            new_watermark=3,
+        )
+
+        mock_summarize.assert_called_once()
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.history_summary, "Async summary.")
+        self.assertEqual(self.session.history_summary_watermark, 3)
+
+    @patch("chat_sessions.services.logger")
+    @patch("chat_sessions.services.summarize_old_messages", side_effect=RuntimeError("boom"))
+    def test_refresh_summary_async_task_logs_errors(
+        self,
+        mock_summarize,
+        mock_logger,
+    ):
+        chat_services._refresh_summary_async_task(
+            session_id=self.session.id,
+            old_messages=self._make_history(3),
+            expected_summary="",
+            expected_watermark=0,
+            new_watermark=3,
+        )
+
+        mock_summarize.assert_called_once()
+        mock_logger.exception.assert_called_once_with(
+            "Async history summary refresh task failed."
+        )
+
+    def test_schedule_async_summary_refresh_submits_task(self):
+        executor = Mock()
+
+        with patch(
+            "chat_sessions.services._get_summary_refresh_executor",
+            return_value=executor,
+        ):
+            chat_services._schedule_async_summary_refresh(
+                session=self.session,
+                old_messages=self._make_history(3),
+                expected_summary="Cached summary.",
+                expected_watermark=1,
+                new_watermark=3,
+            )
+
+        executor.submit.assert_called_once_with(
+            chat_services._refresh_summary_async_task,
+            session_id=self.session.id,
+            old_messages=self._make_history(3),
+            expected_summary="Cached summary.",
+            expected_watermark=1,
+            new_watermark=3,
+        )
+
+    @patch("chat_sessions.services.logger")
+    def test_schedule_async_summary_refresh_logs_executor_errors(self, mock_logger):
+        with patch(
+            "chat_sessions.services._get_summary_refresh_executor",
+            side_effect=RuntimeError("boom"),
+        ):
+            chat_services._schedule_async_summary_refresh(
+                session=self.session,
+                old_messages=self._make_history(3),
+                expected_summary="Cached summary.",
+                expected_watermark=1,
+                new_watermark=3,
+            )
+
+        mock_logger.exception.assert_called_once_with(
+            "Failed to schedule async history summary refresh."
+        )
 
 
     def test_returns_history_unchanged_when_at_or_below_threshold(self):
