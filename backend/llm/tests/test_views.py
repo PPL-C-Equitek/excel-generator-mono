@@ -31,6 +31,7 @@ from llm.views import (
     _generate_output_json,
     _hydrate_previous_output_from_target,
     _is_persistable_authenticated_user,
+    _llm_generate_rate_limit_key,
     _sanitize_output_json,
     build_llm_generation_service,
     build_llm_reasoning_service,
@@ -107,6 +108,37 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=False, pk=uuid4(), _meta=object())))
         self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=True, pk=None, _meta=object())))
         self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=True, pk=uuid4())))
+
+    def test_llm_generate_rate_limit_key_partitions(self):
+        user_id = uuid4()
+
+        self.assertEqual(
+            _llm_generate_rate_limit_key(
+                SimpleNamespace(
+                    user=SimpleNamespace(is_authenticated=True, id=user_id),
+                    META={},
+                )
+            ),
+            f"user:{user_id}",
+        )
+        self.assertEqual(
+            _llm_generate_rate_limit_key(
+                SimpleNamespace(
+                    user=SimpleNamespace(is_authenticated=False, id=None),
+                    META={"HTTP_X_FORWARDED_FOR": "203.0.113.10, 198.51.100.9"},
+                )
+            ),
+            "ip:203.0.113.10",
+        )
+        self.assertEqual(
+            _llm_generate_rate_limit_key(
+                SimpleNamespace(
+                    user=SimpleNamespace(is_authenticated=False, id=None),
+                    META={"REMOTE_ADDR": "198.51.100.7"},
+                )
+            ),
+            "ip:198.51.100.7",
+        )
 
     def test_generate_output_json_returns_generated_output_when_successful(self):
         generation_service = Mock()
