@@ -205,9 +205,46 @@ def _sanitize_download_filename(candidate):
     return basename
 
 
-def _resolve_download_filename(requested_name, default_name, artifact_type):
+def _extract_original_filename_from_export_output(export_output_json):
+    """Extract the original filename from export_output_json.
+    
+    Args:
+        export_output_json: The export output JSON containing document_info
+    
+    Returns:
+        The original filename if found, otherwise None
+    """
+    if not isinstance(export_output_json, dict):
+        return None
+    
+    document_info = export_output_json.get("document_info")
+    if not isinstance(document_info, dict):
+        return None
+    
+    filename = document_info.get("filename")
+    if isinstance(filename, str) and filename.strip():
+        # Remove path components and return just the basename
+        return os.path.basename(filename.strip())
+    
+    return None
+
+
+def _resolve_download_filename(requested_name, default_name, artifact_type, export_output_json=None):
     safe_name = _sanitize_download_filename(requested_name)
     if not safe_name:
+        # If no filename provided in request, try to extract from export_output_json
+        if export_output_json:
+            original_filename = _extract_original_filename_from_export_output(export_output_json)
+            if original_filename:
+                # Remove extension and add the appropriate one
+                root = os.path.splitext(original_filename)[0]
+                if artifact_type == "zip":
+                    return f"{root}.zip"
+                elif artifact_type == "xlsx":
+                    return f"{root}.xlsx"
+                else:
+                    return f"{root}.csv"
+        
         return default_name
 
     if artifact_type == "zip":
@@ -1012,6 +1049,7 @@ def _build_session_output_download_response(
         requested_name=request.query_params.get("filename"),
         default_name=artifact["file_name"],
         artifact_type=artifact["artifact_type"],
+        export_output_json=_normalize_session_output_export_payload(output),
     )
 
     return FileResponse(
