@@ -16,6 +16,15 @@ from llm.services.openai_client import (
     OpenAITextGenerationProvider,
     OpenAIServiceError,
     OpenAIUpstreamError,
+    _build_chat_generation_options,
+    _build_client,
+    _build_client_from_signature,
+    _build_response_generation_options,
+    _resolve_openai_max_retries,
+    _resolve_openai_timeout_seconds,
+    _resolve_optional_openai_max_output_tokens,
+    _resolve_optional_openai_seed,
+    _resolve_optional_openai_temperature,
     reset_text_generation_provider_cache,
     generate_chat_response,
     generate_json,
@@ -226,6 +235,110 @@ class OpenAIClientServiceTest(SimpleTestCase):
         mock_client.responses.create.assert_called_once_with(
             model="gpt-4.1-mini",
             input="Say hi",
+        )
+
+    @override_settings(
+        OPENAI_TIMEOUT_SECONDS=True,
+        OPENAI_MAX_RETRIES=True,
+        OPENAI_TEMPERATURE=True,
+        OPENAI_SEED=True,
+        OPENAI_MAX_OUTPUT_TOKENS=True,
+    )
+    def test_openai_option_resolvers_ignore_boolean_values(self):
+        self.assertEqual(_resolve_openai_timeout_seconds(), 30.0)
+        self.assertEqual(_resolve_openai_max_retries(), 2)
+        self.assertIsNone(_resolve_optional_openai_temperature())
+        self.assertIsNone(_resolve_optional_openai_seed())
+        self.assertIsNone(_resolve_optional_openai_max_output_tokens())
+
+    @override_settings(
+        OPENAI_TIMEOUT_SECONDS=-1,
+        OPENAI_MAX_RETRIES=-1,
+        OPENAI_TEMPERATURE=3,
+        OPENAI_SEED=2.9,
+        OPENAI_MAX_OUTPUT_TOKENS=12.8,
+    )
+    def test_openai_option_resolvers_handle_numeric_boundaries(self):
+        self.assertEqual(_resolve_openai_timeout_seconds(), 30.0)
+        self.assertEqual(_resolve_openai_max_retries(), 2)
+        self.assertIsNone(_resolve_optional_openai_temperature())
+        self.assertEqual(_resolve_optional_openai_seed(), 2)
+        self.assertEqual(_resolve_optional_openai_max_output_tokens(), 12)
+
+    @override_settings(
+        OPENAI_TIMEOUT_SECONDS="",
+        OPENAI_MAX_RETRIES="",
+        OPENAI_TEMPERATURE="",
+        OPENAI_SEED="",
+        OPENAI_MAX_OUTPUT_TOKENS="",
+    )
+    def test_openai_option_resolvers_handle_blank_strings(self):
+        self.assertEqual(_resolve_openai_timeout_seconds(), 30.0)
+        self.assertEqual(_resolve_openai_max_retries(), 2)
+        self.assertIsNone(_resolve_optional_openai_temperature())
+        self.assertIsNone(_resolve_optional_openai_seed())
+        self.assertIsNone(_resolve_optional_openai_max_output_tokens())
+
+    @override_settings(
+        OPENAI_TIMEOUT_SECONDS=object(),
+        OPENAI_MAX_RETRIES=object(),
+        OPENAI_TEMPERATURE=object(),
+        OPENAI_SEED=object(),
+        OPENAI_MAX_OUTPUT_TOKENS=object(),
+    )
+    def test_openai_option_resolvers_handle_unsupported_types(self):
+        self.assertEqual(_resolve_openai_timeout_seconds(), 30.0)
+        self.assertEqual(_resolve_openai_max_retries(), 2)
+        self.assertIsNone(_resolve_optional_openai_temperature())
+        self.assertIsNone(_resolve_optional_openai_seed())
+        self.assertIsNone(_resolve_optional_openai_max_output_tokens())
+
+    @override_settings(
+        OPENAI_TEMPERATURE=2,
+        OPENAI_SEED="42",
+        OPENAI_MAX_OUTPUT_TOKENS=256,
+    )
+    def test_generation_option_builders_map_tokens_to_endpoint_specific_keys(self):
+        self.assertEqual(
+            _build_response_generation_options(),
+            {"temperature": 2.0, "seed": 42, "max_output_tokens": 256},
+        )
+        self.assertEqual(
+            _build_chat_generation_options(),
+            {"temperature": 2.0, "seed": 42, "max_completion_tokens": 256},
+        )
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_BASE_URL="https://proxy.example.test/v1",
+    )
+    @patch("llm.services.openai_client.OpenAI")
+    def test_build_client_from_signature_and_build_client_forward_base_url(self, mock_openai):
+        mock_client = Mock()
+        mock_openai.return_value = mock_client
+
+        direct_client = _build_client_from_signature(
+            "direct-key",
+            "https://direct.example.test/v1",
+            9.5,
+            3,
+        )
+        settings_client = _build_client()
+
+        self.assertIs(direct_client, mock_client)
+        self.assertIs(settings_client, mock_client)
+        self.assertEqual(mock_openai.call_count, 2)
+        mock_openai.assert_any_call(
+            api_key="direct-key",
+            base_url="https://direct.example.test/v1",
+            timeout=9.5,
+            max_retries=3,
+        )
+        mock_openai.assert_any_call(
+            api_key="test-key",
+            base_url="https://proxy.example.test/v1",
+            timeout=30.0,
+            max_retries=2,
         )
 
     @override_settings(
