@@ -6,6 +6,7 @@ import type { SessionResume } from '@/services/sessions'
 import type { ThinkingLogItem } from '@/services/thinkingLogs'
 import type { HistoryItem } from '@/services/history'
 import { downloadSessionOutputCsvFile, downloadSessionOutputExcelFile } from '@/services/llm'
+import { buildSessionOutputDownloadFilename } from '@/utils/sessionDownloadFilename'
 
 interface HistoryItemDetailProps {
     readonly item: HistoryItem
@@ -57,28 +58,27 @@ export default function HistoryItemDetail({
     const isDeleting = deletingHistoryId === item.id
     const [isLatestCsvDownloading, setIsLatestCsvDownloading] = useState(false)
     const [isLatestExcelDownloading, setIsLatestExcelDownloading] = useState(false)
-    const latestOutputId = useMemo(() => {
+    const latestOutput = useMemo(() => {
         if (!session) {
             return null
         }
 
         const reversedHistory = [...session.history].reverse()
-        const latestOutput = reversedHistory.find((entry) => entry.type === 'output')
-        return latestOutput?.id ?? null
+        return reversedHistory.find((entry) => entry.type === 'output') ?? null
     }, [session])
 
-    const canDownloadLatestOutput = !!session?.id && !!latestOutputId
+    const canDownloadLatestOutput = !!session?.id && !!latestOutput
 
     const handleDownloadLatestCsv = async () => {
         const sessionId = session!.id
-        const outputId = latestOutputId!
+        const output = latestOutput!
 
         setIsLatestCsvDownloading(true)
         try {
             await downloadSessionOutputCsvFile(
                 sessionId,
-                outputId,
-                `session-${sessionId}-latest-output.csv`
+                output.id,
+                buildSessionOutputDownloadFilename(output, 'csv')
             )
         } finally {
             setIsLatestCsvDownloading(false)
@@ -87,14 +87,14 @@ export default function HistoryItemDetail({
 
     const handleDownloadLatestExcel = async () => {
         const sessionId = session!.id
-        const outputId = latestOutputId!
+        const output = latestOutput!
 
         setIsLatestExcelDownloading(true)
         try {
             await downloadSessionOutputExcelFile(
                 sessionId,
-                outputId,
-                `session-${sessionId}-latest-output.xlsx`
+                output.id,
+                buildSessionOutputDownloadFilename(output, 'xlsx')
             )
         } finally {
             setIsLatestExcelDownloading(false)

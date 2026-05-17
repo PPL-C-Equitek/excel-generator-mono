@@ -9,6 +9,7 @@ import {
     downloadSessionOutputCsvFile,
     downloadSessionOutputExcelFile,
 } from '../../../src/services/llm'
+import type { SessionResume } from '../../../src/services/sessions'
 
 vi.mock('../../../src/hooks/useHistoryFiles', () => ({
     useHistoryFiles: vi.fn(),
@@ -117,7 +118,12 @@ function mockSessionSearchParam(historyId: string | null, sessionId: string | nu
     } as never)
 }
 
-function makeSessionResumeState(sessionId: string) {
+function makeSessionResumeState(sessionId: string): {
+    session: SessionResume
+    isLoading: boolean
+    error: null
+    isNotFound: boolean
+} {
     return {
         session: {
             id: sessionId,
@@ -133,6 +139,9 @@ function makeSessionResumeState(sessionId: string) {
                     chat_id: null,
                     parent_output_id: null,
                     output_json: { foo: 'bar' },
+                    export_output_json: {
+                        document_info: { filename: 'report-a.pdf', source_type: 'PDF' },
+                    },
                     thinking_log: '',
                     reasoning: {},
                     created_at: '2026-04-10T10:01:00Z',
@@ -302,12 +311,12 @@ describe('HistoryPage', () => {
             expect(mockDownloadSessionOutputCsvFile).toHaveBeenCalledWith(
                 sessionId,
                 'output-1',
-                `session-${sessionId}-latest-output.csv`
+                'report-a.csv'
             )
             expect(mockDownloadSessionOutputExcelFile).toHaveBeenCalledWith(
                 sessionId,
                 'output-1',
-                `session-${sessionId}-latest-output.xlsx`
+                'report-a.xlsx'
             )
         })
     })

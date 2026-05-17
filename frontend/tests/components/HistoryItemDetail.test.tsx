@@ -123,6 +123,9 @@ describe('HistoryItemDetail', () => {
                     chat_id: null,
                     parent_output_id: null,
                     output_json: { ok: true },
+                    export_output_json: {
+                        document_info: { filename: 'report.pdf', source_type: 'PDF' },
+                    },
                     thinking_log: '',
                     reasoning: {},
                     created_at: '2026-05-03T10:01:00.000Z',
@@ -141,12 +144,12 @@ describe('HistoryItemDetail', () => {
             expect(mockDownloadSessionOutputCsvFile).toHaveBeenCalledWith(
                 'session-1',
                 'output-2',
-                'session-session-1-latest-output.csv'
+                'report.csv'
             )
             expect(mockDownloadSessionOutputExcelFile).toHaveBeenCalledWith(
                 'session-1',
                 'output-2',
-                'session-session-1-latest-output.xlsx'
+                'report.xlsx'
             )
         })
     })
