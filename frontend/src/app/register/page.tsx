@@ -50,9 +50,9 @@ function FieldErrorMessage({ children }: Readonly<{ children: React.ReactNode }>
 }
 
 function getResendButtonText(isResending: boolean, resendCooldown: number): string {
-  if (isResending) return 'Mengirim...';
-  if (resendCooldown > 0) return `Kirim Ulang (${resendCooldown}s)`;
-  return 'Kirim Ulang Email';
+  if (isResending) return 'Sending...';
+  if (resendCooldown > 0) return `Resend (${resendCooldown}s)`;
+  return 'Resend Email';
 }
 
 export function validateRegistrationForm(formData: RegisterFormData): {
@@ -66,18 +66,22 @@ export function validateRegistrationForm(formData: RegisterFormData): {
   };
   let isValid = true;
 
+  // Only set the first error found
   if (!formData.name.trim()) {
-    errors.name = 'Nama wajib diisi';
+    errors.name = 'Name cannot be empty';
     isValid = false;
+    return { isValid, errors };
   }
 
   const trimmedEmail = formData.email.trim();
   if (!trimmedEmail) {
-    errors.email = 'Email wajib diisi';
+    errors.email = 'Email cannot be empty';
     isValid = false;
+    return { isValid, errors };
   } else if (!EMAIL_REGEX.test(trimmedEmail)) {
-    errors.email = 'Format email tidak valid';
+    errors.email = 'Invalid email format';
     isValid = false;
+    return { isValid, errors };
   }
 
   return { isValid, errors };
@@ -121,8 +125,8 @@ export async function resendVerificationFlow({
       );
       return { message: response.data?.message };
     },
-    successFallbackMessage: 'Email verifikasi berhasil dikirim ulang.',
-    errorFallbackMessage: 'Gagal mengirim ulang email verifikasi.',
+    successFallbackMessage: 'Verification email sent successfully.',
+    errorFallbackMessage: 'Failed to resend verification email.',
     setIsSubmitting: setIsResending,
     setStatusMessage: setResendStatusMessage,
     setErrorMessage: setResendErrorMessage,
@@ -156,14 +160,6 @@ export default function RegisterPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
-
-    if (name === 'email') {
-      const trimmedEmail = value.trim();
-      setErrors((prev) => ({
-        ...prev,
-        email: trimmedEmail && !EMAIL_REGEX.test(trimmedEmail) ? 'Format email tidak valid' : '',
-      }));
-    }
   };
 
   const handleSubmit = async (e: FormSubmitEvent) => {
@@ -184,7 +180,7 @@ export default function RegisterPage() {
 
       if (activeCooldown > 0) {
         toast.success(
-          'Email ini belum diverifikasi. Silakan cek inbox Anda atau tunggu hingga cooldown selesai.'
+          'Email is not verified yet. Please check your inbox or wait until the cooldown is over.'
         );
         router.push(
           `/auth/verify-email/pending?email=${encodeURIComponent(trimmedEmail)}`
@@ -197,7 +193,7 @@ export default function RegisterPage() {
         email: trimmedEmail,
       });
 
-      setSuccessMessage(response.data?.message || 'Registrasi berhasil. Cek email Anda.');
+      setSuccessMessage(response.data?.message || 'Registration successful. Please check your email.');
     } catch (error: unknown) {
       const axiosError = error as AxiosError<RegisterErrorResponse>;
       const responseData = axiosError.response?.data;
@@ -210,7 +206,7 @@ export default function RegisterPage() {
         const emailForRedirect = formData.email.trim();
         setResendCooldownForEmail(emailForRedirect, 60);
         toast.success(
-          message || 'Email belum diverifikasi. Kami telah mengirim ulang link verifikasi.'
+          message || 'Email is not verified yet. We have resent the verification link.'
         );
         router.push(
           `/auth/verify-email/pending?email=${encodeURIComponent(emailForRedirect)}&resent=1`
@@ -221,7 +217,7 @@ export default function RegisterPage() {
       if (status === 409) {
         setErrors((prev) => ({
           ...prev,
-          form: 'Email ini sudah terdaftar, silakan login',
+          email: 'Email is already registered, please login',
         }));
         return;
       }
@@ -229,7 +225,7 @@ export default function RegisterPage() {
       if (status === 429) {
         setErrors((prev) => ({
           ...prev,
-          form: message || 'Terlalu banyak percobaan. Coba lagi beberapa menit lagi.',
+          form: message || 'Too many attempts. Please try again in a few minutes.',
         }));
         return;
       }
@@ -244,12 +240,12 @@ export default function RegisterPage() {
       } else if (status === 400) {
         setErrors((prev) => ({
           ...prev,
-          form: message || 'Data yang dikirimkan tidak valid',
+          form: message || 'Invalid data provided',
         }));
       } else {
         setErrors((prev) => ({
           ...prev,
-          form: message || 'Terjadi kesalahan pada server',
+          form: message || 'An error occurred on the server',
         }));
       }
     } finally {
@@ -286,11 +282,11 @@ export default function RegisterPage() {
             <AuthEmailSuccessCard
               successMessage={successMessage}
               email={formData.email}
-              emailNotice={<>Email verifikasi sudah dikirim ke </>}
+              emailNotice={<>Verification email has been sent to </>}
               statusMessage={resendStatusMessage}
               errorMessage={resendErrorMessage}
               primaryHref="/login"
-              primaryLabel="Pergi ke Halaman Login"
+              primaryLabel="Go to Login Page"
               secondaryButtonText={getResendButtonText(isResending, resendCooldown)}
               onSecondaryAction={handleResendVerificationEmail}
               isSecondaryDisabled={isResending || resendCooldown > 0}
@@ -315,15 +311,12 @@ export default function RegisterPage() {
                     value={formData.name}
                     onChange={handleChange}
                     placeholder="Enter your full name"
-                    className={`relative block w-full appearance-none rounded-xl border px-4 py-3 text-sm outline-none ${
-                      errors.name ? 'border-rose-400 bg-rose-50/70' : 'border-transparent'
-                      }`}
+                    className="relative block w-full appearance-none rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-blue-500"
                     style={{
                       backgroundColor: 'var(--surface-2)',
                       color: 'var(--foreground)',
                     }}
                   />
-                  {errors.name && <FieldErrorMessage>{errors.name}</FieldErrorMessage>}
                 </div>
 
                 <div className="force-light">
@@ -337,15 +330,15 @@ export default function RegisterPage() {
                     value={formData.email}
                     onChange={handleChange}
                     placeholder="Enter your email"
-                    className={`relative block w-full appearance-none rounded-xl border px-4 py-3 text-sm outline-none ${
-                      errors.email ? 'border-rose-400 bg-rose-50/70' : 'border-transparent'
-                      }`}
+                    className="relative block w-full appearance-none rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-blue-500"
                     style={{
                       backgroundColor: 'var(--surface-2)',
                       color: 'var(--foreground)',
                     }}
                   />
-                  {errors.email && <FieldErrorMessage>{errors.email}</FieldErrorMessage>}
+                  {(errors.name || errors.email) && (
+                    <FieldErrorMessage>{errors.name || errors.email}</FieldErrorMessage>
+                  )}
                 </div>
               </div>
 
@@ -357,7 +350,7 @@ export default function RegisterPage() {
                     }`}
                   style={{ color: 'var(--brand-primary)' }}
                 >
-                  {isLoading ? 'Mendaftar...' : 'Sign Up'}
+                  {isLoading ? 'Signing Up...' : 'Sign Up'}
                 </button>
               </div>
 

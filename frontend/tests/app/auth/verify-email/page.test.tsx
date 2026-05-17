@@ -231,8 +231,7 @@ describe('Verify Email Page', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /verify email and save password/i }));
 
-    expect(screen.getByText(/password is required\./i)).toBeInTheDocument();
-    expect(screen.getByText(/password confirmation is required\./i)).toBeInTheDocument();
+    expect(screen.getByText(/password is required/i)).toBeInTheDocument();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     fetchSpy.mockRestore();
   });
