@@ -193,6 +193,12 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             ),
             "meta-key",
         )
+        self.assertEqual(
+            _extract_llm_generate_idempotency_key(
+                SimpleNamespace(headers=None, META={"HTTP_IDEMPOTENCY_KEY": " meta-only "})
+            ),
+            "meta-only",
+        )
         self.assertIsNone(
             _extract_llm_generate_idempotency_key(
                 SimpleNamespace(headers={}, META={"HTTP_IDEMPOTENCY_KEY": "   "})
