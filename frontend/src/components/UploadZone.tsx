@@ -309,8 +309,6 @@ function ChatComposer({
     const trimmedChatInput = chatInput.trim()
     const isSubmitDisabled = disabled || (!allowEmptySubmit && trimmedChatInput.length === 0)
     const handleSubmit = () => {
-        if (isSubmitDisabled) return
-
         onSubmit?.(trimmedChatInput)
         setChatInput('')
     }
