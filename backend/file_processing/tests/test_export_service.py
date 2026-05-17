@@ -486,6 +486,10 @@ class GenerateCSVTest(unittest.TestCase):
         def build_filename(self, sheet_name):
             return "   "
 
+    class UnsafeFileNamePolicy:
+        def build_filename(self, sheet_name):
+            return "../Report/Jan.csv"
+
     def _build_mapped_output(self):
         return {
             "sheets": [
@@ -864,6 +868,39 @@ class GenerateCSVTest(unittest.TestCase):
                     ["A-1", "15000"],
                 ],
             )
+
+    def test_generate_csv_download_artifact_sanitizes_and_dedupes_sheet_names(self):
+        mapped_output = self._build_mapped_output()
+        mapped_output["sheets"] = [
+            {
+                "name": "Report/Jan",
+                "headers": ["sku"],
+                "rows": [["A-1"]],
+            },
+            {
+                "name": "Report:Jan",
+                "headers": ["sku"],
+                "rows": [["B-2"]],
+            },
+        ]
+
+        result = export_service.generate_csv_download_artifact(mapped_output)
+
+        with zipfile.ZipFile(io.BytesIO(result["content"]), "r") as archive:
+            self.assertEqual(
+                archive.namelist(),
+                ["Report_Jan.csv", "Report_Jan_1.csv"],
+            )
+
+    def test_generate_csv_normalizes_unsafe_filename_from_policy(self):
+        mapped_output = self._build_mapped_output()
+
+        result = export_service.generate_csv(
+            mapped_output,
+            filename_policy=self.UnsafeFileNamePolicy(),
+        )
+
+        self.assertEqual(result["files"][0]["name"], "Report_Jan.csv")
 
 
 class ExportCSVToFilesystemTest(unittest.TestCase):
