@@ -127,8 +127,13 @@ function getDocumentInfo(output?: Extract<SessionResumeHistoryItem, { type: "out
 }
 
 function extractUploadedFileName(content: string): string | null {
-  const match = content.trim().match(/^uploaded file:\s*(.+)$/i);
-  const fileName = match?.[1]?.trim();
+  const normalizedContent = content.trim();
+  const uploadPrefix = "uploaded file:";
+  if (!normalizedContent.toLowerCase().startsWith(uploadPrefix)) {
+    return null;
+  }
+
+  const fileName = normalizedContent.slice(uploadPrefix.length).trim();
   return fileName ? fileName : null;
 }
 
