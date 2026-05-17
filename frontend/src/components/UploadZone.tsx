@@ -31,37 +31,28 @@ interface ConversationViewProps {
     readonly selectedSchemaName?: string | null
     readonly chatMessages: ChatMessage[]
     readonly resultContent?: ReactNode
-    readonly chatInput: string
-    readonly trimmedChatInput: string
     readonly disabled?: boolean
-    readonly onChatInputChange: (value: string) => void
-    readonly onFollowUpSubmit: () => void
+    readonly onFollowUpSubmit: (prompt: string) => void
 }
 
 interface StagedUploadViewProps {
     readonly selectedFile: File
     readonly disabled?: boolean
     readonly footerContent?: ReactNode
-    readonly chatInput: string
-    readonly trimmedChatInput: string
     readonly stagedFileZoneClassName: string
     readonly isValidationFeedbackVisible: boolean
     readonly validationError?: string | null
-    readonly onChatInputChange: (value: string) => void
-    readonly onChatSubmit: () => void
+    readonly onChatSubmit: (prompt: string) => void
     readonly onReset: () => void
 }
 
 interface UploadPromptViewProps {
     readonly disabled?: boolean
     readonly footerContent?: ReactNode
-    readonly chatInput: string
-    readonly trimmedChatInput: string
     readonly dropZoneClassName: string
     readonly onDragStateChange: (isDragging: boolean) => void
     readonly onDrop: (event: DragEvent<HTMLLabelElement>) => void
     readonly onChange: (event: ChangeEvent<HTMLInputElement>) => void
-    readonly onChatInputChange: (value: string) => void
 }
 
 function FileIcon({ className = 'h-12 w-12' }: Readonly<{ className?: string }>) {
@@ -299,12 +290,9 @@ interface ChatComposerProps {
     readonly placeholder: string
     readonly buttonLabel: string
     readonly buttonTestId?: string
-    readonly chatInput: string
-    readonly trimmedChatInput: string
     readonly disabled?: boolean
     readonly allowEmptySubmit?: boolean
-    readonly onChatInputChange: (value: string) => void
-    readonly onSubmit?: () => void
+    readonly onSubmit?: (prompt: string) => void
 }
 
 function ChatComposer({
@@ -313,14 +301,19 @@ function ChatComposer({
     placeholder,
     buttonLabel,
     buttonTestId,
-    chatInput,
-    trimmedChatInput,
     disabled,
     allowEmptySubmit = false,
-    onChatInputChange,
     onSubmit,
 }: Readonly<ChatComposerProps>) {
+    const [chatInput, setChatInput] = useState('')
+    const trimmedChatInput = chatInput.trim()
     const isSubmitDisabled = disabled || (!allowEmptySubmit && trimmedChatInput.length === 0)
+    const handleSubmit = () => {
+        if (isSubmitDisabled) return
+
+        onSubmit?.(trimmedChatInput)
+        setChatInput('')
+    }
 
     return (
         <div className="bg-gray-50/95 backdrop-blur">
@@ -332,7 +325,7 @@ function ChatComposer({
                     id={id}
                     aria-label={label}
                     value={chatInput}
-                    onChange={(event) => onChatInputChange(event.target.value)}
+                    onChange={(event) => setChatInput(event.target.value)}
                     disabled={disabled}
                     rows={2}
                     placeholder={placeholder}
@@ -341,7 +334,7 @@ function ChatComposer({
                 <button
                     type="button"
                     data-testid={buttonTestId}
-                    onClick={onSubmit}
+                    onClick={handleSubmit}
                     disabled={isSubmitDisabled}
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-700 px-5 py-3 text-sm font-bold text-white shadow-md transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -354,20 +347,14 @@ function ChatComposer({
 }
 
 interface InitialChatBarProps {
-    readonly chatInput: string
-    readonly trimmedChatInput: string
     readonly disabled?: boolean
     readonly isChatLocked: boolean
-    readonly onChatInputChange: (value: string) => void
-    readonly onChatSubmit?: () => void
+    readonly onChatSubmit?: (prompt: string) => void
 }
 
 function InitialChatBar({
-    chatInput,
-    trimmedChatInput,
     disabled,
     isChatLocked,
-    onChatInputChange,
     onChatSubmit,
 }: InitialChatBarProps) {
     const composerDisabled = disabled || isChatLocked
@@ -381,11 +368,8 @@ function InitialChatBar({
                     placeholder={isChatLocked ? 'Upload a valid file before chatting...' : 'Add details for the output you want...'}
                     buttonLabel="Send"
                     buttonTestId={isChatLocked ? undefined : 'convert-btn'}
-                    chatInput={chatInput}
-                    trimmedChatInput={trimmedChatInput}
                     disabled={composerDisabled}
                     allowEmptySubmit={true}
-                    onChatInputChange={onChatInputChange}
                     onSubmit={onChatSubmit}
                 />
             </div>
@@ -393,7 +377,7 @@ function InitialChatBar({
     )
 }
 
-function FollowUpComposer(props: Readonly<Pick<ConversationViewProps, 'chatInput' | 'trimmedChatInput' | 'disabled' | 'onChatInputChange' | 'onFollowUpSubmit'>>) {
+function FollowUpComposer(props: Readonly<Pick<ConversationViewProps, 'disabled' | 'onFollowUpSubmit'>>) {
     return (
         <div className="border-t border-gray-200 px-4 py-4 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-5xl">
@@ -402,10 +386,7 @@ function FollowUpComposer(props: Readonly<Pick<ConversationViewProps, 'chatInput
                     label="Follow-up message"
                     placeholder="Ask a follow-up question or refine the output..."
                     buttonLabel="Send"
-                    chatInput={props.chatInput}
-                    trimmedChatInput={props.trimmedChatInput}
                     disabled={props.disabled}
-                    onChatInputChange={props.onChatInputChange}
                     onSubmit={props.onFollowUpSubmit}
                 />
             </div>
@@ -418,10 +399,7 @@ function ConversationView({
     selectedSchemaName,
     chatMessages,
     resultContent,
-    chatInput,
-    trimmedChatInput,
     disabled,
-    onChatInputChange,
     onFollowUpSubmit,
 }: ConversationViewProps) {
     return (
@@ -442,10 +420,7 @@ function ConversationView({
             </div>
 
             <FollowUpComposer
-                chatInput={chatInput}
-                trimmedChatInput={trimmedChatInput}
                 disabled={disabled || !resultContent}
-                onChatInputChange={onChatInputChange}
                 onFollowUpSubmit={onFollowUpSubmit}
             />
         </section>
@@ -456,12 +431,9 @@ function StagedUploadView({
     selectedFile,
     disabled,
     footerContent,
-    chatInput,
-    trimmedChatInput,
     stagedFileZoneClassName,
     isValidationFeedbackVisible,
     validationError,
-    onChatInputChange,
     onChatSubmit,
     onReset,
 }: StagedUploadViewProps) {
@@ -500,11 +472,8 @@ function StagedUploadView({
             </div>
 
             <InitialChatBar
-                chatInput={chatInput}
-                trimmedChatInput={trimmedChatInput}
                 disabled={disabled}
                 isChatLocked={Boolean(validationError)}
-                onChatInputChange={onChatInputChange}
                 onChatSubmit={onChatSubmit}
             />
         </section>
@@ -514,13 +483,10 @@ function StagedUploadView({
 function UploadPromptView({
     disabled,
     footerContent,
-    chatInput,
-    trimmedChatInput,
     dropZoneClassName,
     onDragStateChange,
     onDrop,
     onChange,
-    onChatInputChange,
 }: UploadPromptViewProps) {
     return (
         <section className="flex h-screen flex-col">
@@ -541,11 +507,8 @@ function UploadPromptView({
             </div>
 
             <InitialChatBar
-                chatInput={chatInput}
-                trimmedChatInput={trimmedChatInput}
                 disabled={disabled}
                 isChatLocked={true}
-                onChatInputChange={onChatInputChange}
             />
         </section>
     )
@@ -565,7 +528,6 @@ export default function UploadZone({
     const [isDragging, setIsDragging] = useState(false)
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
     const [submittedFile, setSubmittedFile] = useState<File | null>(null)
-    const [chatInput, setChatInput] = useState('')
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
     const messageIdRef = useRef(0)
 
@@ -576,7 +538,6 @@ export default function UploadZone({
         isValidating,
         validationError
     )
-    const trimmedChatInput = chatInput.trim()
 
     const createMessageId = () => {
         messageIdRef.current += 1
@@ -586,7 +547,6 @@ export default function UploadZone({
     const resetChatTranscript = () => {
         messageIdRef.current = 0
         setChatMessages([])
-        setChatInput('')
     }
 
     const handleFile = (file: File) => {
@@ -617,9 +577,7 @@ export default function UploadZone({
         onFileChange?.()
     }
 
-    const handleInitialChatSubmit = (file: File) => {
-        const prompt = trimmedChatInput
-
+    const handleInitialChatSubmit = (file: File, prompt: string) => {
         resetChatTranscript()
         setSubmittedFile(file)
         if (prompt.length > 0) {
@@ -634,11 +592,9 @@ export default function UploadZone({
         } else {
             onFileSelect?.(file)
         }
-        setChatInput('')
     }
 
-    const handleFollowUpSubmit = (file: File) => {
-        const prompt = trimmedChatInput
+    const handleFollowUpSubmit = (file: File, prompt: string) => {
         setChatMessages((messages) => createFollowUpMessages(
             messages,
             resultContent,
@@ -646,7 +602,6 @@ export default function UploadZone({
             createMessageId
         ))
         onFileSelect?.(file, prompt)
-        setChatInput('')
     }
 
     const dropZoneBaseClassName = 'flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-12 text-center transition-colors sm:p-20'
@@ -661,11 +616,8 @@ export default function UploadZone({
                 selectedSchemaName={selectedSchemaName}
                 chatMessages={chatMessages}
                 resultContent={resultContent}
-                chatInput={chatInput}
-                trimmedChatInput={trimmedChatInput}
                 disabled={disabled}
-                onChatInputChange={setChatInput}
-                onFollowUpSubmit={() => handleFollowUpSubmit(submittedFile)}
+                onFollowUpSubmit={(prompt) => handleFollowUpSubmit(submittedFile, prompt)}
             />
         )
     }
@@ -676,13 +628,10 @@ export default function UploadZone({
                 selectedFile={selectedFile}
                 disabled={disabled}
                 footerContent={footerContent}
-                chatInput={chatInput}
-                trimmedChatInput={trimmedChatInput}
                 stagedFileZoneClassName={stagedFileZoneClassName}
                 isValidationFeedbackVisible={isValidationFeedbackVisible}
                 validationError={validationError}
-                onChatInputChange={setChatInput}
-                onChatSubmit={() => handleInitialChatSubmit(selectedFile)}
+                onChatSubmit={(prompt) => handleInitialChatSubmit(selectedFile, prompt)}
                 onReset={handleReset}
             />
         )
@@ -692,13 +641,10 @@ export default function UploadZone({
         <UploadPromptView
             disabled={disabled}
             footerContent={footerContent}
-            chatInput={chatInput}
-            trimmedChatInput={trimmedChatInput}
             dropZoneClassName={dropZoneClassName}
             onDragStateChange={setIsDragging}
             onDrop={handleDrop}
             onChange={handleChange}
-            onChatInputChange={setChatInput}
         />
     )
 }

@@ -323,6 +323,34 @@ describe('File Confirmation', () => {
     expect(screen.getByRole('button', { name: 'Download CSV' })).toBeInTheDocument()
   })
 
+  it('does not rerender result content while typing a follow-up prompt', async () => {
+    const mockOnFileSelect = vi.fn()
+    const renderResultContent = vi.fn()
+
+    function HeavyResultContent() {
+      renderResultContent()
+      return <p>Heavy result content</p>
+    }
+
+    const { rerender } = render(<UploadZone onFileSelect={mockOnFileSelect} />)
+
+    await uploadAndStageFile(createMockFile('heavy-result.pdf'))
+    await userEvent.click(screen.getByTestId('convert-btn'))
+
+    rerender(
+      <UploadZone
+        onFileSelect={mockOnFileSelect}
+        resultContent={<HeavyResultContent />}
+      />
+    )
+
+    expect(renderResultContent).toHaveBeenCalledTimes(1)
+
+    await userEvent.type(screen.getByLabelText('Follow-up message'), 'Refine the output')
+
+    expect(renderResultContent).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps the chat surface open with a locked composer while generating', async () => {
     const mockOnFileSelect = vi.fn()
     const { rerender } = render(<UploadZone onFileSelect={mockOnFileSelect} />)
