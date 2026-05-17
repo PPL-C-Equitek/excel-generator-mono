@@ -351,11 +351,13 @@ class OpenAIClientServiceTest(SimpleTestCase):
     )
     def test_generation_option_builders_map_tokens_to_endpoint_specific_keys(self):
         self.assertEqual(
-            _build_response_generation_options(),
+            _build_response_generation_options("Extract this payload"),
             {"temperature": 2.0, "seed": 42, "max_output_tokens": 256},
         )
         self.assertEqual(
-            _build_chat_generation_options(),
+            _build_chat_generation_options(
+                [{"role": "user", "content": "Summarize this payload"}]
+            ),
             {"temperature": 2.0, "seed": 42, "max_completion_tokens": 256},
         )
 
