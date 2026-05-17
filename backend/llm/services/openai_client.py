@@ -15,6 +15,11 @@ from openai import (
     RateLimitError,
 )
 
+from .settings_resolvers import (
+    resolve_positive_float_setting as _resolve_positive_float_setting,
+    resolve_positive_int_setting as _resolve_positive_int_setting,
+)
+
 
 _LLM_PROVIDER_FAILED = "LLM provider request failed."
 _DEFAULT_OPENAI_TIMEOUT_SECONDS = 30.0
@@ -194,46 +199,6 @@ def _resolve_openai_max_retries() -> int:
             return _DEFAULT_OPENAI_MAX_RETRIES
         return numeric_value if numeric_value >= 0 else _DEFAULT_OPENAI_MAX_RETRIES
     return _DEFAULT_OPENAI_MAX_RETRIES
-
-
-def _resolve_positive_int_setting(name: str, default: int) -> int:
-    raw_value = getattr(settings, name, default)
-    if isinstance(raw_value, bool):
-        return default
-    if isinstance(raw_value, int):
-        return raw_value if raw_value > 0 else default
-    if isinstance(raw_value, float):
-        numeric_value = int(raw_value)
-        return numeric_value if numeric_value > 0 else default
-    if isinstance(raw_value, str):
-        stripped_value = raw_value.strip()
-        if not stripped_value:
-            return default
-        try:
-            numeric_value = int(stripped_value)
-        except ValueError:
-            return default
-        return numeric_value if numeric_value > 0 else default
-    return default
-
-
-def _resolve_positive_float_setting(name: str, default: float) -> float:
-    raw_value = getattr(settings, name, default)
-    if isinstance(raw_value, bool):
-        return default
-    if isinstance(raw_value, (int, float)):
-        numeric_value = float(raw_value)
-        return numeric_value if numeric_value > 0 else default
-    if isinstance(raw_value, str):
-        stripped_value = raw_value.strip()
-        if not stripped_value:
-            return default
-        try:
-            numeric_value = float(stripped_value)
-        except ValueError:
-            return default
-        return numeric_value if numeric_value > 0 else default
-    return default
 
 
 def _resolve_optional_openai_temperature() -> float | None:
