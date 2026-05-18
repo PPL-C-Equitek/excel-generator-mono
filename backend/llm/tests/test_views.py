@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -18,12 +19,16 @@ from llm.services.openai_client import (
     OpenAIUpstreamError,
 )
 from llm.views import (
+    LLM_GENERATE_RATE_LIMIT_PER_MINUTE,
     _LlmGenerateWorkflow,
     _estimate_payload_size_bytes,
     _build_generate_bootstrap_message,
     _extract_follow_up_prompt,
     _generate_output_json,
     _hydrate_previous_output_from_target,
+    _is_persistable_authenticated_user,
+    _llm_generate_rate_limit_key,
+    _resolve_llm_generate_rate_limit_per_minute,
     _sanitize_output_json,
     build_llm_generation_service,
     build_llm_reasoning_service,
@@ -37,6 +42,36 @@ from llm.services.chat_context_service import (
 from llm.serializers import MAX_MESSAGE_LENGTH
 
 class LlmGenerateEndpointTest(SimpleTestCase):
+    _raw_api_client_class = APIClient
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self._api_client_patch = patch(
+            "llm.tests.test_views.APIClient",
+            side_effect=self._build_verified_client,
+        )
+        self._api_client_patch.start()
+
+    def tearDown(self):
+        self._api_client_patch.stop()
+        super().tearDown()
+
+    def _build_verified_user(self, *, user_id=None, status="verified"):
+        return SimpleNamespace(
+            id=user_id or uuid4(),
+            is_authenticated=True,
+            status=status,
+        )
+
+    def _build_verified_client(self, *args, user=None, **kwargs):
+        client = self._raw_api_client_class(*args, **kwargs)
+        client.force_authenticate(user=user or self._build_verified_user())
+        return client
+
+    def _build_unauthenticated_client(self):
+        return self._raw_api_client_class()
+
     def test_build_llm_generation_service_returns_default_dependencies(self):
         service = build_llm_generation_service()
 
@@ -62,6 +97,49 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         result = get_authenticated_user_id(SimpleNamespace(is_authenticated=False))
 
         self.assertIsNone(result)
+
+    def test_is_persistable_authenticated_user_partitions(self):
+        model_like_user = SimpleNamespace(is_authenticated=True, pk=uuid4(), _meta=object())
+
+        self.assertTrue(_is_persistable_authenticated_user(model_like_user))
+        self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=False, pk=uuid4(), _meta=object())))
+        self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=True, pk=None, _meta=object())))
+        self.assertFalse(_is_persistable_authenticated_user(SimpleNamespace(is_authenticated=True, pk=uuid4())))
+
+    @override_settings(LLM_GENERATE_RATE_LIMIT_PER_MINUTE="not-a-number")
+    def test_resolve_llm_generate_rate_limit_uses_default_for_invalid_config(self):
+        self.assertEqual(_resolve_llm_generate_rate_limit_per_minute(default=17), 17)
+
+    def test_llm_generate_rate_limit_key_partitions(self):
+        user_id = uuid4()
+
+        self.assertEqual(
+            _llm_generate_rate_limit_key(
+                SimpleNamespace(
+                    user=SimpleNamespace(is_authenticated=True, id=user_id),
+                    META={},
+                )
+            ),
+            f"user:{user_id}",
+        )
+        self.assertEqual(
+            _llm_generate_rate_limit_key(
+                SimpleNamespace(
+                    user=SimpleNamespace(is_authenticated=False, id=None),
+                    META={"HTTP_X_FORWARDED_FOR": "203.0.113.10, 198.51.100.9"},
+                )
+            ),
+            "ip:203.0.113.10",
+        )
+        self.assertEqual(
+            _llm_generate_rate_limit_key(
+                SimpleNamespace(
+                    user=SimpleNamespace(is_authenticated=False, id=None),
+                    META={"REMOTE_ADDR": "198.51.100.7"},
+                )
+            ),
+            "ip:198.51.100.7",
+        )
 
     def test_generate_output_json_returns_generated_output_when_successful(self):
         generation_service = Mock()
@@ -387,11 +465,83 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.data["output_json"], {"status": "ok"})
         self.assertIsNone(response.data["output_id"])
         self.assertEqual(mock_build_service.call_count, 1)
-        self.assertFalse(mock_build_service.call_args[0][0].is_authenticated)
+        self.assertTrue(mock_build_service.call_args[0][0].is_authenticated)
         mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             custom_schema_id=None,
             chat_context=None,
+        )
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_401_for_unauthenticated_user(self, mock_build_service):
+        client = self._build_unauthenticated_client()
+
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        mock_build_service.assert_not_called()
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_403_for_unverified_user(self, mock_build_service):
+        client = self._build_verified_client(
+            user=self._build_verified_user(status="pending")
+        )
+
+        response = client.post(
+            "/llm/generate/",
+            {
+                "input_json": {"sheet": "Sheet1"},
+                "refinement": {"enabled": False},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        mock_build_service.assert_not_called()
+
+    @patch("llm.views.build_llm_generation_service")
+    def test_llm_generate_returns_429_when_rate_limit_exceeded(self, mock_build_service):
+        mock_service = mock_build_service.return_value
+        mock_service.generate.return_value = {"status": "ok"}
+        client = self._build_verified_client(
+            user=self._build_verified_user(user_id=uuid4())
+        )
+        payload = {
+            "input_json": {"sheet": "Sheet1"},
+            "refinement": {"enabled": False},
+        }
+
+        for _ in range(LLM_GENERATE_RATE_LIMIT_PER_MINUTE):
+            response = client.post("/llm/generate/", payload, format="json")
+            self.assertEqual(response.status_code, 200)
+
+        blocked_response = client.post("/llm/generate/", payload, format="json")
+
+        self.assertEqual(blocked_response.status_code, 429)
+        self.assertEqual(
+            blocked_response.data["detail"],
+            "Too many llm_generate requests. Please try again later.",
+        )
+        self.assertEqual(
+            blocked_response.data["code"],
+            "llm_generate_rate_limited",
+        )
+        self.assertEqual(
+            blocked_response["X-RateLimit-Limit"],
+            str(LLM_GENERATE_RATE_LIMIT_PER_MINUTE),
+        )
+        self.assertEqual(blocked_response["X-RateLimit-Remaining"], "0")
+        self.assertIn("Retry-After", blocked_response)
+        self.assertEqual(
+            mock_service.generate.call_count,
+            LLM_GENERATE_RATE_LIMIT_PER_MINUTE,
         )
 
     @patch("llm.views.build_llm_reasoning_service")
@@ -656,7 +806,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(mock_build_service.call_count, 1)
-        self.assertFalse(mock_build_service.call_args[0][0].is_authenticated)
+        self.assertTrue(mock_build_service.call_args[0][0].is_authenticated)
         mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             custom_schema_id=schema_id,
@@ -687,7 +837,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data["detail"], "Custom schema not found.")
         self.assertEqual(mock_build_service.call_count, 1)
-        self.assertFalse(mock_build_service.call_args[0][0].is_authenticated)
+        self.assertTrue(mock_build_service.call_args[0][0].is_authenticated)
         mock_service.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
             custom_schema_id=schema_id,
