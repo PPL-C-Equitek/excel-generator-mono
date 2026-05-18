@@ -143,19 +143,218 @@ describe('SessionConversationView', () => {
         )
 
         expect(screen.getByText('Resume Session')).toBeInTheDocument()
-        expect(screen.getByText('Session Info')).toBeInTheDocument()
         expect(screen.getAllByText('Tolong lanjutkan.').length).toBeGreaterThanOrEqual(1)
         expect(screen.getByText('Server log')).toBeInTheDocument()
         expect(screen.queryByText('Session fallback log')).not.toBeInTheDocument()
-        expect(screen.getByText('Total Events')).toBeInTheDocument()
-        expect(screen.getByText('User Prompts')).toBeInTheDocument()
-        expect(screen.getByText('AI Outputs')).toBeInTheDocument()
 
         const outputBlock = screen.getByText('AI Output').closest('article')
         expect(outputBlock).not.toBeNull()
         expect(within(outputBlock as HTMLElement).getByText('Your file is ready.')).toBeInTheDocument()
         expect(within(outputBlock as HTMLElement).getByText('Download CSV')).toBeInTheDocument()
         expect(within(outputBlock as HTMLElement).getByText('Download Excel')).toBeInTheDocument()
+    })
+
+    it('renders the initial uploaded file message as the first generate bubble', () => {
+        const session = makeSession({
+            history: [
+                {
+                    type: 'message',
+                    id: 'message-upload',
+                    role: 'user',
+                    content: 'Uploaded file: invoice-upload.xlsx',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:00:00Z',
+                },
+                {
+                    type: 'output',
+                    id: 'output-upload',
+                    chat_id: 'message-upload',
+                    parent_output_id: null,
+                    output_json: {
+                        document_info: { filename: 'invoice-from-output.xlsx' },
+                        schema_name: 'testing',
+                        size_bytes: 6848,
+                    },
+                    thinking_log: 'done',
+                    reasoning: {},
+                    created_at: '2026-04-10T10:01:00Z',
+                },
+            ],
+        })
+
+        render(
+            <SessionConversationView
+                session={session}
+                isLoadingSession={false}
+                sessionError={null}
+                isSessionNotFound={false}
+                thinkingLogsByOutputId={{}}
+                isLoadingThinkingLogs={false}
+                thinkingLogsError={null}
+            />
+        )
+
+        expect(screen.getByText('Generate this file.')).toBeInTheDocument()
+        expect(screen.getByText('Schema context')).toBeInTheDocument()
+        expect(screen.getByText('testing')).toBeInTheDocument()
+        expect(screen.getByText('invoice-upload.xlsx')).toBeInTheDocument()
+        expect(screen.getByText('6.7 KB')).toBeInTheDocument()
+        expect(screen.queryByText('Uploaded file: invoice-upload.xlsx')).not.toBeInTheDocument()
+    })
+
+    it('falls back to the paired output filename for generic uploaded file history messages', () => {
+        const session = makeSession({
+            history: [
+                {
+                    type: 'message',
+                    id: 'message-upload',
+                    role: 'user',
+                    content: 'Uploaded file for conversion',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:00:00Z',
+                },
+                {
+                    type: 'output',
+                    id: 'output-upload',
+                    chat_id: 'message-upload',
+                    parent_output_id: null,
+                    output_json: {},
+                    thinking_log: 'done',
+                    reasoning: {},
+                    created_at: '2026-04-10T10:01:00Z',
+                },
+            ],
+        })
+
+        render(
+            <SessionConversationView
+                session={session}
+                isLoadingSession={false}
+                sessionError={null}
+                isSessionNotFound={false}
+                thinkingLogsByOutputId={{}}
+                isLoadingThinkingLogs={false}
+                thinkingLogsError={null}
+            />
+        )
+
+        expect(screen.getByText('Generate this file.')).toBeInTheDocument()
+        expect(screen.getByText('session-session-1-output-output-upload.xlsx')).toBeInTheDocument()
+        expect(screen.queryByText('Uploaded file for conversion')).not.toBeInTheDocument()
+    })
+
+    it('falls back to a generic uploaded file label when no filename or output is available', () => {
+        const session = makeSession({
+            history: [
+                {
+                    type: 'message',
+                    id: 'message-upload',
+                    role: 'user',
+                    content: 'Uploaded file:',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:00:00Z',
+                },
+            ],
+        })
+
+        render(
+            <SessionConversationView
+                session={session}
+                isLoadingSession={false}
+                sessionError={null}
+                isSessionNotFound={false}
+                thinkingLogsByOutputId={{}}
+                isLoadingThinkingLogs={false}
+                thinkingLogsError={null}
+            />
+        )
+
+        expect(screen.getByText('Generate this file.')).toBeInTheDocument()
+        expect(screen.getByText('Uploaded file')).toBeInTheDocument()
+        expect(screen.queryByText('Uploaded file:')).not.toBeInTheDocument()
+    })
+
+    it('formats uploaded file sizes across byte, kilobyte, and megabyte ranges', () => {
+        const session = makeSession({
+            history: [
+                {
+                    type: 'message',
+                    id: 'message-byte',
+                    role: 'user',
+                    content: 'Uploaded file: tiny.txt',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:00:00Z',
+                },
+                {
+                    type: 'output',
+                    id: 'output-byte',
+                    chat_id: 'message-byte',
+                    parent_output_id: null,
+                    output_json: { size_bytes: 512 },
+                    thinking_log: 'done',
+                    reasoning: {},
+                    created_at: '2026-04-10T10:01:00Z',
+                },
+                {
+                    type: 'message',
+                    id: 'message-kilobyte',
+                    role: 'user',
+                    content: 'Uploaded file: medium.xlsx',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:02:00Z',
+                },
+                {
+                    type: 'output',
+                    id: 'output-kilobyte',
+                    chat_id: 'message-kilobyte',
+                    parent_output_id: null,
+                    output_json: { size_bytes: 1024 },
+                    thinking_log: 'done',
+                    reasoning: {},
+                    created_at: '2026-04-10T10:03:00Z',
+                },
+                {
+                    type: 'message',
+                    id: 'message-megabyte',
+                    role: 'user',
+                    content: 'Uploaded file: large.xlsx',
+                    thinking_log: '',
+                    target_output_id: null,
+                    created_at: '2026-04-10T10:04:00Z',
+                },
+                {
+                    type: 'output',
+                    id: 'output-megabyte',
+                    chat_id: 'message-megabyte',
+                    parent_output_id: null,
+                    output_json: { size_bytes: 1024 * 1024 },
+                    thinking_log: 'done',
+                    reasoning: {},
+                    created_at: '2026-04-10T10:05:00Z',
+                },
+            ],
+        })
+
+        render(
+            <SessionConversationView
+                session={session}
+                isLoadingSession={false}
+                sessionError={null}
+                isSessionNotFound={false}
+                thinkingLogsByOutputId={{}}
+                isLoadingThinkingLogs={false}
+                thinkingLogsError={null}
+            />
+        )
+
+        expect(screen.getByText('512 B')).toBeInTheDocument()
+        expect(screen.getByText('1.0 KB')).toBeInTheDocument()
+        expect(screen.getByText('1.0 MB')).toBeInTheDocument()
     })
 
     it('shows loading and error states for output thinking logs when no content is available', () => {
@@ -231,45 +430,6 @@ describe('SessionConversationView', () => {
         )
 
         expect(screen.getByText('not-a-date')).toBeInTheDocument()
-    })
-
-    it('keeps invalid session metadata timestamps visible as raw text', () => {
-        render(
-            <SessionConversationView
-                session={makeSession({
-                    created_at: 'invalid-created-at',
-                    updated_at: 'invalid-updated-at',
-                })}
-                isLoadingSession={false}
-                sessionError={null}
-                isSessionNotFound={false}
-                thinkingLogsByOutputId={{}}
-                isLoadingThinkingLogs={false}
-                thinkingLogsError={null}
-            />
-        )
-
-        expect(screen.getByText('invalid-created-at')).toBeInTheDocument()
-        expect(screen.getByText('invalid-updated-at')).toBeInTheDocument()
-    })
-
-    it('renders dash for missing session metadata timestamps', () => {
-        render(
-            <SessionConversationView
-                session={makeSession({
-                    created_at: null,
-                    updated_at: null,
-                })}
-                isLoadingSession={false}
-                sessionError={null}
-                isSessionNotFound={false}
-                thinkingLogsByOutputId={{}}
-                isLoadingThinkingLogs={false}
-                thinkingLogsError={null}
-            />
-        )
-
-        expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(2)
     })
 
     it('renders assistant bubble style and label for assistant messages', () => {
