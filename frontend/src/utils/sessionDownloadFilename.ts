@@ -30,12 +30,12 @@ function getTopLevelFilename(payload: unknown): string | null {
 }
 
 function toSafeBasename(filename: string): string | null {
-  const basename = filename.replace(/\\/g, "/").split("/").pop()?.trim();
+  const basename = filename.replaceAll("\\", "/").split("/").pop()?.trim();
   if (!basename || basename === "." || basename === "..") {
     return null;
   }
 
-  return basename.replace(/[\r\n\u0000]/g, "");
+  return basename.replace(/[\r\n]/g, "");
 }
 
 export function buildSessionOutputDownloadFilename(
