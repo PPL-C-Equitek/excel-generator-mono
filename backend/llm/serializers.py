@@ -237,33 +237,26 @@ class LlmGenerateResponseSerializer(serializers.Serializer):
         return value
 
 
-class SendMessageRequestSerializer(serializers.Serializer):
+class BaseMessageRequestSerializer(serializers.Serializer):
     session_id = serializers.UUIDField(required=False, allow_null=True)
+    message = serializers.CharField(
+        max_length=MAX_MESSAGE_LENGTH,
+        allow_blank=False,
+        trim_whitespace=False,
+    )
+
+    def validate_message(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("This field may not be blank.")
+        return value
+
+
+class SendMessageRequestSerializer(BaseMessageRequestSerializer):
     target_output_id = serializers.UUIDField(required=False, allow_null=True)
-    message = serializers.CharField(
-        max_length=MAX_MESSAGE_LENGTH,
-        allow_blank=False,
-        trim_whitespace=False,
-    )
-
-    def validate_message(self, value):
-        if not value.strip():
-            raise serializers.ValidationError("This field may not be blank.")
-        return value
 
 
-class StreamSendMessageRequestSerializer(serializers.Serializer):
-    session_id = serializers.UUIDField(required=False, allow_null=True)
-    message = serializers.CharField(
-        max_length=MAX_MESSAGE_LENGTH,
-        allow_blank=False,
-        trim_whitespace=False,
-    )
-
-    def validate_message(self, value):
-        if not value.strip():
-            raise serializers.ValidationError("This field may not be blank.")
-        return value
+class StreamSendMessageRequestSerializer(BaseMessageRequestSerializer):
+    pass
 
 
 class SendMessageResponseSerializer(serializers.Serializer):

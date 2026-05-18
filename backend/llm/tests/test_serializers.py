@@ -6,6 +6,7 @@ from uuid import uuid4
 from django.utils import timezone
 
 from llm.serializers import (
+    BaseMessageRequestSerializer,
     LlmGenerateRequestSerializer,
     LlmGenerateResponseSerializer,
     LlmReasoningRequestSerializer,
@@ -711,6 +712,38 @@ class SendMessageSerializerTest(SimpleTestCase):
         serializer = ThinkingLogItemSerializer(instance)
 
         self.assertEqual(serializer.data["reasoning"], ["Step one", "Step two"])
+
+
+class BaseMessageRequestSerializerTest(SimpleTestCase):
+    def test_positive_valid_message(self):
+        s = BaseMessageRequestSerializer(data={"message": "hello"})
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_negative_blank_message(self):
+        s = BaseMessageRequestSerializer(data={"message": "   "})
+        self.assertFalse(s.is_valid())
+        self.assertIn("message", s.errors)
+
+    def test_negative_missing_message(self):
+        s = BaseMessageRequestSerializer(data={})
+        self.assertFalse(s.is_valid())
+        self.assertIn("message", s.errors)
+
+    def test_edge_optional_session_id_accepted(self):
+        sid = str(uuid4())
+        s = BaseMessageRequestSerializer(data={"message": "hi", "session_id": sid})
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_edge_send_message_still_accepts_target_output_id(self):
+        sid = str(uuid4())
+        s = SendMessageRequestSerializer(data={"message": "hi", "target_output_id": sid})
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_edge_stream_serializer_ignores_target_output_id(self):
+        sid = str(uuid4())
+        s = StreamSendMessageRequestSerializer(data={"message": "hi", "target_output_id": sid})
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertNotIn("target_output_id", s.validated_data)
 
 
 class StreamSendMessageSerializerTest(SimpleTestCase):
