@@ -1,19 +1,19 @@
 import os
 import tempfile
-from django.test import TestCase
+from io import BytesIO
 from unittest.mock import patch, MagicMock
 
-from file_processing.services.ocr_service import OCRService
-from io import BytesIO
+from django.test import SimpleTestCase
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
-from file_processing.services.non_ocr_pdf_service import extract_non_ocr_pdf_to_json
+from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
+from file_processing.services.ocr_service import OCRService
 
 
-class TestOCRService(TestCase):
+extract_non_ocr_pdf_to_json = NonOCRPDFService.extract_non_ocr_pdf_to_json
+
+
+class TestOCRService(SimpleTestCase):
     @patch("file_processing.services.ocr_service.PdfReader")
     def test_text_pdf_path(self, mock_reader):
         mock_page = MagicMock()
@@ -60,8 +60,8 @@ class TestOCRService(TestCase):
         self.assertIn("OCRService failed", str(context.exception))
 
 
-class TestNonOCRPDFService(TestCase):
-    """Tests covering extract_pdf_to_json."""
+class TestNonOCRPDFService(SimpleTestCase):
+    """Tests designed around text/table/blank/error input partitions."""
 
     def _create_pdf(self, texts: list[str]) -> str:
         """Create a real PDF with one page per text entry and return its path."""
@@ -76,220 +76,167 @@ class TestNonOCRPDFService(TestCase):
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         tmp.write(buf.read())
         tmp.close()
+        self.addCleanup(self._remove_temp_file, tmp.name)
         return tmp.name
 
-    def _create_blank_pdf(self) -> str:
-        """Create a PDF whose page returns empty text."""
-        buf = BytesIO()
-        p = canvas.Canvas(buf)
-        p.showPage()
-        p.save()
-        buf.seek(0)
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        tmp.write(buf.read())
-        tmp.close()
-        return tmp.name
-
-    def _create_table_pdf(self) -> str:
-        """Create a PDF containing a table (triggers table-extraction path)."""
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        tmp.close()
-
-        doc = SimpleDocTemplate(tmp.name, pagesize=A4)
-        data = [
-            ["NAMA", "NPM", "SEMESTER"],
-            ["Alice", "123", "6"],
-            ["Bob", "456", "4"],
-        ]
-        table = Table(data)
-        table.setStyle(
-            TableStyle(
-                [
-                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
-                ]
-            )
-        )
-        doc.build([table])
-        return tmp.name
-
-    def _create_table_with_none_cell_pdf(self) -> str:
-        """Create a table PDF where a cell is empty (None → '')."""
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        tmp.close()
-
-        doc = SimpleDocTemplate(tmp.name, pagesize=A4)
-        data = [
-            ["COL1", "COL2"],
-            ["val", ""],
-        ]
-        table = Table(data)
-        table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 1, colors.black)]))
-        doc.build([table])
-        return tmp.name
-
-    def _create_table_plus_text_pdf(self) -> str:
-        """Create a PDF with a table AND plain text below it."""
-        from reportlab.platypus import Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        tmp.close()
-
-        doc = SimpleDocTemplate(tmp.name, pagesize=A4)
-        styles = getSampleStyleSheet()
-
-        data = [
-            ["NAMA", "NPM"],
-            ["Alice", "123"],
-        ]
-        table = Table(data)
-        table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 1, colors.black)]))
-
-        text_paragraph = Paragraph(
-            "Please ignore this. THIS IS ONLY FOR TESTING.", styles["Normal"]
-        )
-
-        doc.build([table, Spacer(1, 20), text_paragraph])
-        return tmp.name
-
-    def test_single_page_text_returns_lines(self):
-        """Plain-text page → text is a list of line strings."""
-        path = self._create_pdf(["Hello World"])
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            self.assertEqual(result["document_info"]["source_type"], "pdf")
-            self.assertTrue(result["document_info"]["file_name"].endswith(".pdf"))
-            self.assertEqual(result["document_info"]["total_pages"], 1)
-            self.assertEqual(len(result["content"]), 1)
-            self.assertEqual(result["content"][0]["page"], 1)
-
-            text = result["content"][0]["text"]
-            self.assertIsInstance(text, list)
-            joined = " ".join(text) if isinstance(text[0], str) else str(text)
-            self.assertIn("Hello World", joined)
-        finally:
+    def _remove_temp_file(self, path: str):
+        if os.path.exists(path):
             os.unlink(path)
 
-    def test_multi_page_pdf(self):
-        """Covers loop iteration for multiple pages."""
+    def _stub_pdfplumber_open(self, mock_open, pages):
+        mock_pdf = MagicMock()
+        mock_pdf.pages = pages
+
+        mock_context = MagicMock()
+        mock_context.__enter__.return_value = mock_pdf
+        mock_context.__exit__.return_value = None
+
+        mock_open.return_value = mock_context
+        return mock_pdf
+
+    def _make_plain_text_page(self, text):
+        page = MagicMock()
+        page.extract_tables.return_value = []
+        page.extract_text.return_value = text
+        return page
+
+    @patch("file_processing.services.non_ocr_pdf_service.pdfplumber.open")
+    def test_plain_text_page_splits_lines(self, mock_open):
+        text_page = self._make_plain_text_page("Hello World\nSecond Line")
+        self._stub_pdfplumber_open(mock_open, [text_page])
+
+        result = extract_non_ocr_pdf_to_json("text.pdf")
+
+        self.assertEqual(
+            result,
+            {"content": [{"page": 1, "text": ["Hello World", "Second Line"]}]},
+        )
+        mock_open.assert_called_once_with("text.pdf")
+        text_page.extract_tables.assert_called_once()
+        text_page.extract_text.assert_called_once()
+        text_page.find_tables.assert_not_called()
+
+    def test_real_pdf_text_pages_are_extracted_in_order(self):
         path = self._create_pdf(["Page one", "Page two", "Page three"])
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            self.assertEqual(result["document_info"]["total_pages"], 3)
-            self.assertEqual(len(result["content"]), 3)
-            for i, entry in enumerate(result["content"], start=1):
-                self.assertEqual(entry["page"], i)
-                self.assertIsInstance(entry["text"], list)
-        finally:
-            os.unlink(path)
 
-    def test_blank_page_returns_empty_list(self):
-        """Covers the branch when page has no text and no tables."""
-        path = self._create_blank_pdf()
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            self.assertEqual(result["document_info"]["total_pages"], 1)
-            self.assertEqual(result["content"][0]["text"], [])
-        finally:
-            os.unlink(path)
+        result = extract_non_ocr_pdf_to_json(path)
 
-    def test_table_pdf_returns_rows(self):
-        """Pages with tables → text is list of row-arrays."""
-        path = self._create_table_pdf()
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            text = result["content"][0]["text"]
-            self.assertIsInstance(text, list)
-            self.assertGreaterEqual(len(text), 3)
-            for row in text:
-                self.assertIsInstance(row, list)
-            self.assertIn("NAMA", text[0])
-            self.assertIn("NPM", text[0])
-        finally:
-            os.unlink(path)
+        self.assertEqual(
+            result,
+            {
+                "content": [
+                    {"page": 1, "text": ["Page one"]},
+                    {"page": 2, "text": ["Page two"]},
+                    {"page": 3, "text": ["Page three"]},
+                ]
+            },
+        )
 
-    def test_table_none_cell_replaced_with_empty_string(self):
-        """None cells in tables are replaced with empty strings."""
-        path = self._create_table_with_none_cell_pdf()
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            text = result["content"][0]["text"]
-            for row in text:
-                if isinstance(row, list):
-                    for cell in row:
-                        self.assertIsNotNone(cell)
-                        self.assertIsInstance(cell, str)
-        finally:
-            os.unlink(path)
+    @patch("file_processing.services.non_ocr_pdf_service.pdfplumber.open")
+    def test_blank_text_partitions_return_empty_lists(self, mock_open):
+        for raw_text in ("", None):
+            with self.subTest(raw_text=raw_text):
+                blank_page = self._make_plain_text_page(raw_text)
+                self._stub_pdfplumber_open(mock_open, [blank_page])
 
-    def test_table_plus_outside_text(self):
-        """Text outside table area is also captured as plain strings."""
-        path = self._create_table_plus_text_pdf()
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            text = result["content"][0]["text"]
+                result = extract_non_ocr_pdf_to_json("blank.pdf")
 
-            table_rows = [e for e in text if isinstance(e, list)]
-            plain_lines = [e for e in text if isinstance(e, str)]
+                self.assertEqual(result, {"content": [{"page": 1, "text": []}]})
+                blank_page.find_tables.assert_not_called()
+                mock_open.reset_mock()
 
-            self.assertGreaterEqual(len(table_rows), 2)
-            self.assertGreaterEqual(len(plain_lines), 1)
-            combined = " ".join(plain_lines)
-            self.assertIn("TESTING", combined)
-        finally:
-            os.unlink(path)
+    @patch("file_processing.services.non_ocr_pdf_service.pdfplumber.open")
+    def test_table_rows_are_normalized_and_outside_text_appended_after_rows(
+        self, mock_open
+    ):
+        first_table_region = MagicMock()
+        first_table_region.bbox = (0, 0, 50, 50)
+        second_table_region = MagicMock()
+        second_table_region.bbox = (50, 0, 100, 50)
 
-    def test_document_info_file_name(self):
-        path = self._create_pdf(["test"])
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            expected_name = os.path.basename(path)
-            self.assertEqual(result["document_info"]["file_name"], expected_name)
-        finally:
-            os.unlink(path)
+        filtered_once_page = MagicMock()
+        filtered_twice_page = MagicMock()
+        filtered_twice_page.extract_text.return_value = (
+            "Outside table line\n\n  Trimmed outside line  "
+        )
 
-    def test_document_info_source_type_is_pdf(self):
-        path = self._create_pdf(["abc"])
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            self.assertEqual(result["document_info"]["source_type"], "pdf")
-        finally:
-            os.unlink(path)
+        table_page = MagicMock()
+        table_page.extract_tables.return_value = [
+            [["Name", None], ["Alice", "123"]],
+            [["Course"], ["Testing"]],
+        ]
+        table_page.find_tables.return_value = [first_table_region, second_table_region]
+        table_page.outside_bbox.return_value = filtered_once_page
+        filtered_once_page.outside_bbox.return_value = filtered_twice_page
+        self._stub_pdfplumber_open(mock_open, [table_page])
 
-    def test_corrupt_file_raises_exception(self):
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        tmp.write(b"not a pdf at all")
-        tmp.close()
-        try:
-            with self.assertRaises(Exception):
-                extract_non_ocr_pdf_to_json(tmp.name)
-        finally:
-            os.unlink(tmp.name)
+        result = extract_non_ocr_pdf_to_json("table.pdf")
 
-    def test_nonexistent_file_raises_exception(self):
-        with self.assertRaises(Exception):
-            extract_non_ocr_pdf_to_json("/tmp/nonexistent_file_12345.pdf")
+        self.assertEqual(
+            result,
+            {
+                "content": [
+                    {
+                        "page": 1,
+                        "text": [
+                            ["Name", ""],
+                            ["Alice", "123"],
+                            ["Course"],
+                            ["Testing"],
+                            "Outside table line",
+                            "Trimmed outside line",
+                        ],
+                    }
+                ]
+            },
+        )
+        table_page.outside_bbox.assert_called_once_with(first_table_region.bbox)
+        filtered_once_page.outside_bbox.assert_called_once_with(
+            second_table_region.bbox
+        )
+        filtered_twice_page.extract_text.assert_called_once()
+        table_page.extract_text.assert_not_called()
 
-    def test_return_structure_keys(self):
-        path = self._create_pdf(["structure test"])
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            self.assertIn("document_info", result)
-            self.assertIn("content", result)
-            info = result["document_info"]
-            self.assertIn("source_type", info)
-            self.assertIn("file_name", info)
-            self.assertIn("total_pages", info)
-        finally:
-            os.unlink(path)
+    @patch("file_processing.services.non_ocr_pdf_service.pdfplumber.open")
+    def test_mixed_page_partitions_preserve_page_numbers_and_shape(self, mock_open):
+        text_page = self._make_plain_text_page("Alpha\nBeta")
+        blank_page = self._make_plain_text_page("")
 
-    def test_content_entry_keys(self):
-        path = self._create_pdf(["key test"])
-        try:
-            result = extract_non_ocr_pdf_to_json(path)
-            for entry in result["content"]:
-                self.assertIn("page", entry)
-                self.assertIn("text", entry)
-        finally:
-            os.unlink(path)
+        table_region = MagicMock()
+        table_region.bbox = (0, 0, 100, 100)
+        filtered_page = MagicMock()
+        filtered_page.extract_text.return_value = ""
+        table_page = MagicMock()
+        table_page.extract_tables.return_value = [[["Header"], ["Value"]]]
+        table_page.find_tables.return_value = [table_region]
+        table_page.outside_bbox.return_value = filtered_page
+        self._stub_pdfplumber_open(mock_open, [text_page, table_page, blank_page])
+
+        result = extract_non_ocr_pdf_to_json("mixed.pdf")
+
+        self.assertEqual(
+            result,
+            {
+                "content": [
+                    {"page": 1, "text": ["Alpha", "Beta"]},
+                    {"page": 2, "text": [["Header"], ["Value"]]},
+                    {"page": 3, "text": []},
+                ]
+            },
+        )
+
+    @patch("file_processing.services.non_ocr_pdf_service.pdfplumber.open")
+    def test_pdfplumber_errors_are_propagated(self, mock_open):
+        mock_open.side_effect = ValueError("corrupt PDF")
+
+        with self.assertRaisesRegex(ValueError, "corrupt PDF"):
+            extract_non_ocr_pdf_to_json("corrupt.pdf")
+
+        mock_open.assert_called_once_with("corrupt.pdf")
+
+    def test_missing_pdf_path_raises_file_not_found(self):
+        missing_path = "/tmp/nonexistent_file_12345.pdf"
+        self.assertFalse(os.path.exists(missing_path))
+
+        with self.assertRaises(FileNotFoundError):
+            extract_non_ocr_pdf_to_json(missing_path)
