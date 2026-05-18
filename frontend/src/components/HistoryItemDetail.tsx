@@ -3,9 +3,6 @@
 import SessionConversationView from '@/components/SessionConversationView'
 import type { SessionResume } from '@/services/sessions'
 import type { ThinkingLogItem } from '@/services/thinkingLogs'
-import type { HistoryItem } from '@/services/history'
-import { downloadSessionOutputCsvFile, downloadSessionOutputExcelFile } from '@/services/llm'
-import { buildSessionOutputDownloadFilename } from '@/utils/sessionDownloadFilename'
 
 interface HistoryItemDetailProps {
     readonly selectedSessionId: string | null
@@ -28,54 +25,6 @@ export default function HistoryItemDetail({
     isLoadingThinkingLogs,
     thinkingLogsError,
 }: Readonly<HistoryItemDetailProps>) {
-    const isEditing = editingHistoryId === item.id
-    const isRenaming = renamingHistoryId === item.id
-    const isDeleting = deletingHistoryId === item.id
-    const [isLatestCsvDownloading, setIsLatestCsvDownloading] = useState(false)
-    const [isLatestExcelDownloading, setIsLatestExcelDownloading] = useState(false)
-    const latestOutput = useMemo(() => {
-        if (!session) {
-            return null
-        }
-
-        const reversedHistory = [...session.history].reverse()
-        return reversedHistory.find((entry) => entry.type === 'output') ?? null
-    }, [session])
-
-    const canDownloadLatestOutput = !!session?.id && !!latestOutput
-
-    const handleDownloadLatestCsv = async () => {
-        const sessionId = session!.id
-        const output = latestOutput!
-
-        setIsLatestCsvDownloading(true)
-        try {
-            await downloadSessionOutputCsvFile(
-                sessionId,
-                output.id,
-                buildSessionOutputDownloadFilename(output, 'csv')
-            )
-        } finally {
-            setIsLatestCsvDownloading(false)
-        }
-    }
-
-    const handleDownloadLatestExcel = async () => {
-        const sessionId = session!.id
-        const output = latestOutput!
-
-        setIsLatestExcelDownloading(true)
-        try {
-            await downloadSessionOutputExcelFile(
-                sessionId,
-                output.id,
-                buildSessionOutputDownloadFilename(output, 'xlsx')
-            )
-        } finally {
-            setIsLatestExcelDownloading(false)
-        }
-    }
-
     return (
         <div className="flex h-full min-h-0 flex-col">
             {selectedSessionId ? (

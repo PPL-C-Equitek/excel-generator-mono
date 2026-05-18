@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSearchParams } from 'next/navigation'
 import HistoryPage from '../../../src/app/history/HistoryPage'
@@ -9,6 +10,7 @@ import {
     downloadSessionOutputCsvFile,
     downloadSessionOutputExcelFile,
 } from '../../../src/services/llm'
+import type { HistoryItem } from '../../../src/services/history'
 import type { SessionResume } from '../../../src/services/sessions'
 
 vi.mock('../../../src/hooks/useHistoryFiles', () => ({
@@ -27,19 +29,63 @@ vi.mock('next/navigation', () => ({
     useSearchParams: vi.fn(),
 }))
 
-vi.mock('../../../src/components/Sidebar', () => ({
-    default: ({ activeMenu, selectedHistoryId }: { activeMenu: string; selectedHistoryId?: string | null }) => (
-        <div data-testid="sidebar">
-            <div data-testid="active-menu">{activeMenu}</div>
-            <div data-testid="selected-history-id">{selectedHistoryId ?? 'none'}</div>
-        </div>
-    ),
+vi.mock('../../../src/services/llm', () => ({
+    downloadSessionOutputCsvFile: vi.fn(),
+    downloadSessionOutputExcelFile: vi.fn(),
+    generateJson: vi.fn().mockResolvedValue('{}'),
 }))
+
+vi.mock('../../../src/components/Sidebar', async () => {
+    const { default: HistorySidebarList } = await vi.importActual<typeof import('../../../src/components/HistorySidebarList')>(
+        '../../../src/components/HistorySidebarList'
+    )
+
+    return {
+        default: ({
+            activeMenu,
+            selectedHistoryId,
+            historyListState,
+        }: {
+            activeMenu: string
+            selectedHistoryId?: string | null
+            historyListState?: {
+                items: HistoryItem[]
+                isLoading: boolean
+                loadError: string | null
+                renamingHistoryId: string | null
+                deletingHistoryId: string | null
+                reloadHistory: () => Promise<void>
+                renameHistory: (historyId: string, customName: string) => Promise<boolean>
+                deleteHistory: (historyId: string) => Promise<boolean>
+            }
+        }) => (
+            <div data-testid="sidebar">
+                <div data-testid="active-menu">{activeMenu}</div>
+                <div data-testid="selected-history-id">{selectedHistoryId ?? 'none'}</div>
+                {historyListState ? (
+                    <HistorySidebarList
+                        selectedHistoryId={selectedHistoryId ?? null}
+                        items={historyListState.items}
+                        isLoading={historyListState.isLoading}
+                        loadError={historyListState.loadError}
+                        renamingHistoryId={historyListState.renamingHistoryId}
+                        deletingHistoryId={historyListState.deletingHistoryId}
+                        reloadHistory={historyListState.reloadHistory}
+                        renameHistory={historyListState.renameHistory}
+                        deleteHistory={historyListState.deleteHistory}
+                    />
+                ) : null}
+            </div>
+        ),
+    }
+})
 
 const mockUseHistoryFiles = vi.mocked(useHistoryFiles)
 const mockUseSearchParams = vi.mocked(useSearchParams)
 const mockUseSessionResume = vi.mocked(useSessionResume)
 const mockUseSessionThinkingLogs = vi.mocked(useSessionThinkingLogs)
+const mockDownloadSessionOutputCsvFile = vi.mocked(downloadSessionOutputCsvFile)
+const mockDownloadSessionOutputExcelFile = vi.mocked(downloadSessionOutputExcelFile)
 const historyItems = [
     {
         id: '11111111-1111-1111-1111-111111111111',
@@ -229,7 +275,7 @@ describe('HistoryPage', () => {
 
         render(<HistoryPage />)
 
-        expect(screen.getByText('Loading history...')).toBeInTheDocument()
+        expect(screen.getAllByText('Loading history...')).toHaveLength(2)
     })
 
     it('renders load error when no selected history item exists', () => {
@@ -243,7 +289,7 @@ describe('HistoryPage', () => {
 
         render(<HistoryPage />)
 
-        expect(screen.getByText('Failed to load history.')).toBeInTheDocument()
+        expect(screen.getAllByText('Failed to load history.')).toHaveLength(2)
     })
 
     it('renders guidance text when no selected history item and no loading/error state', () => {
@@ -275,16 +321,33 @@ describe('HistoryPage', () => {
         expect(screen.getByText('Failed to rename history item.')).toBeInTheDocument()
     })
 
-    it('formats valid created_at and falls back for invalid created_at', () => {
+    it('groups history by created_at and falls back for invalid created_at', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-05-10T00:00:00Z'))
+
         mockSearchParam(historyItems[0].id)
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                items: [historyItems[0]],
+                count: 1,
+            })
+        )
         const { unmount } = render(<HistoryPage />)
-        expect(screen.getByText('10 Apr 2026, 17:00 UTC+7')).toBeInTheDocument()
+        expect(screen.getByText('Last 30 days')).toBeInTheDocument()
 
         unmount()
 
         mockSearchParam(historyItems[1].id)
+        mockUseHistoryFiles.mockReturnValue(
+            makeHookState({
+                items: [historyItems[1]],
+                count: 1,
+            })
+        )
         render(<HistoryPage />)
-        expect(screen.getByText('invalid-date')).toBeInTheDocument()
+        expect(screen.getByText('Older')).toBeInTheDocument()
+
+        vi.useRealTimers()
     })
 
     it('calls latest output download handlers when session output exists', async () => {
@@ -294,8 +357,8 @@ describe('HistoryPage', () => {
 
         render(<HistoryPage />)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Download latest as CSV' }))
-        fireEvent.click(screen.getByRole('button', { name: 'Download latest as Excel' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Download CSV' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Download Excel' }))
 
         await waitFor(() => {
             expect(mockDownloadSessionOutputCsvFile).toHaveBeenCalledWith(
@@ -314,6 +377,25 @@ describe('HistoryPage', () => {
     it('allows rename flow and submits new name', async () => {
         const renameHistory = vi.fn().mockResolvedValue(true)
         mockUseHistoryFiles.mockReturnValue(makeHookState({ renameHistory }))
+
+        render(<HistoryPage />)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Actions for report-a.pdf' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+
+        const user = userEvent.setup()
+        const nameInput = screen.getByLabelText('File Name')
+        await user.clear(nameInput)
+        await user.type(nameInput, 'Quarter 1 Report')
+        await user.click(screen.getByRole('button', { name: 'Save' }))
+
+        await waitFor(() => {
+            expect(renameHistory).toHaveBeenCalledWith(
+                historyItems[0].id,
+                'Quarter 1 Report'
+            )
+        })
+    })
 
     it('keeps the history conversation panel fixed while the message list owns scrolling', () => {
         render(<HistoryPage />)
@@ -335,6 +417,5 @@ describe('HistoryPage', () => {
         expect(screen.queryByText('Status')).not.toBeInTheDocument()
         expect(screen.queryByText('Created at')).not.toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'Edit Name' })).not.toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: 'Download latest as CSV' })).not.toBeInTheDocument()
     })
 })

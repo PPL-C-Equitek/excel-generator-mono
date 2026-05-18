@@ -74,30 +74,11 @@ describe('HistoryItemDetail', () => {
                 },
             ]),
         })
-
-        const latestCsvButton = screen.getByRole('button', { name: 'Download latest as CSV' })
-        const latestExcelButton = screen.getByRole('button', { name: 'Download latest as Excel' })
-        const user = userEvent.setup()
-
-        await user.click(latestCsvButton)
-        await user.click(latestExcelButton)
-
-        await waitFor(() => {
-            expect(mockDownloadSessionOutputCsvFile).toHaveBeenCalledWith(
-                'session-1',
-                'output-2',
-                'report.csv'
-            )
-            expect(mockDownloadSessionOutputExcelFile).toHaveBeenCalledWith(
-                'session-1',
-                'output-2',
-                'report.xlsx'
-            )
-        })
-
         expect(screen.getByTestId('session-conversation-view')).toBeInTheDocument()
-        expect(screen.queryByText('Status')).not.toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: 'Edit Name' })).not.toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: 'Download latest as CSV' })).not.toBeInTheDocument()
+        expect(
+            screen.queryByText(
+                'Session context is not available for this history item, so per-session thinking logs cannot be loaded yet.'
+            )
+        ).not.toBeInTheDocument()
     })
 })
