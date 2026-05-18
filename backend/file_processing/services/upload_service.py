@@ -16,7 +16,13 @@ from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import word_validation_service
 from file_processing.services.image_validation_service import validate_image
 from file_processing.services.word_extraction_service import WordExtractionService
+from file_processing.services.contracts import ValidationResult, ExtractionResult
 from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
+from file_processing.services.exceptions import (
+    UploadValidationError,
+    UploadExtractionError,
+    UploadStorageError,
+)
 
 try:
     import magic
@@ -139,6 +145,7 @@ CSV_PROTECTED_ERROR = (
     "File CSV terdeteksi sebagai format terproteksi atau terenkripsi. "
     "Pastikan file adalah CSV biasa yang tidak diproteksi."
 )
+MIME_TYPE_DETECTION_ERROR = "Unable to determine file type."
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
 ZIP_SIGNATURE_PREFIX = b"PK"
 DOES_NOT_MATCH_EXTENSION_ERROR = "File content does not match its extension."
@@ -176,10 +183,15 @@ def _get_empty_page_numbers(extracted_data):
     return empty
 
 
-def _process_pdf(file_path, uploaded_file):
-    is_valid, error = validate_pdf(uploaded_file)
-    if not is_valid:
-        return False, error, None
+def _process_pdf_result(file_path, uploaded_file) -> ExtractionResult:
+    """Process PDF and return ExtractionResult. Raises UploadValidationError on validation failure."""
+    validation_is_valid, validation_error = validate_pdf(uploaded_file)
+    validation_result = ValidationResult(
+        is_valid=validation_is_valid,
+        error=validation_error,
+    )
+    if not validation_result.is_valid:
+        raise UploadValidationError(validation_result.error)
 
     try:
         extracted_data = NonOCRPDFService.extract_non_ocr_pdf_to_json(file_path)
@@ -195,142 +207,243 @@ def _process_pdf(file_path, uploaded_file):
                 for page in extracted_data["content"]:
                     if page["page"] in ocr_by_page:
                         page["text"] = ocr_by_page[page["page"]]["text"]
+        return ExtractionResult.ok(extracted_data)
     except Exception:
         logger.exception("Non-OCR extraction failed, fallback to OCR")
-        extracted_data = OCRService.process_pdf(file_path)
+        try:
+            extracted_data = OCRService.process_pdf(file_path)
+            return ExtractionResult.ok(extracted_data)
+        except Exception:
+            logger.exception("PDF extraction failed")
+            raise
 
-    return True, None, extracted_data
+
+def _process_pdf(file_path, uploaded_file):
+    """Legacy wrapper that preserves the tuple return contract."""
+    try:
+        return _process_pdf_result(file_path, uploaded_file).to_legacy_tuple()
+    except UploadValidationError as exc:
+        return False, str(exc), None
 
 
-def _process_image(file_path):
+def _process_image_result(file_path) -> ExtractionResult:
+    """Process image extraction and return ExtractionResult."""
     try:
         extractor = ImageExtractor()
         extracted_data = extractor.extract(file_path)
-        return True, None, extracted_data
+        return ExtractionResult.ok(extracted_data)
     except ValueError as exc:
-        return False, str(exc), None
+        return ExtractionResult.fail(str(exc))
     except Exception:
         logger.exception("Image extraction failed.")
-        return False, "Image OCR extraction failed.", None
+        return ExtractionResult.fail("Image OCR extraction failed.")
 
 
-def process_word(file_path, ext):
+def _process_word_result(file_path, ext) -> ExtractionResult:
+    """Process word extraction and return ExtractionResult."""
     try:
         extracted_data = WordExtractionService.extract_word_to_json(file_path, ext)
     except ValueError as exc:
-        return False, str(exc), None
+        return ExtractionResult.fail(str(exc))
     except Exception:
         logger.exception("Word extraction failed")
-        return False, WORD_CORRUPT_ERROR, None
+        return ExtractionResult.fail(WORD_CORRUPT_ERROR)
 
-    return True, None, extracted_data
+    return ExtractionResult.ok(extracted_data)
 
 
-def _dispatch_upload_processing(ext, file_path, uploaded_file):
+def _convert_extraction_tuple_to_result(result_tuple) -> ExtractionResult:
+    """Convert external service tuple result to ExtractionResult."""
+    success, error, extracted_data = result_tuple
+    if success:
+        return ExtractionResult.ok(extracted_data)
+    return ExtractionResult.fail(error or "Processing failed")
+
+
+def _process_uploaded_excel_result(file_path) -> ExtractionResult:
+    """Process Excel file and return ExtractionResult."""
+    return _convert_extraction_tuple_to_result(process_uploaded_excel(file_path))
+
+
+def _process_uploaded_txt_result(file_path) -> ExtractionResult:
+    """Process TXT file and return ExtractionResult."""
+    return _convert_extraction_tuple_to_result(process_uploaded_txt(file_path))
+
+
+def _process_uploaded_csv_result(file_path) -> ExtractionResult:
+    """Process CSV file and return ExtractionResult."""
+    return _convert_extraction_tuple_to_result(process_uploaded_csv(file_path))
+
+
+
+def _dispatch_upload_processing(ext, file_path, uploaded_file) -> ExtractionResult:
+    """Dispatch upload processing by file type. Returns ExtractionResult."""
     processors = {
-        EXT_PDF: lambda: _process_pdf(file_path, uploaded_file),
-        EXT_XLS: lambda: process_uploaded_excel(file_path),
-        EXT_XLSX: lambda: process_uploaded_excel(file_path),
-        EXT_DOC: lambda: process_word(file_path, EXT_DOC),
-        EXT_DOCX: lambda: process_word(file_path, EXT_DOCX),
-        EXT_TXT: lambda: process_uploaded_txt(file_path),
-        EXT_CSV: lambda: process_uploaded_csv(file_path),
-        EXT_PNG: lambda: _process_image(file_path),
-        EXT_JPG: lambda: _process_image(file_path),
-        EXT_JPEG: lambda: _process_image(file_path),
+        EXT_PDF: lambda: _convert_extraction_tuple_to_result(
+            _process_pdf(file_path, uploaded_file)
+        ),
+        EXT_XLS: lambda: _process_uploaded_excel_result(file_path),
+        EXT_XLSX: lambda: _process_uploaded_excel_result(file_path),
+        EXT_DOC: lambda: _convert_extraction_tuple_to_result(
+            process_word(file_path, EXT_DOC)
+        ),
+        EXT_DOCX: lambda: _convert_extraction_tuple_to_result(
+            process_word(file_path, EXT_DOCX)
+        ),
+        EXT_TXT: lambda: _process_uploaded_txt_result(file_path),
+        EXT_CSV: lambda: _process_uploaded_csv_result(file_path),
+        EXT_PNG: lambda: _convert_extraction_tuple_to_result(_process_image(file_path)),
+        EXT_JPG: lambda: _convert_extraction_tuple_to_result(_process_image(file_path)),
+        EXT_JPEG: lambda: _convert_extraction_tuple_to_result(_process_image(file_path)),
     }
 
     processor = processors.get(ext)
     if processor is None:
-        return False, "Unsupported file type", None
+        return ExtractionResult.fail("Unsupported file type")
 
     return processor()
 
 
-def process_upload(uploaded_file):
-    is_valid, error = validate_file(uploaded_file)
-    if not is_valid:
-        return False, error, None, None
+def _get_upload_extension(uploaded_file):
+    return os.path.splitext(uploaded_file.name)[1].lower()
 
-    ext = os.path.splitext(uploaded_file.name)[1].lower()
 
-    file_path = save_temp_file(uploaded_file)
-
+def _cleanup_temp_upload(file_path):
     try:
-        success, error, extracted_data = _dispatch_upload_processing(
-            ext,
-            file_path,
-            uploaded_file,
-        )
-        if not success:
-            return False, error, None, None
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        logger.exception("Failed to delete temporary upload file.")
 
-    finally:
+
+def _process_stored_upload(ext, file_path, uploaded_file) -> ExtractionResult:
+    """Process stored upload. Returns ExtractionResult."""
+    try:
+        extraction_result = _dispatch_upload_processing(ext, file_path, uploaded_file)
+        if extraction_result.success:
+            return extraction_result
+        raise UploadExtractionError(extraction_result.error or "Failed to process uploaded file")
+    except UploadValidationError as exc:
+        logger.warning("Validation error during stored upload processing: %s", exc)
+        raise
+    except UploadExtractionError as exc:
+        logger.warning("Extraction error during stored upload processing: %s", exc)
+        raise
+
+
+def process_upload(uploaded_file):
+    """
+    Process uploaded file (boundary layer). Returns legacy tuple format for backward compatibility.
+    
+    Internal flow uses result objects (ValidationResult, ExtractionResult) for consistency.
+    Exception handling maps domain errors back to tuple format.
+    
+    Returns: (success: bool, error: str | None, _unused: None, extracted_data: dict | None)
+    """
+    file_path = None
+    try:
+        # Validation phase (internal: ValidationResult)
+        validation_is_valid, validation_error = validate_file(uploaded_file)
+        validation_result = ValidationResult(
+            is_valid=validation_is_valid,
+            error=validation_error,
+        )
+        if not validation_result.is_valid:
+            raise UploadValidationError(validation_result.error)
+
+        # Storage phase (raises UploadStorageError)
+        ext = _get_upload_extension(uploaded_file)
         try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        except Exception:
-            logger.exception("Failed to delete temporary upload file.")
+            file_path = save_temp_file(uploaded_file)
+        except ValueError as exc:
+            raise UploadStorageError(str(exc)) from exc
 
-    return True, None, None, extracted_data
+        # Extraction phase (internal: ExtractionResult)
+        extraction_result = _process_stored_upload(ext, file_path, uploaded_file)
+        
+        # Convert result object to legacy tuple at boundary
+        return True, None, None, extraction_result.extracted_data
+
+    except UploadValidationError as exc:
+        logger.warning(f"Validation error during upload: {exc}")
+        return False, str(exc), None, None
+    except UploadExtractionError as exc:
+        logger.warning(f"Extraction error during upload: {exc}")
+        return False, str(exc), None, None
+    except UploadStorageError as exc:
+        logger.warning(f"Storage error during upload: {exc}")
+        return False, str(exc), None, None
+    finally:
+        if file_path:
+            _cleanup_temp_upload(file_path)
 
 
-def validate_file(uploaded_file):
-    filename = uploaded_file.name
-    ext = os.path.splitext(filename)[1].lower()
-
-    if ext not in ALLOWED_EXTENSIONS:
-        return (
-            False,
-            "Unsupported file type. Only PDF, XLS, XLSX, TXT, CSV, PNG, JPG, JPEG, DOC, and DOCX are allowed.",
-        )
-
+def _validate_file_content(uploaded_file, ext) -> ValidationResult:
+    """Validate file size, MIME type, and type-specific constraints."""
+    # Image files can return early without further checks
     if ext in IMAGE_EXTENSIONS:
-        return validate_image(uploaded_file)
+        is_valid, error = validate_image(uploaded_file)
+        if not is_valid:
+            return ValidationResult.fail(error or "Invalid image file.")
+        return ValidationResult.ok()
 
+    # All other file types: check size and MIME type
     if uploaded_file.size > MAX_FILE_SIZE:
-        return False, FILE_TOO_LARGE_ERROR
+        return ValidationResult.fail(FILE_TOO_LARGE_ERROR)
 
     is_valid_mime, mime_error = validate_mime_type(uploaded_file, ext)
     if not is_valid_mime:
-        return False, mime_error
+        return ValidationResult.fail(mime_error or MIME_TYPE_DETECTION_ERROR)
 
+    # Type-specific format validation
     if ext in {EXT_XLS, EXT_XLSX}:
         is_valid_excel, excel_error = validate_excel_sheet_count(uploaded_file, ext)
         if not is_valid_excel:
-            return False, excel_error
+            return ValidationResult.fail(excel_error or EXCEL_CORRUPT_ERROR)
 
     if ext in {EXT_DOC, EXT_DOCX}:
         is_valid_word, word_error = word_validation_service.validate_word(
             uploaded_file, ext
         )
         if not is_valid_word:
-            return False, word_error
+            return ValidationResult.fail(word_error or WORD_CORRUPT_ERROR)
 
-    return True, None
+    return ValidationResult.ok()
 
 
-def validate_pdf(uploaded_file):
+def validate_file_result(uploaded_file) -> ValidationResult:
+    """Validate uploaded file and return ValidationResult."""
+    ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+    if ext not in ALLOWED_EXTENSIONS:
+        return ValidationResult.fail(
+            "Unsupported file type. Only PDF, XLS, XLSX, TXT, CSV, PNG, JPG, JPEG, DOC, and DOCX are allowed.",
+        )
+
+    return _validate_file_content(uploaded_file, ext)
+
+
+def validate_pdf_result(uploaded_file) -> ValidationResult:
     try:
         uploaded_file.seek(0)
         reader = PdfReader(uploaded_file, strict=True)
     except Exception:
-        return False, PDF_CORRUPT_ERROR
+        return ValidationResult.fail(PDF_CORRUPT_ERROR)
 
     is_valid, error = check_pdf_encrypted(reader)
     if not is_valid:
-        return False, error
+        return ValidationResult.fail(error or PDF_CORRUPT_ERROR)
 
     is_valid, page_count_or_error = check_pdf_structure(reader)
     if not is_valid:
-        return False, page_count_or_error
+        return ValidationResult.fail(page_count_or_error or PDF_CORRUPT_ERROR)
 
     page_count = page_count_or_error
     is_valid, error = check_pdf_page_count(page_count)
     if not is_valid:
-        return False, error
+        return ValidationResult.fail(error or PDF_CORRUPT_ERROR)
 
-    return True, None
+    return ValidationResult.ok()
 
 
 def check_pdf_encrypted(reader):
@@ -455,7 +568,7 @@ def validate_mime_type(uploaded_file, ext):
         mime = _detect_mime(head, ext)
 
         if not mime:
-            return False, "Unable to determine file type."
+            return False, MIME_TYPE_DETECTION_ERROR
 
         expected_mimes = ALLOWED_MIME_TYPES.get(ext, [])
 
@@ -484,7 +597,7 @@ def validate_mime_type(uploaded_file, ext):
         return True, None
 
     except Exception:
-        return False, "Unable to determine file type."
+        return False, MIME_TYPE_DETECTION_ERROR
 
 
 def _read_head(uploaded_file, size=2048):
@@ -601,20 +714,54 @@ def _validate_csv_content(uploaded_file, detected_mime: str):
 
 
 def save_temp_file(uploaded_file):
-    os.makedirs(settings.UPLOAD_TEMP_DIR, exist_ok=True)
+    """Save uploaded file to temporary directory. Raises UploadStorageError on failure."""
+    try:
+        os.makedirs(settings.UPLOAD_TEMP_DIR, exist_ok=True)
 
-    original_name = os.path.basename(uploaded_file.name)
-    safe_name = get_valid_filename(original_name)
-    unique_name = f"{uuid4()}_{safe_name}"
+        original_name = os.path.basename(uploaded_file.name)
+        safe_name = get_valid_filename(original_name)
+        unique_name = f"{uuid4()}_{safe_name}"
 
-    base_dir = os.path.abspath(settings.UPLOAD_TEMP_DIR)
-    file_path = os.path.abspath(os.path.join(base_dir, unique_name))
+        base_dir = os.path.abspath(settings.UPLOAD_TEMP_DIR)
+        file_path = os.path.abspath(os.path.join(base_dir, unique_name))
 
-    if not file_path.startswith(base_dir):
-        raise ValueError("Invalid file path detected.")
+        if not file_path.startswith(base_dir):
+            raise ValueError("Invalid file path detected.")
 
-    with open(file_path, "wb+") as destination:
-        for chunk in uploaded_file.chunks():
-            destination.write(chunk)
+        with open(file_path, "wb+") as destination:
+            for chunk in uploaded_file.chunks():
+                destination.write(chunk)
 
-    return file_path
+        return file_path
+    except ValueError:
+        raise
+    except UploadStorageError:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to save temporary upload file")
+        raise UploadStorageError("Failed to save temporary file") from exc
+
+# =============================================================================
+# Test compatibility wrappers (backward compatibility for existing tests)
+# These convert result objects back to tuple format for test infrastructure.
+# Production code should use the result objects and process_upload as boundary.
+# =============================================================================
+
+def validate_file(uploaded_file):
+    """Test compatibility wrapper: convert ValidationResult to tuple."""
+    return validate_file_result(uploaded_file).to_legacy_tuple()
+
+
+def validate_pdf(uploaded_file):
+    """Test compatibility wrapper: convert ValidationResult to tuple."""
+    return validate_pdf_result(uploaded_file).to_legacy_tuple()
+
+
+def process_word(file_path, ext):
+    """Test compatibility wrapper: convert ExtractionResult to tuple."""
+    return _process_word_result(file_path, ext).to_legacy_tuple()
+
+
+def _process_image(file_path):
+    """Test compatibility wrapper: convert ExtractionResult to tuple."""
+    return _process_image_result(file_path).to_legacy_tuple()
