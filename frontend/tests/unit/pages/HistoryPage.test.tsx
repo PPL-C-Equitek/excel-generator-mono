@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSearchParams } from 'next/navigation'
 import HistoryPage from '../../../src/app/history/HistoryPage'
@@ -27,11 +27,6 @@ vi.mock('next/navigation', () => ({
     useSearchParams: vi.fn(),
 }))
 
-vi.mock('../../../src/services/llm', () => ({
-    downloadSessionOutputCsvFile: vi.fn(),
-    downloadSessionOutputExcelFile: vi.fn(),
-}))
-
 vi.mock('../../../src/components/Sidebar', () => ({
     default: ({ activeMenu, selectedHistoryId }: { activeMenu: string; selectedHistoryId?: string | null }) => (
         <div data-testid="sidebar">
@@ -45,9 +40,6 @@ const mockUseHistoryFiles = vi.mocked(useHistoryFiles)
 const mockUseSearchParams = vi.mocked(useSearchParams)
 const mockUseSessionResume = vi.mocked(useSessionResume)
 const mockUseSessionThinkingLogs = vi.mocked(useSessionThinkingLogs)
-const mockDownloadSessionOutputCsvFile = vi.mocked(downloadSessionOutputCsvFile)
-const mockDownloadSessionOutputExcelFile = vi.mocked(downloadSessionOutputExcelFile)
-
 const historyItems = [
     {
         id: '11111111-1111-1111-1111-111111111111',
@@ -191,8 +183,6 @@ describe('HistoryPage', () => {
         render(<HistoryPage />)
 
         expect(screen.getByTestId('selected-history-id')).toHaveTextContent(historyItems[1].id)
-        fireEvent.click(screen.getByRole('button', { name: 'Edit Name' }))
-        expect(screen.getByLabelText('File Name')).toHaveValue('Budget Sheet')
     })
 
     it('uses the sessionId query parameter when present', () => {
@@ -325,128 +315,26 @@ describe('HistoryPage', () => {
         const renameHistory = vi.fn().mockResolvedValue(true)
         mockUseHistoryFiles.mockReturnValue(makeHookState({ renameHistory }))
 
+    it('keeps the history conversation panel fixed while the message list owns scrolling', () => {
         render(<HistoryPage />)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Edit Name' }))
-        fireEvent.change(screen.getByLabelText('File Name'), {
-            target: { value: 'Quarterly Report' },
-        })
-        fireEvent.click(screen.getByRole('button', { name: 'Save Name' }))
-
-        await waitFor(() => {
-            expect(renameHistory).toHaveBeenCalledWith(historyItems[0].id, 'Quarterly Report')
-        })
-    })
-
-    it('shows rename pending state when save is in progress', () => {
-        const { rerender } = render(<HistoryPage />)
-
-        fireEvent.click(screen.getByRole('button', { name: 'Edit Name' }))
-
-        mockUseHistoryFiles.mockReturnValue(
-            makeHookState({
-                renamingHistoryId: historyItems[0].id,
-            })
+        const fallbackMessage = screen.getByText(
+            'Session context is not available for this history item, so per-session thinking logs cannot be loaded yet.'
         )
-        rerender(<HistoryPage />)
+        const mainPanel = fallbackMessage.closest('main')
+        const detailViewport = mainPanel?.querySelector('section > div')
 
-        expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled()
+        expect(mainPanel).toHaveClass('h-screen', 'overflow-hidden')
+        expect(detailViewport).toHaveClass('overflow-hidden')
+        expect(detailViewport).not.toHaveClass('overflow-y-auto')
     })
 
-    it('keeps rename form open when rename fails', async () => {
-        const renameHistory = vi.fn().mockResolvedValue(false)
-        mockUseHistoryFiles.mockReturnValue(makeHookState({ renameHistory }))
-
+    it('does not render the removed detail metadata and action controls', () => {
         render(<HistoryPage />)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Edit Name' }))
-        fireEvent.click(screen.getByRole('button', { name: 'Save Name' }))
-
-        await waitFor(() => {
-            expect(renameHistory).toHaveBeenCalled()
-            expect(screen.getByLabelText('File Name')).toBeInTheDocument()
-        })
-    })
-
-    it('opens delete dialog and confirms deletion', async () => {
-        const deleteHistory = vi.fn().mockResolvedValue(true)
-        mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
-
-        render(<HistoryPage />)
-
-        fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-        expect(screen.getByRole('dialog')).toBeInTheDocument()
-
-        fireEvent.click(screen.getByRole('button', { name: 'Delete History' }))
-
-        await waitFor(() => {
-            expect(deleteHistory).toHaveBeenCalledWith(historyItems[0].id)
-        })
-    })
-
-    it('keeps delete dialog open when delete fails', async () => {
-        const deleteHistory = vi.fn().mockResolvedValue(false)
-        mockUseHistoryFiles.mockReturnValue(makeHookState({ deleteHistory }))
-
-        render(<HistoryPage />)
-
-        fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-        fireEvent.click(screen.getByRole('button', { name: 'Delete History' }))
-
-        await waitFor(() => {
-            expect(deleteHistory).toHaveBeenCalledWith(historyItems[0].id)
-        })
-
-        expect(screen.getByRole('dialog')).toBeInTheDocument()
-    })
-
-    it('shows delete dialog pending state when confirmation is in progress', () => {
-        const { rerender } = render(<HistoryPage />)
-
-        fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-
-        mockUseHistoryFiles.mockReturnValue(
-            makeHookState({
-                deletingHistoryId: historyItems[0].id,
-            })
-        )
-        rerender(<HistoryPage />)
-
-        const dialog = screen.getByRole('dialog')
-        expect(within(dialog).getByRole('button', { name: 'Deleting...' })).toBeDisabled()
-    })
-
-    it('shows delete dialog pending label when delete is in progress', () => {
-        mockUseHistoryFiles.mockReturnValue(
-            makeHookState({
-                deletingHistoryId: historyItems[0].id,
-            })
-        )
-
-        render(<HistoryPage />)
-
-        expect(screen.getByRole('button', { name: 'Deleting...' })).toBeDisabled()
-    })
-
-    it('closes delete dialog when cancel is clicked', () => {
-        render(<HistoryPage />)
-
-        fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-        expect(screen.getByRole('dialog')).toBeInTheDocument()
-
-        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    })
-
-    it('shows deleting state label when delete is pending', () => {
-        mockUseHistoryFiles.mockReturnValue(
-            makeHookState({
-                deletingHistoryId: historyItems[0].id,
-            })
-        )
-
-        render(<HistoryPage />)
-
-        expect(screen.getByRole('button', { name: 'Deleting...' })).toBeDisabled()
+        expect(screen.queryByText('Status')).not.toBeInTheDocument()
+        expect(screen.queryByText('Created at')).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Edit Name' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Download latest as CSV' })).not.toBeInTheDocument()
     })
 })

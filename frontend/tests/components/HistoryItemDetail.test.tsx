@@ -1,32 +1,12 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen } from '@testing-library/react'
 import type { ComponentProps } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import HistoryItemDetail from '@/components/HistoryItemDetail'
-import type { HistoryItem } from '@/services/history'
 import type { SessionResume } from '@/services/sessions'
-import { downloadSessionOutputCsvFile, downloadSessionOutputExcelFile } from '@/services/llm'
 
 vi.mock('@/components/SessionConversationView', () => ({
     default: () => <div data-testid="session-conversation-view">SessionConversationView</div>,
 }))
-
-vi.mock('@/services/llm', () => ({
-    downloadSessionOutputCsvFile: vi.fn(),
-    downloadSessionOutputExcelFile: vi.fn(),
-}))
-
-const mockDownloadSessionOutputCsvFile = vi.mocked(downloadSessionOutputCsvFile)
-const mockDownloadSessionOutputExcelFile = vi.mocked(downloadSessionOutputExcelFile)
-
-const baseItem: HistoryItem = {
-    id: 'history-1',
-    original_name: 'report.pdf',
-    custom_name: '',
-    session_id: null,
-    status_processing: 'completed',
-    created_at: '2026-05-03T10:00:00.000Z',
-}
 
 function makeSession(history: SessionResume['history']): SessionResume {
     return {
@@ -43,12 +23,6 @@ function makeSession(history: SessionResume['history']): SessionResume {
 function renderComponent(overrides: Partial<ComponentProps<typeof HistoryItemDetail>> = {}) {
     return render(
         <HistoryItemDetail
-            item={baseItem}
-            editingHistoryId={null}
-            renamingHistoryId={null}
-            deletingHistoryId={null}
-            renameValue=""
-            historyFileNameMaxLength={100}
             selectedSessionId={null}
             session={null}
             isLoadingSession={false}
@@ -57,12 +31,6 @@ function renderComponent(overrides: Partial<ComponentProps<typeof HistoryItemDet
             thinkingLogsByOutputId={{}}
             isLoadingThinkingLogs={false}
             thinkingLogsError={null}
-            setRenameValue={vi.fn()}
-            startEditing={vi.fn()}
-            stopEditing={vi.fn()}
-            handleRenameSubmit={vi.fn()}
-            requestDelete={vi.fn()}
-            formatCreatedAt={(value: string) => value}
             {...overrides}
         />
     )
@@ -78,33 +46,7 @@ describe('HistoryItemDetail', () => {
         ).toBeInTheDocument()
     })
 
-    it('disables latest export buttons when session exists but has no output item', () => {
-        renderComponent({
-            selectedSessionId: 'session-1',
-            session: makeSession([
-                {
-                    type: 'message',
-                    id: 'message-1',
-                    role: 'user',
-                    content: 'hello',
-                    thinking_log: '',
-                    target_output_id: null,
-                    created_at: '2026-05-03T10:00:00.000Z',
-                },
-            ]),
-        })
-
-        const latestCsvButton = screen.getByRole('button', { name: 'Download latest as CSV' })
-        const latestExcelButton = screen.getByRole('button', { name: 'Download latest as Excel' })
-
-        expect(latestCsvButton).toBeDisabled()
-        expect(latestExcelButton).toBeDisabled()
-    })
-
-    it('downloads latest output csv and excel when output exists in session history', async () => {
-        mockDownloadSessionOutputCsvFile.mockResolvedValue(undefined)
-        mockDownloadSessionOutputExcelFile.mockResolvedValue(undefined)
-
+    it('renders only the session conversation when session context exists', () => {
         renderComponent({
             selectedSessionId: 'session-1',
             session: makeSession([
@@ -152,5 +94,10 @@ describe('HistoryItemDetail', () => {
                 'report.xlsx'
             )
         })
+
+        expect(screen.getByTestId('session-conversation-view')).toBeInTheDocument()
+        expect(screen.queryByText('Status')).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Edit Name' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Download latest as CSV' })).not.toBeInTheDocument()
     })
 })

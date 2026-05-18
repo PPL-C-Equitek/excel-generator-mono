@@ -29,7 +29,7 @@ describe('Verify Email Pending Page', () => {
     render(<VerifyEmailPendingPage />);
 
     expect(screen.getByText('pending@example.com')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /kirim ulang/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /resend/i })).toBeEnabled();
   });
 
   test('resend verification calls API and shows success status', async () => {
@@ -41,20 +41,20 @@ describe('Verify Email Pending Page', () => {
     });
 
     mockedAxios.post.mockResolvedValueOnce({
-      data: { message: 'Email verifikasi telah dikirim ulang' },
+      data: { message: 'Verification email sent successfully' },
     } as never);
 
     render(<VerifyEmailPendingPage />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /kirim ulang/i }));
+    await user.click(screen.getByRole('button', { name: /resend/i }));
 
     await waitFor(() => {
       expect(mockedAxios.post).toHaveBeenCalledWith(
         expect.stringContaining('/auth/resend-verification/'),
         { email: 'pending@example.com' }
       );
-      expect(screen.getByText(/email verifikasi telah dikirim ulang/i)).toBeInTheDocument();
+      expect(screen.getByText(/verification email sent successfully/i)).toBeInTheDocument();
     });
   });
 
@@ -66,7 +66,7 @@ describe('Verify Email Pending Page', () => {
     render(<VerifyEmailPendingPage />);
 
     expect(screen.queryByText('pending@example.com')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /kirim ulang/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /resend/i })).toBeDisabled();
   });
 
   test('shows resend error message when request fails', async () => {
@@ -82,7 +82,7 @@ describe('Verify Email Pending Page', () => {
     render(<VerifyEmailPendingPage />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /kirim ulang/i }));
+    await user.click(screen.getByRole('button', { name: /resend/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/mail service down/i)).toBeInTheDocument();
@@ -101,7 +101,7 @@ describe('Verify Email Pending Page', () => {
     render(<VerifyEmailPendingPage />);
 
     expect(
-      screen.getByText(/kami telah mengirim ulang link verifikasi/i)
+      screen.getByText(/we have resent the verification link/i)
     ).toBeInTheDocument();
   });
 
@@ -116,7 +116,7 @@ describe('Verify Email Pending Page', () => {
     render(<VerifyEmailPendingPage />);
 
     expect(
-      screen.getByText(/silakan cek inbox untuk link verifikasi terbaru/i)
+      screen.getByText(/please check your inbox for the latest verification link/i)
     ).toBeInTheDocument();
   });
 });
