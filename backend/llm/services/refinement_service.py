@@ -17,6 +17,12 @@ from llm.services.refinement_quality_rules import (
     TableHeaderOverlapRule,
     TableRowsNotEmptyRule,
 )
+from llm.services.refinement_stop_policies import (
+    CompositeRefinementStopPolicy,
+    ExitOnValidStopPolicy,
+    PlateauStopPolicy,
+    RefinementIterationState,
+)
 
 
 _REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
@@ -336,6 +342,12 @@ class RefinementOrchestrator:
         has_valid_candidate = False
         stagnation_count = 0
         plateau_patience = max(1, int(refinement_config.plateau_patience))
+        stop_policy = CompositeRefinementStopPolicy(
+            policies=[
+                ExitOnValidStopPolicy(enabled=refinement_config.early_exit_on_valid),
+                PlateauStopPolicy(enabled=refinement_config.early_exit_on_plateau),
+            ]
+        )
 
         previous_candidate = None
         previous_validation_log = None
@@ -378,16 +390,18 @@ class RefinementOrchestrator:
 
             is_valid = validation_log["verdict"] == "valid"
             has_valid_candidate = has_valid_candidate or is_valid
-            if is_valid and refinement_config.early_exit_on_valid:
+            stop_decision = stop_policy.should_stop(
+                RefinementIterationState(
+                    iteration=iteration,
+                    max_iterations=max_iterations,
+                    is_valid=is_valid,
+                    has_valid_candidate=has_valid_candidate,
+                    stagnation_count=stagnation_count,
+                    plateau_patience=plateau_patience,
+                )
+            )
+            if stop_decision.should_stop:
                 early_exit_triggered = iteration < max_iterations
-                break
-            if (
-                not has_valid_candidate
-                and refinement_config.early_exit_on_plateau
-                and iteration < max_iterations
-                and stagnation_count >= plateau_patience
-            ):
-                early_exit_triggered = True
                 break
 
             previous_candidate = sanitized_candidate
