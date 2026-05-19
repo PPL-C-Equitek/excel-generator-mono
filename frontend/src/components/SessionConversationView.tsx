@@ -302,7 +302,18 @@ function renderThinkingPanelForOutput(
     return <ReasoningProcessPanel steps={reasoningSteps} />;
   }
 
-  return <ThinkingPanel status={THINKING_PANEL_STATUS.success} content={content} />;
+  if (!content) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4">
+      <p className="font-semibold text-gray-900">Thinking log</p>
+      <div className="mt-3 whitespace-pre-wrap rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+        {content}
+      </div>
+    </div>
+  );
 }
 
 function SessionHistoryBubble({

@@ -144,6 +144,7 @@ describe('SessionConversationView', () => {
 
         expect(screen.getByText('Resume Session')).toBeInTheDocument()
         expect(screen.getAllByText('Tolong lanjutkan.').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getByText('Thinking log')).toBeInTheDocument()
         expect(screen.getByText('Server log')).toBeInTheDocument()
         expect(screen.queryByText('Session fallback log')).not.toBeInTheDocument()
 
