@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import SchemaSelector from '@/components/SchemaSelector'
+import ReasoningProcessPanel from '@/components/ReasoningProcessPanel'
 import Sidebar from '@/components/Sidebar'
 import UploadZone from '@/components/UploadZone'
 import { useConvertFlow } from '@/hooks/useConvertFlow'
@@ -102,40 +103,13 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
     )
     const visibleReasoningSteps = reasoningSteps.slice(0, visibleReasoningCount)
 
-    const renderReasoningSteps = (steps: string[], isWaitingForSteps: boolean) => (
-        <div data-testid="reasoning-steps">
-            <p className="font-semibold text-gray-900">Reasoning steps</p>
-            <div className="mt-3 space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
-                {steps.map((step, index) => (
-                    <div key={`${step}-${index}`} className="flex items-start gap-2">
-                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-700 text-[10px] font-bold text-white">
-                            {index + 1}
-                        </span>
-                        <span className="whitespace-pre-wrap">{step}</span>
-                    </div>
-                ))}
-
-                {isWaitingForSteps && (
-                    <div className="flex items-center gap-2 text-red-700">
-                        <div className="h-2 w-2 animate-pulse rounded-full bg-red-700" />
-                        <span>
-                            {steps.length > 0
-                                ? 'Preparing the thinking log...'
-                                : 'Waiting for backend reasoning steps...'}
-                        </span>
-                    </div>
-                )}
-            </div>
-        </div>
-    )
-
     const resultContent = (() => {
         if (isGenerating) {
-            return renderReasoningSteps([], true)
+            return <ReasoningProcessPanel />
         }
 
         if (isReasoningPlaybackPending) {
-            return renderReasoningSteps(visibleReasoningSteps, true)
+            return <ReasoningProcessPanel steps={visibleReasoningSteps} />
         }
 
         if (error && errorPhase === 'generating') {

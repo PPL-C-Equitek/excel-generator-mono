@@ -175,11 +175,11 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(screen.getByTestId('reasoning-steps')).toBeInTheDocument()
         })
 
-        it('shows backend reasoning wait text', () => {
+        it('shows thinking process loading text', () => {
             mockHookReturn.isConverting = true
             mockHookReturn.isGenerating = true
             render(<ConvertPage />)
-            expect(screen.getByText(/waiting for backend reasoning steps/i)).toBeInTheDocument()
+            expect(screen.getByText('Loading thinking process...')).toBeInTheDocument()
         })
 
         it('does not show error or output while loading', () => {
@@ -296,7 +296,7 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
                 })
 
                 expect(screen.getByText('Reviewed the uploaded file.')).toBeInTheDocument()
-                expect(screen.getByText('Preparing the thinking log...')).toBeInTheDocument()
+                expect(screen.getByText('Loading thinking process...')).toBeInTheDocument()
                 expect(screen.queryByText('Thinking log')).not.toBeInTheDocument()
             } finally {
                 vi.useRealTimers()

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import ReasoningProcessPanel from "@/components/ReasoningProcessPanel";
 import ThinkingPanel, { THINKING_PANEL_STATUS } from "@/components/ThinkingPanel";
 import type { SessionResume, SessionResumeHistoryItem } from "@/services/sessions";
 import type { ThinkingLogItem } from "@/services/thinkingLogs";
@@ -273,28 +274,6 @@ function getReasoningSteps(
   return [];
 }
 
-function renderReasoningSteps(steps: string[]) {
-  if (steps.length === 0) {
-    return null;
-  }
-
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <p className="text-sm font-semibold text-slate-900">Reasoning steps</p>
-      <div className="mt-3 space-y-3 text-sm text-slate-700">
-        {steps.map((step, index) => (
-          <div key={`${step}-${index}`} className="flex items-start gap-3">
-            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-700 text-[11px] font-bold text-white">
-              {index + 1}
-            </span>
-            <span className="whitespace-pre-wrap wrap-anywhere leading-6">{step}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function getThinkingPanelContent(
   item: SessionResumeHistoryItem,
   thinkingLogRecord?: ThinkingLogItem,
@@ -320,16 +299,7 @@ function renderThinkingPanelForOutput(
   }
 
   if (isLoadingThinkingLogs && !content) {
-    return (
-      <div className="space-y-3">
-        {renderReasoningSteps(reasoningSteps)}
-        <ThinkingPanel
-          status={THINKING_PANEL_STATUS.loading}
-          content=""
-          animated
-        />
-      </div>
-    );
+    return <ReasoningProcessPanel steps={reasoningSteps} />;
   }
 
   return <ThinkingPanel status={THINKING_PANEL_STATUS.success} content={content} />;
@@ -587,22 +557,7 @@ export default function SessionConversationView({
         <AssistantAvatar />
         <div className="max-w-2xl rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-gray-700 shadow-sm ring-1 ring-gray-200 lg:max-w-3xl">
           <span className="sr-only">AI Thinking</span>
-          {pendingReasoningSteps.length > 0 ? (
-            <div className="space-y-3">
-              {renderReasoningSteps(visibleReasoningSteps)}
-              <ThinkingPanel
-                status={THINKING_PANEL_STATUS.loading}
-                content=""
-                animated
-              />
-            </div>
-          ) : (
-            <ThinkingPanel
-              status={THINKING_PANEL_STATUS.loading}
-              content=""
-              animated
-            />
-          )}
+          <ReasoningProcessPanel steps={visibleReasoningSteps} />
         </div>
       </article>
     );

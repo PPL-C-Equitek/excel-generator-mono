@@ -501,7 +501,7 @@ describe('SessionConversationView', () => {
         expect(screen.getByText('Valid step B')).toBeInTheDocument()
     })
 
-    it('handles non-array non-object reasoning source without rendering reasoning steps', () => {
+    it('handles non-array non-object reasoning source with the standard loading panel', () => {
         render(
             <SessionConversationView
                 session={makeSession({
@@ -527,7 +527,7 @@ describe('SessionConversationView', () => {
             />
         )
 
-        expect(screen.queryByText('Reasoning steps')).not.toBeInTheDocument()
+        expect(screen.getByText('Reasoning steps')).toBeInTheDocument()
         expect(screen.getByText('Loading thinking process...')).toBeInTheDocument()
     })
 
