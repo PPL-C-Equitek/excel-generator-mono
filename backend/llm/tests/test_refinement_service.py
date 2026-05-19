@@ -24,6 +24,12 @@ from llm.services.refinement_quality_rules import (
     _collect_source_headers,
     _normalized_headers,
 )
+from llm.services.refinement_stop_policies import (
+    CompositeRefinementStopPolicy,
+    ExitOnValidStopPolicy,
+    PlateauStopPolicy,
+    RefinementIterationState,
+)
 from file_processing.services.export_service import OutputLLMValidationError
 
 
@@ -454,6 +460,52 @@ class RefinementQualityValidatorTest(SimpleTestCase):
         self.assertEqual(validator.validate(output_json="invalid", input_json={}), [])
 
 
+class RefinementStopPolicyTest(SimpleTestCase):
+    def test_composite_stop_policy_returns_valid_stop_before_plateau(self):
+        stop_policy = CompositeRefinementStopPolicy(
+            policies=[
+                ExitOnValidStopPolicy(enabled=True),
+                PlateauStopPolicy(enabled=True),
+            ]
+        )
+
+        decision = stop_policy.should_stop(
+            RefinementIterationState(
+                iteration=3,
+                max_iterations=5,
+                is_valid=True,
+                has_valid_candidate=True,
+                stagnation_count=2,
+                plateau_patience=2,
+            )
+        )
+
+        self.assertTrue(decision.should_stop)
+        self.assertEqual(decision.reason, "valid")
+
+    def test_composite_stop_policy_returns_continue_when_no_policy_matches(self):
+        stop_policy = CompositeRefinementStopPolicy(
+            policies=[
+                ExitOnValidStopPolicy(enabled=True),
+                PlateauStopPolicy(enabled=True),
+            ]
+        )
+
+        decision = stop_policy.should_stop(
+            RefinementIterationState(
+                iteration=2,
+                max_iterations=5,
+                is_valid=False,
+                has_valid_candidate=False,
+                stagnation_count=1,
+                plateau_patience=2,
+            )
+        )
+
+        self.assertFalse(decision.should_stop)
+        self.assertEqual(decision.reason, "none")
+
+
 class RefinementOrchestratorTest(SimpleTestCase):
     def _build_reasoning_service(self):
         return Mock()
@@ -830,6 +882,46 @@ class RefinementOrchestratorTest(SimpleTestCase):
 
         self.assertEqual(result["refinement_meta"]["iterations_run"], 5)
         self.assertFalse(result["refinement_meta"]["early_exit_triggered"])
+        self.assertEqual(generation_service.generate.call_count, 5)
+
+    def test_orchestrator_never_uses_plateau_stop_after_valid_candidate_found(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid-1"},
+            {
+                "document_info": {"source_type": "Excel", "filename": "report.xlsx"},
+                "summary": {"total_tables": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["item"],
+                        "rows": [{"item": "Pen"}],
+                    }
+                ],
+            },
+            {"status": "invalid-3"},
+            {"status": "invalid-4"},
+            {"status": "invalid-5"},
+        ]
+
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+
+        result = orchestrator.run(
+            input_json={"filename": "report.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=5,
+                early_exit_on_valid=False,
+                early_exit_on_plateau=True,
+                plateau_patience=2,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 5)
+        self.assertFalse(result["refinement_meta"]["early_exit_triggered"])
+        self.assertEqual(result["refinement_meta"]["final_status"], "valid")
         self.assertEqual(generation_service.generate.call_count, 5)
 
     # Edge
