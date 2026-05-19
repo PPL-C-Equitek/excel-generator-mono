@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import SchemaSelector from '@/components/SchemaSelector'
-import ReasoningProcessPanel from '@/components/ReasoningProcessPanel'
+import ReasoningProcessPanel, { ReasoningStepsDropdown } from '@/components/ReasoningProcessPanel'
 import Sidebar from '@/components/Sidebar'
 import UploadZone from '@/components/UploadZone'
 import { useConvertFlow } from '@/hooks/useConvertFlow'
@@ -127,6 +127,8 @@ export default function ConvertPage({ llmService: injectedService }: ConvertPage
 
         return (
             <div>
+                <ReasoningStepsDropdown steps={reasoningSteps} />
+
                 {thinkingLog && (
                     <div className="mb-4">
                         <p className="font-semibold text-gray-900">Thinking log</p>

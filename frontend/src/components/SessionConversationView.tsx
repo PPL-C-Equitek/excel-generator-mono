@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import ReasoningProcessPanel from "@/components/ReasoningProcessPanel";
+import ReasoningProcessPanel, { ReasoningStepsDropdown } from "@/components/ReasoningProcessPanel";
 import ThinkingPanel, { THINKING_PANEL_STATUS } from "@/components/ThinkingPanel";
 import type { SessionResume, SessionResumeHistoryItem } from "@/services/sessions";
 import type { ThinkingLogItem } from "@/services/thinkingLogs";
@@ -302,17 +302,19 @@ function renderThinkingPanelForOutput(
     return <ReasoningProcessPanel steps={reasoningSteps} />;
   }
 
-  if (!content) {
-    return null;
-  }
-
   return (
-    <div className="mb-4">
-      <p className="font-semibold text-gray-900">Thinking log</p>
-      <div className="mt-3 whitespace-pre-wrap rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
-        {content}
-      </div>
-    </div>
+    <>
+      <ReasoningStepsDropdown steps={reasoningSteps} />
+
+      {content ? (
+        <div className="mb-4">
+          <p className="font-semibold text-gray-900">Thinking log</p>
+          <div className="mt-3 whitespace-pre-wrap rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+            {content}
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
