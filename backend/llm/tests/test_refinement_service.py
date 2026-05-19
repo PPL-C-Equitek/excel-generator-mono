@@ -8,11 +8,6 @@ from llm.services.refinement_service import (
     _compact_validation_issues,
     _compact_validation_log_for_instruction,
     _collect_refinement_quality_errors,
-    _collect_headers_from_header_list,
-    _collect_headers_from_rows,
-    _collect_nested_source_headers,
-    _collect_source_headers,
-    _normalized_headers,
     _resolve_refinement_final_status,
     build_refinement_instruction,
     build_validation_log,
@@ -23,6 +18,11 @@ from llm.services.refinement_quality_rules import (
     SummaryTotalItemsRule,
     TableHeaderOverlapRule,
     TableRowsNotEmptyRule,
+    _collect_headers_from_header_list,
+    _collect_headers_from_rows,
+    _collect_nested_source_headers,
+    _collect_source_headers,
+    _normalized_headers,
 )
 from file_processing.services.export_service import OutputLLMValidationError
 
