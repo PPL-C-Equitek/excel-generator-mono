@@ -18,6 +18,12 @@ from llm.services.refinement_service import (
     build_validation_log,
     _sanitize_reasoning_meta_keys,
 )
+from llm.services.refinement_quality_rules import (
+    RefinementQualityValidator,
+    SummaryTotalItemsRule,
+    TableHeaderOverlapRule,
+    TableRowsNotEmptyRule,
+)
 from file_processing.services.export_service import OutputLLMValidationError
 
 
@@ -378,6 +384,74 @@ class RefinementHelpersTest(SimpleTestCase):
         compact_log = _compact_validation_log_for_instruction(validation_log)
 
         self.assertIs(compact_log, validation_log)
+
+
+class RefinementQualityValidatorTest(SimpleTestCase):
+    def test_validator_combines_rule_results_in_stable_order(self):
+        validator = RefinementQualityValidator(
+            rules=[
+                TableRowsNotEmptyRule(),
+                TableHeaderOverlapRule(),
+                SummaryTotalItemsRule(),
+            ]
+        )
+
+        issues = validator.validate(
+            output_json={
+                "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
+                "summary": {"total_items": 2},
+                "content_data": [
+                    {
+                        "table_name": "result",
+                        "headers": ["No", "Rumah", "Luas"],
+                        "rows": [],
+                    }
+                ],
+            },
+            input_json={
+                "content_data": [
+                    {
+                        "headers": ["ID", "Barang", "Harga"],
+                        "rows": [{"ID": "1", "Barang": "A", "Harga": 1000}],
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(
+            issues,
+            [
+                {
+                    "path": "$.content_data[0].rows",
+                    "message": "rows must not be empty for refinement quality checks.",
+                    "severity": "error",
+                },
+                {
+                    "path": "$.content_data[0].headers",
+                    "message": (
+                        "Output headers do not overlap with source-extracted headers, "
+                        "which indicates likely semantic mismatch."
+                    ),
+                    "severity": "error",
+                },
+                {
+                    "path": "$.summary.total_items",
+                    "message": "summary.total_items does not match the number of rows in content_data.",
+                    "severity": "error",
+                },
+            ],
+        )
+
+    def test_validator_returns_empty_list_for_non_object_payload(self):
+        validator = RefinementQualityValidator(
+            rules=[
+                TableRowsNotEmptyRule(),
+                TableHeaderOverlapRule(),
+                SummaryTotalItemsRule(),
+            ]
+        )
+
+        self.assertEqual(validator.validate(output_json="invalid", input_json={}), [])
 
 
 class RefinementOrchestratorTest(SimpleTestCase):
