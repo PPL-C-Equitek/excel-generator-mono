@@ -11,6 +11,12 @@ from llm.services.reasoning_service import (
     LlmReasoningService,
     generate_conversion_reasoning_response,
 )
+from llm.services.refinement_quality_rules import (
+    RefinementQualityValidator,
+    SummaryTotalItemsRule,
+    TableHeaderOverlapRule,
+    TableRowsNotEmptyRule,
+)
 
 
 _REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
@@ -246,31 +252,14 @@ def _collect_refinement_quality_errors(
     output_json: Any,
     input_json: Any | None,
 ) -> list[dict[str, str]]:
-    if not isinstance(output_json, dict):
-        return []
-
-    content_data = output_json.get("content_data")
-    if not isinstance(content_data, list):
-        return []
-
-    source_headers = _collect_source_headers(input_json) if input_json is not None else set()
-    errors: list[dict[str, str]] = []
-    total_rows = 0
-    for table_index, table in enumerate(content_data):
-        if not isinstance(table, dict):
-            continue
-
-        table_errors, table_row_count = _collect_table_quality_errors(
-            table=table,
-            table_index=table_index,
-            source_headers=source_headers,
-        )
-        errors.extend(table_errors)
-        total_rows += table_row_count
-
-    errors.extend(_collect_summary_quality_errors(output_json, total_rows))
-
-    return errors
+    validator = RefinementQualityValidator(
+        rules=[
+            TableRowsNotEmptyRule(),
+            TableHeaderOverlapRule(),
+            SummaryTotalItemsRule(),
+        ]
+    )
+    return validator.validate(output_json=output_json, input_json=input_json)
 
 
 def build_validation_log(
@@ -336,7 +325,11 @@ def _compact_validation_issues(issues: Any, max_items: int) -> list[dict[str, st
         path = issue.get("path")
         message = issue.get("message")
         severity = issue.get("severity")
-        if not all(isinstance(value, str) and value.strip() for value in (path, message, severity)):
+        if not isinstance(path, str) or not path.strip():
+            continue
+        if not isinstance(message, str) or not message.strip():
+            continue
+        if not isinstance(severity, str) or not severity.strip():
             continue
         compact_issues.append(
             {
