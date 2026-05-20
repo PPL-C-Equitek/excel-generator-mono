@@ -15,6 +15,7 @@ from llm.services.refinement_service import (
 )
 from llm.services.refinement_quality_rules import (
     RefinementQualityValidator,
+    RefinementValidationContext,
     SummaryTotalItemsRule,
     TableHeaderOverlapRule,
     TableRowsNotEmptyRule,
@@ -384,6 +385,26 @@ class RefinementHelpersTest(SimpleTestCase):
             ],
         )
 
+    def test_compact_validation_issues_skips_non_string_and_blank_path(self):
+        issues = [
+            {"path": None, "message": "missing path", "severity": "error"},
+            {"path": "   ", "message": "blank path", "severity": "warning"},
+            {"path": "$.valid", "message": "kept", "severity": "error"},
+        ]
+
+        compacted = _compact_validation_issues(issues, max_items=5)
+
+        self.assertEqual(
+            compacted,
+            [
+                {
+                    "path": "$.valid",
+                    "message": "kept",
+                    "severity": "error",
+                }
+            ],
+        )
+
     def test_compact_validation_log_for_instruction_returns_non_dict_unchanged(self):
         validation_log = ["invalid-structure"]
 
@@ -393,6 +414,34 @@ class RefinementHelpersTest(SimpleTestCase):
 
 
 class RefinementQualityValidatorTest(SimpleTestCase):
+    def test_table_rows_not_empty_rule_returns_empty_when_content_data_is_not_list(self):
+        rule = TableRowsNotEmptyRule()
+
+        errors = rule.evaluate(
+            RefinementValidationContext(
+                output_json={"content_data": "not-a-list"},
+                input_json=None,
+                source_headers=set(),
+                total_rows=0,
+            )
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_table_header_overlap_rule_returns_empty_when_content_data_is_not_list(self):
+        rule = TableHeaderOverlapRule()
+
+        errors = rule.evaluate(
+            RefinementValidationContext(
+                output_json={"content_data": "not-a-list"},
+                input_json=None,
+                source_headers={"id"},
+                total_rows=0,
+            )
+        )
+
+        self.assertEqual(errors, [])
+
     def test_validator_combines_rule_results_in_stable_order(self):
         validator = RefinementQualityValidator(
             rules=[
