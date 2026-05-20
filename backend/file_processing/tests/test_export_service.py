@@ -486,6 +486,10 @@ class GenerateCSVTest(unittest.TestCase):
         def build_filename(self, sheet_name):
             return "   "
 
+    class UnsafeFileNamePolicy:
+        def build_filename(self, sheet_name):
+            return "../Report/Jan.csv"
+
     def _build_mapped_output(self):
         return {
             "sheets": [
@@ -864,6 +868,39 @@ class GenerateCSVTest(unittest.TestCase):
                     ["A-1", "15000"],
                 ],
             )
+
+    def test_generate_csv_download_artifact_sanitizes_and_dedupes_sheet_names(self):
+        mapped_output = self._build_mapped_output()
+        mapped_output["sheets"] = [
+            {
+                "name": "Report/Jan",
+                "headers": ["sku"],
+                "rows": [["A-1"]],
+            },
+            {
+                "name": "Report:Jan",
+                "headers": ["sku"],
+                "rows": [["B-2"]],
+            },
+        ]
+
+        result = export_service.generate_csv_download_artifact(mapped_output)
+
+        with zipfile.ZipFile(io.BytesIO(result["content"]), "r") as archive:
+            self.assertEqual(
+                archive.namelist(),
+                ["Report_Jan.csv", "Report_Jan_1.csv"],
+            )
+
+    def test_generate_csv_normalizes_unsafe_filename_from_policy(self):
+        mapped_output = self._build_mapped_output()
+
+        result = export_service.generate_csv(
+            mapped_output,
+            filename_policy=self.UnsafeFileNamePolicy(),
+        )
+
+        self.assertEqual(result["files"][0]["name"], "Report_Jan.csv")
 
 
 class ExportCSVToFilesystemTest(unittest.TestCase):
@@ -1765,3 +1802,128 @@ class DiscoverExcelDownloadArtifactsTest(unittest.TestCase):
         ):
             with self.assertRaises(export_service.OutputExcelDownloadStorageError):
                 export_service._discover_excel_download_artifacts(r"C:\safe\storage")
+
+
+class CSVFilenameHelperFunctionsTest(unittest.TestCase):
+    """Tests for CSV filename normalization and deduplication helper functions."""
+
+    def test_normalize_csv_filename_returns_normalized_name_for_valid_filenames(self):
+        result = export_service._normalize_csv_filename("Report_Q1.csv", 0)
+        self.assertEqual(result, "Report_Q1.csv")
+
+    def test_normalize_csv_filename_replaces_path_separators_with_underscores(self):
+        filename = f"Reports{os.sep}Q1{os.sep}Data.csv"
+        result = export_service._normalize_csv_filename(filename, 0)
+        self.assertNotIn(os.sep, result)
+        self.assertIn("_", result)
+
+    def test_normalize_csv_filename_removes_invalid_characters(self):
+        filename = "Report<>|\"*.csv"
+        result = export_service._normalize_csv_filename(filename, 0)
+        self.assertNotIn("<", result)
+        self.assertNotIn(">", result)
+        self.assertNotIn("|", result)
+        self.assertNotIn('"', result)
+        self.assertNotIn("*", result)
+
+    def test_normalize_csv_filename_strips_leading_dots_and_periods(self):
+        filename = "...Report.csv"
+        result = export_service._normalize_csv_filename(filename, 0)
+        self.assertFalse(result.startswith("."))
+
+    def test_normalize_csv_filename_generates_default_sheet_name_when_filename_only_contains_dots(self):
+        """Test line 699: base_name = f"Sheet{sheet_index + 1}" when filename normalizes to only dots."""
+        filename = "..."
+        result = export_service._normalize_csv_filename(filename, 0)
+        self.assertEqual(result, "Sheet1")
+
+    def test_normalize_csv_filename_generates_default_sheet_name_for_empty_filename(self):
+        """Test line 699: base_name = f"Sheet{sheet_index + 1}" when filename is empty."""
+        filename = ""
+        result = export_service._normalize_csv_filename(filename, 0)
+        self.assertEqual(result, "Sheet1")
+
+    def test_normalize_csv_filename_generates_default_sheet_name_for_whitespace_only_filename(self):
+        """Test line 699: base_name = f"Sheet{sheet_index + 1}" when filename is whitespace only."""
+        filename = "   "
+        result = export_service._normalize_csv_filename(filename, 0)
+        self.assertEqual(result, "Sheet1")
+
+    def test_normalize_csv_filename_uses_different_sheet_indices_for_multiple_default_names(self):
+        """Test that different sheet indices generate different default names."""
+        for sheet_index in range(5):
+            result = export_service._normalize_csv_filename("...", sheet_index)
+            self.assertEqual(result, f"Sheet{sheet_index + 1}")
+
+    def test_normalize_csv_filename_generates_default_name_when_special_chars_result_in_empty_name(self):
+        """Test line 699: default name when all characters are invalid/stripped."""
+        filename = "/////\\\\\\\\\\...."
+        result = export_service._normalize_csv_filename(filename, 2)
+        self.assertEqual(result, "Sheet3")
+
+    def test_ensure_csv_extension_returns_filename_unchanged_when_force_extension_false(self):
+        result = export_service._ensure_csv_extension("data.xlsx", force_extension=False)
+        self.assertEqual(result, "data.xlsx")
+
+    def test_ensure_csv_extension_returns_filename_unchanged_when_already_has_extension(self):
+        result = export_service._ensure_csv_extension("data.csv", force_extension=True)
+        self.assertEqual(result, "data.csv")
+
+    def test_ensure_csv_extension_adds_extension_to_filename_without_extension(self):
+        result = export_service._ensure_csv_extension("data", force_extension=True)
+        self.assertEqual(result, "data.csv")
+
+    def test_ensure_csv_extension_returns_sheet_csv_when_filename_is_empty_with_force_extension(self):
+        """Test lines 710-712: if not root: return "Sheet.csv" when filename is empty."""
+        result = export_service._ensure_csv_extension("", force_extension=True)
+        self.assertEqual(result, "Sheet.csv")
+
+    def test_dedupe_csv_filename_returns_unchanged_when_not_seen(self):
+        seen_filenames = set()
+        result = export_service._dedupe_csv_filename("report.csv", seen_filenames)
+        self.assertEqual(result, "report.csv")
+        self.assertIn("report.csv", seen_filenames)
+
+    def test_dedupe_csv_filename_returns_unique_filename_when_seen(self):
+        """Test lines 710-712: duplicate detection loop in _dedupe_csv_filename."""
+        seen_filenames = {"report.csv"}
+        result = export_service._dedupe_csv_filename("report.csv", seen_filenames)
+        self.assertEqual(result, "report_1.csv")
+        self.assertIn("report_1.csv", seen_filenames)
+
+    def test_dedupe_csv_filename_handles_multiple_duplicates(self):
+        """Test lines 710-712: multiple iterations of duplicate detection loop."""
+        seen_filenames = {"report.csv", "report_1.csv", "report_2.csv"}
+        result = export_service._dedupe_csv_filename("report.csv", seen_filenames)
+        self.assertEqual(result, "report_3.csv")
+        self.assertIn("report_3.csv", seen_filenames)
+
+    def test_dedupe_csv_filename_is_case_insensitive(self):
+        """Test that deduplication is case-insensitive (seen_filenames should contain lowercase)."""
+        seen_filenames = {"report.csv"}
+        result = export_service._dedupe_csv_filename("REPORT.CSV", seen_filenames)
+        self.assertEqual(result, "REPORT_1.CSV")
+
+    def test_dedupe_csv_filename_preserves_extension_for_duplicates(self):
+        """Test that the extension is preserved when adding duplicate index."""
+        seen_filenames = {"data.json"}
+        result = export_service._dedupe_csv_filename("data.json", seen_filenames)
+        self.assertEqual(result, "data_1.json")
+
+    def test_dedupe_csv_filename_handles_file_without_extension(self):
+        """Test deduplication for files without extensions."""
+        seen_filenames = {"report"}
+        result = export_service._dedupe_csv_filename("report", seen_filenames)
+        self.assertEqual(result, "report_1")
+
+    def test_dedupe_csv_filename_returns_unique_values_for_sequential_calls(self):
+        """Test that we can safely dedupe multiple files with same base name."""
+        seen_filenames = set()
+        result1 = export_service._dedupe_csv_filename("data.csv", seen_filenames)
+        result2 = export_service._dedupe_csv_filename("data.csv", seen_filenames)
+        result3 = export_service._dedupe_csv_filename("data.csv", seen_filenames)
+        
+        self.assertEqual(result1, "data.csv")
+        self.assertEqual(result2, "data_1.csv")
+        self.assertEqual(result3, "data_2.csv")
+        self.assertEqual(len(seen_filenames), 3)

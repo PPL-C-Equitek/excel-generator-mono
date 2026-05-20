@@ -205,24 +205,77 @@ def _sanitize_download_filename(candidate):
     return basename
 
 
-def _resolve_download_filename(requested_name, default_name, artifact_type):
+def _extract_original_filename_from_export_output(export_output_json):
+    """Extract the original filename from export_output_json.
+    
+    Args:
+        export_output_json: The export output JSON containing document_info
+    
+    Returns:
+        The original filename if found, otherwise None
+    """
+    if not isinstance(export_output_json, dict):
+        return None
+    
+    document_info = export_output_json.get("document_info")
+    if not isinstance(document_info, dict):
+        return None
+    
+    filename = document_info.get("filename")
+    if isinstance(filename, str) and filename.strip():
+        # Remove path components and return just the basename
+        return os.path.basename(filename.strip())
+    
+    return None
+
+
+def _resolve_expected_download_extension(artifact_type):
+    if artifact_type == "zip":
+        return ".zip"
+    if artifact_type == "xlsx":
+        return ".xlsx"
+    return ".csv"
+
+
+def _build_filename_from_export_output(export_output_json, expected_ext):
+    if not export_output_json:
+        return None
+
+    original_filename = _extract_original_filename_from_export_output(
+        export_output_json
+    )
+    if not original_filename:
+        return None
+
+    root = os.path.splitext(original_filename)[0]
+    return f"{root}{expected_ext}"
+
+
+def _ensure_expected_extension(filename, expected_ext):
+    root, ext = os.path.splitext(filename)
+    if ext.lower() == expected_ext:
+        return filename
+    if ext:
+        return f"{root}{expected_ext}"
+    return f"{filename}{expected_ext}"
+
+
+def _resolve_download_filename(
+    requested_name,
+    default_name,
+    artifact_type,
+    export_output_json=None,
+):
+    expected_ext = _resolve_expected_download_extension(artifact_type)
     safe_name = _sanitize_download_filename(requested_name)
     if not safe_name:
-        return default_name
+        derived_name = _build_filename_from_export_output(
+            export_output_json,
+            expected_ext,
+        )
+        return derived_name or default_name
 
-    if artifact_type == "zip":
-        expected_ext = ".zip"
-    elif artifact_type == "xlsx":
-        expected_ext = ".xlsx"
-    else:
-        expected_ext = ".csv"
-    root, ext = os.path.splitext(safe_name)
-    if ext.lower() != expected_ext:
-        if ext:
-            return f"{root}{expected_ext}"
-        return f"{safe_name}{expected_ext}"
-
-    return safe_name
+    return _ensure_expected_extension(safe_name, expected_ext)
 
 
 def _is_invalid_excel_download_id_error(error):
@@ -1012,6 +1065,7 @@ def _build_session_output_download_response(
         requested_name=request.query_params.get("filename"),
         default_name=artifact["file_name"],
         artifact_type=artifact["artifact_type"],
+        export_output_json=_normalize_session_output_export_payload(output),
     )
 
     return FileResponse(

@@ -27,6 +27,8 @@ Required structure:
 - content_data[*].table_name: non-empty unique string
 - content_data[*].headers: non-empty unique string array
 - content_data[*].rows: array of objects with keys matching headers exactly
+- if the source contains multiple distinct tables, output multiple content_data entries in source order
+- do not merge separate tables into a single content_data entry unless they are clearly the same table continued across pages
 
 Rules:
 - no markdown

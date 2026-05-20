@@ -42,6 +42,9 @@ function makeSession(overrides = {}) {
                 chat_id: null,
                 parent_output_id: null,
                 output_json: { summary: { total_rows: 1 } },
+                export_output_json: {
+                    document_info: { filename: 'invoice.pdf', source_type: 'PDF' },
+                },
                 thinking_log: 'Session fallback log',
                 reasoning: { step1: 'Normalisasi' },
                 created_at: '2026-04-10T10:01:00Z',
@@ -555,12 +558,12 @@ describe('SessionConversationView', () => {
             expect(mockDownloadSessionOutputCsvFile).toHaveBeenCalledWith(
                 'session-1',
                 'output-1',
-                'session-session-1-output-output-1.csv'
+                'invoice.csv'
             )
             expect(mockDownloadSessionOutputExcelFile).toHaveBeenCalledWith(
                 'session-1',
                 'output-1',
-                'session-session-1-output-output-1.xlsx'
+                'invoice.xlsx'
             )
         })
     })

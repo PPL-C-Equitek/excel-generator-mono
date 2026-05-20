@@ -56,6 +56,7 @@ _SCALAR_TYPES = (str, int, float, bool, type(None))
 _ALLOWED_SOURCE_TYPES = {"Excel", "PDF"}
 _REQUIRED_TOP_LEVEL_KEYS = {"document_info", "summary", "content_data"}
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+_CSV_FILENAME_INVALID_CHARS = re.compile(r"[\\/*?:\"<>|]")
 _EXCEL_SHEET_INVALID_CHARS = re.compile(r"[\\/*?:\[\]]")
 _EXCEL_ARTIFACT_TYPE = "xlsx"
 _EXCEL_FILE_ID_PREFIX = "xlsx_"
@@ -353,6 +354,7 @@ def generate_csv(mapped_output, sanitization_policy=None, filename_policy=None):
     )
 
     files = []
+    seen_filenames = set()
     for sheet_index, sheet in enumerate(sheets):
         files.append(
             _build_csv_file(
@@ -360,13 +362,20 @@ def generate_csv(mapped_output, sanitization_policy=None, filename_policy=None):
                 sheet_index=sheet_index,
                 sanitization_policy=sanitization_policy,
                 filename_policy=filename_policy,
+                seen_filenames=seen_filenames,
             )
         )
 
     return {"files": files}
 
 
-def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
+def _build_csv_file(
+    sheet,
+    sheet_index,
+    sanitization_policy,
+    filename_policy,
+    seen_filenames,
+):
     sheet_name, headers, rows = _validate_sheet_structure(
         sheet, sheet_index, OutputCSVGenerationError
     )
@@ -386,8 +395,18 @@ def _build_csv_file(sheet, sheet_index, sanitization_policy, filename_policy):
             "filename_policy.build_filename must return a non-empty string."
         )
 
+    normalized_filename = _normalize_csv_filename(filename, sheet_index)
+    normalized_filename = _ensure_csv_extension(
+        normalized_filename,
+        force_extension=isinstance(filename_policy, CSVFileNamePolicy),
+    )
+    normalized_filename = _dedupe_csv_filename(
+        normalized_filename,
+        seen_filenames,
+    )
+
     return {
-        "name": filename,
+        "name": normalized_filename,
         "content": _build_csv_content(normalized_headers, normalized_rows),
     }
 
@@ -665,6 +684,43 @@ def _normalize_excel_sheet_name(sheet_name, seen_names):
         duplicate_index += 1
 
     seen_names.add(candidate.lower())
+    return candidate
+
+
+def _normalize_csv_filename(filename, sheet_index):
+    trimmed = filename.strip()
+    base_name = trimmed
+    for separator in filter(None, (os.sep, os.altsep)):
+        base_name = base_name.replace(separator, "_")
+
+    base_name = _CSV_FILENAME_INVALID_CHARS.sub("_", base_name)
+    base_name = os.path.basename(base_name).lstrip("._").strip()
+    if not base_name or base_name.strip(".") == "":
+        base_name = f"Sheet{sheet_index + 1}"
+    return base_name
+
+
+def _ensure_csv_extension(filename, force_extension):
+    if not force_extension:
+        return filename
+
+    root, extension = os.path.splitext(filename)
+    if extension:
+        return filename
+    if not root:
+        return "Sheet.csv"
+    return f"{root}.csv"
+
+
+def _dedupe_csv_filename(filename, seen_filenames):
+    root, extension = os.path.splitext(filename)
+    candidate = f"{root}{extension}"
+    duplicate_index = 1
+    while candidate.lower() in seen_filenames:
+        candidate = f"{root}_{duplicate_index}{extension}"
+        duplicate_index += 1
+
+    seen_filenames.add(candidate.lower())
     return candidate
 
 

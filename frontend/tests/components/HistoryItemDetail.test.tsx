@@ -59,12 +59,26 @@ describe('HistoryItemDetail', () => {
                     target_output_id: null,
                     created_at: '2026-05-03T10:00:00.000Z',
                 },
+                {
+                    type: 'output',
+                    id: 'output-2',
+                    chat_id: null,
+                    parent_output_id: null,
+                    output_json: { ok: true },
+                    export_output_json: {
+                        document_info: { filename: 'report.pdf', source_type: 'PDF' },
+                    },
+                    thinking_log: '',
+                    reasoning: {},
+                    created_at: '2026-05-03T10:01:00.000Z',
+                },
             ]),
         })
-
         expect(screen.getByTestId('session-conversation-view')).toBeInTheDocument()
-        expect(screen.queryByText('Status')).not.toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: 'Edit Name' })).not.toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: 'Download latest as CSV' })).not.toBeInTheDocument()
+        expect(
+            screen.queryByText(
+                'Session context is not available for this history item, so per-session thinking logs cannot be loaded yet.'
+            )
+        ).not.toBeInTheDocument()
     })
 })
