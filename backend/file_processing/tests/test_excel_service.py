@@ -656,3 +656,9 @@ class ExcelServiceDirectUnitTests(SimpleTestCase):
 
         result = _xls_sheet_to_rows(mock_sheet)
         self.assertEqual(result, [])
+
+    def test_has_ole_signature_handles_exception_and_returns_false(self):
+        from file_processing.services.excel_service import _has_ole_signature
+        result = _has_ole_signature("/nonexistent_path_that_should_fail.xlsx")
+        self.assertIs(result, False)
+
