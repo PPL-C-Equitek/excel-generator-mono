@@ -1,9 +1,9 @@
 import io
 import builtins
 from unittest.mock import patch
-from django.test import TestCase
+from django.test import TestCase, SimpleTestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
-from file_processing.services.excel_service import process_uploaded_excel, _load_workbook
+from file_processing.services.excel_service import process_uploaded_excel, _load_workbook, _trim_trailing_nulls
 
 def _build_excel(sheets: dict) -> bytes:
     try:
@@ -600,3 +600,59 @@ class FileValidationTests(TestCase):
             response.json().get("message"),
             "Excel has too many sheets (maximum 100).",
         )
+
+
+class ExcelServiceDirectUnitTests(SimpleTestCase):
+    def test_load_workbook_corrupted_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            _load_workbook(io.BytesIO(b"corrupt data"))
+
+    def test_empty_xls_sheet_returns_empty_rows(self):
+        from file_processing.services.excel_service import parse_xls
+        import tempfile
+        import os
+        data = _build_xls({"Sheet1": []})
+        with tempfile.NamedTemporaryFile(suffix=".xls", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        try:
+            result = parse_xls(tmp_path)
+            self.assertEqual(result, {"Sheet1": []})
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_process_uploaded_excel_xlsx_with_ole_signature(self):
+        import tempfile
+        import os
+        data = _build_xls({"Sheet1": [["A", "B"], [1, 2]]})
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        try:
+            success, error, result = process_uploaded_excel(tmp_path)
+            self.assertTrue(success)
+            self.assertIsNone(error)
+            self.assertIn("Sheet1", result)
+            self.assertEqual(result["Sheet1"], [["A", "B"], ["1", "2"]])
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    @patch("file_processing.services.excel_service.parse_excel", side_effect=Exception("mocked exception"))
+    def test_process_uploaded_excel_general_exception(self, mock_parse):
+        success, error, data = process_uploaded_excel(io.BytesIO(b"some data"))
+        self.assertFalse(success)
+        self.assertEqual(error, "Invalid or corrupted Excel file.")
+        self.assertIsNone(data)
+
+    def test_xls_sheet_to_rows_with_zero_columns(self):
+        from unittest.mock import MagicMock
+        from file_processing.services.excel_service import _xls_sheet_to_rows
+        mock_sheet = MagicMock()
+        mock_sheet.nrows = 1
+        mock_sheet.ncols = 0
+        mock_sheet.cell_value = MagicMock()
+
+        result = _xls_sheet_to_rows(mock_sheet)
+        self.assertEqual(result, [])
