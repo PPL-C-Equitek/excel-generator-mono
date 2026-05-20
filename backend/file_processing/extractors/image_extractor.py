@@ -40,9 +40,25 @@ class ImageExtractor:
         preprocessor: BaseImagePreprocessor | None = None,
         factory: BaseOcrBundleFactory | None = None,
     ):
-        effective_factory = factory or DefaultOcrFactory()
-        self.ocr_engine = ocr_engine or effective_factory.create_engine()
-        self.preprocessor = preprocessor or effective_factory.create_preprocessor()
+        if factory is not None and ocr_engine is not None and preprocessor is not None:
+            raise ValueError(
+                "Factory is unused when both ocr_engine and preprocessor are provided."
+            )
+
+        effective_factory = None
+        if ocr_engine is None or preprocessor is None:
+            effective_factory = factory or DefaultOcrFactory()
+
+        self.ocr_engine = (
+            ocr_engine
+            if ocr_engine is not None
+            else effective_factory.create_engine()
+        )
+        self.preprocessor = (
+            preprocessor
+            if preprocessor is not None
+            else effective_factory.create_preprocessor()
+        )
 
     def _validate_extension(self, file_path: str) -> None:
         extension = os.path.splitext(file_path)[1].lower()

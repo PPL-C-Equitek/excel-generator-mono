@@ -46,6 +46,30 @@ class TestImageExtractor(SimpleTestCase):
         self.assertIs(extractor.ocr_engine, mock_engine)
         self.assertIs(extractor.preprocessor, mock_preprocessor)
 
+    @patch("file_processing.extractors.image_extractor.DefaultOcrFactory")
+    def test_factory_is_not_created_when_components_provided(self, mock_factory_cls):
+        engine = _DummyEngine("ignored", 0.0)
+        preprocessor = GrayscaleThresholdPreprocessor(apply_thresholding=False)
+
+        extractor = ImageExtractor(ocr_engine=engine, preprocessor=preprocessor)
+
+        mock_factory_cls.assert_not_called()
+        self.assertIs(extractor.ocr_engine, engine)
+        self.assertIs(extractor.preprocessor, preprocessor)
+
+    def test_factory_with_full_components_raises(self):
+        engine = _DummyEngine("ignored", 0.0)
+        preprocessor = GrayscaleThresholdPreprocessor(apply_thresholding=False)
+
+        with self.assertRaises(ValueError) as context:
+            ImageExtractor(
+                ocr_engine=engine,
+                preprocessor=preprocessor,
+                factory=MagicMock(spec=BaseOcrBundleFactory),
+            )
+
+        self.assertIn("Factory is unused", str(context.exception))
+
     def _make_temp_image(self, suffix=".png", fmt="PNG"):
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             path = temp_file.name
