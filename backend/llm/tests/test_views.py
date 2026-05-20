@@ -56,6 +56,7 @@ from llm.views import (
     _resolve_message_target_output,
     _resolve_send_message_session_context,
     _run_basic_generation,
+    _schedule_artifact_history_creation,
     _sanitize_output_json,
     _thinking_log_not_found_response,
     build_llm_generation_service,
@@ -1100,6 +1101,60 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             pass
 
         self.assertEqual(_estimate_payload_size_bytes(_NonSerializable()), 0)
+
+    @patch("llm.views.create_artifact_history")
+    @patch("llm.views.transaction.on_commit")
+    def test_schedule_artifact_history_creation_registers_on_commit_callback(
+        self,
+        mock_on_commit,
+        mock_create_artifact_history,
+    ):
+        request_user = self._build_verified_user(user_id=uuid4())
+        callbacks = []
+        mock_on_commit.side_effect = callbacks.append
+
+        _schedule_artifact_history_creation(
+            user=request_user,
+            input_json={"filename": "invoice.pdf"},
+            output_json={"headers": ["A"], "rows": [["1"]]},
+            session_id=uuid4(),
+        )
+
+        mock_on_commit.assert_called_once()
+        mock_create_artifact_history.assert_not_called()
+        self.assertEqual(len(callbacks), 1)
+
+        callbacks[0]()
+
+        mock_create_artifact_history.assert_called_once()
+
+    @patch("llm.views.logger")
+    @patch("llm.views.create_artifact_history")
+    @patch("llm.views.transaction.on_commit")
+    def test_schedule_artifact_history_creation_swallows_callback_errors(
+        self,
+        mock_on_commit,
+        mock_create_artifact_history,
+        mock_logger,
+    ):
+        request_user = self._build_verified_user(user_id=uuid4())
+        callbacks = []
+        mock_on_commit.side_effect = callbacks.append
+        mock_create_artifact_history.side_effect = RuntimeError("history failure")
+
+        _schedule_artifact_history_creation(
+            user=request_user,
+            input_json={"filename": "invoice.pdf"},
+            output_json={"headers": ["A"], "rows": [["1"]]},
+            session_id=uuid4(),
+        )
+
+        self.assertEqual(len(callbacks), 1)
+        callbacks[0]()
+
+        mock_logger.exception.assert_called_once_with(
+            "Unexpected error while creating artifact history after llm_generate persistence."
+        )
 
     def test_hydrate_previous_output_keeps_existing_previous_output(self):
         existing_previous_output = {"content_data": [{"rows": [{"status": "paid"}]}]}
@@ -2462,17 +2517,18 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         mock_service.generate.return_value = raw_output_json
         self.client.force_authenticate(user=self.user)
 
-        response = self.client.post(
-            "/llm/generate/",
-            {
-                "input_json": {
-                    "filename": "invoice.pdf",
-                    "extracted": "raw upload text",
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/llm/generate/",
+                {
+                    "input_json": {
+                        "filename": "invoice.pdf",
+                        "extracted": "raw upload text",
+                    },
+                    "refinement": {"enabled": False},
                 },
-                "refinement": {"enabled": False},
-            },
-            format="json",
-        )
+                format="json",
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("session_id", response.data)
@@ -2763,18 +2819,19 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         }
         self.client.force_authenticate(user=self.user)
 
-        response = self.client.post(
-            "/llm/generate/",
-            {
-                "input_json": {
-                    "filename": "invoice.pdf",
-                    "extracted": "raw upload text",
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/llm/generate/",
+                {
+                    "input_json": {
+                        "filename": "invoice.pdf",
+                        "extracted": "raw upload text",
+                    },
+                    "include_reasoning": False,
+                    "refinement": {"enabled": False},
                 },
-                "include_reasoning": False,
-                "refinement": {"enabled": False},
-            },
-            format="json",
-        )
+                format="json",
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(ArtifactHistory.objects.count(), 1)
@@ -2805,15 +2862,16 @@ class LlmGenerateSessionIntegrationTest(TestCase):
         session = Session.objects.create(owner=self.user, title="Existing Session")
         self.client.force_authenticate(user=self.user)
 
-        response = self.client.post(
-            "/llm/generate/",
-            {
-                "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
-                "session_id": str(session.id),
-                "refinement": {"enabled": False},
-            },
-            format="json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/llm/generate/",
+                {
+                    "input_json": {"filename": "invoice.pdf", "extracted": "raw upload text"},
+                    "session_id": str(session.id),
+                    "refinement": {"enabled": False},
+                },
+                format="json",
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["session_id"], str(session.id))
@@ -3991,6 +4049,8 @@ class SendMessageEdgeCaseTest(TestCase):
         )
 
         mock_build_summary.assert_called_once()
+        _, kwargs = mock_build_summary.call_args
+        self.assertTrue(kwargs["allow_async_refresh"])
         mock_generate.assert_called_once_with(summarized_history)
 
 class SendMessageSessionTitleGenerationTest(TestCase):
