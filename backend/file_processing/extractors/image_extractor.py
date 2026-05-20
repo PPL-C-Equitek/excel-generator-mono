@@ -18,11 +18,11 @@ import logging
 from PIL import Image
 
 from file_processing.extractors.ocr.base_ocr_engine import BaseOCREngine
-from file_processing.extractors.image_preprocessors import (
-    BaseImagePreprocessor,
-    GrayscaleThresholdPreprocessor,
+from file_processing.extractors.ocr.ocr_factory import (
+    BaseOcrBundleFactory,
+    DefaultOcrFactory,
 )
-from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
+from file_processing.extractors.image_preprocessors import BaseImagePreprocessor
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +38,11 @@ class ImageExtractor:
         ocr_engine: BaseOCREngine | None = None,
         *,
         preprocessor: BaseImagePreprocessor | None = None,
+        factory: BaseOcrBundleFactory | None = None,
     ):
-        self.ocr_engine = ocr_engine or TesseractEngine(apply_preprocessing=False)
-        self.preprocessor = preprocessor or GrayscaleThresholdPreprocessor()
+        effective_factory = factory or DefaultOcrFactory()
+        self.ocr_engine = ocr_engine or effective_factory.create_engine()
+        self.preprocessor = preprocessor or effective_factory.create_preprocessor()
 
     def _validate_extension(self, file_path: str) -> None:
         extension = os.path.splitext(file_path)[1].lower()
