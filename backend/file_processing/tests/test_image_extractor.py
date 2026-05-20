@@ -9,6 +9,10 @@ from PIL import Image
 from file_processing.extractors.image_extractor import ImageExtractor
 from file_processing.extractors.image_preprocessors import GrayscaleThresholdPreprocessor
 from file_processing.extractors.ocr.base_ocr_engine import BaseOCREngine
+from file_processing.extractors.ocr.ocr_factory import (
+    BaseOcrBundleFactory,
+    DefaultOcrFactory,
+)
 from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
 from file_processing.services.upload_service import _process_image
 
@@ -26,15 +30,45 @@ class _DummyEngine(BaseOCREngine):
 
 
 class TestImageExtractor(SimpleTestCase):
-    @patch("file_processing.extractors.image_extractor.TesseractEngine")
-    def test_default_engine_disables_internal_preprocessing(self, mock_tesseract_engine):
+    @patch("file_processing.extractors.image_extractor.DefaultOcrFactory")
+    def test_default_engine_uses_factory_bundle(self, mock_factory_cls):
+        mock_factory = MagicMock()
         mock_engine = MagicMock()
-        mock_tesseract_engine.return_value = mock_engine
+        mock_preprocessor = MagicMock()
+        mock_factory.create_engine.return_value = mock_engine
+        mock_factory.create_preprocessor.return_value = mock_preprocessor
+        mock_factory_cls.return_value = mock_factory
 
         extractor = ImageExtractor()
 
-        mock_tesseract_engine.assert_called_once_with(apply_preprocessing=False)
+        mock_factory.create_engine.assert_called_once_with()
+        mock_factory.create_preprocessor.assert_called_once_with()
         self.assertIs(extractor.ocr_engine, mock_engine)
+        self.assertIs(extractor.preprocessor, mock_preprocessor)
+
+    @patch("file_processing.extractors.image_extractor.DefaultOcrFactory")
+    def test_factory_is_not_created_when_components_provided(self, mock_factory_cls):
+        engine = _DummyEngine("ignored", 0.0)
+        preprocessor = GrayscaleThresholdPreprocessor(apply_thresholding=False)
+
+        extractor = ImageExtractor(ocr_engine=engine, preprocessor=preprocessor)
+
+        mock_factory_cls.assert_not_called()
+        self.assertIs(extractor.ocr_engine, engine)
+        self.assertIs(extractor.preprocessor, preprocessor)
+
+    def test_factory_with_full_components_raises(self):
+        engine = _DummyEngine("ignored", 0.0)
+        preprocessor = GrayscaleThresholdPreprocessor(apply_thresholding=False)
+
+        with self.assertRaises(ValueError) as context:
+            ImageExtractor(
+                ocr_engine=engine,
+                preprocessor=preprocessor,
+                factory=MagicMock(spec=BaseOcrBundleFactory),
+            )
+
+        self.assertIn("Factory is unused", str(context.exception))
 
     def _make_temp_image(self, suffix=".png", fmt="PNG"):
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
@@ -241,3 +275,40 @@ class TestImageExtractionHypothesis(SimpleTestCase):
         self.assertFalse(success)
         self.assertEqual(error, "Image OCR extraction failed.")
         self.assertIsNone(data)
+
+
+class TestOcrFactory(SimpleTestCase):
+    def test_base_factory_methods_raise_not_implemented(self):
+        class _CallsSuperFactory(BaseOcrBundleFactory):
+            def create_engine(self):
+                return super().create_engine()
+
+            def create_preprocessor(self):
+                return super().create_preprocessor()
+
+        factory = _CallsSuperFactory()
+        with self.assertRaises(NotImplementedError):
+            factory.create_engine()
+        with self.assertRaises(NotImplementedError):
+            factory.create_preprocessor()
+
+    @patch("file_processing.extractors.ocr.ocr_factory.TesseractEngine")
+    @patch("file_processing.extractors.ocr.ocr_factory.GrayscaleThresholdPreprocessor")
+    def test_default_factory_builds_expected_bundle(
+        self,
+        mock_preprocessor,
+        mock_tesseract_engine,
+    ):
+        mock_engine = MagicMock()
+        mock_preprocessor_instance = MagicMock()
+        mock_tesseract_engine.return_value = mock_engine
+        mock_preprocessor.return_value = mock_preprocessor_instance
+
+        factory = DefaultOcrFactory()
+        engine = factory.create_engine()
+        preprocessor = factory.create_preprocessor()
+
+        mock_tesseract_engine.assert_called_once_with(apply_preprocessing=False)
+        mock_preprocessor.assert_called_once_with()
+        self.assertIs(engine, mock_engine)
+        self.assertIs(preprocessor, mock_preprocessor_instance)
