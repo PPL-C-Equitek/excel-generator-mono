@@ -163,6 +163,20 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
         self.assertNotIn("Processing Method:", prompt)
         self.assertIn("Corrections Applied: 0", prompt)
 
+    def test_build_extraction_prompt_ocr_context_without_regions_skips_region_section(self):
+        prompt = build_extraction_prompt(
+            ocr_context={
+                "confidence_score": 72.0,
+                "confidence_level": "medium",
+                "document_type": "pdf",
+                "corrections_applied": ["teh->the"],
+            },
+        )
+
+        self.assertIn("## OCR_QUALITY_CONTEXT", prompt)
+        self.assertNotIn("Low-Confidence Regions (first 5):", prompt)
+        self.assertIn("Corrections Applied: 1", prompt)
+
     def test_build_extraction_prompt_supports_schema_chat_and_refinement_together(self):
         prompt = build_extraction_prompt(
             schema_hint="headers: [item]",

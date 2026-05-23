@@ -222,3 +222,21 @@ class OCRCleanupServiceTest(SimpleTestCase):
 
         self.assertEqual(summary["confidence_score"], 80.0)
         self.assertEqual(summary["correction_count"], 1)
+
+    def test_remove_space_before_punct_handles_empty_and_skips_space_before_punctuation(self):
+        self.assertEqual(OCRCleanupService._remove_space_before_punct(""), "")
+        self.assertEqual(OCRCleanupService._remove_space_before_punct("alpha   , beta"), "alpha, beta")
+
+    def test_spellchecker_candidate_returns_none_when_spellchecker_unavailable(self):
+        service = OCRCleanupService(spell_checker=None)
+        service.spell_checker = None
+
+        self.assertIsNone(service._spellchecker_candidate("invoice"))
+
+    def test_flatten_terms_covers_empty_and_non_normalized_chunks(self):
+        with patch("file_processing.services.ocr_cleanup_service.re.findall", return_value=["   ", "Alpha"]):
+            terms = _flatten_terms("ignored")
+
+        self.assertEqual(terms, {"alpha"})
+        self.assertEqual(_flatten_terms([]), set())
+        self.assertEqual(_flatten_terms(123), set())

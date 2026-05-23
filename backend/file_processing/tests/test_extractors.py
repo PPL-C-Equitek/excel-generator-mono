@@ -447,6 +447,33 @@ class TestTesseractEngine(TestCase):
         self.assertEqual(mock_pytesseract.image_to_data.call_count, 2)
 
     @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
+    def test_tesseract_extract_metadata_keeps_existing_winner_when_later_result_is_worse(self, mock_pytesseract):
+        mock_pytesseract.Output.DICT = "dict"
+        mock_pytesseract.image_to_data.side_effect = [
+            {
+                "text": ["better"],
+                "conf": [70.0],
+                "block_num": [1],
+                "par_num": [1],
+                "line_num": [1],
+            },
+            {
+                "text": ["worse"],
+                "conf": [60.0],
+                "block_num": [1],
+                "par_num": [1],
+                "line_num": [1],
+            },
+        ]
+
+        engine = TesseractEngine(apply_preprocessing=False, psm_modes=[3, 6])
+        result = engine.extract_text_with_metadata("img")
+
+        self.assertEqual(result["text"], "better")
+        self.assertEqual(result["avg_confidence"], 70.0)
+        self.assertEqual(mock_pytesseract.image_to_data.call_count, 2)
+
+    @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
     def test_tesseract_confidence_no_early_exit_when_below_threshold(self, mock_pytesseract):
         mock_pytesseract.Output.DICT = "dict"
         mock_pytesseract.image_to_data.side_effect = [
