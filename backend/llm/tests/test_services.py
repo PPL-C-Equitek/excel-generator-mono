@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from llm.services.generation_service import (
     _compact_input_json_for_prompt,
+    _extract_ocr_context,
     CustomSchemaNotFoundError,
     DjangoCustomSchemaPromptSource,
     JsonGenerationService,
@@ -192,6 +193,33 @@ class CompactInputJsonForPromptTest(SimpleTestCase):
             },
         )
         self.assertEqual(input_json, expected_original)
+
+    def test_extract_ocr_context_finds_nested_metadata_variants(self):
+        scenarios = (
+            ({"ocr_metadata": {"confidence_score": 91.0}}, 91.0),
+            ({"original_input_json": {"ocr_metadata": {"confidence_score": 82.0}}}, 82.0),
+            ({"input_json": {"ocr_metadata": {"confidence_score": 73.0}}}, 73.0),
+            ({"payload": {"ocr_metadata": {"confidence_score": 64.0}}}, 64.0),
+            ({"extracted": {"ocr_metadata": {"confidence_score": 55.0}}}, 55.0),
+        )
+
+        for payload, expected_confidence in scenarios:
+            with self.subTest(payload=payload):
+                context = _extract_ocr_context(payload)
+                self.assertEqual(context["confidence_score"], expected_confidence)
+
+    def test_extract_ocr_context_returns_none_for_list_and_empty_nested_payloads(self):
+        self.assertIsNone(_extract_ocr_context([{"ocr_metadata": {"confidence_score": 1.0}}]))
+        self.assertIsNone(
+            _extract_ocr_context(
+                {
+                    "original_input_json": {},
+                    "input_json": [],
+                    "payload": None,
+                    "extracted": {},
+                }
+            )
+        )
 
 
 class OpenAIClientServiceTest(SimpleTestCase):

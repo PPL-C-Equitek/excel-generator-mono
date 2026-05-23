@@ -423,6 +423,14 @@ class RefinementHelpersTest(SimpleTestCase):
             with self.subTest(payload=payload):
                 self.assertEqual(_extract_ocr_confidence(payload), expected)
 
+    def test_extract_ocr_confidence_ignores_non_numeric_direct_score_and_falls_back(self):
+        payload = {
+            "ocr_metadata": {"confidence_score": "high"},
+            "input_json": {"ocr_metadata": {"confidence_score": 44.0}},
+        }
+
+        self.assertEqual(_extract_ocr_confidence(payload), 44.0)
+
 
 class RefinementOrchestratorTest(SimpleTestCase):
     def _build_reasoning_service(self):
