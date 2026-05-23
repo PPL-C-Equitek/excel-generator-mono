@@ -165,6 +165,38 @@ class OCRCleanupService:
             return None
 
     @staticmethod
+    def _remove_space_before_punct(text: str) -> str:
+        """Remove whitespace immediately preceding punctuation characters.
+
+        This is implemented with a linear-time scan to avoid any chance of
+        catastrophic backtracking from complex regular expressions.
+        """
+        if not text:
+            return text
+        punct = {",", ".", ";", ":", "!", "?"}
+        out: list[str] = []
+        i = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
+            if ch.isspace():
+                # look ahead to the next non-space character
+                j = i
+                while j < n and text[j].isspace():
+                    j += 1
+                if j < n and text[j] in punct:
+                    # skip all whitespace that precedes punctuation
+                    i = j
+                    continue
+                # not before punctuation: preserve the original whitespace sequence
+                out.append(ch)
+                i += 1
+            else:
+                out.append(ch)
+                i += 1
+        return "".join(out)
+
+    @staticmethod
     def _extract_candidate_terms(schema_definitions: Any | None) -> set[str]:
         terms = set(_FALLBACK_DOMAIN_TERMS)
         terms.update(_flatten_terms(schema_definitions))
@@ -231,7 +263,7 @@ class OCRCleanupService:
                 corrections.append(correction)
 
         cleaned_line = " ".join(cleaned_tokens).strip()
-        cleaned_line = re.sub(r"\s+([,.;:!?])", r"\1", cleaned_line)
+        cleaned_line = self._remove_space_before_punct(cleaned_line)
         return cleaned_line, corrections
 
     def _clean_word(self, word: str, confidence: float, domain_terms: set[str]) -> tuple[str, str | None]:
