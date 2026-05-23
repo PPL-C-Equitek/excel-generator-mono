@@ -176,30 +176,47 @@ def _get_empty_page_numbers(extracted_data):
     return empty
 
 
+def _merge_ocr_results_into_extracted_data(extracted_data, ocr_data):
+    ocr_by_page = {p["page"]: p for p in ocr_data.get("content", [])}
+
+    for page in extracted_data["content"]:
+        if page["page"] not in ocr_by_page:
+            continue
+
+        ocr_page = ocr_by_page[page["page"]]
+        page["text"] = ocr_page["text"]
+        if "ocr_metadata" in ocr_page:
+            page["ocr_metadata"] = ocr_page["ocr_metadata"]
+
+    if ocr_data.get("ocr_metadata"):
+        extracted_data["ocr_metadata"] = ocr_data["ocr_metadata"]
+
+
+def _augment_empty_pdf_pages_with_ocr(file_path, extracted_data):
+    empty_pages = _get_empty_page_numbers(extracted_data)
+    if not empty_pages:
+        return extracted_data
+
+    ocr_data = OCRService.process_pdf_pages(file_path, empty_pages)
+    _merge_ocr_results_into_extracted_data(extracted_data, ocr_data)
+    return extracted_data
+
+
+def _extract_pdf_data(file_path):
+    extracted_data = NonOCRPDFService.extract_non_ocr_pdf_to_json(file_path)
+    if not _has_extracted_text(extracted_data):
+        return OCRService.process_pdf(file_path)
+
+    return _augment_empty_pdf_pages_with_ocr(file_path, extracted_data)
+
+
 def _process_pdf(file_path, uploaded_file):
     is_valid, error = validate_pdf(uploaded_file)
     if not is_valid:
         return False, error, None
 
     try:
-        extracted_data = NonOCRPDFService.extract_non_ocr_pdf_to_json(file_path)
-
-        if not _has_extracted_text(extracted_data):
-            extracted_data = OCRService.process_pdf(file_path)
-        else:
-            empty_pages = _get_empty_page_numbers(extracted_data)
-            if empty_pages:
-                ocr_data = OCRService.process_pdf_pages(file_path, empty_pages)
-                # Merge OCR results into the extracted data
-                ocr_by_page = {p["page"]: p for p in ocr_data.get("content", [])}
-                for page in extracted_data["content"]:
-                    if page["page"] in ocr_by_page:
-                        ocr_page = ocr_by_page[page["page"]]
-                        page["text"] = ocr_page["text"]
-                        if "ocr_metadata" in ocr_page:
-                            page["ocr_metadata"] = ocr_page["ocr_metadata"]
-                if ocr_data.get("ocr_metadata"):
-                    extracted_data["ocr_metadata"] = ocr_data["ocr_metadata"]
+        extracted_data = _extract_pdf_data(file_path)
     except Exception:
         logger.exception("Non-OCR extraction failed, fallback to OCR")
         extracted_data = OCRService.process_pdf(file_path)
