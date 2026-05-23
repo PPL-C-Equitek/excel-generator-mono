@@ -137,6 +137,17 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
         self.assertIn("Low-Confidence Regions (first 5):", prompt)
         self.assertIn("lncome", prompt)
 
+    def test_build_extraction_prompt_supports_string_ocr_context(self):
+        prompt = build_extraction_prompt(ocr_context="  OCR metadata as raw text  ")
+
+        self.assertIn("## OCR_QUALITY_CONTEXT", prompt)
+        self.assertIn("OCR metadata as raw text", prompt)
+
+    def test_build_extraction_prompt_ignores_blank_ocr_context(self):
+        prompt = build_extraction_prompt(ocr_context="   ")
+
+        self.assertNotIn("## OCR_QUALITY_CONTEXT", prompt)
+
     def test_build_extraction_prompt_supports_schema_chat_and_refinement_together(self):
         prompt = build_extraction_prompt(
             schema_hint="headers: [item]",

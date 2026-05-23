@@ -5,7 +5,7 @@ import zipfile
 import unittest
 import base64
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch, MagicMock, PropertyMock
 from PyPDF2.errors import PdfReadError
@@ -222,6 +222,43 @@ class TestOCRService(TestCase):
             OCRService._ocr_single_image("img")
 
         self.assertIn("OCR runtime error", str(context.exception))
+
+
+class TestUploadPdfProcessing(SimpleTestCase):
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    @patch("file_processing.services.upload_service.OCRService.process_pdf_pages")
+    @patch("file_processing.services.upload_service.validate_pdf")
+    def test_process_pdf_merges_page_and_document_ocr_metadata(
+        self,
+        mock_validate_pdf,
+        mock_process_pdf_pages,
+        mock_extract_non_ocr,
+    ):
+        mock_validate_pdf.return_value = (True, None)
+        mock_extract_non_ocr.return_value = {
+            "content": [
+                {"page": 1, "text": []},
+                {"page": 2, "text": ["kept text"]},
+            ]
+        }
+        mock_process_pdf_pages.return_value = {
+            "content": [
+                {
+                    "page": 1,
+                    "text": ["ocr text"],
+                    "ocr_metadata": {"confidence_score": 88.0},
+                }
+            ],
+            "ocr_metadata": {"confidence_score": 88.0},
+        }
+
+        success, error, data = upload_service._process_pdf("/tmp/example.pdf", SimpleUploadedFile("example.pdf", b"pdf"))
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(data["content"][0]["text"], ["ocr text"])
+        self.assertEqual(data["content"][0]["ocr_metadata"]["confidence_score"], 88.0)
+        self.assertEqual(data["ocr_metadata"]["confidence_score"], 88.0)
 
 
 class TestNonOCRPDFService(TestCase):

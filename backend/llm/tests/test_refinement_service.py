@@ -7,6 +7,7 @@ from llm.services.refinement_service import (
     RefinementOrchestrator,
     _compact_validation_issues,
     _compact_validation_log_for_instruction,
+    _extract_ocr_confidence,
     _collect_refinement_quality_errors,
     _collect_headers_from_header_list,
     _collect_headers_from_rows,
@@ -408,6 +409,19 @@ class RefinementHelpersTest(SimpleTestCase):
         compact_log = _compact_validation_log_for_instruction(validation_log)
 
         self.assertIs(compact_log, validation_log)
+
+    def test_extract_ocr_confidence_recurses_through_nested_wrappers(self):
+        scenarios = (
+            ({"ocr_metadata": {"confidence_score": 88.0}}, 88.0),
+            ({"original_input_json": {"ocr_metadata": {"confidence_score": 77.0}}}, 77.0),
+            ({"input_json": {"ocr_metadata": {"confidence_score": 66.0}}}, 66.0),
+            ({"payload": {"ocr_metadata": {"confidence_score": 55.0}}}, 55.0),
+            ({"not": "dict"}, None),
+        )
+
+        for payload, expected in scenarios:
+            with self.subTest(payload=payload):
+                self.assertEqual(_extract_ocr_confidence(payload), expected)
 
 
 class RefinementOrchestratorTest(SimpleTestCase):

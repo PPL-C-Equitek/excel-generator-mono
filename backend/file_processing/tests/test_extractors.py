@@ -317,6 +317,62 @@ class TestTesseractEngine(TestCase):
         self.assertEqual(mock_pytesseract.image_to_data.call_count, 1)
 
     @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
+    def test_tesseract_extract_metadata_with_custom_config_and_missing_geometry(self, mock_pytesseract):
+        mock_pytesseract.Output.DICT = "dict"
+        mock_pytesseract.image_to_data.return_value = {
+            "text": ["alpha"],
+            "conf": [91.0],
+            "block_num": [1],
+            "par_num": [1],
+            "line_num": [1],
+        }
+
+        engine = TesseractEngine(apply_preprocessing=False, custom_config="--psm 6")
+        result = engine.extract_text_with_metadata("img")
+
+        self.assertEqual(result["text"], "alpha")
+        self.assertEqual(result["word_details"][0]["left"], 0)
+        self.assertEqual(result["word_details"][0]["top"], 0)
+        self.assertEqual(result["word_details"][0]["width"], 0)
+        self.assertEqual(result["word_details"][0]["height"], 0)
+        self.assertEqual(mock_pytesseract.image_to_data.call_count, 1)
+
+    @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
+    def test_tesseract_extract_metadata_selects_best_psm(self, mock_pytesseract):
+        mock_pytesseract.Output.DICT = "dict"
+        mock_pytesseract.image_to_data.side_effect = [
+            {
+                "text": ["one"],
+                "conf": [60.0],
+                "block_num": [1],
+                "par_num": [1],
+                "line_num": [1],
+                "left": [1],
+                "top": [2],
+                "width": [3],
+                "height": [4],
+            },
+            {
+                "text": ["two"],
+                "conf": [95.0],
+                "block_num": [1],
+                "par_num": [1],
+                "line_num": [1],
+                "left": [5],
+                "top": [6],
+                "width": [7],
+                "height": [8],
+            },
+        ]
+
+        engine = TesseractEngine(apply_preprocessing=False, psm_modes=[3, 6])
+        result = engine.extract_text_with_metadata("img")
+
+        self.assertEqual(result["text"], "two")
+        self.assertEqual(result["avg_confidence"], 95.0)
+        self.assertEqual(mock_pytesseract.image_to_data.call_count, 2)
+
+    @patch("file_processing.extractors.ocr.tesseract_engine.pytesseract")
     def test_tesseract_confidence_no_early_exit_when_below_threshold(self, mock_pytesseract):
         mock_pytesseract.Output.DICT = "dict"
         mock_pytesseract.image_to_data.side_effect = [
