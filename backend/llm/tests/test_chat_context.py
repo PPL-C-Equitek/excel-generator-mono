@@ -135,6 +135,7 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
             schema_hint=None,
             refinement_instruction=None,
             chat_context=chat_ctx,
+            ocr_context=None,
         )
 
     def test_positive_no_chat_context_passes_none_to_prompt(self):
@@ -148,6 +149,7 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
             schema_hint=None,
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
 
     def test_positive_chat_context_passed_alongside_custom_schema(self):
@@ -165,6 +167,7 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
             schema_hint="schema: [A]",
             refinement_instruction=None,
             chat_context="Format tanggal DD/MM/YYYY",
+            ocr_context=None,
         )
 
     def test_negative_generate_still_works_without_chat_context(self):
@@ -184,6 +187,7 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
             schema_hint=None,
             refinement_instruction=None,
             chat_context="",
+            ocr_context=None,
         )
 
 
