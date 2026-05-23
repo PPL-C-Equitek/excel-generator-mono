@@ -12,6 +12,30 @@ from .reasoning_service import TextGenerationProvider, compose_system_prompt, ge
 _UPLOAD_PROMPT_NOISE_KEYS = {"status", "message", "size"}
 
 
+def _extract_ocr_context(payload: dict[str, Any] | list[Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+
+    direct_metadata = payload.get("ocr_metadata")
+    if isinstance(direct_metadata, dict) and direct_metadata:
+        return direct_metadata
+
+    for nested_key in ("original_input_json", "input_json", "payload"):
+        nested_payload = payload.get(nested_key)
+        if isinstance(nested_payload, (dict, list)):
+            nested_metadata = _extract_ocr_context(nested_payload)
+            if nested_metadata:
+                return nested_metadata
+
+    extracted = payload.get("extracted")
+    if isinstance(extracted, dict):
+        nested_metadata = _extract_ocr_context(extracted)
+        if nested_metadata:
+            return nested_metadata
+
+    return None
+
+
 def _normalize_user_prompt(payload: dict[str, Any]) -> None:
     user_prompt = payload.get("user_prompt")
     if not isinstance(user_prompt, str):
@@ -156,6 +180,7 @@ class LlmGenerationService:
             schema_hint=schema_prompt_fragment,
             refinement_instruction=refinement_instruction,
             chat_context=chat_context,
+            ocr_context=_extract_ocr_context(input_json),
         )
         effective_system_prompt = compose_system_prompt(
             self.base_system_prompt_provider(),

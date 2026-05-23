@@ -119,6 +119,24 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
         self.assertIn("## REFINEMENT", prompt)
         self.assertIn("Repair content_data row mapping.", prompt)
 
+    def test_build_extraction_prompt_includes_ocr_context_when_provided(self):
+        prompt = build_extraction_prompt(
+            ocr_context={
+                "confidence_score": 58.0,
+                "confidence_level": "low",
+                "document_type": "image",
+                "processing_method": "tesseract_multi_psm_layout_aware",
+                "low_confidence_regions": [{"text": "lncome", "confidence": 42.0}],
+                "corrections_applied": ["lncome->income"],
+            },
+        )
+
+        self.assertIn("## OCR_QUALITY_CONTEXT", prompt)
+        self.assertIn("Document Type: image", prompt)
+        self.assertIn("OCR Confidence: 58.0% (low)", prompt)
+        self.assertIn("Low-Confidence Regions (first 5):", prompt)
+        self.assertIn("lncome", prompt)
+
     def test_build_extraction_prompt_supports_schema_chat_and_refinement_together(self):
         prompt = build_extraction_prompt(
             schema_hint="headers: [item]",

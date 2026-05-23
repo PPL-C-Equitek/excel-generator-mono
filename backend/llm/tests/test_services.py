@@ -798,6 +798,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint=None,
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_not_called()
         json_generator.generate.assert_called_once_with(
@@ -829,6 +830,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint="Use only invoice_number and total_amount.",
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
         json_generator.generate.assert_called_once_with(
@@ -858,6 +860,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint="   ",
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
@@ -885,6 +888,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint=None,
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
         json_generator.generate.assert_called_once_with(
             input_json={"name": "Pen", "price": 5000},
@@ -916,6 +920,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint=None,
             refinement_instruction="Fix validation errors",
             chat_context=None,
+            ocr_context=None,
         )
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
@@ -949,6 +954,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint="Use only invoice_number and total_amount.",
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
         json_generator.generate.assert_called_once_with(
@@ -978,8 +984,46 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         self.assertEqual(first_result, {"status": "ok-1"})
         self.assertEqual(second_result, {"status": "ok-2"})
-        schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
-        self.assertEqual(json_generator.generate.call_count, 2)
+        self.assertEqual(schema_prompt_source.get_prompt_fragment.call_count, 1)
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_passes_ocr_context_from_input_json(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "Base prompt.",
+        )
+
+        result = service.generate(
+            {
+                "sheet": "Sheet1",
+                "ocr_metadata": {
+                    "confidence_score": 53.5,
+                    "confidence_level": "low",
+                    "document_type": "pdf",
+                },
+            }
+        )
+
+        self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint=None,
+            refinement_instruction=None,
+            chat_context=None,
+            ocr_context={
+                "confidence_score": 53.5,
+                "confidence_level": "low",
+                "document_type": "pdf",
+            },
+        )
+        schema_prompt_source.get_prompt_fragment.assert_not_called()
+        self.assertEqual(json_generator.generate.call_count, 1)
 
     @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_fetches_schema_fragment_for_distinct_schema_ids(

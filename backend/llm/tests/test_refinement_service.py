@@ -137,6 +137,36 @@ class RefinementValidationLogTest(SimpleTestCase):
             any("semantic mismatch" in issue["message"] for issue in log["errors"])
         )
 
+    def test_build_validation_log_relaxes_header_checks_for_low_confidence_ocr(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
+                "summary": {"total_items": 1},
+                "content_data": [
+                    {
+                        "table_name": "result",
+                        "headers": ["No", "Rumah", "Luas"],
+                        "rows": [{"No": "1", "Rumah": "A", "Luas": "100"}],
+                    }
+                ],
+            },
+            iteration=1,
+            input_json={
+                "ocr_metadata": {"confidence_score": 52.0, "confidence_level": "low"},
+                "content_data": [
+                    {
+                        "headers": ["ID", "Barang", "Harga"],
+                        "rows": [{"ID": "1", "Barang": "A", "Harga": 1000}],
+                    }
+                ],
+            },
+        )
+
+        self.assertNotEqual(log["verdict"], "invalid")
+        self.assertTrue(
+            any("relaxed" in warning["message"].lower() for warning in log["warnings"])
+        )
+
     def test_build_validation_log_marks_total_items_mismatch_as_invalid_quality(self):
         log = build_validation_log(
             {

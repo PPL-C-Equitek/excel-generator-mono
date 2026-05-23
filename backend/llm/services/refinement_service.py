@@ -31,6 +31,7 @@ _REFINEMENT_PREVIOUS_OUTPUT_MAX_CHARS = 6000
 _REFINEMENT_VALIDATION_LOG_MAX_CHARS = 3000
 _REFINEMENT_MAX_ISSUES_IN_INSTRUCTION = 12
 _DEFAULT_REFINEMENT_PLATEAU_PATIENCE = 2
+_LOW_CONFIDENCE_OCR_THRESHOLD = 60.0
 
 
 @dataclass(frozen=True)
@@ -176,10 +177,30 @@ def _normalized_headers(headers: Any) -> set[str]:
     }
 
 
+def _extract_ocr_confidence(payload: Any) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+
+    ocr_metadata = payload.get("ocr_metadata")
+    if isinstance(ocr_metadata, dict):
+        confidence_score = ocr_metadata.get("confidence_score")
+        if isinstance(confidence_score, (int, float)):
+            return float(confidence_score)
+
+    for nested_key in ("original_input_json", "input_json", "payload"):
+        nested_payload = payload.get(nested_key)
+        confidence = _extract_ocr_confidence(nested_payload)
+        if confidence is not None:
+            return confidence
+
+    return None
+
+
 def _collect_table_quality_errors(
     table: dict[str, Any],
     table_index: int,
     source_headers: set[str],
+    relax_header_checks: bool = False,
 ) -> tuple[list[dict[str, str]], int]:
     errors: list[dict[str, str]] = []
     total_rows = 0
@@ -197,7 +218,7 @@ def _collect_table_quality_errors(
 
     output_headers = _normalized_headers(table.get("headers"))
     has_overlap = bool(output_headers.intersection(source_headers))
-    if source_headers and output_headers and not has_overlap:
+    if source_headers and output_headers and not has_overlap and not relax_header_checks:
         errors.append(
             _build_quality_error(
                 f"$.content_data[{table_index}].headers",
@@ -254,6 +275,10 @@ def _collect_refinement_quality_errors(
         return []
 
     source_headers = _collect_source_headers(input_json) if input_json is not None else set()
+    ocr_confidence = _extract_ocr_confidence(input_json)
+    relax_header_checks = (
+        ocr_confidence is not None and ocr_confidence < _LOW_CONFIDENCE_OCR_THRESHOLD
+    )
     errors: list[dict[str, str]] = []
     total_rows = 0
     for table_index, table in enumerate(content_data):
@@ -264,6 +289,7 @@ def _collect_refinement_quality_errors(
             table=table,
             table_index=table_index,
             source_headers=source_headers,
+            relax_header_checks=relax_header_checks,
         )
         errors.extend(table_errors)
         total_rows += table_row_count
@@ -280,6 +306,17 @@ def build_validation_log(
 ) -> dict[str, Any]:
     structural_errors: list[dict[str, str]] = []
     warnings = _collect_ambiguity_warnings(output_json)
+    ocr_confidence = _extract_ocr_confidence(input_json)
+    if ocr_confidence is not None and ocr_confidence < _LOW_CONFIDENCE_OCR_THRESHOLD:
+        warnings.append(
+            {
+                "path": "$.ocr_metadata.confidence_score",
+                "message": (
+                    f"Input OCR confidence is {ocr_confidence:.1f}%, so header validation was relaxed."
+                ),
+                "severity": "warning",
+            }
+        )
     try:
         validate_output_llm(output_json)
         strict_schema_is_valid = True

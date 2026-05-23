@@ -194,7 +194,12 @@ def _process_pdf(file_path, uploaded_file):
                 ocr_by_page = {p["page"]: p for p in ocr_data.get("content", [])}
                 for page in extracted_data["content"]:
                     if page["page"] in ocr_by_page:
-                        page["text"] = ocr_by_page[page["page"]]["text"]
+                        ocr_page = ocr_by_page[page["page"]]
+                        page["text"] = ocr_page["text"]
+                        if "ocr_metadata" in ocr_page:
+                            page["ocr_metadata"] = ocr_page["ocr_metadata"]
+                if ocr_data.get("ocr_metadata"):
+                    extracted_data["ocr_metadata"] = ocr_data["ocr_metadata"]
     except Exception:
         logger.exception("Non-OCR extraction failed, fallback to OCR")
         extracted_data = OCRService.process_pdf(file_path)
