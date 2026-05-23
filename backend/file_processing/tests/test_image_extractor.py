@@ -56,6 +56,8 @@ class TestImageExtractor(SimpleTestCase):
 
             self.assertEqual(result["content"][0]["page"], 1)
             self.assertEqual(result["content"][0]["text"], ["line one", "line two"])
+            self.assertIn("ocr_metadata", result)
+            self.assertEqual(result["ocr_metadata"]["document_type"], "image")
         finally:
             os.unlink(path)
 
