@@ -4,10 +4,14 @@ from llm.services.openai_client import (
     OpenAIConfigurationError,
     OpenAIUpstreamError,
     generate_streaming_chat_response,
+    reset_chat_completion_client_cache,
 )
 
 
 class GenerateStreamingChatResponseTest(SimpleTestCase):
+    def setUp(self):
+        super().setUp()
+        reset_chat_completion_client_cache()
 
     def _make_stream(self, chunks):
         mock_stream = MagicMock()

@@ -1,12 +1,14 @@
 import itertools
 import json
 import logging
+import hashlib
 import time
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Callable, cast
 from uuid import UUID
 
 from django.conf import settings
+from django.core.cache import cache
 from chat_sessions.models import GeneratedOutput
 from artifact_history.services import create_artifact_history
 from django.db import transaction
@@ -16,6 +18,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from api.decorators import rate_limit
 from chat_sessions.services import (
     append_assistant_message,
     append_user_message,
@@ -94,6 +97,40 @@ THINKING_LOG_NOT_FOUND_DETAIL = "Thinking log not found."
 INVALID_THINKING_LOG_PAGINATION_DETAIL = "Invalid thinking log pagination request."
 INVALID_THINKING_LOG_IDENTIFIER_DETAIL = "Invalid thinking log identifier."
 MAX_THINKING_LOG_PAGE_SIZE = 100
+DEFAULT_LLM_GENERATE_RATE_LIMIT_PER_MINUTE = 20
+DEFAULT_LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS = 300
+_LLM_GENERATE_IDEMPOTENCY_HEADER = "Idempotency-Key"
+_LLM_GENERATE_IDEMPOTENCY_KEY_NAMESPACE = "llm_generate:idempotency"
+_LLM_GENERATE_IDEMPOTENCY_KEY_REUSED_DETAIL = (
+    "Idempotency-Key has already been used for a different request payload."
+)
+_LLM_GENERATE_IDEMPOTENCY_IN_PROGRESS_DETAIL = (
+    "Request with the same Idempotency-Key is still in progress."
+)
+
+
+def _resolve_llm_generate_rate_limit_per_minute(default: int = DEFAULT_LLM_GENERATE_RATE_LIMIT_PER_MINUTE) -> int:
+    raw_rate = getattr(settings, "LLM_GENERATE_RATE_LIMIT_PER_MINUTE", default)
+    try:
+        parsed_rate = int(raw_rate)
+    except (TypeError, ValueError):
+        return default
+    return parsed_rate if parsed_rate > 0 else default
+
+
+def _resolve_llm_generate_idempotency_ttl_seconds(
+    default: int = DEFAULT_LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS,
+) -> int:
+    raw_ttl = getattr(settings, "LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS", default)
+    try:
+        parsed_ttl = int(raw_ttl)
+    except (TypeError, ValueError):
+        return default
+    return parsed_ttl if parsed_ttl > 0 else default
+
+
+LLM_GENERATE_RATE_LIMIT_PER_MINUTE = _resolve_llm_generate_rate_limit_per_minute()
+LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS = _resolve_llm_generate_idempotency_ttl_seconds()
 
 
 def get_authenticated_user_id(user) -> object | None:
@@ -102,11 +139,171 @@ def get_authenticated_user_id(user) -> object | None:
     return getattr(user, "id", None)
 
 
+def _is_persistable_authenticated_user(user) -> bool:
+    return (
+        getattr(user, "is_authenticated", False)
+        and hasattr(user, "_meta")
+        and getattr(user, "pk", None) is not None
+    )
+
+
 def _require_json_content_type(request):
     content_type = (request.content_type or "").split(";", 1)[0].strip().lower()
     if content_type != _JSON_CONTENT_TYPE:
         return Response({"detail": UNSUPPORTED_MEDIA_TYPE_DETAIL}, status=415)
     return None
+
+
+def _llm_generate_rate_limit_key(request):
+    request_user = getattr(request, "user", None)
+    user_id = getattr(request_user, "id", None)
+    if getattr(request_user, "is_authenticated", False) and user_id is not None:
+        return f"user:{user_id}"
+
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if forwarded_for:
+        return f"ip:{forwarded_for.split(',', 1)[0].strip()}"
+    return f"ip:{request.META.get('REMOTE_ADDR', 'unknown')}"
+
+
+def _extract_llm_generate_idempotency_key(request) -> str | None:
+    raw_key = None
+    request_headers = getattr(request, "headers", None)
+    if hasattr(request_headers, "get"):
+        raw_key = request_headers.get(_LLM_GENERATE_IDEMPOTENCY_HEADER)
+    if raw_key is None:
+        raw_key = request.META.get("HTTP_IDEMPOTENCY_KEY")
+
+    if not isinstance(raw_key, str):
+        return None
+    normalized_key = raw_key.strip()
+    return normalized_key or None
+
+
+def _build_llm_generate_idempotency_cache_key(user, idempotency_key: str) -> str:
+    user_id = get_authenticated_user_id(user)
+    user_segment = str(user_id) if user_id is not None else "anonymous"
+    key_digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+    return f"{_LLM_GENERATE_IDEMPOTENCY_KEY_NAMESPACE}:{user_segment}:{key_digest}"
+
+
+def _compute_llm_generate_idempotency_request_hash(validated_data: dict[str, Any]) -> str:
+    serialized_payload = json.dumps(
+        validated_data,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(serialized_payload.encode("utf-8")).hexdigest()
+
+
+def _build_llm_generate_idempotency_response(
+    detail: str,
+    code: str,
+    status_code: int = 409,
+) -> Response:
+    return Response(
+        {
+            "detail": detail,
+            "code": code,
+        },
+        status=status_code,
+    )
+
+
+def _resolve_cached_llm_generate_idempotency_response(
+    cached_record: Any,
+    request_hash: str,
+) -> Response | None:
+    if not isinstance(cached_record, dict):
+        return None
+
+    cached_hash = cached_record.get("request_hash")
+    if cached_hash is not None and cached_hash != request_hash:
+        return _build_llm_generate_idempotency_response(
+            detail=_LLM_GENERATE_IDEMPOTENCY_KEY_REUSED_DETAIL,
+            code="llm_generate_idempotency_key_reused",
+        )
+
+    cached_state = cached_record.get("state")
+    if cached_state == "in_progress":
+        return _build_llm_generate_idempotency_response(
+            detail=_LLM_GENERATE_IDEMPOTENCY_IN_PROGRESS_DETAIL,
+            code="llm_generate_idempotency_in_progress",
+        )
+    if cached_state != "completed":
+        return None
+
+    cached_status = cached_record.get("status_code")
+    if not isinstance(cached_status, int):
+        return None
+
+    replayed_response = Response(cached_record.get("data"), status=cached_status)
+    replayed_response["X-Idempotency-Replayed"] = "true"
+    return replayed_response
+
+
+def _run_llm_generate_with_idempotency(
+    request,
+    validated_data: dict[str, Any],
+    execute_workflow: Callable[[], Response],
+) -> Response:
+    idempotency_key = _extract_llm_generate_idempotency_key(request)
+    if idempotency_key is None:
+        return execute_workflow()
+
+    request_hash = _compute_llm_generate_idempotency_request_hash(validated_data)
+    cache_key = _build_llm_generate_idempotency_cache_key(request.user, idempotency_key)
+    cached_response = _resolve_cached_llm_generate_idempotency_response(
+        cache.get(cache_key),
+        request_hash,
+    )
+    if cached_response is not None:
+        return cached_response
+
+    in_progress_record = {
+        "state": "in_progress",
+        "request_hash": request_hash,
+    }
+    lock_acquired = cache.add(
+        cache_key,
+        in_progress_record,
+        timeout=LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS,
+    )
+    if not lock_acquired:
+        cached_response = _resolve_cached_llm_generate_idempotency_response(
+            cache.get(cache_key),
+            request_hash,
+        )
+        if cached_response is not None:
+            return cached_response
+        return _build_llm_generate_idempotency_response(
+            detail=_LLM_GENERATE_IDEMPOTENCY_IN_PROGRESS_DETAIL,
+            code="llm_generate_idempotency_in_progress",
+        )
+
+    try:
+        workflow_response = execute_workflow()
+    except Exception:
+        cache.delete(cache_key)
+        raise
+
+    if workflow_response.status_code >= 500:
+        cache.delete(cache_key)
+        return workflow_response
+
+    cache.set(
+        cache_key,
+        {
+            "state": "completed",
+            "request_hash": request_hash,
+            "status_code": workflow_response.status_code,
+            "data": workflow_response.data,
+        },
+        timeout=LLM_GENERATE_IDEMPOTENCY_TTL_SECONDS,
+    )
+    return workflow_response
 
 
 def build_llm_generation_service(user=None) -> LlmGenerationService:
@@ -163,7 +360,10 @@ def _generate_reply_and_title_for_new_session(history, message):
         title = sanitize_session_title(data.get("title", "")) or "New Chat"
         return reply, title
     except Exception:
-        return generate_chat_response(history), generate_session_title_from_message(message)
+        fallback_reply = raw_result.strip() if isinstance(raw_result, str) else ""
+        if not fallback_reply:
+            fallback_reply = "Sorry, I couldn't generate a response."
+        return fallback_reply, generate_session_title_from_message(message)
 
 
 def _resolve_send_message_session_context(user, session_id):
@@ -179,7 +379,9 @@ def _resolve_send_message_session_context(user, session_id):
 
 def _generate_send_message_reply_and_title(session, history, message):
     prepared_history = (
-        build_history_with_summary(session, history) if session is not None else history
+        build_history_with_summary(session, history, allow_async_refresh=True)
+        if session is not None
+        else history
     )
     prepared_history = _inject_file_context_if_available(session, prepared_history)
     if session is None:
@@ -384,7 +586,7 @@ def _persist_generate_output_for_authenticated_user(
     bootstrap_message_content="",
     title="",
 ):
-    if not getattr(user, "is_authenticated", False):
+    if not _is_persistable_authenticated_user(user):
         return None, None, None, None
 
     try:
@@ -412,6 +614,33 @@ def _persist_generate_output_for_authenticated_user(
             "Unexpected error while persisting session-aware llm_generate output."
         )
         return None, None, None, Response({"detail": INTERNAL_FAILURE_DETAIL}, status=500)
+
+
+def _schedule_artifact_history_creation(
+    *,
+    user,
+    input_json,
+    output_json,
+    session_id,
+) -> None:
+    original_name = extract_original_name(input_json, output_json)
+
+    def _create_artifact_history_callback() -> None:
+        try:
+            create_artifact_history(
+                owner=user,
+                original_name=original_name,
+                custom_name=None,
+                session_id=session_id,
+                output_json=output_json,
+                status_processing="completed",
+            )
+        except Exception:
+            logger.exception(
+                "Unexpected error while creating artifact history after llm_generate persistence."
+            )
+
+    transaction.on_commit(_create_artifact_history_callback)
 
 
 def _build_generate_bootstrap_message(input_json, title):
@@ -645,14 +874,12 @@ class _LlmGenerateWorkflow:
         runtime.response_output_id = response_output_id
         runtime.response_chat_id = response_chat_id
 
-        if getattr(self.request.user, "is_authenticated", False):
-            create_artifact_history(
-                owner=self.request.user,
-                original_name=extract_original_name(runtime.input_json, runtime.output_json),
-                custom_name=None,
-                session_id=response_session_id,
+        if _is_persistable_authenticated_user(self.request.user):
+            _schedule_artifact_history_creation(
+                user=self.request.user,
+                input_json=runtime.input_json,
                 output_json=runtime.output_json,
-                status_processing="completed",
+                session_id=response_session_id,
             )
 
         return None
@@ -883,8 +1110,18 @@ def _execute_llm_generate_flow(
         )
     except Exception as exc:
         return _llm_generate_error_response(exc)
+
+
 @api_view(["POST"])
 @require_http_methods(["POST"])
+@permission_classes([IsAuthenticated, IsVerifiedUser])
+@rate_limit(
+    max_requests=LLM_GENERATE_RATE_LIMIT_PER_MINUTE,
+    per="minute",
+    key_func=_llm_generate_rate_limit_key,
+    error_detail="Too many llm_generate requests. Please try again later.",
+    error_code="llm_generate_rate_limited",
+)
 def llm_generate(request):
     content_type_error = _require_json_content_type(request)
     if content_type_error is not None:
@@ -898,8 +1135,11 @@ def llm_generate(request):
         )
 
     validated_data = cast(dict[str, Any], request_serializer.validated_data)
-    workflow = _LlmGenerateWorkflow(request, validated_data)
-    return workflow.run()
+    return _run_llm_generate_with_idempotency(
+        request=request,
+        validated_data=validated_data,
+        execute_workflow=lambda: _LlmGenerateWorkflow(request, validated_data).run(),
+    )
 
 @require_http_methods(["POST"])
 @api_view(["POST"])
@@ -969,7 +1209,11 @@ def send_message(request):
 def _build_stream_event_generator(request, session, history, message):
     reply_chunks = []
 
-    prepared_history = build_history_with_summary(session, history) if session is not None else history
+    prepared_history = (
+        build_history_with_summary(session, history, allow_async_refresh=True)
+        if session is not None
+        else history
+    )
     prepared_history = _inject_file_context_if_available(session, prepared_history)
 
     try:

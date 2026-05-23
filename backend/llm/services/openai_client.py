@@ -1,4 +1,7 @@
 from contextlib import contextmanager
+import math
+import json
+from threading import Lock
 from typing import Any
 
 from django.conf import settings
@@ -12,8 +15,19 @@ from openai import (
     RateLimitError,
 )
 
+from .settings_resolvers import (
+    resolve_positive_float_setting as _resolve_positive_float_setting,
+    resolve_positive_int_setting as _resolve_positive_int_setting,
+)
+
 
 _LLM_PROVIDER_FAILED = "LLM provider request failed."
+_DEFAULT_OPENAI_TIMEOUT_SECONDS = 30.0
+_DEFAULT_OPENAI_MAX_RETRIES = 2
+_DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_THRESHOLD_CHARS = 4000
+_DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MIN = 512
+_DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MAX = 4096
+_DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_RATIO = 1.0
 
 
 class OpenAIServiceError(Exception):
@@ -52,7 +66,7 @@ def handle_openai_exceptions():
 class OpenAITextGenerationProvider:
     def __init__(self):
         self._client: OpenAI | None = None
-        self._client_signature: tuple[str, str] | None = None
+        self._client_signature: tuple[str, str, float, int] | None = None
 
     def _get_client(self) -> OpenAI:
         signature = _resolve_client_signature()
@@ -66,12 +80,17 @@ class OpenAITextGenerationProvider:
             raise ValueError("Prompt must be a non-empty string.")
 
         client = self._get_client()
+        effective_system_prompt = _resolve_system_prompt(system_prompt)
         request_payload = {
             "model": settings.OPENAI_MODEL,
             "input": prompt,
         }
-
-        effective_system_prompt = _resolve_system_prompt(system_prompt)
+        request_payload.update(
+            _build_response_generation_options(
+                prompt=prompt,
+                system_prompt=effective_system_prompt,
+            )
+        )
         if effective_system_prompt:
             request_payload["instructions"] = effective_system_prompt
 
@@ -94,6 +113,13 @@ class OpenAITextGenerationProvider:
         return output_text
 
 
+_TEXT_PROVIDER_SINGLETON: OpenAITextGenerationProvider | None = None
+_TEXT_PROVIDER_LOCK = Lock()
+_CHAT_COMPLETION_CLIENT_SINGLETON: OpenAI | None = None
+_CHAT_COMPLETION_CLIENT_SIGNATURE: tuple[str, str, float, int, int] | None = None
+_CHAT_COMPLETION_CLIENT_LOCK = Lock()
+
+
 def _resolve_system_prompt(system_prompt: str | None = None) -> str:
     raw_prompt = settings.OPENAI_SYSTEM_PROMPT if system_prompt is None else system_prompt
     if not isinstance(raw_prompt, str):
@@ -101,25 +127,277 @@ def _resolve_system_prompt(system_prompt: str | None = None) -> str:
     return raw_prompt.strip()
 
 
-def _resolve_client_signature() -> tuple[str, str]:
-    api_key = settings.OPENAI_API_KEY.strip()
+def _resolve_client_signature() -> tuple[str, str, float, int]:
+    api_key_raw = getattr(settings, "OPENAI_API_KEY", "")
+    api_key = api_key_raw.strip() if isinstance(api_key_raw, str) else ""
     if not api_key:
         raise OpenAIConfigurationError("OPENAI_API_KEY is not configured.")
 
     base_url = getattr(settings, "OPENAI_BASE_URL", "")
     normalized_base_url = base_url.strip() if isinstance(base_url, str) else ""
-    return api_key, normalized_base_url
+    timeout_seconds = _resolve_openai_timeout_seconds()
+    max_retries = _resolve_openai_max_retries()
+    return api_key, normalized_base_url, timeout_seconds, max_retries
 
 
-def _build_client_from_signature(api_key: str, normalized_base_url: str) -> OpenAI:
+def _resolve_chat_completion_client_signature() -> tuple[str, str, float, int, int]:
+    api_key, normalized_base_url, timeout_seconds, max_retries = _resolve_client_signature()
+    # Include runtime OpenAI class identity so test patching and runtime swaps
+    # invalidate the cached chat client deterministically.
+    return api_key, normalized_base_url, timeout_seconds, max_retries, id(OpenAI)
+
+
+def _build_client_from_signature(
+    api_key: str,
+    normalized_base_url: str,
+    timeout_seconds: float,
+    max_retries: int,
+) -> OpenAI:
+    client_kwargs: dict[str, Any] = {
+        "api_key": api_key,
+        "timeout": timeout_seconds,
+        "max_retries": max_retries,
+    }
     if normalized_base_url:
-        return OpenAI(api_key=api_key, base_url=normalized_base_url)
-    return OpenAI(api_key=api_key)
+        client_kwargs["base_url"] = normalized_base_url
+    return OpenAI(**client_kwargs)
 
 
 def _build_client() -> OpenAI:
-    api_key, normalized_base_url = _resolve_client_signature()
-    return _build_client_from_signature(api_key, normalized_base_url)
+    signature = _resolve_client_signature()
+    return _build_client_from_signature(*signature)
+
+
+def _resolve_openai_timeout_seconds() -> float:
+    raw_value = getattr(settings, "OPENAI_TIMEOUT_SECONDS", _DEFAULT_OPENAI_TIMEOUT_SECONDS)
+    if isinstance(raw_value, bool):
+        return _DEFAULT_OPENAI_TIMEOUT_SECONDS
+    if isinstance(raw_value, (int, float)):
+        numeric_value = float(raw_value)
+        if numeric_value > 0:
+            return numeric_value
+        return _DEFAULT_OPENAI_TIMEOUT_SECONDS
+    if isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return _DEFAULT_OPENAI_TIMEOUT_SECONDS
+        try:
+            numeric_value = float(stripped_value)
+        except ValueError:
+            return _DEFAULT_OPENAI_TIMEOUT_SECONDS
+        if numeric_value > 0:
+            return numeric_value
+    return _DEFAULT_OPENAI_TIMEOUT_SECONDS
+
+
+def _resolve_openai_max_retries() -> int:
+    raw_value = getattr(settings, "OPENAI_MAX_RETRIES", _DEFAULT_OPENAI_MAX_RETRIES)
+    if isinstance(raw_value, bool):
+        return _DEFAULT_OPENAI_MAX_RETRIES
+    if isinstance(raw_value, int):
+        return raw_value if raw_value >= 0 else _DEFAULT_OPENAI_MAX_RETRIES
+    if isinstance(raw_value, float):
+        numeric_value = int(raw_value)
+        return numeric_value if numeric_value >= 0 else _DEFAULT_OPENAI_MAX_RETRIES
+    if isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return _DEFAULT_OPENAI_MAX_RETRIES
+        try:
+            numeric_value = int(stripped_value)
+        except ValueError:
+            return _DEFAULT_OPENAI_MAX_RETRIES
+        return numeric_value if numeric_value >= 0 else _DEFAULT_OPENAI_MAX_RETRIES
+    return _DEFAULT_OPENAI_MAX_RETRIES
+
+
+def _resolve_optional_openai_temperature() -> float | None:
+    raw_value = getattr(settings, "OPENAI_TEMPERATURE", None)
+    if raw_value in (None, "") or isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, (int, float)):
+        numeric_value = float(raw_value)
+    elif isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return None
+        try:
+            numeric_value = float(stripped_value)
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if 0 <= numeric_value <= 2:
+        return numeric_value
+    return None
+
+
+def _resolve_optional_openai_seed() -> int | None:
+    raw_value = getattr(settings, "OPENAI_SEED", None)
+    if raw_value in (None, "") or isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        return raw_value
+    if isinstance(raw_value, float):
+        return int(raw_value)
+    if isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return None
+        try:
+            return int(stripped_value)
+        except ValueError:
+            return None
+    return None
+
+
+def _resolve_optional_openai_max_output_tokens() -> int | None:
+    raw_value = getattr(settings, "OPENAI_MAX_OUTPUT_TOKENS", None)
+    if raw_value in (None, "") or isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        return raw_value if raw_value > 0 else None
+    if isinstance(raw_value, float):
+        numeric_value = int(raw_value)
+        return numeric_value if numeric_value > 0 else None
+    if isinstance(raw_value, str):
+        stripped_value = raw_value.strip()
+        if not stripped_value:
+            return None
+        try:
+            numeric_value = int(stripped_value)
+        except ValueError:
+            return None
+        return numeric_value if numeric_value > 0 else None
+    return None
+
+
+def _resolve_adaptive_max_output_tokens(prompt_context: str | None) -> int | None:
+    if not isinstance(prompt_context, str):
+        return None
+
+    normalized_prompt_context = prompt_context.strip()
+    if not normalized_prompt_context:
+        return None
+
+    threshold_chars = _resolve_positive_int_setting(
+        "OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_THRESHOLD_CHARS",
+        _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_THRESHOLD_CHARS,
+    )
+    if len(normalized_prompt_context) < threshold_chars:
+        return None
+
+    minimum_tokens = _resolve_positive_int_setting(
+        "OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_MIN",
+        _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MIN,
+    )
+    maximum_tokens = _resolve_positive_int_setting(
+        "OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_MAX",
+        _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MAX,
+    )
+    ratio = _resolve_positive_float_setting(
+        "OPENAI_ADAPTIVE_MAX_OUTPUT_TOKENS_RATIO",
+        _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_RATIO,
+    )
+
+    if maximum_tokens < minimum_tokens:
+        maximum_tokens = minimum_tokens
+
+    estimated_prompt_tokens = max(1, math.ceil(len(normalized_prompt_context) / 4))
+    adaptive_tokens = int(estimated_prompt_tokens * ratio)
+    adaptive_tokens = max(minimum_tokens, adaptive_tokens)
+    adaptive_tokens = min(maximum_tokens, adaptive_tokens)
+    return adaptive_tokens
+
+
+def _resolve_common_generation_options(
+    prompt_context: str | None = None,
+) -> tuple[float | None, int | None, int | None]:
+    temperature = _resolve_optional_openai_temperature()
+    seed = _resolve_optional_openai_seed()
+    max_output_tokens = _resolve_optional_openai_max_output_tokens()
+    if max_output_tokens is None:
+        max_output_tokens = _resolve_adaptive_max_output_tokens(prompt_context)
+    return temperature, seed, max_output_tokens
+
+
+def _apply_generation_options(
+    options: dict[str, Any],
+    temperature: float | None,
+    seed: int | None,
+    max_output_tokens: int | None,
+    *,
+    token_key: str,
+) -> dict[str, Any]:
+    if temperature is not None:
+        options["temperature"] = temperature
+    if seed is not None:
+        options["seed"] = seed
+    if max_output_tokens is not None:
+        options[token_key] = max_output_tokens
+    return options
+
+
+def _build_response_generation_options(
+    prompt: str,
+    system_prompt: str | None = None,
+) -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    prompt_context = prompt
+    if isinstance(system_prompt, str) and system_prompt.strip():
+        prompt_context = f"{system_prompt.strip()}\n{prompt}"
+
+    temperature, seed, max_output_tokens = _resolve_common_generation_options(
+        prompt_context
+    )
+    return _apply_generation_options(
+        options,
+        temperature,
+        seed,
+        max_output_tokens,
+        token_key="max_output_tokens",
+    )
+
+
+def _extract_message_content_for_budget(message: Any) -> str:
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        return json.dumps(content) if content is not None else ""
+    if isinstance(message, str):
+        return message
+    return ""
+
+
+def _build_prompt_context_from_messages(messages: list[dict]) -> str:
+    parts: list[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        content = _extract_message_content_for_budget(message)
+        if isinstance(role, str) and role.strip():
+            parts.append(f"{role.strip()}: {content}")
+        else:
+            parts.append(content)
+    return "\n".join(parts)
+
+
+def _build_chat_generation_options(messages: list[dict]) -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    prompt_context = _build_prompt_context_from_messages(messages)
+    temperature, seed, max_output_tokens = _resolve_common_generation_options(
+        prompt_context
+    )
+    return _apply_generation_options(
+        options,
+        temperature,
+        seed,
+        max_output_tokens,
+        token_key="max_completion_tokens",
+    )
 
 
 def _map_api_status_to_http(status_code: int | None) -> int:
@@ -146,6 +424,7 @@ def _generate_text_via_chat_completions(
         response = client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=messages,
+            **_build_chat_generation_options(messages),
         )
 
     try:
@@ -181,8 +460,51 @@ def _normalize_chat_message_content(content: Any) -> str | None:
     return None
 
 
+def _get_text_generation_provider() -> OpenAITextGenerationProvider:
+    global _TEXT_PROVIDER_SINGLETON
+    if _TEXT_PROVIDER_SINGLETON is not None:
+        return _TEXT_PROVIDER_SINGLETON
+
+    with _TEXT_PROVIDER_LOCK:
+        if _TEXT_PROVIDER_SINGLETON is None:
+            _TEXT_PROVIDER_SINGLETON = OpenAITextGenerationProvider()
+        return _TEXT_PROVIDER_SINGLETON
+
+
+def _get_chat_completion_client() -> OpenAI:
+    global _CHAT_COMPLETION_CLIENT_SINGLETON, _CHAT_COMPLETION_CLIENT_SIGNATURE
+    signature = _resolve_chat_completion_client_signature()
+    if (
+        _CHAT_COMPLETION_CLIENT_SINGLETON is not None
+        and _CHAT_COMPLETION_CLIENT_SIGNATURE == signature
+    ):
+        return _CHAT_COMPLETION_CLIENT_SINGLETON
+
+    with _CHAT_COMPLETION_CLIENT_LOCK:
+        if (
+            _CHAT_COMPLETION_CLIENT_SINGLETON is None
+            or _CHAT_COMPLETION_CLIENT_SIGNATURE != signature
+        ):
+            _CHAT_COMPLETION_CLIENT_SINGLETON = _build_client()
+            _CHAT_COMPLETION_CLIENT_SIGNATURE = signature
+        return _CHAT_COMPLETION_CLIENT_SINGLETON
+
+
+def reset_text_generation_provider_cache() -> None:
+    global _TEXT_PROVIDER_SINGLETON
+    with _TEXT_PROVIDER_LOCK:
+        _TEXT_PROVIDER_SINGLETON = None
+
+
+def reset_chat_completion_client_cache() -> None:
+    global _CHAT_COMPLETION_CLIENT_SINGLETON, _CHAT_COMPLETION_CLIENT_SIGNATURE
+    with _CHAT_COMPLETION_CLIENT_LOCK:
+        _CHAT_COMPLETION_CLIENT_SINGLETON = None
+        _CHAT_COMPLETION_CLIENT_SIGNATURE = None
+
+
 def generate_text(prompt: str, system_prompt: str | None = None) -> str:
-    provider = OpenAITextGenerationProvider()
+    provider = _get_text_generation_provider()
     return provider.generate_text(prompt=prompt, system_prompt=system_prompt)
 
 
@@ -191,13 +513,14 @@ def generate_streaming_chat_response(messages: list[dict]):
     if not messages:
         raise ValueError("messages must be a non-empty list.")
 
-    client = _build_client()
+    client = _get_chat_completion_client()
 
     with handle_openai_exceptions():
         stream = client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=messages,
             stream=True,
+            **_build_chat_generation_options(messages),
         )
 
     try:
@@ -217,12 +540,13 @@ def generate_chat_response(messages: list[dict]) -> str:
     if not messages:
         raise ValueError("messages must be a non-empty list.")
 
-    client = _build_client()
+    client = _get_chat_completion_client()
 
     with handle_openai_exceptions():
         response = client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=messages,
+            **_build_chat_generation_options(messages),
         )
 
     try:

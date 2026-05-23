@@ -1,6 +1,11 @@
 import re
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from heapq import merge
+from threading import Lock
 from types import SimpleNamespace
+from typing import Protocol
 
 from django.conf import settings
 from django.db.models import Prefetch
@@ -8,6 +13,8 @@ from django.utils import timezone
 
 from chat_sessions.models import ChatMessage, GeneratedOutput, Session
 from llm.services.openai_client import generate_chat_response
+
+logger = logging.getLogger(__name__)
 
 
 SESSION_LIST_MAX_LIMIT = 50
@@ -478,6 +485,9 @@ def create_generated_output(
 SUMMARY_RECENT_MESSAGES_KEEP = 10
 
 SUMMARY_REFRESH_THRESHOLD = 10
+_DEFAULT_SUMMARY_REFRESH_WORKERS = 2
+_summary_refresh_executor: ThreadPoolExecutor | None = None
+_summary_refresh_executor_lock = Lock()
 
 
 def get_summary_threshold() -> int:
@@ -501,7 +511,201 @@ def summarize_old_messages(messages: list[dict]) -> str:
     return generate_chat_response([{"role": "user", "content": prompt}])
 
 
-def build_history_with_summary(session, full_history: list[dict]) -> list[dict]:
+def _resolve_summary_refresh_workers(default: int = _DEFAULT_SUMMARY_REFRESH_WORKERS) -> int:
+    raw_workers = getattr(settings, "CHAT_HISTORY_SUMMARY_REFRESH_WORKERS", default)
+    try:
+        parsed_workers = int(raw_workers)
+    except (TypeError, ValueError):
+        return default
+    return parsed_workers if parsed_workers > 0 else default
+
+
+def _get_summary_refresh_executor() -> ThreadPoolExecutor:
+    global _summary_refresh_executor
+    if _summary_refresh_executor is not None:
+        return _summary_refresh_executor
+
+    with _summary_refresh_executor_lock:
+        if _summary_refresh_executor is None:
+            _summary_refresh_executor = ThreadPoolExecutor(
+                max_workers=_resolve_summary_refresh_workers(),
+                thread_name_prefix="chat-summary-refresh",
+            )
+        return _summary_refresh_executor
+
+
+def _build_summary_message(summary: str) -> dict[str, str]:
+    return {
+        "role": "system",
+        "content": f"[Summary of earlier conversation]: {summary}",
+    }
+
+
+def _normalize_summary_watermark(value) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return normalized if normalized >= 0 else 0
+
+
+def _reload_persisted_summary_state(session) -> tuple[str, int]:
+    persisted_state = (
+        Session.objects.filter(id=session.id)
+        .values("history_summary", "history_summary_watermark")
+        .first()
+    )
+    if persisted_state is None:
+        return "", 0
+    return (
+        persisted_state.get("history_summary") or "",
+        _normalize_summary_watermark(persisted_state.get("history_summary_watermark")),
+    )
+
+
+def _resolve_summary_state_after_conflict(
+    session,
+    fallback_summary: str,
+    fallback_watermark: int,
+) -> tuple[str, int]:
+    cached_summary, summarized_watermark = _reload_persisted_summary_state(session)
+    if cached_summary:
+        return cached_summary, summarized_watermark
+    return fallback_summary, fallback_watermark
+
+
+def _persist_summary_if_unchanged(
+    session,
+    expected_summary: str,
+    expected_watermark: int,
+    new_summary: str,
+    new_watermark: int,
+) -> bool:
+    updated_rows = Session.objects.filter(
+        id=session.id,
+        history_summary=expected_summary,
+        history_summary_watermark=expected_watermark,
+    ).update(
+        history_summary=new_summary,
+        history_summary_watermark=new_watermark,
+        updated_at=timezone.now(),
+    )
+    if updated_rows:
+        session.history_summary = new_summary
+        session.history_summary_watermark = new_watermark
+        return True
+    return False
+
+
+@dataclass(frozen=True)
+class SummaryRefreshContext:
+    session: Session
+    old_messages: list[dict]
+    cached_summary: str
+    summarized_watermark: int
+    old_count: int
+
+
+class SummaryRefreshStrategy(Protocol):
+    def refresh(self, context: SummaryRefreshContext) -> tuple[str, int]:
+        """Return (cached_summary, summarized_watermark) after refresh step."""
+
+
+class SyncSummaryRefreshStrategy:
+    def refresh(self, context: SummaryRefreshContext) -> tuple[str, int]:
+        refreshed_summary = summarize_old_messages(context.old_messages)
+        persisted = _persist_summary_if_unchanged(
+            session=context.session,
+            expected_summary=context.cached_summary,
+            expected_watermark=context.summarized_watermark,
+            new_summary=refreshed_summary,
+            new_watermark=context.old_count,
+        )
+        if persisted:
+            return refreshed_summary, context.old_count
+        return _resolve_summary_state_after_conflict(
+            context.session,
+            fallback_summary=refreshed_summary,
+            fallback_watermark=context.old_count,
+        )
+
+
+class AsyncSummaryRefreshStrategy:
+    def refresh(self, context: SummaryRefreshContext) -> tuple[str, int]:
+        _schedule_async_summary_refresh(
+            session=context.session,
+            old_messages=context.old_messages,
+            expected_summary=context.cached_summary,
+            expected_watermark=context.summarized_watermark,
+            new_watermark=context.old_count,
+        )
+        return context.cached_summary, context.summarized_watermark
+
+
+_SYNC_SUMMARY_REFRESH_STRATEGY = SyncSummaryRefreshStrategy()
+_ASYNC_SUMMARY_REFRESH_STRATEGY = AsyncSummaryRefreshStrategy()
+
+
+def _resolve_summary_refresh_strategy(
+    *,
+    allow_async_refresh: bool,
+    cached_summary: str,
+) -> SummaryRefreshStrategy:
+    if allow_async_refresh and cached_summary:
+        return _ASYNC_SUMMARY_REFRESH_STRATEGY
+    return _SYNC_SUMMARY_REFRESH_STRATEGY
+
+
+def _refresh_summary_async_task(
+    *,
+    session_id,
+    old_messages: list[dict],
+    expected_summary: str,
+    expected_watermark: int,
+    new_watermark: int,
+) -> None:
+    try:
+        refreshed_summary = summarize_old_messages(old_messages)
+        Session.objects.filter(
+            id=session_id,
+            history_summary=expected_summary,
+            history_summary_watermark=expected_watermark,
+        ).update(
+            history_summary=refreshed_summary,
+            history_summary_watermark=new_watermark,
+            updated_at=timezone.now(),
+        )
+    except Exception:
+        logger.exception("Async history summary refresh task failed.")
+
+
+def _schedule_async_summary_refresh(
+    *,
+    session,
+    old_messages: list[dict],
+    expected_summary: str,
+    expected_watermark: int,
+    new_watermark: int,
+) -> None:
+    try:
+        _get_summary_refresh_executor().submit(
+            _refresh_summary_async_task,
+            session_id=session.id,
+            old_messages=list(old_messages),
+            expected_summary=expected_summary,
+            expected_watermark=expected_watermark,
+            new_watermark=new_watermark,
+        )
+    except Exception:
+        logger.exception("Failed to schedule async history summary refresh.")
+
+
+def build_history_with_summary(
+    session,
+    full_history: list[dict],
+    *,
+    allow_async_refresh: bool = False,
+) -> list[dict]:
     if len(full_history) <= get_summary_threshold():
         return full_history
 
@@ -510,7 +714,7 @@ def build_history_with_summary(session, full_history: list[dict]) -> list[dict]:
 
     cached_summary = session.history_summary or ""
     old_count = len(old_messages)
-    summarized_watermark = session.history_summary_watermark
+    summarized_watermark = _normalize_summary_watermark(session.history_summary_watermark)
 
     needs_refresh = (
         not cached_summary
@@ -518,20 +722,22 @@ def build_history_with_summary(session, full_history: list[dict]) -> list[dict]:
     )
 
     if needs_refresh:
-        cached_summary = summarize_old_messages(old_messages)
-        session.history_summary = cached_summary
-        session.history_summary_watermark = old_count
-        session.save(update_fields=["history_summary", "history_summary_watermark", "updated_at"])
-    elif summarized_watermark < old_count:
-        gap_messages = old_messages[summarized_watermark:]
-        summary_message = {
-            "role": "system",
-            "content": f"[Summary of earlier conversation]: {cached_summary}",
-        }
-        return [summary_message] + gap_messages + recent_messages
+        strategy = _resolve_summary_refresh_strategy(
+            allow_async_refresh=allow_async_refresh,
+            cached_summary=cached_summary,
+        )
+        cached_summary, summarized_watermark = strategy.refresh(
+            SummaryRefreshContext(
+                session=session,
+                old_messages=old_messages,
+                cached_summary=cached_summary,
+                summarized_watermark=summarized_watermark,
+                old_count=old_count,
+            )
+        )
 
-    summary_message = {
-        "role": "system",
-        "content": f"[Summary of earlier conversation]: {cached_summary}",
-    }
+    summary_message = _build_summary_message(cached_summary)
+    if summarized_watermark < old_count:
+        gap_messages = old_messages[summarized_watermark:]
+        return [summary_message] + gap_messages + recent_messages
     return [summary_message] + recent_messages
