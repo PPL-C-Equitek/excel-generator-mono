@@ -26,6 +26,8 @@ from PyPDF2 import PdfReader
 
 from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
 from file_processing.extractors.pdf_ocr_extractor import PdfOcrExtractor
+from file_processing.extractors.ocr.ocr_strategy import OCRStrategyFactory
+from file_processing.services.ocr_cleanup_service import OCRCleanupService
 from file_processing.services.ocr_config import (
     TEXT_LAYER_MIN_CHARS_PER_PAGE,
 )
@@ -48,14 +50,19 @@ class OCRService:
 
         Uses multi-PSM strategy for robust handling of various document layouts.
         """
+        return cls._ocr_single_image_with_metadata(image)["text"]
+
+    @classmethod
+    def _ocr_single_image_with_metadata(cls, image) -> Dict[str, Any]:
+        """Run Tesseract OCR and return text plus word-level metadata."""
         try:
             engine = TesseractEngine(apply_preprocessing=True)
-            text, conf = engine.extract_text_with_confidence(image)
+            metadata = engine.extract_text_with_metadata(image)
             logger.info(
                 "Tesseract OCR: confidence=%.1f%%, chars=%d",
-                conf, len(text),
+                metadata.get("avg_confidence", 0.0), len(metadata.get("text", "")),
             )
-            return text
+            return metadata
         except ImportError as exc:
             logger.warning(
                 "pytesseract is not installed; cannot perform OCR."
@@ -66,6 +73,16 @@ class OCRService:
         except Exception as exc:
             logger.exception("Tesseract OCR failed")
             raise ValueError(f"OCR runtime error: {str(exc)}") from exc
+
+    @staticmethod
+    def _build_page_metadata(cleanup_result: Dict[str, Any], page_num: int) -> Dict[str, Any]:
+        metadata = dict(cleanup_result.get("ocr_metadata", {}))
+        metadata.setdefault("page", page_num)
+        return metadata
+
+    @staticmethod
+    def _build_document_metadata(page_metadata: List[Dict[str, Any]], document_type: str) -> Dict[str, Any]:
+        return OCRCleanupService.summarize_page_metadata(page_metadata, document_type)
 
     @classmethod
     def process_pdf_pages(cls, file_path: str, page_numbers: List[int]) -> Dict[str, Any]:
@@ -87,18 +104,34 @@ class OCRService:
             page_images = extractor.convert_pages(file_path, page_numbers=page_numbers)
 
             content: List[Dict[str, Any]] = []
+            page_metadata: List[Dict[str, Any]] = []
 
             for page_num, image in page_images:
-                raw_text = cls._ocr_single_image(image)
-                text_blocks = cls.split_lines(raw_text)
+                ocr_payload = cls._ocr_single_image_with_metadata(image)
+                cleanup_result = OCRStrategyFactory.cleanup_text_for_document(
+                    document_type="pdf",
+                    text=ocr_payload.get("text", ""),
+                    avg_confidence=float(ocr_payload.get("avg_confidence", 0.0)),
+                    word_details=ocr_payload.get("word_details"),
+                )
+                text_blocks = cls.split_lines(cleanup_result["text"])
 
-                content.append({"page": page_num, "text": text_blocks})
+                page_entry = {
+                    "page": page_num,
+                    "text": text_blocks,
+                    "ocr_metadata": cls._build_page_metadata(cleanup_result, page_num),
+                }
+                content.append(page_entry)
+                page_metadata.append(page_entry["ocr_metadata"])
 
                 logger.info(
                     "Page %d: extracted %d line(s) via OCR", page_num, len(text_blocks),
                 )
 
-            return {"content": content}
+            return {
+                "content": content,
+                "ocr_metadata": cls._build_document_metadata(page_metadata, "pdf"),
+            }
 
         except Exception as e:
             logger.exception("OCRService.process_pdf_pages failed")
@@ -162,26 +195,39 @@ class OCRService:
             page_images = extractor.convert_pages(file_path)
 
             ocr_content: List[Dict[str, Any]] = []
+            page_metadata: List[Dict[str, Any]] = []
 
             for page_num, image in page_images:
-                raw_text = cls._ocr_single_image(image)
-                text_blocks = cls.split_lines(raw_text)
+                ocr_payload = cls._ocr_single_image_with_metadata(image)
+                cleanup_result = OCRStrategyFactory.cleanup_text_for_document(
+                    document_type="pdf",
+                    text=ocr_payload.get("text", ""),
+                    avg_confidence=float(ocr_payload.get("avg_confidence", 0.0)),
+                    word_details=ocr_payload.get("word_details"),
+                )
+                text_blocks = cls.split_lines(cleanup_result["text"])
 
                 logger.info(
                     "Page %d OCR: %d line(s) extracted",
                     page_num, len(text_blocks),
                 )
 
-                ocr_content.append({
+                page_entry = {
                     "page": page_num,
                     "text": text_blocks,
-                })
+                    "ocr_metadata": cls._build_page_metadata(cleanup_result, page_num),
+                }
+                ocr_content.append(page_entry)
+                page_metadata.append(page_entry["ocr_metadata"])
 
             logger.info(
                 "OCR pipeline completed for '%s': %d page(s) processed",
                 file_path, len(ocr_content),
             )
-            return {"content": ocr_content}
+            return {
+                "content": ocr_content,
+                "ocr_metadata": cls._build_document_metadata(page_metadata, "pdf"),
+            }
 
         except Exception as e:
             logger.exception("OCRService.process_pdf failed")
@@ -201,8 +247,14 @@ class OCRService:
         """
         logger.info("Processing standalone image via OCR")
 
-        raw_text = cls._ocr_single_image(image)
-        text_blocks = cls.split_lines(raw_text)
+        ocr_payload = cls._ocr_single_image_with_metadata(image)
+        cleanup_result = OCRStrategyFactory.cleanup_text_for_document(
+            document_type="image",
+            text=ocr_payload.get("text", ""),
+            avg_confidence=float(ocr_payload.get("avg_confidence", 0.0)),
+            word_details=ocr_payload.get("word_details"),
+        )
+        text_blocks = cls.split_lines(cleanup_result["text"])
 
         logger.info("Standalone image OCR: %d line(s) extracted", len(text_blocks))
 
@@ -210,5 +262,9 @@ class OCRService:
             "content": [{
                 "page": 1,
                 "text": text_blocks,
+                "ocr_metadata": cls._build_page_metadata(cleanup_result, 1),
             }],
+            "ocr_metadata": cls._build_document_metadata([
+                cls._build_page_metadata(cleanup_result, 1)
+            ], "image"),
         }
