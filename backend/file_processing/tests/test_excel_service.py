@@ -244,7 +244,7 @@ class ExcelDataExtractionTests(TestCase):
 
         self.assertFalse(success)
         self.assertIsNone(data)
-        self.assertIn("File tidak ditemukan", error)
+        self.assertIn("File not found", error)
 
     def test_openpyxl_not_installed_raises_runtime_error(self):
         real_import = builtins.__import__
@@ -661,4 +661,42 @@ class ExcelServiceDirectUnitTests(SimpleTestCase):
         from file_processing.services.excel_service import _has_ole_signature
         result = _has_ole_signature("/nonexistent_path_that_should_fail.xlsx")
         self.assertIs(result, False)
+
+    def test_process_uploaded_excel_xls_with_file_object(self):
+        xls_bytes = _build_xls({
+            "Sheet1": [["Kolom A", "Kolom B"], ["Nilai 1", "Nilai 2"]]
+        })
+        f = io.BytesIO(xls_bytes)
+        f.name = "test.xls"
+
+        success, error, data = process_uploaded_excel(f)
+        self.assertTrue(success, f"Expected success but got error: {error}")
+        self.assertIsNone(error)
+        self.assertIsNotNone(data)
+        self.assertIn("Sheet1", data)
+        self.assertEqual(data["Sheet1"], [["Kolom A", "Kolom B"], ["Nilai 1", "Nilai 2"]])
+
+    def test_has_ole_signature_with_file_like_object(self):
+        from file_processing.services.excel_service import _has_ole_signature
+        from file_processing.services.excel_service import OLE_SIGNATURE
+        
+        f_correct = io.BytesIO(OLE_SIGNATURE + b"extra data")
+        self.assertTrue(_has_ole_signature(f_correct))
+        
+        f_incorrect = io.BytesIO(b"incorrect signature data")
+        self.assertFalse(_has_ole_signature(f_incorrect))
+
+    def test_xls_with_ole_signature_file_object(self):
+        xls_bytes = _build_xls({
+            "Sheet1": [["Val1"]]
+        })
+        f = io.BytesIO(xls_bytes)
+        f.name = "legacy.xlsx"
+
+        success, error, data = process_uploaded_excel(f)
+        self.assertTrue(success, f"Expected success but got error: {error}")
+        self.assertIsNone(error)
+        self.assertIsNotNone(data)
+        self.assertIn("Sheet1", data)
+
 
