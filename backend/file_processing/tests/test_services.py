@@ -259,6 +259,42 @@ class TestUploadPdfProcessing(SimpleTestCase):
         self.assertEqual(data["content"][0]["text"], ["ocr text"])
         self.assertEqual(data["content"][0]["ocr_metadata"]["confidence_score"], 88.0)
 
+    def test_merge_ocr_results_promotes_document_metadata_when_all_pages_covered(self):
+        extracted_data = {
+            "content": [
+                {"page": 1, "text": []},
+                {"page": 2, "text": []},
+            ]
+        }
+
+        ocr_data = {
+            "content": [
+                {
+                    "page": 1,
+                    "text": ["page 1 text"],
+                },
+                {
+                    "page": 2,
+                    "text": ["page 2 text"],
+                },
+            ],
+            "ocr_metadata": {
+                "confidence_score": 91.5,
+            },
+        }
+
+        upload_service._merge_ocr_results_into_extracted_data(
+            extracted_data,
+            ocr_data,
+        )
+
+        self.assertEqual(
+            extracted_data["ocr_metadata"],
+            {
+                "confidence_score": 91.5,
+            },
+        )
+
 
 class TestNonOCRPDFService(TestCase):
     """Tests covering extract_pdf_to_json."""
