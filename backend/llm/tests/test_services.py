@@ -1007,7 +1007,6 @@ class OpenAIClientServiceTest(SimpleTestCase):
             temperature=0.2,
             seed=7,
             max_output_tokens=333,
-            instructions=openai_client._resolve_system_prompt(),
         )
 
     @override_settings(
@@ -1033,7 +1032,6 @@ class OpenAIClientServiceTest(SimpleTestCase):
             model="gpt-4.1-mini",
             input="x" * 400,
             max_output_tokens=100,
-            instructions=openai_client._resolve_system_prompt(),
         )
 
     @override_settings(
@@ -1054,7 +1052,6 @@ class OpenAIClientServiceTest(SimpleTestCase):
         mock_client.responses.create.assert_called_once_with(
             model="gpt-4.1-mini",
             input="Say hi",
-            instructions=openai_client._resolve_system_prompt(),
         )
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
