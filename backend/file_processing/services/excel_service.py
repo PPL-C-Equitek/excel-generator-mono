@@ -190,11 +190,7 @@ def process_uploaded_excel(
             if name and isinstance(name, str):
                 ext = os.path.splitext(name)[1].lower()
 
-        is_xls = False
-        if ext == ".xls":
-            is_xls = True
-        elif ext == ".xlsx" and _has_ole_signature(file_or_path):
-            is_xls = True
+        is_xls = ext == ".xls" or (ext == ".xlsx" and _has_ole_signature(file_or_path))
 
         if is_xls:
             data = parse_xls(file_or_path)

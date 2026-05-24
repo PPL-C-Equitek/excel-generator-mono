@@ -699,4 +699,48 @@ class ExcelServiceDirectUnitTests(SimpleTestCase):
         self.assertIsNotNone(data)
         self.assertIn("Sheet1", data)
 
+    def test_has_ole_signature_no_seek_file_object(self):
+        from file_processing.services.excel_service import _has_ole_signature, OLE_SIGNATURE
+        class MockFileNoSeek:
+            def __init__(self, data):
+                self.data = data
+            def read(self, n=-1):
+                if n == -1:
+                    return self.data
+                return self.data[:n]
+        f = MockFileNoSeek(OLE_SIGNATURE + b"data")
+        self.assertTrue(_has_ole_signature(f))
+
+    def test_has_ole_signature_read_exception(self):
+        from file_processing.services.excel_service import _has_ole_signature
+        class MockFileReadError:
+            def seek(self, offset, whence=0):
+                pass
+            def read(self, n=-1):
+                raise RuntimeError("read error")
+        f = MockFileReadError()
+        self.assertFalse(_has_ole_signature(f))
+
+    def test_load_xls_workbook_no_seek_file_object(self):
+        from file_processing.services.excel_service import _load_xls_workbook
+        xls_bytes = _build_xls({"Sheet1": [["A"]]})
+        class MockXlsFileNoSeek:
+            def __init__(self, data):
+                self.data = data
+            def read(self):
+                return self.data
+        f = MockXlsFileNoSeek(xls_bytes)
+        wb = _load_xls_workbook(f)
+        self.assertIsNotNone(wb)
+
+    def test_load_xls_workbook_read_exception(self):
+        from file_processing.services.excel_service import _load_xls_workbook
+        class MockFileReadError:
+            def read(self):
+                raise RuntimeError("read error")
+        f = MockFileReadError()
+        with self.assertRaises(ValueError):
+            _load_xls_workbook(f)
+
+
 
