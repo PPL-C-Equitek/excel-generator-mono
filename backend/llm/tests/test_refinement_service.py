@@ -138,7 +138,7 @@ class RefinementValidationLogTest(SimpleTestCase):
             any("semantic mismatch" in issue["message"] for issue in log["errors"])
         )
 
-    def test_build_validation_log_relaxes_header_checks_for_low_confidence_ocr(self):
+    def test_build_validation_log_blocks_low_confidence_ocr_and_requests_manual_review(self):
         log = build_validation_log(
             {
                 "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
@@ -163,9 +163,14 @@ class RefinementValidationLogTest(SimpleTestCase):
             },
         )
 
-        self.assertNotEqual(log["verdict"], "invalid")
+        self.assertEqual(log["verdict"], "invalid")
+        # Expect a quality error about OCR confidence that requests manual review
         self.assertTrue(
-            any("relaxed" in warning["message"].lower() for warning in log["warnings"])
+            any(
+                issue.get("path") == "$.ocr_metadata.confidence_score"
+                and ("manual review" in issue.get("message", "").lower() or "low ocr" in issue.get("message", "").lower())
+                for issue in log.get("errors", [])
+            )
         )
 
     def test_build_validation_log_marks_total_items_mismatch_as_invalid_quality(self):

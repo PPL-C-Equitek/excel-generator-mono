@@ -276,9 +276,11 @@ def _collect_refinement_quality_errors(
 
     source_headers = _collect_source_headers(input_json) if input_json is not None else set()
     ocr_confidence = _extract_ocr_confidence(input_json)
-    relax_header_checks = (
-        ocr_confidence is not None and ocr_confidence < _LOW_CONFIDENCE_OCR_THRESHOLD
-    )
+    # Do NOT relax header checks when OCR confidence is low. Instead,
+    # treat low OCR confidence as a blocking quality issue that requires
+    # manual review so the pipeline does not accept semantically-incorrect
+    # outputs produced from noisy OCR inputs.
+    relax_header_checks = False
     errors: list[dict[str, str]] = []
     total_rows = 0
     for table_index, table in enumerate(content_data):
@@ -293,6 +295,19 @@ def _collect_refinement_quality_errors(
         )
         errors.extend(table_errors)
         total_rows += table_row_count
+
+    # If OCR confidence is low, add an explicit quality error to force
+    # manual review / block automatic acceptance.
+    if ocr_confidence is not None and ocr_confidence < _LOW_CONFIDENCE_OCR_THRESHOLD:
+        errors.append(
+            _build_quality_error(
+                "$.ocr_metadata.confidence_score",
+                (
+                    f"Input OCR confidence is {ocr_confidence:.1f}% (<{_LOW_CONFIDENCE_OCR_THRESHOLD:.1f}%). "
+                    "Low OCR confidence prevents relaxing header validation — manual review required."
+                ),
+            )
+        )
 
     errors.extend(_collect_summary_quality_errors(output_json, total_rows))
 
@@ -312,7 +327,8 @@ def build_validation_log(
             {
                 "path": "$.ocr_metadata.confidence_score",
                 "message": (
-                    f"Input OCR confidence is {ocr_confidence:.1f}%, so header validation was relaxed."
+                    f"Input OCR confidence is {ocr_confidence:.1f}% (<{_LOW_CONFIDENCE_OCR_THRESHOLD:.1f}%). "
+                    "Low OCR confidence — stricter validation applied and manual review recommended."
                 ),
                 "severity": "warning",
             }
