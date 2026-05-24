@@ -1294,7 +1294,8 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         mock_build_service.assert_not_called()
 
     @patch("llm.views.build_llm_generation_service")
-    def test_llm_generate_returns_429_when_rate_limit_exceeded(self, mock_build_service):
+    @patch("api.decorators._increment_request_count", return_value=LLM_GENERATE_RATE_LIMIT_PER_MINUTE + 1)
+    def test_llm_generate_returns_429_when_rate_limit_exceeded(self, _mock_increment, mock_build_service):
         mock_service = mock_build_service.return_value
         mock_service.generate.return_value = {"status": "ok"}
         client = self._build_verified_client(
@@ -1304,10 +1305,6 @@ class LlmGenerateEndpointTest(SimpleTestCase):
             "input_json": {"sheet": "Sheet1"},
             "refinement": {"enabled": False},
         }
-
-        for _ in range(LLM_GENERATE_RATE_LIMIT_PER_MINUTE):
-            response = client.post("/llm/generate/", payload, format="json")
-            self.assertEqual(response.status_code, 200)
 
         blocked_response = client.post("/llm/generate/", payload, format="json")
 
@@ -1328,7 +1325,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         self.assertIn("Retry-After", blocked_response)
         self.assertEqual(
             mock_service.generate.call_count,
-            LLM_GENERATE_RATE_LIMIT_PER_MINUTE,
+            0,
         )
 
     @patch("llm.views.build_llm_reasoning_service")

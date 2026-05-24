@@ -6,6 +6,7 @@ from django.test import SimpleTestCase
 
 from llm.prompts.extraction import (
     _build_chat_context_section,
+    _build_section_context_section,
     build_extraction_prompt,
 )
 from llm.services.generation_service import LlmGenerationService
@@ -107,6 +108,28 @@ class BuildExtractionPromptWithChatContextTest(SimpleTestCase):
         self.assertIn('"content_data"', prompt)
 
 
+class BuildSectionContextSectionTest(SimpleTestCase):
+    def test_positive_returns_section_context_with_labels(self):
+        result = _build_section_context_section(
+            {
+                "source_type": "page_content",
+                "section_count": 2,
+                "section_labels": ["Finance", "Sales"],
+                "instruction": "Keep each clearly separated business entity as a distinct table.",
+            }
+        )
+
+        self.assertIn("## SECTION_CONTEXT", result)
+        self.assertIn("Source: page_content", result)
+        self.assertIn("Likely Sections: 2", result)
+        self.assertIn("Finance", result)
+        self.assertIn("Sales", result)
+
+    def test_negative_returns_none_for_blank_input(self):
+        self.assertIsNone(_build_section_context_section(None))
+        self.assertIsNone(_build_section_context_section("   "))
+
+
 class LlmGenerationServiceChatContextTest(SimpleTestCase):
     def _make_service(self, generate_return_value=None):
         mock_provider = Mock()
@@ -133,6 +156,7 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
 
         mock_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction=None,
             chat_context=chat_ctx,
             ocr_context=None,
@@ -147,13 +171,14 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
 
         mock_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
         )
 
     def test_positive_chat_context_passed_alongside_custom_schema(self):
-        service, mock_schema_source = self._make_service()
+        service, _ = self._make_service()
 
         with patch("llm.services.generation_service.build_extraction_prompt") as mock_prompt:
             mock_prompt.return_value = "mocked_prompt"
@@ -165,6 +190,7 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
 
         mock_prompt.assert_called_once_with(
             schema_hint="schema: [A]",
+            section_context=None,
             refinement_instruction=None,
             chat_context="Format tanggal DD/MM/YYYY",
             ocr_context=None,
@@ -185,6 +211,7 @@ class LlmGenerationServiceChatContextTest(SimpleTestCase):
 
         mock_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction=None,
             chat_context="",
             ocr_context=None,
