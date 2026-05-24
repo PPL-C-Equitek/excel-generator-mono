@@ -436,6 +436,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
         mock_client.responses.create.assert_called_once_with(
             model="gpt-4.1-mini",
             input="Say hi",
+            instructions=openai_client._resolve_system_prompt(),
         )
 
     @override_settings(
@@ -722,11 +723,10 @@ class OpenAIClientServiceTest(SimpleTestCase):
         )
 
     @override_settings(OPENAI_MAX_OUTPUT_TOKENS=256)
-    def test_response_generation_options_include_system_prompt_context(self):
+    def test_response_generation_options_ignore_system_prompt_context(self):
         self.assertEqual(
             _build_response_generation_options(
                 "Prompt",
-                system_prompt="  System  ",
             ),
             {"max_output_tokens": 256},
         )

@@ -88,7 +88,6 @@ class OpenAITextGenerationProvider:
         request_payload.update(
             _build_response_generation_options(
                 prompt=prompt,
-                system_prompt=effective_system_prompt,
             )
         )
         if effective_system_prompt:
@@ -341,16 +340,9 @@ def _apply_generation_options(
 
 def _build_response_generation_options(
     prompt: str,
-    system_prompt: str | None = None,
 ) -> dict[str, Any]:
     options: dict[str, Any] = {}
-    prompt_context = prompt
-    if isinstance(system_prompt, str) and system_prompt.strip():
-        prompt_context = f"{system_prompt.strip()}\n{prompt}"
-
-    temperature, seed, max_output_tokens = _resolve_common_generation_options(
-        prompt_context
-    )
+    temperature, seed, max_output_tokens = _resolve_common_generation_options(prompt)
     return _apply_generation_options(
         options,
         temperature,
