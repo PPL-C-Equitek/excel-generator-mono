@@ -20,7 +20,7 @@ Do not fabricate rows, fields, or values.
 QUALITY_SECTION = """## QUALITY_RULES
 ### Output Contract
 - top-level keys must be exactly: document_info, summary, content_data
-- document_info.source_type must be exactly: Excel or PDF (case-sensitive)
+- document_info.source_type must be exactly: Excel, PDF, DOCX, CSV, TXT, or Image (case-sensitive)
 - document_info.filename must be a non-empty string
 
 ### Summary Rules
@@ -46,6 +46,8 @@ QUALITY_SECTION = """## QUALITY_RULES
 - Excel: if multiple sheets exist, each sheet must be a separate table in content_data
 - Excel: table_name must use the real sheet name
 - Excel: do not merge sheets together
+- Non-Excel documents: if a clear business entity or document section boundary is present, emit a separate content_data entry for each section in source order
+- Non-Excel documents: split conservatively; only separate sections when the boundary is explicit enough to avoid merging different business entities
 - PDF: if distinct tables are present, represent each as a separate table in content_data
 - PDF: if table boundaries are unclear, group conservatively rather than inventing splits
 - PDF: only merge rows when they are clearly part of the same visual table across pages; otherwise preserve separate tables
