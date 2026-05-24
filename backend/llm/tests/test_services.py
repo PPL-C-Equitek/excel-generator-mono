@@ -15,6 +15,10 @@ from llm.services.generation_service import (
     _compact_input_json_for_prompt,
     _extract_ocr_context,
     _extract_section_context,
+    _extract_section_label_from_item,
+    _extract_section_label_from_text,
+    _extract_section_labels_from_content_rows,
+    _normalize_section_label,
     _normalize_user_prompt,
     _resolve_positive_int_setting as _resolve_generation_positive_int_setting,
     _truncate_table_rows,
@@ -2095,6 +2099,143 @@ class LlmGenerationServiceTest(SimpleTestCase):
             prompt_source.get_prompt_fragment("schema-1")
 
         mock_get.assert_not_called()
+
+    def test_extract_section_label_helpers_cover_edge_cases(self):
+        self.assertIsNone(_normalize_section_label("   "))
+        self.assertEqual(
+            _normalize_section_label("  Finance   Department  "),
+            "Finance Department",
+        )
+
+        self.assertIsNone(_extract_section_label_from_text("   "))
+        self.assertEqual(
+            _extract_section_label_from_text("Section: Finance"),
+            "Finance",
+        )
+        self.assertEqual(
+            _extract_section_label_from_text("Business Unit - Retail"),
+            "Retail",
+        )
+
+        self.assertEqual(
+            _extract_section_label_from_text("Finance Department"),
+            "Finance Department",
+        )
+
+        self.assertIsNone(
+            _extract_section_label_from_text(
+                "department " + ("x" * 100)
+            )
+        )
+
+        self.assertIsNone(
+            _extract_section_label_from_text("random text")
+        )
+
+    def test_extract_section_label_from_item_covers_all_variants(self):
+        self.assertEqual(
+            _extract_section_label_from_item("Section: Finance"),
+            "Finance",
+        )
+
+        self.assertEqual(
+            _extract_section_label_from_item(
+                ["   ", "Department: Sales", ""]
+            ),
+            "Sales",
+        )
+
+        self.assertIsNone(
+            _extract_section_label_from_item(
+                ["Finance", "Sales"]
+            )
+        )
+
+        self.assertEqual(
+            _extract_section_label_from_item(
+                {"a": " ", "b": "Branch: Jakarta"}
+            ),
+            "Jakarta",
+        )
+
+        self.assertIsNone(
+            _extract_section_label_from_item(
+                {"a": "Finance", "b": "Sales"}
+            )
+        )
+
+        self.assertIsNone(
+            _extract_section_label_from_item(123)
+        )
+
+    def test_extract_section_labels_from_content_rows_limits_and_deduplicates(self):
+        rows = [
+            "Section: Finance",
+            "Section: Finance",
+            "Section: Sales",
+            "Section: HR",
+            "Section: Ops",
+            "Section: Legal",
+            "Section: IT",
+            "Section: Audit",
+            "Section: Marketing",
+            "Section: Extra",
+        ]
+
+        result = _extract_section_labels_from_content_rows(rows)
+        self.assertEqual(len(result), 8)
+        self.assertEqual(result[0], "Finance")
+        self.assertNotIn("Extra", result)
+
+    def test_extract_section_context_returns_none_for_non_dict_payloads(self):
+        self.assertIsNone(_extract_section_context(None))
+        self.assertIsNone(_extract_section_context([]))
+        self.assertIsNone(_extract_section_context("invalid"))
+
+    def test_build_section_context_from_payload_returns_none_when_no_context_found(self):
+        self.assertIsNone(
+            _build_section_context_from_payload(
+                {"content": ["random text"]}
+            )
+        )
+
+    def test_extract_section_labels_from_content_rows_breaks_after_eight_labels(self):
+        rows = [f"Section: Label{i}" for i in range(20)]
+
+        result = _extract_section_labels_from_content_rows(rows)
+
+        self.assertEqual(len(result), 8)
+        self.assertEqual(result[0], "Label0")
+        self.assertEqual(result[-1], "Label7")
+
+    def test_extract_section_context_handles_nested_payload_without_context(self):
+        payload = {
+            "payload": {
+                "original_input_json": {
+                    "input_json": {
+                        "content": ["random text without section keywords"],
+                    }
+                }
+            }
+        }
+
+        self.assertIsNone(_extract_section_context(payload))
+
+    def test_extract_section_labels_from_content_rows_returns_empty_for_non_list(self):
+        self.assertEqual(
+            _extract_section_labels_from_content_rows("not-a-list"),
+            [],
+        )
+
+        self.assertEqual(
+            _extract_section_labels_from_content_rows(None),
+            [],
+        )
+
+        self.assertEqual(
+            _extract_section_labels_from_content_rows({"a": 1}),
+            [],
+        )
 
 
 class GenerateChatResponseServiceTest(SimpleTestCase):

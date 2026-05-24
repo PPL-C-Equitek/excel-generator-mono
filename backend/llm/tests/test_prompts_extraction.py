@@ -70,3 +70,63 @@ class PromptsExtractionTest(SimpleTestCase):
         self.assertIn("OCR_QUALITY_CONTEXT", prompt)
         self.assertIn("CHAT_CONTEXT", prompt)
         self.assertIn("REFINEMENT", prompt)
+
+    def test_append_section_context_values_skips_blank_entries(self):
+        lines = []
+
+        extraction_mod._append_section_context_values(
+            lines,
+            "Labels:",
+            [" A ", "   ", "", "B"],
+        )
+
+        self.assertEqual(
+            lines,
+            [
+                "Labels:",
+                "- A",
+                "- B",
+            ],
+        )
+
+    def test_normalize_section_context_values_handles_invalid_types(self):
+        self.assertEqual(
+            extraction_mod._normalize_section_context_values(
+                [" A ", None, 123, " ", "B"]
+            ),
+            ["A", "B"],
+        )
+
+        self.assertEqual(
+            extraction_mod._normalize_section_context_values("not-a-list"),
+            [],
+        )
+
+    def test_append_section_context_values_handles_empty_and_non_empty_values(self):
+        lines = []
+
+        extraction_mod._append_section_context_values(
+            lines,
+            "Labels:",
+            ["  Finance  ", "   ", ""],
+        )
+
+        self.assertEqual(
+            lines,
+            [
+                "Labels:",
+                "- Finance",
+            ],
+        )
+
+    def test_build_section_context_section_skips_blank_source_type(self):
+        result = extraction_mod._build_section_context_section(
+            {
+                "source_type": "   ",
+                "section_count": 2,
+                "section_labels": ["Finance", "Sales"],
+            }
+        )
+
+        self.assertIn("Likely Sections: 2", result)
+        self.assertNotIn("Source:", result)
