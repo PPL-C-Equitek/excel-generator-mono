@@ -189,7 +189,15 @@ def _merge_ocr_results_into_extracted_data(extracted_data, ocr_data):
             page["ocr_metadata"] = ocr_page["ocr_metadata"]
 
     if ocr_data.get("ocr_metadata"):
-        extracted_data["ocr_metadata"] = ocr_data["ocr_metadata"]
+        # Only promote OCR document-level metadata when OCR covered the
+        # entire document. When OCR was run only for a subset of pages
+        # (e.g. augmenting empty pages), do not overwrite or add
+        # top-level `ocr_metadata` because it would incorrectly represent
+        # the whole document based on a small subset of pages.
+        ocr_pages = len(ocr_data.get("content", []))
+        total_pages = len(extracted_data.get("content", []))
+        if ocr_pages and total_pages and ocr_pages == total_pages:
+            extracted_data["ocr_metadata"] = ocr_data["ocr_metadata"]
 
 
 def _augment_empty_pdf_pages_with_ocr(file_path, extracted_data):
