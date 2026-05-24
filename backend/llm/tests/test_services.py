@@ -1004,6 +1004,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
             temperature=0.2,
             seed=7,
             max_output_tokens=333,
+            instructions=openai_client._resolve_system_prompt(),
         )
 
     @override_settings(
@@ -1029,6 +1030,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
             model="gpt-4.1-mini",
             input="x" * 400,
             max_output_tokens=100,
+            instructions=openai_client._resolve_system_prompt(),
         )
 
     @override_settings(
@@ -1049,6 +1051,7 @@ class OpenAIClientServiceTest(SimpleTestCase):
         mock_client.responses.create.assert_called_once_with(
             model="gpt-4.1-mini",
             input="Say hi",
+            instructions=openai_client._resolve_system_prompt(),
         )
 
     @override_settings(OPENAI_API_KEY="test-key", OPENAI_MODEL="gpt-4.1-mini")
@@ -1632,6 +1635,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
@@ -1664,6 +1668,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="Use only invoice_number and total_amount.",
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
@@ -1694,6 +1699,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="   ",
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
@@ -1722,6 +1728,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
@@ -1754,6 +1761,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction="Fix validation errors",
             chat_context=None,
             ocr_context=None,
@@ -1788,6 +1796,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="Use only invoice_number and total_amount.",
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
@@ -1850,6 +1859,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context={
@@ -1860,6 +1870,55 @@ class LlmGenerationServiceTest(SimpleTestCase):
         )
         schema_prompt_source.get_prompt_fragment.assert_not_called()
         self.assertEqual(json_generator.generate.call_count, 1)
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_passes_section_context_for_multi_section_input(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "Base prompt.",
+        )
+
+        result = service.generate(
+            {
+                "extracted": {
+                    "Finance Department": [["header"]],
+                    "Sales Department": [["header"]],
+                }
+            }
+        )
+
+        self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint=None,
+            section_context={
+                "source_type": "extracted_map",
+                "section_count": 2,
+                "section_labels": ["Finance Department", "Sales Department"],
+                "instruction": (
+                    "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+                    "Split only when the boundary is explicit; otherwise keep the table intact."
+                ),
+            },
+            refinement_instruction=None,
+            chat_context=None,
+            ocr_context=None,
+        )
+        json_generator.generate.assert_called_once_with(
+            input_json={
+                "extracted": {
+                    "Finance Department": [["header"]],
+                    "Sales Department": [["header"]],
+                }
+            },
+            system_prompt="Base prompt.\n\nExtraction prompt.",
+        )
 
     @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_fetches_schema_fragment_for_distinct_schema_ids(
