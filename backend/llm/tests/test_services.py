@@ -9,8 +9,12 @@ from llm.services.generation_service import (
     _apply_extracted_payload_budget,
     _apply_prompt_payload_budget,
     _build_prompt_budget_summary,
+    _build_section_context_from_content_rows,
+    _build_section_context_from_extracted_map,
+    _build_section_context_from_payload,
     _compact_input_json_for_prompt,
     _extract_ocr_context,
+    _extract_section_context,
     _normalize_user_prompt,
     _resolve_positive_int_setting as _resolve_generation_positive_int_setting,
     _truncate_table_rows,
@@ -436,7 +440,6 @@ class OpenAIClientServiceTest(SimpleTestCase):
         mock_client.responses.create.assert_called_once_with(
             model="gpt-4.1-mini",
             input="Say hi",
-            instructions=openai_client._resolve_system_prompt(),
         )
 
     @override_settings(
@@ -1918,6 +1921,115 @@ class LlmGenerationServiceTest(SimpleTestCase):
                 }
             },
             system_prompt="Base prompt.\n\nExtraction prompt.",
+        )
+
+    def test_extract_ocr_context_prefers_direct_and_nested_metadata(self):
+        self.assertEqual(
+            _extract_ocr_context({"ocr_metadata": {"confidence_score": 88.5}}),
+            {"confidence_score": 88.5},
+        )
+        self.assertEqual(
+            _extract_ocr_context(
+                {
+                    "payload": {
+                        "original_input_json": {
+                            "input_json": {
+                                "extracted": {
+                                    "Sheet1": [["header"]],
+                                },
+                                "payload": {
+                                    "ocr_metadata": {
+                                        "confidence_score": 42.0,
+                                        "document_type": "pdf",
+                                    }
+                                },
+                            }
+                        }
+                    }
+                }
+            ),
+            {"confidence_score": 42.0, "document_type": "pdf"},
+        )
+        self.assertIsNone(_extract_ocr_context({"ocr_metadata": "invalid"}))
+        self.assertIsNone(_extract_ocr_context(None))
+
+    def test_section_context_builders_cover_extracted_and_content_variants(self):
+        single_section = {"Only Section": [["header"]]}
+        multi_section = {"Finance Department": [["header"]], "Sales Department": [["header"]]}
+
+        self.assertIsNone(_build_section_context_from_extracted_map(single_section))
+        self.assertEqual(
+            _build_section_context_from_extracted_map(multi_section),
+            {
+                "source_type": "extracted_map",
+                "section_count": 2,
+                "section_labels": ["Finance Department", "Sales Department"],
+                "instruction": (
+                    "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+                    "Split only when the boundary is explicit; otherwise keep the table intact."
+                ),
+            },
+        )
+
+        self.assertIsNone(_build_section_context_from_content_rows(["Only one section"]))
+        content_context = _build_section_context_from_content_rows(
+            [
+                "Section: Finance",
+                {"department": "Section: Sales"},
+                ["Branch", "Ignored"],
+            ]
+        )
+        self.assertEqual(
+            content_context,
+            {
+                "source_type": "page_content",
+                "section_count": 2,
+                "section_labels": ["Finance", "Sales"],
+                "section_markers": ["Finance", "Sales"],
+                "instruction": (
+                    "Use the markers above as conservative boundaries. Do not merge different business entities into one table when the section change is explicit."
+                ),
+            },
+        )
+
+        self.assertIsNone(_build_section_context_from_payload({"extracted": single_section}))
+        self.assertEqual(
+            _build_section_context_from_payload({"content": ["Section: Finance", "Section: Sales"]}),
+            content_context,
+        )
+
+        self.assertEqual(
+            _extract_section_context(
+                {
+                    "payload": {
+                        "original_input_json": {
+                            "input_json": {
+                                "extracted": multi_section,
+                            }
+                        }
+                    }
+                }
+            ),
+            {
+                "source_type": "extracted_map",
+                "section_count": 2,
+                "section_labels": ["Finance Department", "Sales Department"],
+                "instruction": (
+                    "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+                    "Split only when the boundary is explicit; otherwise keep the table intact."
+                ),
+            },
+        )
+
+        self.assertEqual(
+            _extract_section_context(
+                {
+                    "input_json": {
+                        "content": ["Section: Finance", {"department": "Section: Sales"}],
+                    }
+                }
+            ),
+            content_context,
         )
 
     @patch("llm.services.generation_service.build_extraction_prompt")
