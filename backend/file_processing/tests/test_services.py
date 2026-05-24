@@ -258,7 +258,6 @@ class TestUploadPdfProcessing(SimpleTestCase):
         self.assertIsNone(error)
         self.assertEqual(data["content"][0]["text"], ["ocr text"])
         self.assertEqual(data["content"][0]["ocr_metadata"]["confidence_score"], 88.0)
-        self.assertEqual(data["ocr_metadata"]["confidence_score"], 88.0)
 
 
 class TestNonOCRPDFService(TestCase):

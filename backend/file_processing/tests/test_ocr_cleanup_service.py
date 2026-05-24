@@ -227,6 +227,22 @@ class OCRCleanupServiceTest(SimpleTestCase):
         self.assertEqual(OCRCleanupService._remove_space_before_punct(""), "")
         self.assertEqual(OCRCleanupService._remove_space_before_punct("alpha   , beta"), "alpha, beta")
 
+    def test_cleanup_with_word_details_normalizes_space_before_punctuation(self):
+        service = OCRCleanupService(spell_checker=Mock())
+        # Simulate tokens recognized with positions but spaced incorrectly
+        result = service.cleanup_text(
+            text="Amount : 100",
+            avg_confidence=90.0,
+            word_details=[
+                {"text": "Amount", "confidence": 95.0, "block_num": 1, "par_num": 1, "line_num": 1, "left": 10},
+                {"text": ":", "confidence": 95.0, "block_num": 1, "par_num": 1, "line_num": 1, "left": 20},
+                {"text": "100", "confidence": 95.0, "block_num": 1, "par_num": 1, "line_num": 1, "left": 30},
+            ],
+            document_type="pdf",
+        )
+
+        self.assertEqual(result["text"], "Amount: 100")
+
     def test_spellchecker_candidate_returns_none_when_spellchecker_unavailable(self):
         service = OCRCleanupService(spell_checker=None)
         service.spell_checker = None

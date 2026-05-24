@@ -321,6 +321,8 @@ class OCRCleanupService:
 
             line_confidence = mean(line_confidences) if line_confidences else 0.0
             cleaned_line = " ".join(cleaned_words).strip()
+            # Normalize spacing before punctuation (e.g. turn "Amount : 100" into "Amount: 100").
+            cleaned_line = self._remove_space_before_punct(cleaned_line)
             lines.append({
                 "text": cleaned_line,
                 "avg_confidence": round(float(line_confidence), 2),
