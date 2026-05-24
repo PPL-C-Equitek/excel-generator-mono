@@ -3,7 +3,7 @@ import builtins
 from unittest.mock import patch
 from django.test import TestCase, SimpleTestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
-from file_processing.services.excel_service import process_uploaded_excel, _load_workbook, _trim_trailing_nulls
+from file_processing.services.excel_service import process_uploaded_excel, _load_workbook
 
 def _build_excel(sheets: dict) -> bytes:
     try:
