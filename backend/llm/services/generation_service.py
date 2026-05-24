@@ -20,7 +20,7 @@ _DEFAULT_PROMPT_MAX_ROWS_PER_TABLE = 60
 _DEFAULT_PROMPT_MAX_COLUMNS_PER_ROW = 20
 _DEFAULT_PROMPT_MAX_CELL_CHARS = 160
 _SECTION_LABEL_PATTERN = re.compile(
-    r"^(?:section|entity|business\s+entity|business\s+unit|department|company|branch|project|customer|vendor)\s*[:\-]\s*(.+)$",
+    r"^(?:section|entity|business\s+entity|business\s+unit|department|company|branch|project|customer|vendor)[ \t]*[:\-][ \t]*([^\n]{1,80})$",
     re.IGNORECASE,
 )
 _SECTION_KEYWORDS = {
