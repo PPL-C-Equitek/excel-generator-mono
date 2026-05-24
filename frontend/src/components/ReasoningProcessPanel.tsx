@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { memo, useId, useMemo, useState } from "react";
 
 interface ReasoningProcessPanelProps {
   readonly steps?: readonly string[];
@@ -10,7 +10,9 @@ interface ReasoningProcessPanelProps {
 
 const DEFAULT_LOADING_TEXT = "Loading thinking process...";
 
-function ReasoningStepList({ steps }: Readonly<{ steps: readonly string[] }>) {
+const ReasoningStepList = memo(function ReasoningStepList({
+  steps,
+}: Readonly<{ steps: readonly string[] }>) {
   return (
     <>
       {steps.map((step, index) => (
@@ -23,7 +25,7 @@ function ReasoningStepList({ steps }: Readonly<{ steps: readonly string[] }>) {
       ))}
     </>
   );
-}
+});
 
 export default function ReasoningProcessPanel({
   steps = [],
@@ -67,14 +69,15 @@ function ChevronIcon({ isOpen }: Readonly<{ isOpen: boolean }>) {
   );
 }
 
-function ReasoningStepsDropdown({
+const ReasoningStepsDropdown = memo(function ReasoningStepsDropdown({
   steps,
 }: Readonly<{ steps: readonly string[] }>) {
   const [isOpen, setIsOpen] = useState(false);
   const contentId = useId();
-  const normalizedSteps = steps
-    .map((step) => step.trim())
-    .filter((step) => step.length > 0);
+  const normalizedSteps = useMemo(
+    () => steps.map((step) => step.trim()).filter((step) => step.length > 0),
+    [steps],
+  );
 
   if (normalizedSteps.length === 0) {
     return null;
@@ -106,7 +109,7 @@ function ReasoningStepsDropdown({
       ) : null}
     </div>
   );
-}
+});
 
 export { ReasoningStepsDropdown };
 export { DEFAULT_LOADING_TEXT };
