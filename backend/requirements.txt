@@ -7,7 +7,7 @@ djangorestframework==3.16.1
 redis==5.2.1
 gunicorn==25.1.0
 openai>=1.0.0,<2.0.0
-packaging==26.0
+packaging>=24.1
 psycopg2-binary==2.9.11
 sqlparse==0.5.5
 tzdata==2025.3
