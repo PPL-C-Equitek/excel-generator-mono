@@ -287,11 +287,13 @@ def _extract_section_labels_from_content_rows(content_rows: Any) -> list[str]:
 
 
 def _build_section_context_from_extracted_map(extracted: dict[str, Any]) -> dict[str, Any] | None:
-    section_labels = [
-        _normalize_section_label(str(key))
-        for key in extracted.keys()
-    ]
-    section_labels = [label for label in section_labels if label]
+    section_labels = []
+    for key in extracted.keys():
+        if not isinstance(key, str):
+            key = str(key)
+        candidate = _extract_section_label_from_text(key)
+        if candidate and candidate not in section_labels:
+            section_labels.append(candidate)
     if len(section_labels) <= 1:
         return None
 

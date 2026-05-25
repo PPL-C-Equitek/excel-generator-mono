@@ -2040,6 +2040,24 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(_extract_section_label_from_text("Project Alpha"), "Project Alpha")
         self.assertEqual(_extract_section_label_from_text("Company: EMEA"), "EMEA")
 
+    def test_section_context_from_extracted_map_ignores_generic_keys(self):
+        self.assertIsNone(
+            _build_section_context_from_extracted_map(
+                {
+                    "Sheet1": [["header"]],
+                    "Sheet2": [["header"]],
+                }
+            )
+        )
+        self.assertIsNone(
+            _build_section_context_from_extracted_map(
+                {
+                    "Projected Revenue Q1": [["header"]],
+                    "Companywide Total": [["header"]],
+                }
+            )
+        )
+
     @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_fetches_schema_fragment_for_distinct_schema_ids(
         self, mock_build_extraction_prompt
