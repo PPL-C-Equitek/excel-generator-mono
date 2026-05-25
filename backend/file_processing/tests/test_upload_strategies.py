@@ -102,14 +102,16 @@ class UploadProcessingStrategyContractTest(SimpleTestCase):
 
 
 class DispatchUploadProcessingDelegationContractTest(SimpleTestCase):
-    @patch("file_processing.services.upload_service.get_upload_processing_strategy")
-    def test_dispatch_upload_processing_delegates_to_strategy_positive(
-        self,
-        mock_get_strategy,
-    ):
-        uploaded_file = object()
+    def _make_strategy_mock(self, return_value=(True, None, {"content": []}), side_effect=None):
         strategy = MagicMock()
-        strategy.process.return_value = (True, None, {"content": []})
+        strategy.process.return_value = return_value
+        strategy.process.side_effect = side_effect
+        return strategy
+
+    @patch("file_processing.services.upload_service.get_upload_processing_strategy")
+    def test_dispatch_upload_processing_delegates_to_strategy_positive(self, mock_get_strategy):
+        uploaded_file = object()
+        strategy = self._make_strategy_mock()
         mock_get_strategy.return_value = strategy
 
         result = _dispatch_upload_processing(".pdf", "/tmp/file.pdf", uploaded_file)
@@ -119,24 +121,16 @@ class DispatchUploadProcessingDelegationContractTest(SimpleTestCase):
         strategy.process.assert_called_once_with("/tmp/file.pdf", uploaded_file)
 
     @patch("file_processing.services.upload_service.get_upload_processing_strategy")
-    def test_dispatch_upload_processing_propagates_strategy_failure_negative(
-        self,
-        mock_get_strategy,
-    ):
-        strategy = MagicMock()
-        strategy.process.side_effect = RuntimeError("boom")
+    def test_dispatch_upload_processing_propagates_strategy_failure_negative(self, mock_get_strategy):
+        strategy = self._make_strategy_mock(side_effect=RuntimeError("boom"))
         mock_get_strategy.return_value = strategy
 
         with self.assertRaisesRegex(RuntimeError, "boom"):
             _dispatch_upload_processing(".csv", "/tmp/file.csv", object())
 
     @patch("file_processing.services.upload_service.get_upload_processing_strategy")
-    def test_dispatch_upload_processing_passes_extension_alias_edge(
-        self,
-        mock_get_strategy,
-    ):
-        strategy = MagicMock()
-        strategy.process.return_value = (False, "unsupported", None)
+    def test_dispatch_upload_processing_passes_extension_alias_edge(self, mock_get_strategy):
+        strategy = self._make_strategy_mock(return_value=(False, "unsupported", None))
         mock_get_strategy.return_value = strategy
 
         _dispatch_upload_processing(".xlsx", "/tmp/file.xlsx", object())
@@ -150,17 +144,16 @@ class DispatchUploadProcessingDelegationContractTest(SimpleTestCase):
 
 
 class ProcessUploadStrategyDelegationContractTest(SimpleTestCase):
+    def _build_uploaded_file(self, name):
+        uploaded_file = MagicMock()
+        uploaded_file.name = name
+        return uploaded_file
+
     @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service._dispatch_upload_processing")
     @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_delegates_normalized_extension_positive(
-        self,
-        mock_validate_file,
-        mock_dispatch,
-        mock_save_temp_file,
-    ):
-        uploaded_file = MagicMock()
-        uploaded_file.name = "Report.XLSX"
+    def test_process_upload_delegates_normalized_extension_positive(self, mock_validate_file, mock_dispatch, mock_save_temp_file):
+        uploaded_file = self._build_uploaded_file("Report.XLSX")
         mock_validate_file.return_value = (True, None)
         mock_save_temp_file.return_value = "/tmp/report.xlsx"
         mock_dispatch.return_value = (True, None, {"content": []})
@@ -173,14 +166,8 @@ class ProcessUploadStrategyDelegationContractTest(SimpleTestCase):
     @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service._dispatch_upload_processing")
     @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_propagates_dispatch_error_negative(
-        self,
-        mock_validate_file,
-        mock_dispatch,
-        mock_save_temp_file,
-    ):
-        uploaded_file = MagicMock()
-        uploaded_file.name = "report.csv"
+    def test_process_upload_propagates_dispatch_error_negative(self, mock_validate_file, mock_dispatch, mock_save_temp_file):
+        uploaded_file = self._build_uploaded_file("report.csv")
         mock_validate_file.return_value = (True, None)
         mock_save_temp_file.return_value = "/tmp/report.csv"
         mock_dispatch.return_value = (False, "broken", None)
@@ -192,14 +179,8 @@ class ProcessUploadStrategyDelegationContractTest(SimpleTestCase):
     @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service._dispatch_upload_processing")
     @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_normalizes_jpeg_extension_edge(
-        self,
-        mock_validate_file,
-        mock_dispatch,
-        mock_save_temp_file,
-    ):
-        uploaded_file = MagicMock()
-        uploaded_file.name = "scan.JPEG"
+    def test_process_upload_normalizes_jpeg_extension_edge(self, mock_validate_file, mock_dispatch, mock_save_temp_file):
+        uploaded_file = self._build_uploaded_file("scan.JPEG")
         mock_validate_file.return_value = (True, None)
         mock_save_temp_file.return_value = "/tmp/scan.jpeg"
         mock_dispatch.return_value = (True, None, {"content": []})
@@ -210,6 +191,11 @@ class ProcessUploadStrategyDelegationContractTest(SimpleTestCase):
 
 
 class ProcessUploadStrategyHelperContractTest(SimpleTestCase):
+    def _build_uploaded_file(self, name):
+        uploaded_file = MagicMock()
+        uploaded_file.name = name
+        return uploaded_file
+
     def test_upload_service_exposes_process_upload_with_strategy_helper(self):
         from file_processing.services import upload_service
 
@@ -218,14 +204,8 @@ class ProcessUploadStrategyHelperContractTest(SimpleTestCase):
     @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service._process_upload_with_strategy")
     @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_delegates_to_strategy_helper_positive(
-        self,
-        mock_validate_file,
-        mock_process_upload_with_strategy,
-        mock_save_temp_file,
-    ):
-        uploaded_file = MagicMock()
-        uploaded_file.name = "report.PDF"
+    def test_process_upload_delegates_to_strategy_helper_positive(self, mock_validate_file, mock_process_upload_with_strategy, mock_save_temp_file):
+        uploaded_file = self._build_uploaded_file("report.PDF")
         mock_validate_file.return_value = (True, None)
         mock_save_temp_file.return_value = "/tmp/report.pdf"
         mock_process_upload_with_strategy.return_value = (True, None, {"content": []})
@@ -242,14 +222,8 @@ class ProcessUploadStrategyHelperContractTest(SimpleTestCase):
     @patch("file_processing.services.upload_service.save_temp_file")
     @patch("file_processing.services.upload_service._process_upload_with_strategy")
     @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_reraises_strategy_helper_error_negative(
-        self,
-        mock_validate_file,
-        mock_process_upload_with_strategy,
-        mock_save_temp_file,
-    ):
-        uploaded_file = MagicMock()
-        uploaded_file.name = "report.csv"
+    def test_process_upload_reraises_strategy_helper_error_negative(self, mock_validate_file, mock_process_upload_with_strategy, mock_save_temp_file):
+        uploaded_file = self._build_uploaded_file("report.csv")
         mock_validate_file.return_value = (True, None)
         mock_save_temp_file.return_value = "/tmp/report.csv"
         mock_process_upload_with_strategy.side_effect = RuntimeError("boom")
@@ -259,13 +233,8 @@ class ProcessUploadStrategyHelperContractTest(SimpleTestCase):
 
     @patch("file_processing.services.upload_service._process_upload_with_strategy")
     @patch("file_processing.services.upload_service.validate_file")
-    def test_process_upload_short_circuits_before_strategy_helper_edge(
-        self,
-        mock_validate_file,
-        mock_process_upload_with_strategy,
-    ):
-        uploaded_file = MagicMock()
-        uploaded_file.name = "bad.exe"
+    def test_process_upload_short_circuits_before_strategy_helper_edge(self, mock_validate_file, mock_process_upload_with_strategy):
+        uploaded_file = self._build_uploaded_file("bad.exe")
         mock_validate_file.return_value = (False, "Unsupported file type")
 
         result = process_upload(uploaded_file)
