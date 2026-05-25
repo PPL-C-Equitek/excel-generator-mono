@@ -67,8 +67,9 @@ class SendVerificationEmailTest(TestCase):
             send_verification_email("user@example.com")
 
         log_text = "\n".join(log.output)
-        self.assertIn("Verification link", log_text)
-        self.assertIn("verify-email?token=", log_text)
+        self.assertIn("Verification email requested for user@example.com", log_text)
+        self.assertIn("verification link not logged", log_text)
+        self.assertNotIn("verify-email?token=", log_text)
 
     @override_settings(
         RESEND_API_KEY="re_test_key",
@@ -105,12 +106,13 @@ class SendVerificationEmailTest(TestCase):
         self.assertTrue(any("Failed to send" in msg for msg in log.output))
 
     @override_settings(RESEND_API_KEY="", FRONTEND_URL="https://myapp.com")
-    def test_uses_frontend_url_setting(self):
+    def test_fallback_log_does_not_expose_frontend_verification_url(self):
         with self.assertLogs("authentication.services", level="INFO") as log:
             send_verification_email("user@example.com")
 
         log_text = "\n".join(log.output)
-        self.assertIn("https://myapp.com/auth/verify-email?token=", log_text)
+        self.assertNotIn("https://myapp.com/auth/verify-email?token=", log_text)
+        self.assertIn("Verification email requested for user@example.com", log_text)
 
     @override_settings(RESEND_API_KEY="", FRONTEND_URL="http://localhost:3000")
     def test_rotates_email_verification_nonce_before_logging_link(self):
@@ -388,23 +390,6 @@ class VerificationEmailSenderInternalBehaviorTest(SimpleTestCase):
             sender.on_failure("user@example.com", RuntimeError("boom"))
 
         self.assertTrue(any("Failed to send verification email" in message for message in log.output))
-
-    def test_extract_anchor_href_returns_html_when_href_missing_edge(self):
-        from authentication.services import VerificationEmailSender
-
-        html = "<p>no link here</p>"
-
-        self.assertEqual(VerificationEmailSender._extract_anchor_href(html), html)
-
-    def test_extract_anchor_href_returns_remainder_when_quote_unclosed_edge(self):
-        from authentication.services import VerificationEmailSender
-
-        html = '<a href="https://example.com/verify?token=abc'
-
-        self.assertEqual(
-            VerificationEmailSender._extract_anchor_href(html),
-            "https://example.com/verify?token=abc",
-        )
 
 
 class _EmailSenderDelegationContractMixin:

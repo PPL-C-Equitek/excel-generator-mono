@@ -230,8 +230,8 @@ class VerificationEmailSender(EmailSender):
 
     def log_fallback(self, email: str, payload: dict[str, str]) -> None:
         logger.info(
-            "Verification link (RESEND_API_KEY not set): %s",
-            self._extract_anchor_href(payload["html"]),
+            "Verification email requested for %s (RESEND_API_KEY not set; verification link not logged)",
+            email,
         )
 
     def on_failure(self, email: str, exc: Exception) -> None:
@@ -239,18 +239,6 @@ class VerificationEmailSender(EmailSender):
             self.user.email_verification_nonce = self.previous_nonce
             self.user.save(update_fields=["email_verification_nonce"])
         logger.exception("Failed to send verification email to %s", email)
-
-    @staticmethod
-    def _extract_anchor_href(html: str) -> str:
-        prefix = 'href="'
-        start = html.find(prefix)
-        if start == -1:
-            return html
-        start += len(prefix)
-        end = html.find('"', start)
-        if end == -1:
-            return html[start:]
-        return html[start:end]
 
 
 class PasswordResetEmailSender(EmailSender):
