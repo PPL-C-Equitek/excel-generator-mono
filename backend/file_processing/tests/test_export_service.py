@@ -68,6 +68,16 @@ class ValidateOutputLLMTest(unittest.TestCase):
 
         self.assertEqual(result, output_json)
 
+    def test_validate_output_llm_accepts_extended_source_types(self):
+        for source_type in ("DOCX", "CSV", "TXT", "Image"):
+            with self.subTest(source_type=source_type):
+                output_json = self._build_valid_payload()
+                output_json["document_info"]["source_type"] = source_type
+
+                result = validate_output_llm(output_json)
+
+                self.assertEqual(result["document_info"]["source_type"], source_type)
+
     def test_validate_output_llm_rejects_non_object_or_array_root(self):
         with self.assertRaises(OutputLLMValidationError):
             validate_output_llm("not-valid")
