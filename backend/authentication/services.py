@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import logging
 import jwt
 import uuid
@@ -157,6 +158,144 @@ def decode_password_reset_token(token, max_age):
     if not isinstance(value, str) or not value.startswith(prefix):
         raise ValueError("Invalid token purpose.")
     return value[len(prefix):]
+
+
+class EmailSender(ABC):
+    def send(self, email: str) -> None:
+        self.prepare(email)
+        payload = self.build_email_payload(email)
+
+        try:
+            resend_api_key = getattr(settings, "RESEND_API_KEY", "")
+            if resend_api_key:
+                from_email = _require_resend_from_email()
+                import resend
+
+                resend.api_key = resend_api_key
+                resend.Emails.send({"from": from_email, **payload})
+            else:
+                self.log_fallback(email, payload)
+        except Exception as exc:
+            self.on_failure(email, exc)
+            raise
+
+    def prepare(self, email: str) -> None:
+        return None
+
+    @abstractmethod
+    def build_email_payload(self, email: str) -> dict[str, str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def log_fallback(self, email: str, payload: dict[str, str]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def on_failure(self, email: str, exc: Exception) -> None:
+        raise NotImplementedError
+
+
+class VerificationEmailSender(EmailSender):
+    def __init__(self) -> None:
+        self.user: User | None = None
+        self.previous_nonce: uuid.UUID | None = None
+
+    def prepare(self, email: str) -> None:
+        user = User.objects.get(email=email)
+        self.user = user
+        self.previous_nonce = user.email_verification_nonce
+        user.email_verification_nonce = uuid.uuid4()
+        user.save(update_fields=["email_verification_nonce"])
+
+    def build_email_payload(self, email: str) -> dict[str, str]:
+        if self.user is None:
+            raise RuntimeError("Verification email sender is not prepared.")
+
+        token = generate_verification_token(
+            self.user.email,
+            str(self.user.email_verification_nonce),
+        )
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        verification_url = (
+            f"{frontend_url}/auth/verify-email?token={quote(token, safe='')}"
+        )
+        return {
+            "to": self.user.email,
+            "subject": "Verify Your Email",
+            "html": (
+                '<p>Click the link below to verify: '
+                f'<a href="{verification_url}">{verification_url}</a></p>'
+            ),
+        }
+
+    def log_fallback(self, email: str, payload: dict[str, str]) -> None:
+        logger.info(
+            "Verification link (RESEND_API_KEY not set): %s",
+            self._extract_anchor_href(payload["html"]),
+        )
+
+    def on_failure(self, email: str, exc: Exception) -> None:
+        if self.user is not None and self.previous_nonce is not None:
+            self.user.email_verification_nonce = self.previous_nonce
+            self.user.save(update_fields=["email_verification_nonce"])
+        logger.exception("Failed to send verification email to %s", email)
+
+    @staticmethod
+    def _extract_anchor_href(html: str) -> str:
+        prefix = 'href="'
+        start = html.find(prefix)
+        if start == -1:
+            return html
+        start += len(prefix)
+        end = html.find('"', start)
+        if end == -1:
+            return html[start:]
+        return html[start:end]
+
+
+class PasswordResetEmailSender(EmailSender):
+    def build_email_payload(self, email: str) -> dict[str, str]:
+        token = generate_password_reset_token(email)
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        reset_url = f"{frontend_url}/auth/reset-password?token={quote(token, safe='')}"
+        return {
+            "to": email,
+            "subject": "Reset Your Password",
+            "html": (
+                '<p>Click the link below to reset your password: '
+                f'<a href="{reset_url}">{reset_url}</a></p>'
+            ),
+        }
+
+    def log_fallback(self, email: str, payload: dict[str, str]) -> None:
+        logger.info(
+            "Password reset requested for %s (RESEND_API_KEY not set; reset link not logged)",
+            email,
+        )
+
+    def on_failure(self, email: str, exc: Exception) -> None:
+        logger.exception("Failed to send password reset email to %s", email)
+
+
+class PasswordChangedEmailSender(EmailSender):
+    def build_email_payload(self, email: str) -> dict[str, str]:
+        return {
+            "to": email,
+            "subject": "Your Password Was Changed",
+            "html": (
+                "<p>Your account password was changed successfully.</p>"
+                "<p>If this was not you, please contact support immediately.</p>"
+            ),
+        }
+
+    def log_fallback(self, email: str, payload: dict[str, str]) -> None:
+        logger.info(
+            "Password changed notification (RESEND_API_KEY not set) for %s",
+            email,
+        )
+
+    def on_failure(self, email: str, exc: Exception) -> None:
+        logger.exception("Failed to send password changed email to %s", email)
 
 
 def generate_tokens(user_id, email, session_version: int = 1) -> TokenPayload:
@@ -346,89 +485,12 @@ class RefreshTokenService:
 
 
 def send_verification_email(email):
-    user = User.objects.get(email=email)
-    previous_nonce = user.email_verification_nonce
-    user.email_verification_nonce = uuid.uuid4()
-    user.save(update_fields=["email_verification_nonce"])
-
-    token = generate_verification_token(user.email, str(user.email_verification_nonce))
-    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
-    verification_url = f"{frontend_url}/auth/verify-email?token={quote(token, safe='')}"
-
-    try:
-        resend_api_key = getattr(settings, "RESEND_API_KEY", "")
-        if resend_api_key:
-            from_email = _require_resend_from_email()
-            import resend
-            resend.api_key = resend_api_key
-            resend.Emails.send({
-                "from": from_email,
-                "to": user.email,
-                "subject": "Verify Your Email",
-                "html": f'<p>Click the link below to verify: <a href="{verification_url}">{verification_url}</a></p>',
-            })
-        else:
-            logger.info("Verification link (RESEND_API_KEY not set): %s", verification_url)
-    except Exception as exc:
-        user.email_verification_nonce = previous_nonce
-        user.save(update_fields=["email_verification_nonce"])
-        logger.exception("Failed to send verification email to %s", user.email)
-        raise exc
+    VerificationEmailSender().send(email)
 
 
 def send_password_reset_email(email):
-    token = generate_password_reset_token(email)
-    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
-    reset_url = f"{frontend_url}/auth/reset-password?token={quote(token, safe='')}"
-    try:
-        resend_api_key = getattr(settings, "RESEND_API_KEY", "")
-        if resend_api_key:
-            from_email = _require_resend_from_email()
-            import resend
-
-            resend.api_key = resend_api_key
-            resend.Emails.send(
-                {
-                    "from": from_email,
-                    "to": email,
-                    "subject": "Reset Your Password",
-                    "html": f'<p>Click the link below to reset your password: <a href="{reset_url}">{reset_url}</a></p>',
-                }
-            )
-        else:
-            logger.info(
-                "Password reset requested for %s (RESEND_API_KEY not set; reset link not logged)",
-                email,
-            )
-    except Exception:
-        logger.exception("Failed to send password reset email to %s", email)
-        raise
+    PasswordResetEmailSender().send(email)
 
 
 def send_password_changed_email(email):
-    try:
-        resend_api_key = getattr(settings, "RESEND_API_KEY", "")
-        if resend_api_key:
-            from_email = _require_resend_from_email()
-            import resend
-
-            resend.api_key = resend_api_key
-            resend.Emails.send(
-                {
-                    "from": from_email,
-                    "to": email,
-                    "subject": "Your Password Was Changed",
-                    "html": (
-                        "<p>Your account password was changed successfully.</p>"
-                        "<p>If this was not you, please contact support immediately.</p>"
-                    ),
-                }
-            )
-        else:
-            logger.info(
-                "Password changed notification (RESEND_API_KEY not set) for %s",
-                email,
-            )
-    except Exception:
-        logger.exception("Failed to send password changed email to %s", email)
-        raise
+    PasswordChangedEmailSender().send(email)

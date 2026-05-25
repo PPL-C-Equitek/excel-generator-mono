@@ -330,6 +330,82 @@ class EmailSenderTemplateContractTest(SimpleTestCase):
         self.assertTrue(hasattr(services, "PasswordResetEmailSender"))
         self.assertTrue(hasattr(services, "PasswordChangedEmailSender"))
 
+    def test_email_sender_default_prepare_returns_none_edge(self):
+        from authentication.services import EmailSender
+
+        class StubEmailSender(EmailSender):
+            def build_email_payload(self, email: str) -> dict[str, str]:
+                return {"to": email, "subject": "stub", "html": "<p>stub</p>"}
+
+            def log_fallback(self, email: str, payload: dict[str, str]) -> None:
+                return None
+
+            def on_failure(self, email: str, exc: Exception) -> None:
+                return None
+
+        self.assertIsNone(StubEmailSender().prepare("user@example.com"))
+
+    def test_email_sender_abstract_hooks_raise_not_implemented_negative(self):
+        from authentication.services import EmailSender
+
+        class SuperDelegatingEmailSender(EmailSender):
+            def build_email_payload(self, email: str) -> dict[str, str]:
+                return super().build_email_payload(email)
+
+            def log_fallback(self, email: str, payload: dict[str, str]) -> None:
+                return super().log_fallback(email, payload)
+
+            def on_failure(self, email: str, exc: Exception) -> None:
+                return super().on_failure(email, exc)
+
+        sender = SuperDelegatingEmailSender()
+
+        with self.assertRaises(NotImplementedError):
+            sender.build_email_payload("user@example.com")
+
+        with self.assertRaises(NotImplementedError):
+            sender.log_fallback("user@example.com", {"html": "<p>stub</p>"})
+
+        with self.assertRaises(NotImplementedError):
+            sender.on_failure("user@example.com", RuntimeError("boom"))
+
+
+class VerificationEmailSenderInternalBehaviorTest(SimpleTestCase):
+    def test_build_email_payload_requires_prepare_first_negative(self):
+        from authentication.services import VerificationEmailSender
+
+        sender = VerificationEmailSender()
+
+        with self.assertRaisesRegex(RuntimeError, "not prepared"):
+            sender.build_email_payload("user@example.com")
+
+    def test_on_failure_without_prepared_user_only_logs_edge(self):
+        from authentication.services import VerificationEmailSender
+
+        sender = VerificationEmailSender()
+
+        with self.assertLogs("authentication.services", level="ERROR") as log:
+            sender.on_failure("user@example.com", RuntimeError("boom"))
+
+        self.assertTrue(any("Failed to send verification email" in message for message in log.output))
+
+    def test_extract_anchor_href_returns_html_when_href_missing_edge(self):
+        from authentication.services import VerificationEmailSender
+
+        html = "<p>no link here</p>"
+
+        self.assertEqual(VerificationEmailSender._extract_anchor_href(html), html)
+
+    def test_extract_anchor_href_returns_remainder_when_quote_unclosed_edge(self):
+        from authentication.services import VerificationEmailSender
+
+        html = '<a href="https://example.com/verify?token=abc'
+
+        self.assertEqual(
+            VerificationEmailSender._extract_anchor_href(html),
+            "https://example.com/verify?token=abc",
+        )
+
 
 class SendVerificationEmailDelegationContractTest(SimpleTestCase):
     @patch("authentication.services.VerificationEmailSender")
