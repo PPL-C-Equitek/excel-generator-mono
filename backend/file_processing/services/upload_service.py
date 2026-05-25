@@ -296,6 +296,10 @@ def _dispatch_upload_processing(ext, file_path, uploaded_file):
     return strategy.process(file_path, uploaded_file)
 
 
+def _process_upload_with_strategy(ext, file_path, uploaded_file):
+    return _dispatch_upload_processing(ext, file_path, uploaded_file)
+
+
 def process_upload(uploaded_file):
     is_valid, error = validate_file(uploaded_file)
     if not is_valid:
@@ -306,7 +310,7 @@ def process_upload(uploaded_file):
     file_path = save_temp_file(uploaded_file)
 
     try:
-        success, error, extracted_data = _dispatch_upload_processing(
+        success, error, extracted_data = _process_upload_with_strategy(
             ext,
             file_path,
             uploaded_file,
