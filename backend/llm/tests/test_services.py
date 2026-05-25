@@ -2049,6 +2049,26 @@ class LlmGenerationServiceTest(SimpleTestCase):
                 }
             )
         )
+
+    def test_section_context_from_extracted_map_handles_non_string_keys(self):
+        self.assertEqual(
+            _build_section_context_from_extracted_map(
+                {
+                    1: [["header"]],
+                    "Section: Finance": [["header"]],
+                    "Section: Sales": [["header"]],
+                }
+            ),
+            {
+                "source_type": "extracted_map",
+                "section_count": 2,
+                "section_labels": ["Finance", "Sales"],
+                "instruction": (
+                    "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+                    "Split only when the boundary is explicit; otherwise keep the table intact."
+                ),
+            },
+        )
         self.assertIsNone(
             _build_section_context_from_extracted_map(
                 {
