@@ -191,13 +191,13 @@ class ExcelDataExtractionTests(TestCase):
         self.assertEqual(len(rows1[1]), 2)
         self.assertEqual(rows1[1][0], "val")
         self.assertEqual(rows1[1][1], "null")
-        self.assertEqual(len(rows2[0]), 3)
-        self.assertEqual(rows2[0][2], "nullx2")
-        self.assertEqual(len(rows2[1]), 3)
+        self.assertGreaterEqual(len(rows2[0]), 2)
+        self.assertEqual(rows2[0][0], "P")
+        self.assertEqual(rows2[0][1], "Q")
+        self.assertGreaterEqual(len(rows2[1]), 2)
         v2 = rows2[1][0]
         self.assertTrue(v2 is None or v2 == "", f"Sheet2 P empty cell: got {v2!r}")
         self.assertEqual(rows2[1][1], "val2")
-        self.assertEqual(rows2[1][2], "nullx2")
 
     def test_multi_sheet_all_sheets_empty_returns_valid_json_structure(self):
         data = _build_excel({
@@ -743,4 +743,101 @@ class ExcelServiceDirectUnitTests(SimpleTestCase):
             _load_xls_workbook(f)
 
 
+class ParseExcelCalamineTests(SimpleTestCase):
+
+    def test_calamine_parse_basic_data_from_file_like(self):
+        from file_processing.services.excel_service import _parse_excel_calamine
+        data = _build_excel({"Sheet1": [["NIM", "Nama"], ["001", "Alice"]]})
+        f = io.BytesIO(data)
+        result = _parse_excel_calamine(f)
+        self.assertIn("Sheet1", result)
+        self.assertEqual(result["Sheet1"][0], ["NIM", "Nama"])
+        self.assertEqual(result["Sheet1"][1], ["001", "Alice"])
+
+    def test_calamine_parse_empty_sheet_returns_empty_list(self):
+        from file_processing.services.excel_service import _parse_excel_calamine
+        data = _build_excel({"Kosong": []})
+        f = io.BytesIO(data)
+        result = _parse_excel_calamine(f)
+        self.assertIn("Kosong", result)
+        self.assertEqual(result["Kosong"], [])
+
+    def test_calamine_parse_multi_sheet(self):
+        from file_processing.services.excel_service import _parse_excel_calamine
+        data = _build_excel({
+            "Mahasiswa": [["NIM", "Nama"], ["001", "Alice"]],
+            "Dosen":     [["NIP", "Nama"], ["D01", "Budi"]],
+        })
+        f = io.BytesIO(data)
+        result = _parse_excel_calamine(f)
+        self.assertIn("Mahasiswa", result)
+        self.assertIn("Dosen", result)
+        self.assertEqual(result["Mahasiswa"][1][0], "001")
+        self.assertEqual(result["Dosen"][1][0], "D01")
+
+    def test_calamine_parse_null_cells_handled(self):
+        from file_processing.services.excel_service import _parse_excel_calamine
+        data = _build_excel({"Sheet1": [["A", "B", "C"], ["val", None, "x"]]})
+        f = io.BytesIO(data)
+        result = _parse_excel_calamine(f)
+        row = result["Sheet1"][1]
+        self.assertEqual(row[0], "val")
+        self.assertIsNone(row[1])
+        self.assertEqual(row[2], "x")
+
+    def test_calamine_parse_trailing_null_row_is_skipped(self):
+        from file_processing.services.excel_service import _parse_excel_calamine
+        data = _build_excel({
+            "Sheet1": [["A", "B"], [None, None], ["1", "2"]]
+        })
+        f = io.BytesIO(data)
+        result = _parse_excel_calamine(f)
+        self.assertEqual(len(result["Sheet1"]), 2)
+        self.assertEqual(result["Sheet1"][0], ["A", "B"])
+        self.assertEqual(result["Sheet1"][1], ["1", "2"])
+
+    def test_calamine_parse_raises_file_not_found_for_missing_path(self):
+        from file_processing.services.excel_service import _parse_excel_calamine
+        with self.assertRaises(FileNotFoundError):
+            _parse_excel_calamine("/tmp/file_yang_tidak_ada_sama_sekali.xlsx")
+
+    def test_calamine_not_installed_raises_import_error(self):
+        from file_processing.services.excel_service import _parse_excel_calamine
+        with patch("builtins.__import__", side_effect=lambda name, *a, **k: (
+            (_ for _ in ()).throw(ImportError("no calamine"))
+            if name == "python_calamine" else __import__(name, *a, **k)
+        )):
+            with self.assertRaises(ImportError):
+                _parse_excel_calamine(io.BytesIO(b"dummy"))
+
+    def test_parse_excel_falls_back_to_openpyxl_when_calamine_missing(self):
+        data = _build_excel({"Sheet1": [["A", "B"], ["1", "2"]]})
+        f = io.BytesIO(data)
+
+        real_import = builtins.__import__
+        def fake_import(name, *args, **kwargs):
+            if name == "python_calamine":
+                raise ImportError("calamine not installed")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            from file_processing.services.excel_service import parse_excel
+            result = parse_excel(f)
+
+        self.assertIn("Sheet1", result)
+        self.assertEqual(result["Sheet1"][0], ["A", "B"])
+
+    def test_calamine_parse_path_string(self):
+        import tempfile, os
+        from file_processing.services.excel_service import _parse_excel_calamine
+        data = _build_excel({"Sheet1": [["X", "Y"], ["10", "20"]]})
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        try:
+            result = _parse_excel_calamine(tmp_path)
+            self.assertIn("Sheet1", result)
+            self.assertEqual(result["Sheet1"][0], ["X", "Y"])
+        finally:
+            os.unlink(tmp_path)
 

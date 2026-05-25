@@ -100,7 +100,42 @@ def _sheet_to_rows(ws) -> list[list[Any]]:
     return data_rows
 
 
+def _parse_excel_calamine(file_or_path: str | IO[bytes] | Any) -> dict[str, list[list[Any]]]:
+    try:
+        from python_calamine import CalamineWorkbook
+    except ImportError as exc:
+        raise ImportError("python-calamine is not installed. Run: pip install python-calamine") from exc
+
+    if isinstance(file_or_path, str):
+        if not os.path.exists(file_or_path):
+            raise FileNotFoundError(f"File not found: {file_or_path}")
+        wb = CalamineWorkbook.from_path(file_or_path)
+    else:
+        try:
+            file_or_path.seek(0)
+        except (AttributeError, OSError):
+            pass
+        wb = CalamineWorkbook.from_filelike(file_or_path)
+
+    result: dict[str, list[list[Any]]] = {}
+    for sheet_name in wb.sheet_names:
+        ws = wb.get_sheet_by_name(sheet_name)
+        data_rows: list[list[Any]] = []
+        for row in ws.to_python(skip_empty_area=False):
+            row_list = [None if v == "" else v for v in row]
+            processed = _process_row(row_list, len(row_list))
+            if processed is not None:
+                data_rows.append(processed)
+        result[sheet_name] = data_rows
+    return result
+
+
 def parse_excel(file_or_path: str | IO[bytes] | Any) -> dict[str, list[list[Any]]]:
+    try:
+        return _parse_excel_calamine(file_or_path)
+    except ImportError:
+        pass
+
     wb = _load_workbook(file_or_path)
 
     result: dict[str, list[list[Any]]] = {}
