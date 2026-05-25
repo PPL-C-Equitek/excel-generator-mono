@@ -175,11 +175,11 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
             expect(screen.getByTestId('reasoning-steps')).toBeInTheDocument()
         })
 
-        it('shows backend reasoning wait text', () => {
+        it('shows thinking process loading text', () => {
             mockHookReturn.isConverting = true
             mockHookReturn.isGenerating = true
             render(<ConvertPage />)
-            expect(screen.getByText(/waiting for backend reasoning steps/i)).toBeInTheDocument()
+            expect(screen.getByText('Loading thinking process...')).toBeInTheDocument()
         })
 
         it('does not show error or output while loading', () => {
@@ -296,10 +296,46 @@ describe('ConvertPage — rendering tests (post-refactor)', () => {
                 })
 
                 expect(screen.getByText('Reviewed the uploaded file.')).toBeInTheDocument()
-                expect(screen.getByText('Preparing the thinking log...')).toBeInTheDocument()
+                expect(screen.getByText('Loading thinking process...')).toBeInTheDocument()
                 expect(screen.queryByText('Thinking log')).not.toBeInTheDocument()
             } finally {
                 vi.useRealTimers()
+            }
+        })
+
+        it('keeps reasoning steps available in a dropdown after playback completes', async () => {
+            const setTimeoutSpy = vi
+                .spyOn(globalThis, 'setTimeout')
+                .mockImplementation((handler: TimerHandler) => {
+                    if (typeof handler === 'function') {
+                        handler()
+                        handler()
+                        handler()
+                    }
+
+                    return 1 as unknown as ReturnType<typeof globalThis.setTimeout>
+                })
+            const clearTimeoutSpy = vi
+                .spyOn(globalThis, 'clearTimeout')
+                .mockImplementation(() => undefined)
+            const user = userEvent.setup()
+
+            try {
+                mockHookReturn.outputFile = sampleOutput
+                mockHookReturn.reasoningSteps = ['Reviewed the uploaded file.']
+                mockHookReturn.thinkingLog = 'Final reasoning summary.'
+
+                render(<ConvertPage />)
+
+                expect(screen.getByText('Thinking log')).toBeInTheDocument()
+                expect(screen.queryByText('Reviewed the uploaded file.')).not.toBeInTheDocument()
+
+                await user.click(screen.getByRole('button', { name: /reasoning steps/i }))
+
+                expect(screen.getByText('Reviewed the uploaded file.')).toBeInTheDocument()
+            } finally {
+                setTimeoutSpy.mockRestore()
+                clearTimeoutSpy.mockRestore()
             }
         })
 

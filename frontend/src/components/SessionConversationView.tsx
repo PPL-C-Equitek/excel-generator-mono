@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import ReasoningProcessPanel, { ReasoningStepsDropdown } from "@/components/ReasoningProcessPanel";
 import ThinkingPanel, { THINKING_PANEL_STATUS } from "@/components/ThinkingPanel";
 import type { SessionResume, SessionResumeHistoryItem } from "@/services/sessions";
 import type { ThinkingLogItem } from "@/services/thinkingLogs";
@@ -150,28 +151,30 @@ function isUploadBootstrapMessage(item: Extract<SessionResumeHistoryItem, { type
   );
 }
 
-function getPairedOutputForMessage(
-  history: SessionResumeHistoryItem[],
-  message: Extract<SessionResumeHistoryItem, { type: "message" }>,
-  messageIndex: number,
-): Extract<SessionResumeHistoryItem, { type: "output" }> | null {
-  const outputForMessage = history.find(
-    (candidate): candidate is Extract<SessionResumeHistoryItem, { type: "output" }> =>
-      candidate.type === "output" && candidate.chat_id === message.id,
-  );
+function buildPairedOutputsByMessageId(history: readonly SessionResumeHistoryItem[]) {
+  const pairedOutputsByMessageId = new Map<
+    string,
+    Extract<SessionResumeHistoryItem, { type: "output" }>
+  >();
+  let nextOutput: Extract<SessionResumeHistoryItem, { type: "output" }> | null = null;
 
-  if (outputForMessage) {
-    return outputForMessage;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const item = history[index];
+
+    if (item.type === "output") {
+      nextOutput = item;
+      if (item.chat_id) {
+        pairedOutputsByMessageId.set(item.chat_id, item);
+      }
+      continue;
+    }
+
+    if (nextOutput && !pairedOutputsByMessageId.has(item.id)) {
+      pairedOutputsByMessageId.set(item.id, nextOutput);
+    }
   }
 
-  return (
-    history
-      .slice(messageIndex + 1)
-      .find(
-        (candidate): candidate is Extract<SessionResumeHistoryItem, { type: "output" }> =>
-          candidate.type === "output",
-      ) ?? null
-  );
+  return pairedOutputsByMessageId;
 }
 
 function getUploadPreview(
@@ -274,28 +277,6 @@ function getReasoningSteps(
   return [];
 }
 
-function renderReasoningSteps(steps: string[]) {
-  if (steps.length === 0) {
-    return null;
-  }
-
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <p className="text-sm font-semibold text-slate-900">Reasoning steps</p>
-      <div className="mt-3 space-y-3 text-sm text-slate-700">
-        {steps.map((step, index) => (
-          <div key={`${step}-${index}`} className="flex items-start gap-3">
-            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-700 text-[11px] font-bold text-white">
-              {index + 1}
-            </span>
-            <span className="whitespace-pre-wrap wrap-anywhere leading-6">{step}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function getThinkingPanelContent(
   item: SessionResumeHistoryItem,
   thinkingLogRecord?: ThinkingLogItem,
@@ -321,19 +302,23 @@ function renderThinkingPanelForOutput(
   }
 
   if (isLoadingThinkingLogs && !content) {
-    return (
-      <div className="space-y-3">
-        {renderReasoningSteps(reasoningSteps)}
-        <ThinkingPanel
-          status={THINKING_PANEL_STATUS.loading}
-          content=""
-          animated
-        />
-      </div>
-    );
+    return <ReasoningProcessPanel steps={reasoningSteps} />;
   }
 
-  return <ThinkingPanel status={THINKING_PANEL_STATUS.success} content={content} />;
+  return (
+    <>
+      <ReasoningStepsDropdown steps={reasoningSteps} />
+
+      {content ? (
+        <div className="mb-4">
+          <p className="font-semibold text-gray-900">Thinking log</p>
+          <div className="mt-3 whitespace-pre-wrap rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+            {content}
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function SessionHistoryBubble({
@@ -574,6 +559,10 @@ export default function SessionConversationView({
         (item): item is Extract<SessionResumeHistoryItem, { type: "output" }> =>
           item.type === "output",
       ) ?? null;
+  const pairedOutputsByMessageId = useMemo(
+    () => buildPairedOutputsByMessageId(localHistory),
+    [localHistory],
+  );
   const canSend = draftMessage.trim().length > 0 && !isSending;
 
   const renderPendingThinkingBubble = () => {
@@ -588,22 +577,7 @@ export default function SessionConversationView({
         <AssistantAvatar />
         <div className="max-w-2xl rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-gray-700 shadow-sm ring-1 ring-gray-200 lg:max-w-3xl">
           <span className="sr-only">AI Thinking</span>
-          {pendingReasoningSteps.length > 0 ? (
-            <div className="space-y-3">
-              {renderReasoningSteps(visibleReasoningSteps)}
-              <ThinkingPanel
-                status={THINKING_PANEL_STATUS.loading}
-                content=""
-                animated
-              />
-            </div>
-          ) : (
-            <ThinkingPanel
-              status={THINKING_PANEL_STATUS.loading}
-              content=""
-              animated
-            />
-          )}
+          <ReasoningProcessPanel steps={visibleReasoningSteps} />
         </div>
       </article>
     );
@@ -755,14 +729,14 @@ export default function SessionConversationView({
           </div>
         ) : null}
         <div className="space-y-5">
-          {localHistory.map((item, index) => (
+          {localHistory.map((item) => (
             <SessionHistoryBubble
               key={`${item.type}-${item.id}`}
               item={item}
               sessionId={session.id}
               pairedOutput={
                 item.type === "message"
-                  ? getPairedOutputForMessage(localHistory, item, index)
+                  ? pairedOutputsByMessageId.get(item.id) ?? null
                   : null
               }
               thinkingLogRecord={

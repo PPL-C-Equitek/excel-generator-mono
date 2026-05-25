@@ -147,8 +147,13 @@ describe('SessionConversationView', () => {
 
         expect(screen.getByText('Resume Session')).toBeInTheDocument()
         expect(screen.getAllByText('Tolong lanjutkan.').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getByText('Thinking log')).toBeInTheDocument()
         expect(screen.getByText('Server log')).toBeInTheDocument()
         expect(screen.queryByText('Session fallback log')).not.toBeInTheDocument()
+        expect(screen.queryByText('step1')).not.toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: /reasoning steps/i }))
+        expect(screen.getByText('step1')).toBeInTheDocument()
 
         const outputBlock = screen.getByText('AI Output').closest('article')
         expect(outputBlock).not.toBeNull()
@@ -504,7 +509,7 @@ describe('SessionConversationView', () => {
         expect(screen.getByText('Valid step B')).toBeInTheDocument()
     })
 
-    it('handles non-array non-object reasoning source without rendering reasoning steps', () => {
+    it('handles non-array non-object reasoning source with the standard loading panel', () => {
         render(
             <SessionConversationView
                 session={makeSession({
@@ -530,7 +535,7 @@ describe('SessionConversationView', () => {
             />
         )
 
-        expect(screen.queryByText('Reasoning steps')).not.toBeInTheDocument()
+        expect(screen.getByText('Reasoning steps')).toBeInTheDocument()
         expect(screen.getByText('Loading thinking process...')).toBeInTheDocument()
     })
 
