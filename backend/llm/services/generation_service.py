@@ -23,18 +23,10 @@ _SECTION_LABEL_PATTERN = re.compile(
     r"^(?:section|entity|business\s+entity|business\s+unit|department|company|branch|project|customer|vendor)[ \t]*[:\-][ \t]*([^\n]{1,80})$",
     re.IGNORECASE,
 )
-_SECTION_KEYWORDS = {
-    "section",
-    "entity",
-    "business entity",
-    "business unit",
-    "department",
-    "company",
-    "branch",
-    "project",
-    "customer",
-    "vendor",
-}
+_SECTION_KEYWORD_PATTERN = re.compile(
+    r"\b(?:section|entity|business\s+entity|business\s+unit|department|company|branch|project|customer|vendor)\b",
+    re.IGNORECASE,
+)
 
 
 def _truncate_text_cell(value: Any, max_chars: int) -> Any:
@@ -251,8 +243,7 @@ def _extract_section_label_from_text(value: str) -> str | None:
     if keyword_match:
         return _normalize_section_label(keyword_match.group(1))
 
-    lowered = normalized_value.lower()
-    if any(keyword in lowered for keyword in _SECTION_KEYWORDS) and len(normalized_value) <= 80:
+    if _SECTION_KEYWORD_PATTERN.search(normalized_value) and len(normalized_value) <= 80:
         return _normalize_section_label(normalized_value)
 
     return None

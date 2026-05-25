@@ -2033,6 +2033,13 @@ class LlmGenerationServiceTest(SimpleTestCase):
             content_context,
         )
 
+    def test_extract_section_label_from_text_requires_whole_keyword_match(self):
+        self.assertIsNone(_extract_section_label_from_text("Projected Revenue Q1"))
+        self.assertIsNone(_extract_section_label_from_text("Companywide Total"))
+
+        self.assertEqual(_extract_section_label_from_text("Project Alpha"), "Project Alpha")
+        self.assertEqual(_extract_section_label_from_text("Company: EMEA"), "EMEA")
+
     @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_fetches_schema_fragment_for_distinct_schema_ids(
         self, mock_build_extraction_prompt
