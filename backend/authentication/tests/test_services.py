@@ -19,6 +19,7 @@ from authentication.services import (
     decode_verification_token,
     generate_tokens,
     generate_verification_token,
+    send_password_reset_email,
     send_password_changed_email,
     send_verification_email,
 )
@@ -318,3 +319,79 @@ class SendPasswordChangedEmailTest(SimpleTestCase):
                     send_password_changed_email("user@example.com")
 
         self.assertTrue(any("Failed to send password changed email" in msg for msg in log.output))
+
+
+class EmailSenderTemplateContractTest(SimpleTestCase):
+    def test_services_module_exposes_template_method_email_sender_classes(self):
+        from authentication import services
+
+        self.assertTrue(hasattr(services, "EmailSender"))
+        self.assertTrue(hasattr(services, "VerificationEmailSender"))
+        self.assertTrue(hasattr(services, "PasswordResetEmailSender"))
+        self.assertTrue(hasattr(services, "PasswordChangedEmailSender"))
+
+
+class SendVerificationEmailDelegationContractTest(SimpleTestCase):
+    @patch("authentication.services.VerificationEmailSender")
+    def test_send_verification_email_delegates_to_sender_positive(self, mock_sender_cls):
+        send_verification_email("user@example.com")
+
+        mock_sender_cls.assert_called_once_with()
+        mock_sender_cls.return_value.send.assert_called_once_with("user@example.com")
+
+    @patch("authentication.services.VerificationEmailSender")
+    def test_send_verification_email_reraises_sender_error_negative(self, mock_sender_cls):
+        mock_sender_cls.return_value.send.side_effect = RuntimeError("send failed")
+
+        with self.assertRaisesRegex(RuntimeError, "send failed"):
+            send_verification_email("user@example.com")
+
+    @patch("authentication.services.VerificationEmailSender")
+    def test_send_verification_email_passes_empty_email_through_edge(self, mock_sender_cls):
+        send_verification_email("")
+
+        mock_sender_cls.return_value.send.assert_called_once_with("")
+
+
+class SendPasswordResetEmailDelegationContractTest(SimpleTestCase):
+    @patch("authentication.services.PasswordResetEmailSender")
+    def test_send_password_reset_email_delegates_to_sender_positive(self, mock_sender_cls):
+        send_password_reset_email("user@example.com")
+
+        mock_sender_cls.assert_called_once_with()
+        mock_sender_cls.return_value.send.assert_called_once_with("user@example.com")
+
+    @patch("authentication.services.PasswordResetEmailSender")
+    def test_send_password_reset_email_reraises_sender_error_negative(self, mock_sender_cls):
+        mock_sender_cls.return_value.send.side_effect = RuntimeError("send failed")
+
+        with self.assertRaisesRegex(RuntimeError, "send failed"):
+            send_password_reset_email("user@example.com")
+
+    @patch("authentication.services.PasswordResetEmailSender")
+    def test_send_password_reset_email_passes_empty_email_through_edge(self, mock_sender_cls):
+        send_password_reset_email("")
+
+        mock_sender_cls.return_value.send.assert_called_once_with("")
+
+
+class SendPasswordChangedEmailDelegationContractTest(SimpleTestCase):
+    @patch("authentication.services.PasswordChangedEmailSender")
+    def test_send_password_changed_email_delegates_to_sender_positive(self, mock_sender_cls):
+        send_password_changed_email("user@example.com")
+
+        mock_sender_cls.assert_called_once_with()
+        mock_sender_cls.return_value.send.assert_called_once_with("user@example.com")
+
+    @patch("authentication.services.PasswordChangedEmailSender")
+    def test_send_password_changed_email_reraises_sender_error_negative(self, mock_sender_cls):
+        mock_sender_cls.return_value.send.side_effect = RuntimeError("send failed")
+
+        with self.assertRaisesRegex(RuntimeError, "send failed"):
+            send_password_changed_email("user@example.com")
+
+    @patch("authentication.services.PasswordChangedEmailSender")
+    def test_send_password_changed_email_passes_empty_email_through_edge(self, mock_sender_cls):
+        send_password_changed_email("")
+
+        mock_sender_cls.return_value.send.assert_called_once_with("")
