@@ -407,67 +407,71 @@ class VerificationEmailSenderInternalBehaviorTest(SimpleTestCase):
         )
 
 
-class SendVerificationEmailDelegationContractTest(SimpleTestCase):
-    @patch("authentication.services.VerificationEmailSender")
-    def test_send_verification_email_delegates_to_sender_positive(self, mock_sender_cls):
-        send_verification_email("user@example.com")
+class _EmailSenderDelegationContractMixin:
+    sender_patch_target = ""
+    wrapper = None
+
+    def _assert_wrapper_delegates(self, email: str) -> None:
+        with patch(self.sender_patch_target) as mock_sender_cls:
+            self.wrapper(email)
 
         mock_sender_cls.assert_called_once_with()
-        mock_sender_cls.return_value.send.assert_called_once_with("user@example.com")
+        mock_sender_cls.return_value.send.assert_called_once_with(email)
 
-    @patch("authentication.services.VerificationEmailSender")
-    def test_send_verification_email_reraises_sender_error_negative(self, mock_sender_cls):
-        mock_sender_cls.return_value.send.side_effect = RuntimeError("send failed")
+    def _assert_wrapper_reraises_sender_error(self, email: str) -> None:
+        with patch(self.sender_patch_target) as mock_sender_cls:
+            mock_sender_cls.return_value.send.side_effect = RuntimeError("send failed")
 
-        with self.assertRaisesRegex(RuntimeError, "send failed"):
-            send_verification_email("user@example.com")
-
-    @patch("authentication.services.VerificationEmailSender")
-    def test_send_verification_email_passes_empty_email_through_edge(self, mock_sender_cls):
-        send_verification_email("")
-
-        mock_sender_cls.return_value.send.assert_called_once_with("")
+            with self.assertRaisesRegex(RuntimeError, "send failed"):
+                self.wrapper(email)
 
 
-class SendPasswordResetEmailDelegationContractTest(SimpleTestCase):
-    @patch("authentication.services.PasswordResetEmailSender")
-    def test_send_password_reset_email_delegates_to_sender_positive(self, mock_sender_cls):
-        send_password_reset_email("user@example.com")
+class SendVerificationEmailDelegationContractTest(
+    _EmailSenderDelegationContractMixin,
+    SimpleTestCase,
+):
+    sender_patch_target = "authentication.services.VerificationEmailSender"
+    wrapper = staticmethod(send_verification_email)
 
-        mock_sender_cls.assert_called_once_with()
-        mock_sender_cls.return_value.send.assert_called_once_with("user@example.com")
+    def test_send_verification_email_delegates_to_sender_positive(self):
+        self._assert_wrapper_delegates("user@example.com")
 
-    @patch("authentication.services.PasswordResetEmailSender")
-    def test_send_password_reset_email_reraises_sender_error_negative(self, mock_sender_cls):
-        mock_sender_cls.return_value.send.side_effect = RuntimeError("send failed")
+    def test_send_verification_email_reraises_sender_error_negative(self):
+        self._assert_wrapper_reraises_sender_error("user@example.com")
 
-        with self.assertRaisesRegex(RuntimeError, "send failed"):
-            send_password_reset_email("user@example.com")
-
-    @patch("authentication.services.PasswordResetEmailSender")
-    def test_send_password_reset_email_passes_empty_email_through_edge(self, mock_sender_cls):
-        send_password_reset_email("")
-
-        mock_sender_cls.return_value.send.assert_called_once_with("")
+    def test_send_verification_email_passes_empty_email_through_edge(self):
+        self._assert_wrapper_delegates("")
 
 
-class SendPasswordChangedEmailDelegationContractTest(SimpleTestCase):
-    @patch("authentication.services.PasswordChangedEmailSender")
-    def test_send_password_changed_email_delegates_to_sender_positive(self, mock_sender_cls):
-        send_password_changed_email("user@example.com")
+class SendPasswordResetEmailDelegationContractTest(
+    _EmailSenderDelegationContractMixin,
+    SimpleTestCase,
+):
+    sender_patch_target = "authentication.services.PasswordResetEmailSender"
+    wrapper = staticmethod(send_password_reset_email)
 
-        mock_sender_cls.assert_called_once_with()
-        mock_sender_cls.return_value.send.assert_called_once_with("user@example.com")
+    def test_send_password_reset_email_delegates_to_sender_positive(self):
+        self._assert_wrapper_delegates("user@example.com")
 
-    @patch("authentication.services.PasswordChangedEmailSender")
-    def test_send_password_changed_email_reraises_sender_error_negative(self, mock_sender_cls):
-        mock_sender_cls.return_value.send.side_effect = RuntimeError("send failed")
+    def test_send_password_reset_email_reraises_sender_error_negative(self):
+        self._assert_wrapper_reraises_sender_error("user@example.com")
 
-        with self.assertRaisesRegex(RuntimeError, "send failed"):
-            send_password_changed_email("user@example.com")
+    def test_send_password_reset_email_passes_empty_email_through_edge(self):
+        self._assert_wrapper_delegates("")
 
-    @patch("authentication.services.PasswordChangedEmailSender")
-    def test_send_password_changed_email_passes_empty_email_through_edge(self, mock_sender_cls):
-        send_password_changed_email("")
 
-        mock_sender_cls.return_value.send.assert_called_once_with("")
+class SendPasswordChangedEmailDelegationContractTest(
+    _EmailSenderDelegationContractMixin,
+    SimpleTestCase,
+):
+    sender_patch_target = "authentication.services.PasswordChangedEmailSender"
+    wrapper = staticmethod(send_password_changed_email)
+
+    def test_send_password_changed_email_delegates_to_sender_positive(self):
+        self._assert_wrapper_delegates("user@example.com")
+
+    def test_send_password_changed_email_reraises_sender_error_negative(self):
+        self._assert_wrapper_reraises_sender_error("user@example.com")
+
+    def test_send_password_changed_email_passes_empty_email_through_edge(self):
+        self._assert_wrapper_delegates("")
