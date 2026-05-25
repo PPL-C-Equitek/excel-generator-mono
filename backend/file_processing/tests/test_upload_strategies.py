@@ -17,6 +17,89 @@ class UploadProcessingStrategyContractTest(SimpleTestCase):
         self.assertTrue(hasattr(upload_service, "ImageUploadStrategy"))
         self.assertTrue(hasattr(upload_service, "get_upload_processing_strategy"))
 
+    def test_base_upload_processing_strategy_abstract_process_raises_negative(self):
+        from file_processing.services.upload_service import UploadProcessingStrategy
+
+        class StubStrategy(UploadProcessingStrategy):
+            def process(self, file_path, uploaded_file):
+                return super().process(file_path, uploaded_file)
+
+        with self.assertRaises(NotImplementedError):
+            StubStrategy().process("/tmp/file.any", object())
+
+    @patch("file_processing.services.upload_service._process_pdf")
+    def test_pdf_upload_strategy_wraps_pdf_processor_positive(self, mock_process_pdf):
+        from file_processing.services.upload_service import PdfUploadStrategy
+
+        uploaded_file = object()
+        mock_process_pdf.return_value = (True, None, {"content": []})
+
+        result = PdfUploadStrategy().process("/tmp/file.pdf", uploaded_file)
+
+        self.assertEqual(result, (True, None, {"content": []}))
+        mock_process_pdf.assert_called_once_with("/tmp/file.pdf", uploaded_file)
+
+    @patch("file_processing.services.upload_service.process_uploaded_excel")
+    def test_excel_upload_strategy_wraps_excel_processor_positive(self, mock_process_uploaded_excel):
+        from file_processing.services.upload_service import ExcelUploadStrategy
+
+        mock_process_uploaded_excel.return_value = (True, None, {"rows": []})
+
+        result = ExcelUploadStrategy().process("/tmp/file.xlsx", object())
+
+        self.assertEqual(result, (True, None, {"rows": []}))
+        mock_process_uploaded_excel.assert_called_once_with("/tmp/file.xlsx")
+
+    @patch("file_processing.services.upload_service.process_uploaded_csv")
+    def test_csv_upload_strategy_wraps_csv_processor_positive(self, mock_process_uploaded_csv):
+        from file_processing.services.upload_service import CsvUploadStrategy
+
+        mock_process_uploaded_csv.return_value = (True, None, {"rows": []})
+
+        result = CsvUploadStrategy().process("/tmp/file.csv", object())
+
+        self.assertEqual(result, (True, None, {"rows": []}))
+        mock_process_uploaded_csv.assert_called_once_with("/tmp/file.csv")
+
+    @patch("file_processing.services.upload_service.process_uploaded_txt")
+    def test_txt_upload_strategy_wraps_txt_processor_positive(self, mock_process_uploaded_txt):
+        from file_processing.services.upload_service import TxtUploadStrategy
+
+        mock_process_uploaded_txt.return_value = (True, None, {"text": "ok"})
+
+        result = TxtUploadStrategy().process("/tmp/file.txt", object())
+
+        self.assertEqual(result, (True, None, {"text": "ok"}))
+        mock_process_uploaded_txt.assert_called_once_with("/tmp/file.txt")
+
+    @patch("file_processing.services.upload_service.process_word")
+    def test_word_upload_strategy_wraps_word_processor_with_extension_positive(self, mock_process_word):
+        from file_processing.services.upload_service import WordUploadStrategy
+
+        mock_process_word.return_value = (True, None, {"content": []})
+
+        result = WordUploadStrategy(".docx").process("/tmp/file.docx", object())
+
+        self.assertEqual(result, (True, None, {"content": []}))
+        mock_process_word.assert_called_once_with("/tmp/file.docx", ".docx")
+
+    @patch("file_processing.services.upload_service._process_image")
+    def test_image_upload_strategy_wraps_image_processor_positive(self, mock_process_image):
+        from file_processing.services.upload_service import ImageUploadStrategy
+
+        mock_process_image.return_value = (True, None, {"content": []})
+
+        result = ImageUploadStrategy().process("/tmp/file.png", object())
+
+        self.assertEqual(result, (True, None, {"content": []}))
+        mock_process_image.assert_called_once_with("/tmp/file.png")
+
+    def test_get_upload_processing_strategy_rejects_unsupported_extension_negative(self):
+        from file_processing.services.upload_service import get_upload_processing_strategy
+
+        with self.assertRaisesRegex(ValueError, "Unsupported file type"):
+            get_upload_processing_strategy(".exe")
+
 
 class DispatchUploadProcessingDelegationContractTest(SimpleTestCase):
     @patch("file_processing.services.upload_service.get_upload_processing_strategy")
@@ -59,6 +142,11 @@ class DispatchUploadProcessingDelegationContractTest(SimpleTestCase):
         _dispatch_upload_processing(".xlsx", "/tmp/file.xlsx", object())
 
         mock_get_strategy.assert_called_once_with(".xlsx")
+
+    def test_dispatch_upload_processing_returns_unsupported_tuple_negative(self):
+        result = _dispatch_upload_processing(".exe", "/tmp/file.exe", object())
+
+        self.assertEqual(result, (False, "Unsupported file type", None))
 
 
 class ProcessUploadStrategyDelegationContractTest(SimpleTestCase):
