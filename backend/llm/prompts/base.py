@@ -54,26 +54,17 @@ QUALITY_SECTION = """## QUALITY_RULES
 
 ### Normalization / Unpivot Rules
 If columns represent categorical groupings (department names, regions, units, or similar),
-unpivot those columns into long-format rows.
+you may unpivot those columns into long-format rows, but only when the input clearly requires it.
 
 Apply unpivoting only within a single detected table.
 Do not use unpivoting as a reason to merge multiple distinct tables into one content_data item.
 
-The normalized table must use these exact column names:
-[
-  "unit",
-  "item",
-  "num_type",
-  "status_type",
-  "value"
-]
+Only when unpivoting is actually used, the normalized table must use these exact column names:
+["unit", "item", "num_type", "status_type", "value"]
 
-Never use translated or alternative names such as:
-- Nilai
-- Tipe
-- Status
-- Item
-- any other language variant
+If unpivoting is not used, keep the original headers from the source.
+Never invent unit/item/num_type/status_type/value headers unless unpivoting is required.
+Never use translated or alternative names such as Nilai, Tipe, Status, Item, or any other language variant.
 
 Exclude rows where value is 0 or null after unpivoting.
 
