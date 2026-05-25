@@ -207,3 +207,68 @@ class ProcessUploadStrategyDelegationContractTest(SimpleTestCase):
         process_upload(uploaded_file)
 
         mock_dispatch.assert_called_once_with(".jpeg", "/tmp/scan.jpeg", uploaded_file)
+
+
+class ProcessUploadStrategyHelperContractTest(SimpleTestCase):
+    def test_upload_service_exposes_process_upload_with_strategy_helper(self):
+        from file_processing.services import upload_service
+
+        self.assertTrue(hasattr(upload_service, "_process_upload_with_strategy"))
+
+    @patch("file_processing.services.upload_service.save_temp_file")
+    @patch("file_processing.services.upload_service._process_upload_with_strategy")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_delegates_to_strategy_helper_positive(
+        self,
+        mock_validate_file,
+        mock_process_upload_with_strategy,
+        mock_save_temp_file,
+    ):
+        uploaded_file = MagicMock()
+        uploaded_file.name = "report.PDF"
+        mock_validate_file.return_value = (True, None)
+        mock_save_temp_file.return_value = "/tmp/report.pdf"
+        mock_process_upload_with_strategy.return_value = (True, None, {"content": []})
+
+        result = process_upload(uploaded_file)
+
+        self.assertEqual(result, (True, None, None, {"content": []}))
+        mock_process_upload_with_strategy.assert_called_once_with(
+            ".pdf",
+            "/tmp/report.pdf",
+            uploaded_file,
+        )
+
+    @patch("file_processing.services.upload_service.save_temp_file")
+    @patch("file_processing.services.upload_service._process_upload_with_strategy")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_reraises_strategy_helper_error_negative(
+        self,
+        mock_validate_file,
+        mock_process_upload_with_strategy,
+        mock_save_temp_file,
+    ):
+        uploaded_file = MagicMock()
+        uploaded_file.name = "report.csv"
+        mock_validate_file.return_value = (True, None)
+        mock_save_temp_file.return_value = "/tmp/report.csv"
+        mock_process_upload_with_strategy.side_effect = RuntimeError("boom")
+
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            process_upload(uploaded_file)
+
+    @patch("file_processing.services.upload_service._process_upload_with_strategy")
+    @patch("file_processing.services.upload_service.validate_file")
+    def test_process_upload_short_circuits_before_strategy_helper_edge(
+        self,
+        mock_validate_file,
+        mock_process_upload_with_strategy,
+    ):
+        uploaded_file = MagicMock()
+        uploaded_file.name = "bad.exe"
+        mock_validate_file.return_value = (False, "Unsupported file type")
+
+        result = process_upload(uploaded_file)
+
+        self.assertEqual(result, (False, "Unsupported file type", None, None))
+        mock_process_upload_with_strategy.assert_not_called()
