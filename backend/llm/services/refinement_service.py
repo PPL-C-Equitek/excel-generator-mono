@@ -11,6 +11,18 @@ from llm.services.reasoning_service import (
     LlmReasoningService,
     generate_conversion_reasoning_response,
 )
+from llm.services.refinement_quality_rules import (
+    RefinementQualityValidator,
+    SummaryTotalItemsRule,
+    TableHeaderOverlapRule,
+    TableRowsNotEmptyRule,
+)
+from llm.services.refinement_stop_policies import (
+    CompositeRefinementStopPolicy,
+    ExitOnValidStopPolicy,
+    PlateauStopPolicy,
+    RefinementIterationState,
+)
 
 
 _REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
@@ -99,178 +111,18 @@ def _collect_ambiguity_warnings(payload: Any, path: str = "$") -> list[dict[str,
     return warnings
 
 
-def _normalize_header_value(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip().lower()
-    return normalized or None
-
-
-def _collect_headers_from_header_list(headers: Any) -> set[str]:
-    if not isinstance(headers, list):
-        return set()
-    return {
-        normalized
-        for normalized in (_normalize_header_value(header) for header in headers)
-        if normalized is not None
-    }
-
-
-def _collect_headers_from_rows(rows: Any) -> set[str]:
-    if not isinstance(rows, list):
-        return set()
-
-    source_headers: set[str] = set()
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        for row_key in row.keys():
-            normalized = _normalize_header_value(row_key)
-            if normalized is not None:
-                source_headers.add(normalized)
-    return source_headers
-
-
-def _collect_nested_source_headers(payload: Any) -> set[str]:
-    if isinstance(payload, dict):
-        return _collect_source_headers(payload)
-    if isinstance(payload, list):
-        source_headers: set[str] = set()
-        for item in payload:
-            source_headers.update(_collect_source_headers(item))
-        return source_headers
-    return set()
-
-
-def _collect_source_headers(payload: Any) -> set[str]:
-    if not isinstance(payload, dict):
-        return _collect_nested_source_headers(payload)
-
-    source_headers: set[str] = set()
-    for key, value in payload.items():
-        if key == "headers":
-            source_headers.update(_collect_headers_from_header_list(value))
-            continue
-        if key == "rows":
-            source_headers.update(_collect_headers_from_rows(value))
-            continue
-        source_headers.update(_collect_nested_source_headers(value))
-    return source_headers
-
-
-def _build_quality_error(path: str, message: str) -> dict[str, str]:
-    return {
-        "path": path,
-        "message": message,
-        "severity": "error",
-    }
-
-
-def _normalized_headers(headers: Any) -> set[str]:
-    if not isinstance(headers, list):
-        return set()
-    return {
-        header.strip().lower()
-        for header in headers
-        if isinstance(header, str) and header.strip()
-    }
-
-
-def _collect_table_quality_errors(
-    table: dict[str, Any],
-    table_index: int,
-    source_headers: set[str],
-) -> tuple[list[dict[str, str]], int]:
-    errors: list[dict[str, str]] = []
-    total_rows = 0
-
-    rows = table.get("rows")
-    if isinstance(rows, list):
-        total_rows = len(rows)
-        if total_rows == 0:
-            errors.append(
-                _build_quality_error(
-                    f"$.content_data[{table_index}].rows",
-                    "rows must not be empty for refinement quality checks.",
-                )
-            )
-
-    output_headers = _normalized_headers(table.get("headers"))
-    has_overlap = bool(output_headers.intersection(source_headers))
-    if source_headers and output_headers and not has_overlap:
-        errors.append(
-            _build_quality_error(
-                f"$.content_data[{table_index}].headers",
-                (
-                    "Output headers do not overlap with source-extracted headers, "
-                    "which indicates likely semantic mismatch."
-                ),
-            )
-        )
-
-    return errors, total_rows
-
-
-def _collect_summary_quality_errors(
-    output_json: dict[str, Any],
-    total_rows: int,
-) -> list[dict[str, str]]:
-    summary = output_json.get("summary")
-    if not isinstance(summary, dict):
-        return []
-
-    total_items = summary.get("total_items")
-    if not isinstance(total_items, int):
-        return []
-
-    if total_items < 0:
-        return [
-            _build_quality_error(
-                "$.summary.total_items",
-                "summary.total_items must be a non-negative integer.",
-            )
-        ]
-
-    if total_items == total_rows:
-        return []
-
-    return [
-        _build_quality_error(
-            "$.summary.total_items",
-            "summary.total_items does not match the number of rows in content_data.",
-        )
-    ]
-
-
 def _collect_refinement_quality_errors(
     output_json: Any,
     input_json: Any | None,
 ) -> list[dict[str, str]]:
-    if not isinstance(output_json, dict):
-        return []
-
-    content_data = output_json.get("content_data")
-    if not isinstance(content_data, list):
-        return []
-
-    source_headers = _collect_source_headers(input_json) if input_json is not None else set()
-    errors: list[dict[str, str]] = []
-    total_rows = 0
-    for table_index, table in enumerate(content_data):
-        if not isinstance(table, dict):
-            continue
-
-        table_errors, table_row_count = _collect_table_quality_errors(
-            table=table,
-            table_index=table_index,
-            source_headers=source_headers,
-        )
-        errors.extend(table_errors)
-        total_rows += table_row_count
-
-    errors.extend(_collect_summary_quality_errors(output_json, total_rows))
-
-    return errors
+    validator = RefinementQualityValidator(
+        rules=[
+            TableRowsNotEmptyRule(),
+            TableHeaderOverlapRule(),
+            SummaryTotalItemsRule(),
+        ]
+    )
+    return validator.validate(output_json=output_json, input_json=input_json)
 
 
 def build_validation_log(
@@ -336,7 +188,11 @@ def _compact_validation_issues(issues: Any, max_items: int) -> list[dict[str, st
         path = issue.get("path")
         message = issue.get("message")
         severity = issue.get("severity")
-        if not all(isinstance(value, str) and value.strip() for value in (path, message, severity)):
+        if not isinstance(path, str) or not path.strip():
+            continue
+        if not isinstance(message, str) or not message.strip():
+            continue
+        if not isinstance(severity, str) or not severity.strip():
             continue
         compact_issues.append(
             {
@@ -486,6 +342,12 @@ class RefinementOrchestrator:
         has_valid_candidate = False
         stagnation_count = 0
         plateau_patience = max(1, int(refinement_config.plateau_patience))
+        stop_policy = CompositeRefinementStopPolicy(
+            policies=[
+                ExitOnValidStopPolicy(enabled=refinement_config.early_exit_on_valid),
+                PlateauStopPolicy(enabled=refinement_config.early_exit_on_plateau),
+            ]
+        )
 
         previous_candidate = None
         previous_validation_log = None
@@ -528,16 +390,18 @@ class RefinementOrchestrator:
 
             is_valid = validation_log["verdict"] == "valid"
             has_valid_candidate = has_valid_candidate or is_valid
-            if is_valid and refinement_config.early_exit_on_valid:
+            stop_decision = stop_policy.should_stop(
+                RefinementIterationState(
+                    iteration=iteration,
+                    max_iterations=max_iterations,
+                    is_valid=is_valid,
+                    has_valid_candidate=has_valid_candidate,
+                    stagnation_count=stagnation_count,
+                    plateau_patience=plateau_patience,
+                )
+            )
+            if stop_decision.should_stop:
                 early_exit_triggered = iteration < max_iterations
-                break
-            if (
-                not has_valid_candidate
-                and refinement_config.early_exit_on_plateau
-                and iteration < max_iterations
-                and stagnation_count >= plateau_patience
-            ):
-                early_exit_triggered = True
                 break
 
             previous_candidate = sanitized_candidate

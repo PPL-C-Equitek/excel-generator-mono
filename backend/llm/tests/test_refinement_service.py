@@ -8,15 +8,28 @@ from llm.services.refinement_service import (
     _compact_validation_issues,
     _compact_validation_log_for_instruction,
     _collect_refinement_quality_errors,
+    _resolve_refinement_final_status,
+    build_refinement_instruction,
+    build_validation_log,
+    _sanitize_reasoning_meta_keys,
+)
+from llm.services.refinement_quality_rules import (
+    RefinementQualityValidator,
+    RefinementValidationContext,
+    SummaryTotalItemsRule,
+    TableHeaderOverlapRule,
+    TableRowsNotEmptyRule,
     _collect_headers_from_header_list,
     _collect_headers_from_rows,
     _collect_nested_source_headers,
     _collect_source_headers,
     _normalized_headers,
-    _resolve_refinement_final_status,
-    build_refinement_instruction,
-    build_validation_log,
-    _sanitize_reasoning_meta_keys,
+)
+from llm.services.refinement_stop_policies import (
+    CompositeRefinementStopPolicy,
+    ExitOnValidStopPolicy,
+    PlateauStopPolicy,
+    RefinementIterationState,
 )
 from file_processing.services.export_service import OutputLLMValidationError
 
@@ -372,12 +385,174 @@ class RefinementHelpersTest(SimpleTestCase):
             ],
         )
 
+    def test_compact_validation_issues_skips_non_string_and_blank_path(self):
+        issues = [
+            {"path": None, "message": "missing path", "severity": "error"},
+            {"path": "   ", "message": "blank path", "severity": "warning"},
+            {"path": "$.valid", "message": "kept", "severity": "error"},
+        ]
+
+        compacted = _compact_validation_issues(issues, max_items=5)
+
+        self.assertEqual(
+            compacted,
+            [
+                {
+                    "path": "$.valid",
+                    "message": "kept",
+                    "severity": "error",
+                }
+            ],
+        )
+
     def test_compact_validation_log_for_instruction_returns_non_dict_unchanged(self):
         validation_log = ["invalid-structure"]
 
         compact_log = _compact_validation_log_for_instruction(validation_log)
 
         self.assertIs(compact_log, validation_log)
+
+
+class RefinementQualityValidatorTest(SimpleTestCase):
+    def test_table_rows_not_empty_rule_returns_empty_when_content_data_is_not_list(self):
+        rule = TableRowsNotEmptyRule()
+
+        errors = rule.evaluate(
+            RefinementValidationContext(
+                output_json={"content_data": "not-a-list"},
+                input_json=None,
+                source_headers=set(),
+                total_rows=0,
+            )
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_table_header_overlap_rule_returns_empty_when_content_data_is_not_list(self):
+        rule = TableHeaderOverlapRule()
+
+        errors = rule.evaluate(
+            RefinementValidationContext(
+                output_json={"content_data": "not-a-list"},
+                input_json=None,
+                source_headers={"id"},
+                total_rows=0,
+            )
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_validator_combines_rule_results_in_stable_order(self):
+        validator = RefinementQualityValidator(
+            rules=[
+                TableRowsNotEmptyRule(),
+                TableHeaderOverlapRule(),
+                SummaryTotalItemsRule(),
+            ]
+        )
+
+        issues = validator.validate(
+            output_json={
+                "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
+                "summary": {"total_items": 2},
+                "content_data": [
+                    {
+                        "table_name": "result",
+                        "headers": ["No", "Rumah", "Luas"],
+                        "rows": [],
+                    }
+                ],
+            },
+            input_json={
+                "content_data": [
+                    {
+                        "headers": ["ID", "Barang", "Harga"],
+                        "rows": [{"ID": "1", "Barang": "A", "Harga": 1000}],
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(
+            issues,
+            [
+                {
+                    "path": "$.content_data[0].rows",
+                    "message": "rows must not be empty for refinement quality checks.",
+                    "severity": "error",
+                },
+                {
+                    "path": "$.content_data[0].headers",
+                    "message": (
+                        "Output headers do not overlap with source-extracted headers, "
+                        "which indicates likely semantic mismatch."
+                    ),
+                    "severity": "error",
+                },
+                {
+                    "path": "$.summary.total_items",
+                    "message": "summary.total_items does not match the number of rows in content_data.",
+                    "severity": "error",
+                },
+            ],
+        )
+
+    def test_validator_returns_empty_list_for_non_object_payload(self):
+        validator = RefinementQualityValidator(
+            rules=[
+                TableRowsNotEmptyRule(),
+                TableHeaderOverlapRule(),
+                SummaryTotalItemsRule(),
+            ]
+        )
+
+        self.assertEqual(validator.validate(output_json="invalid", input_json={}), [])
+
+
+class RefinementStopPolicyTest(SimpleTestCase):
+    def test_composite_stop_policy_returns_valid_stop_before_plateau(self):
+        stop_policy = CompositeRefinementStopPolicy(
+            policies=[
+                ExitOnValidStopPolicy(enabled=True),
+                PlateauStopPolicy(enabled=True),
+            ]
+        )
+
+        decision = stop_policy.should_stop(
+            RefinementIterationState(
+                iteration=3,
+                max_iterations=5,
+                is_valid=True,
+                has_valid_candidate=True,
+                stagnation_count=2,
+                plateau_patience=2,
+            )
+        )
+
+        self.assertTrue(decision.should_stop)
+        self.assertEqual(decision.reason, "valid")
+
+    def test_composite_stop_policy_returns_continue_when_no_policy_matches(self):
+        stop_policy = CompositeRefinementStopPolicy(
+            policies=[
+                ExitOnValidStopPolicy(enabled=True),
+                PlateauStopPolicy(enabled=True),
+            ]
+        )
+
+        decision = stop_policy.should_stop(
+            RefinementIterationState(
+                iteration=2,
+                max_iterations=5,
+                is_valid=False,
+                has_valid_candidate=False,
+                stagnation_count=1,
+                plateau_patience=2,
+            )
+        )
+
+        self.assertFalse(decision.should_stop)
+        self.assertEqual(decision.reason, "none")
 
 
 class RefinementOrchestratorTest(SimpleTestCase):
@@ -756,6 +931,46 @@ class RefinementOrchestratorTest(SimpleTestCase):
 
         self.assertEqual(result["refinement_meta"]["iterations_run"], 5)
         self.assertFalse(result["refinement_meta"]["early_exit_triggered"])
+        self.assertEqual(generation_service.generate.call_count, 5)
+
+    def test_orchestrator_never_uses_plateau_stop_after_valid_candidate_found(self):
+        generation_service = Mock()
+        generation_service.generate.side_effect = [
+            {"status": "invalid-1"},
+            {
+                "document_info": {"source_type": "Excel", "filename": "report.xlsx"},
+                "summary": {"total_tables": 1},
+                "content_data": [
+                    {
+                        "table_name": "Sheet1",
+                        "headers": ["item"],
+                        "rows": [{"item": "Pen"}],
+                    }
+                ],
+            },
+            {"status": "invalid-3"},
+            {"status": "invalid-4"},
+            {"status": "invalid-5"},
+        ]
+
+        orchestrator = RefinementOrchestrator(generation_service=generation_service)
+
+        result = orchestrator.run(
+            input_json={"filename": "report.xlsx"},
+            custom_schema_id=None,
+            include_reasoning=False,
+            refinement_config=RefinementConfig(
+                enabled=True,
+                max_iterations=5,
+                early_exit_on_valid=False,
+                early_exit_on_plateau=True,
+                plateau_patience=2,
+            ),
+        )
+
+        self.assertEqual(result["refinement_meta"]["iterations_run"], 5)
+        self.assertFalse(result["refinement_meta"]["early_exit_triggered"])
+        self.assertEqual(result["refinement_meta"]["final_status"], "valid")
         self.assertEqual(generation_service.generate.call_count, 5)
 
     # Edge
