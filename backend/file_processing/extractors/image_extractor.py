@@ -22,6 +22,7 @@ from file_processing.extractors.image_preprocessors import (
     BaseImagePreprocessor,
     GrayscaleThresholdPreprocessor,
 )
+from file_processing.extractors.ocr.ocr_strategy import OCRStrategyFactory
 from file_processing.extractors.ocr.tesseract_engine import TesseractEngine
 
 logger = logging.getLogger(__name__)
@@ -70,18 +71,25 @@ class ImageExtractor:
         try:
             with self._load_image(file_path) as image:
                 prepared = self.preprocessor.preprocess(image)
-                text, confidence = self.ocr_engine.extract_text_with_confidence(prepared)
+                metadata = self.ocr_engine.extract_text_with_metadata(prepared)
         except ValueError:
             raise
         except Exception as exc:
             logger.exception("Image OCR extraction failed.")
             raise ValueError("Image OCR extraction failed.") from exc
 
-        lines = self._split_lines(text)
+        cleanup_result = OCRStrategyFactory.cleanup_text_for_document(
+            document_type="image",
+            text=metadata.get("text", ""),
+            avg_confidence=float(metadata.get("avg_confidence", 0.0)),
+            word_details=metadata.get("word_details"),
+        )
+
+        lines = self._split_lines(cleanup_result["text"])
         logger.info(
             "Image OCR completed: %d lines extracted (confidence=%.1f%%)",
             len(lines),
-            confidence,
+            cleanup_result["ocr_metadata"].get("confidence_score", 0.0),
         )
 
         return {
@@ -89,6 +97,8 @@ class ImageExtractor:
                 {
                     "page": 1,
                     "text": lines,
+                    "ocr_metadata": cleanup_result["ocr_metadata"],
                 }
-            ]
+            ],
+            "ocr_metadata": cleanup_result["ocr_metadata"],
         }

@@ -119,6 +119,64 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
         self.assertIn("## REFINEMENT", prompt)
         self.assertIn("Repair content_data row mapping.", prompt)
 
+    def test_build_extraction_prompt_includes_ocr_context_when_provided(self):
+        prompt = build_extraction_prompt(
+            ocr_context={
+                "confidence_score": 58.0,
+                "confidence_level": "low",
+                "document_type": "image",
+                "processing_method": "tesseract_multi_psm_layout_aware",
+                "low_confidence_regions": [{"text": "lncome", "confidence": 42.0}],
+                "corrections_applied": ["lncome->income"],
+            },
+        )
+
+        self.assertIn("## OCR_QUALITY_CONTEXT", prompt)
+        self.assertIn("Document Type: image", prompt)
+        self.assertIn("OCR Confidence: 58.0% (low)", prompt)
+        self.assertIn("Low-Confidence Regions (first 5):", prompt)
+        self.assertIn("lncome", prompt)
+
+    def test_build_extraction_prompt_supports_string_ocr_context(self):
+        prompt = build_extraction_prompt(ocr_context="  OCR metadata as raw text  ")
+
+        self.assertIn("## OCR_QUALITY_CONTEXT", prompt)
+        self.assertIn("OCR metadata as raw text", prompt)
+
+    def test_build_extraction_prompt_ignores_blank_ocr_context(self):
+        prompt = build_extraction_prompt(ocr_context="   ")
+
+        self.assertNotIn("## OCR_QUALITY_CONTEXT", prompt)
+
+    def test_build_extraction_prompt_ignores_non_dict_ocr_regions_but_keeps_context(self):
+        prompt = build_extraction_prompt(
+            ocr_context={
+                "confidence_score": 61.0,
+                "confidence_level": "medium",
+                "document_type": "pdf",
+                "low_confidence_regions": ["bad-region"],
+                "corrections_applied": [],
+            },
+        )
+
+        self.assertIn("## OCR_QUALITY_CONTEXT", prompt)
+        self.assertNotIn("Processing Method:", prompt)
+        self.assertIn("Corrections Applied: 0", prompt)
+
+    def test_build_extraction_prompt_ocr_context_without_regions_skips_region_section(self):
+        prompt = build_extraction_prompt(
+            ocr_context={
+                "confidence_score": 72.0,
+                "confidence_level": "medium",
+                "document_type": "pdf",
+                "corrections_applied": ["teh->the"],
+            },
+        )
+
+        self.assertIn("## OCR_QUALITY_CONTEXT", prompt)
+        self.assertNotIn("Low-Confidence Regions (first 5):", prompt)
+        self.assertIn("Corrections Applied: 1", prompt)
+
     def test_build_extraction_prompt_supports_schema_chat_and_refinement_together(self):
         prompt = build_extraction_prompt(
             schema_hint="headers: [item]",

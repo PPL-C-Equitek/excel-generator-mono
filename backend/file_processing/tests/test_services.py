@@ -5,7 +5,7 @@ import zipfile
 import unittest
 import base64
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch, MagicMock, PropertyMock
 from PyPDF2.errors import PdfReadError
@@ -56,7 +56,7 @@ class TestOCRService(TestCase):
         self.assertEqual(result["content"][0]["page"], 1)
         self.assertEqual(len(result["content"][0]["text"]), 3)
 
-    @patch("file_processing.services.ocr_service.OCRService._ocr_single_image")
+    @patch("file_processing.services.ocr_service.OCRService._ocr_single_image_with_metadata")
     @patch("file_processing.services.ocr_service.PdfOcrExtractor")
     @patch("file_processing.services.ocr_service.PdfReader")
     def test_scanned_pdf_uses_ocr(
@@ -70,12 +70,17 @@ class TestOCRService(TestCase):
         mock_image = MagicMock()
         mock_extractor_cls.return_value.convert_pages.return_value = [(1, mock_image)]
 
-        mock_ocr_single.return_value = "OCR line one\nOCR line two"
+        mock_ocr_single.return_value = {
+            "text": "OCR line one\nOCR line two",
+            "avg_confidence": 81.0,
+            "word_details": [],
+        }
 
         result = OCRService.process_pdf("dummy.pdf")
 
         self.assertEqual(result["content"][0]["page"], 1)
         self.assertGreater(len(result["content"][0]["text"]), 0)
+        self.assertIn("ocr_metadata", result)
         mock_ocr_single.assert_called_once()
 
     @patch("file_processing.services.ocr_service.PdfReader")
@@ -95,19 +100,24 @@ class TestOCRService(TestCase):
 
         self.assertEqual(result, ["Hello world. How are you?", "Fine.", "Rp 1.000.000"])
 
-    @patch("file_processing.services.ocr_service.OCRService._ocr_single_image")
+    @patch("file_processing.services.ocr_service.OCRService._ocr_single_image_with_metadata")
     @patch("file_processing.services.ocr_service.PdfOcrExtractor")
     def test_process_pdf_pages_success(self, mock_extractor_cls, mock_ocr_single):
 
         mock_image = MagicMock()
         mock_extractor_cls.return_value.convert_pages.return_value = [(1, mock_image)]
 
-        mock_ocr_single.return_value = "Hello OCR from single image"
+        mock_ocr_single.return_value = {
+            "text": "Hello OCR from single image",
+            "avg_confidence": 87.5,
+            "word_details": [],
+        }
 
         result = OCRService.process_pdf_pages("/tmp/file.pdf", [1])
 
         self.assertEqual(result["content"][0]["page"], 1)
         self.assertEqual(result["content"][0]["text"], ["Hello OCR from single image"])
+        self.assertIn("ocr_metadata", result)
 
     @patch("file_processing.services.ocr_service.PdfOcrExtractor")
     def test_process_pdf_pages_no_images(self, mock_extractor_cls):
@@ -121,21 +131,30 @@ class TestOCRService(TestCase):
     @patch("file_processing.services.ocr_service.TesseractEngine")
     def test_ocr_single_image_success(self, mock_tesseract):
         mock_engine = MagicMock()
-        mock_engine.extract_text_with_confidence.return_value = ("OCR text", 60.0)
+        mock_engine.extract_text_with_metadata.return_value = {
+            "text": "OCR text",
+            "avg_confidence": 60.0,
+            "word_details": [],
+        }
         mock_tesseract.return_value = mock_engine
 
         text = OCRService._ocr_single_image("mock_image")
 
         self.assertEqual(text, "OCR text")
 
-    @patch("file_processing.services.ocr_service.OCRService._ocr_single_image")
+    @patch("file_processing.services.ocr_service.OCRService._ocr_single_image_with_metadata")
     def test_process_image_success(self, mock_ocr_single):
-        mock_ocr_single.return_value = "Standalone image OCR"
+        mock_ocr_single.return_value = {
+            "text": "Standalone image OCR",
+            "avg_confidence": 92.0,
+            "word_details": [],
+        }
 
         result = OCRService.process_image("mock_image")
 
         self.assertEqual(result["content"][0]["page"], 1)
         self.assertEqual(result["content"][0]["text"], ["Standalone image OCR"])
+        self.assertIn("ocr_metadata", result)
 
     @patch("file_processing.services.ocr_service.PdfOcrExtractor")
     def test_process_pdf_pages_exception(self, mock_extractor_cls):
@@ -157,7 +176,7 @@ class TestOCRService(TestCase):
 
         self.assertEqual(result["content"][0]["page"], 1)
 
-    @patch("file_processing.services.ocr_service.OCRService._ocr_single_image")
+    @patch("file_processing.services.ocr_service.OCRService._ocr_single_image_with_metadata")
     @patch("file_processing.services.ocr_service.PdfOcrExtractor")
     @patch("file_processing.services.ocr_service.PdfReader")
     def test_process_pdf_ocr_branch(
@@ -172,11 +191,16 @@ class TestOCRService(TestCase):
         mock_image = MagicMock()
         mock_extractor_cls.return_value.convert_pages.return_value = [(1, mock_image)]
 
-        mock_ocr_single.return_value = "OCR TEXT"
+        mock_ocr_single.return_value = {
+            "text": "OCR TEXT",
+            "avg_confidence": 88.0,
+            "word_details": [],
+        }
 
         result = OCRService.process_pdf("/tmp/file.pdf")
 
         self.assertEqual(result["content"][0]["text"], ["OCR TEXT"])
+        self.assertIn("ocr_metadata", result)
 
     @patch("file_processing.services.ocr_service.TesseractEngine")
     def test_ocr_single_image_import_error(self, mock_tesseract):
@@ -190,7 +214,7 @@ class TestOCRService(TestCase):
     @patch("file_processing.services.ocr_service.TesseractEngine")
     def test_ocr_single_image_generic_exception(self, mock_tesseract):
         mock_engine = MagicMock()
-        mock_engine.extract_text_with_confidence.side_effect = Exception("boom")
+        mock_engine.extract_text_with_metadata.side_effect = Exception("boom")
 
         mock_tesseract.return_value = mock_engine
 
@@ -198,6 +222,78 @@ class TestOCRService(TestCase):
             OCRService._ocr_single_image("img")
 
         self.assertIn("OCR runtime error", str(context.exception))
+
+
+class TestUploadPdfProcessing(SimpleTestCase):
+    @patch("file_processing.services.upload_service.NonOCRPDFService.extract_non_ocr_pdf_to_json")
+    @patch("file_processing.services.upload_service.OCRService.process_pdf_pages")
+    @patch("file_processing.services.upload_service.validate_pdf")
+    def test_process_pdf_merges_page_and_document_ocr_metadata(
+        self,
+        mock_validate_pdf,
+        mock_process_pdf_pages,
+        mock_extract_non_ocr,
+    ):
+        mock_validate_pdf.return_value = (True, None)
+        mock_extract_non_ocr.return_value = {
+            "content": [
+                {"page": 1, "text": []},
+                {"page": 2, "text": ["kept text"]},
+            ]
+        }
+        mock_process_pdf_pages.return_value = {
+            "content": [
+                {
+                    "page": 1,
+                    "text": ["ocr text"],
+                    "ocr_metadata": {"confidence_score": 88.0},
+                }
+            ],
+            "ocr_metadata": {"confidence_score": 88.0},
+        }
+
+        success, error, data = upload_service._process_pdf("/tmp/example.pdf", SimpleUploadedFile("example.pdf", b"pdf"))
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertEqual(data["content"][0]["text"], ["ocr text"])
+        self.assertEqual(data["content"][0]["ocr_metadata"]["confidence_score"], 88.0)
+
+    def test_merge_ocr_results_promotes_document_metadata_when_all_pages_covered(self):
+        extracted_data = {
+            "content": [
+                {"page": 1, "text": []},
+                {"page": 2, "text": []},
+            ]
+        }
+
+        ocr_data = {
+            "content": [
+                {
+                    "page": 1,
+                    "text": ["page 1 text"],
+                },
+                {
+                    "page": 2,
+                    "text": ["page 2 text"],
+                },
+            ],
+            "ocr_metadata": {
+                "confidence_score": 91.5,
+            },
+        }
+
+        upload_service._merge_ocr_results_into_extracted_data(
+            extracted_data,
+            ocr_data,
+        )
+
+        self.assertEqual(
+            extracted_data["ocr_metadata"],
+            {
+                "confidence_score": 91.5,
+            },
+        )
 
 
 class TestNonOCRPDFService(TestCase):

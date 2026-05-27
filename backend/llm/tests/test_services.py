@@ -10,6 +10,7 @@ from llm.services.generation_service import (
     _apply_prompt_payload_budget,
     _build_prompt_budget_summary,
     _compact_input_json_for_prompt,
+    _extract_ocr_context,
     _normalize_user_prompt,
     _resolve_positive_int_setting as _resolve_generation_positive_int_setting,
     _truncate_table_rows,
@@ -375,6 +376,33 @@ class CompactInputJsonForPromptTest(SimpleTestCase):
             },
         )
         self.assertEqual(input_json, expected_original)
+
+    def test_extract_ocr_context_finds_nested_metadata_variants(self):
+        scenarios = (
+            ({"ocr_metadata": {"confidence_score": 91.0}}, 91.0),
+            ({"original_input_json": {"ocr_metadata": {"confidence_score": 82.0}}}, 82.0),
+            ({"input_json": {"ocr_metadata": {"confidence_score": 73.0}}}, 73.0),
+            ({"payload": {"ocr_metadata": {"confidence_score": 64.0}}}, 64.0),
+            ({"extracted": {"ocr_metadata": {"confidence_score": 55.0}}}, 55.0),
+        )
+
+        for payload, expected_confidence in scenarios:
+            with self.subTest(payload=payload):
+                context = _extract_ocr_context(payload)
+                self.assertEqual(context["confidence_score"], expected_confidence)
+
+    def test_extract_ocr_context_returns_none_for_list_and_empty_nested_payloads(self):
+        self.assertIsNone(_extract_ocr_context([{"ocr_metadata": {"confidence_score": 1.0}}]))
+        self.assertIsNone(
+            _extract_ocr_context(
+                {
+                    "original_input_json": {},
+                    "input_json": [],
+                    "payload": None,
+                    "extracted": {},
+                }
+            )
+        )
 
 
 class OpenAIClientServiceTest(SimpleTestCase):
@@ -1606,6 +1634,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint=None,
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_not_called()
         json_generator.generate.assert_called_once_with(
@@ -1637,6 +1666,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint="Use only invoice_number and total_amount.",
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
         json_generator.generate.assert_called_once_with(
@@ -1666,6 +1696,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint="   ",
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
@@ -1693,6 +1724,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint=None,
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
         json_generator.generate.assert_called_once_with(
             input_json={"name": "Pen", "price": 5000},
@@ -1724,6 +1756,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint=None,
             refinement_instruction="Fix validation errors",
             chat_context=None,
+            ocr_context=None,
         )
         json_generator.generate.assert_called_once_with(
             input_json={"sheet": "Sheet1"},
@@ -1757,6 +1790,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
             schema_hint="Use only invoice_number and total_amount.",
             refinement_instruction=None,
             chat_context=None,
+            ocr_context=None,
         )
         schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
         json_generator.generate.assert_called_once_with(
@@ -1786,8 +1820,46 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         self.assertEqual(first_result, {"status": "ok-1"})
         self.assertEqual(second_result, {"status": "ok-2"})
-        schema_prompt_source.get_prompt_fragment.assert_called_once_with("schema-1")
-        self.assertEqual(json_generator.generate.call_count, 2)
+        self.assertEqual(schema_prompt_source.get_prompt_fragment.call_count, 1)
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_passes_ocr_context_from_input_json(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "Base prompt.",
+        )
+
+        result = service.generate(
+            {
+                "sheet": "Sheet1",
+                "ocr_metadata": {
+                    "confidence_score": 53.5,
+                    "confidence_level": "low",
+                    "document_type": "pdf",
+                },
+            }
+        )
+
+        self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint=None,
+            refinement_instruction=None,
+            chat_context=None,
+            ocr_context={
+                "confidence_score": 53.5,
+                "confidence_level": "low",
+                "document_type": "pdf",
+            },
+        )
+        schema_prompt_source.get_prompt_fragment.assert_not_called()
+        self.assertEqual(json_generator.generate.call_count, 1)
 
     @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_fetches_schema_fragment_for_distinct_schema_ids(

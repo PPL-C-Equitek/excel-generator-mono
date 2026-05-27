@@ -7,6 +7,7 @@ from llm.services.refinement_service import (
     RefinementOrchestrator,
     _compact_validation_issues,
     _compact_validation_log_for_instruction,
+    _extract_ocr_confidence,
     _collect_refinement_quality_errors,
     _collect_headers_from_header_list,
     _collect_headers_from_rows,
@@ -135,6 +136,41 @@ class RefinementValidationLogTest(SimpleTestCase):
         self.assertEqual(log["verdict"], "invalid")
         self.assertTrue(
             any("semantic mismatch" in issue["message"] for issue in log["errors"])
+        )
+
+    def test_build_validation_log_blocks_low_confidence_ocr_and_requests_manual_review(self):
+        log = build_validation_log(
+            {
+                "document_info": {"source_type": "PDF", "filename": "sample.pdf"},
+                "summary": {"total_items": 1},
+                "content_data": [
+                    {
+                        "table_name": "result",
+                        "headers": ["No", "Rumah", "Luas"],
+                        "rows": [{"No": "1", "Rumah": "A", "Luas": "100"}],
+                    }
+                ],
+            },
+            iteration=1,
+            input_json={
+                "ocr_metadata": {"confidence_score": 52.0, "confidence_level": "low"},
+                "content_data": [
+                    {
+                        "headers": ["ID", "Barang", "Harga"],
+                        "rows": [{"ID": "1", "Barang": "A", "Harga": 1000}],
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(log["verdict"], "invalid")
+        # Expect a quality error about OCR confidence that requests manual review
+        self.assertTrue(
+            any(
+                issue.get("path") == "$.ocr_metadata.confidence_score"
+                and ("manual review" in issue.get("message", "").lower() or "low ocr" in issue.get("message", "").lower())
+                for issue in log.get("errors", [])
+            )
         )
 
     def test_build_validation_log_marks_total_items_mismatch_as_invalid_quality(self):
@@ -378,6 +414,27 @@ class RefinementHelpersTest(SimpleTestCase):
         compact_log = _compact_validation_log_for_instruction(validation_log)
 
         self.assertIs(compact_log, validation_log)
+
+    def test_extract_ocr_confidence_recurses_through_nested_wrappers(self):
+        scenarios = (
+            ({"ocr_metadata": {"confidence_score": 88.0}}, 88.0),
+            ({"original_input_json": {"ocr_metadata": {"confidence_score": 77.0}}}, 77.0),
+            ({"input_json": {"ocr_metadata": {"confidence_score": 66.0}}}, 66.0),
+            ({"payload": {"ocr_metadata": {"confidence_score": 55.0}}}, 55.0),
+            ({"not": "dict"}, None),
+        )
+
+        for payload, expected in scenarios:
+            with self.subTest(payload=payload):
+                self.assertEqual(_extract_ocr_confidence(payload), expected)
+
+    def test_extract_ocr_confidence_ignores_non_numeric_direct_score_and_falls_back(self):
+        payload = {
+            "ocr_metadata": {"confidence_score": "high"},
+            "input_json": {"ocr_metadata": {"confidence_score": 44.0}},
+        }
+
+        self.assertEqual(_extract_ocr_confidence(payload), 44.0)
 
 
 class RefinementOrchestratorTest(SimpleTestCase):

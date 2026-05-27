@@ -24,3 +24,18 @@ class BaseOCREngine(ABC):
         so callers know that the engine does not provide a real score.
         """
         return self.extract_text(image), 0.0
+
+    def extract_text_with_metadata(self, image: Any) -> dict[str, Any]:
+        """Extract OCR text plus optional confidence metadata.
+
+        Engines that can provide layout-aware word details should override this
+        method. The default implementation preserves backwards compatibility by
+        delegating to ``extract_text_with_confidence()`` and returning an empty
+        ``word_details`` list.
+        """
+        text, confidence = self.extract_text_with_confidence(image)
+        return {
+            "text": text,
+            "avg_confidence": confidence,
+            "word_details": [],
+        }
