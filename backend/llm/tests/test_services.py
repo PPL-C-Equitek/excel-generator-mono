@@ -1352,6 +1352,29 @@ class OpenAIClientServiceTest(SimpleTestCase):
             system_prompt=None,
         )
 
+    @patch("llm.services.openai_client.generate_text")
+    def test_generate_json_recovers_json_from_code_fence(self, mock_generate_text):
+        mock_generate_text.return_value = (
+            "Here is the JSON:\n"
+            "```json\n"
+            '{"status":"ok","rows":[1,2]}\n'
+            "```"
+        )
+
+        result = generate_json({"source": "upload"})
+
+        self.assertEqual(result, {"status": "ok", "rows": [1, 2]})
+
+    @patch("llm.services.openai_client.generate_text")
+    def test_generate_json_recovers_embedded_json_object(self, mock_generate_text):
+        mock_generate_text.return_value = (
+            'Model note before JSON {"status":"ok","rows":[1,2]} trailing text'
+        )
+
+        result = generate_json({"source": "upload"})
+
+        self.assertEqual(result, {"status": "ok", "rows": [1, 2]})
+
     def test_generate_json_rejects_non_json_object_or_array_input(self):
         with self.assertRaises(ValueError):
             generate_json("plain text")
