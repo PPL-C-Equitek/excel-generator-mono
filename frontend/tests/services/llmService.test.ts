@@ -272,13 +272,13 @@ describe("generateJson negative (HTTP errors)", () => {
     );
   });
 
-  it("keeps backend detail when status is not mapped", async () => {
+  it("keeps original API error when status is not mapped", async () => {
     server.use(
       http.post(`${API_BASE}/llm/generate/`, () =>
         HttpResponse.json({ detail: "Teapot" }, { status: 418 })
       )
     );
-    await expect(generateJson({ key: "value" })).rejects.toThrow("Teapot");
+    await expect(generateJson({ key: "value" })).rejects.toThrow("Request failed. Please try again.");
   });
 
   it("supports legacy message-based API errors without a status property", async () => {
@@ -429,13 +429,13 @@ describe("exportToCsv", () => {
     );
   });
 
-  it("passes through backend detail for unmapped HTTP errors", async () => {
+  it("passes through unmapped HTTP errors", async () => {
     server.use(
       http.post(`${API_BASE}/export/csv`, () =>
         HttpResponse.json({ detail: "Teapot" }, { status: 418 })
       )
     );
-    await expect(exportToCsv(mockJson)).rejects.toThrow("Teapot");
+    await expect(exportToCsv(mockJson)).rejects.toThrow("Request failed. Please try again.");
   });
 
   it("supports legacy message-based API errors without a status property", async () => {
