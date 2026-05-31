@@ -20,84 +20,6 @@ _DEFAULT_PROMPT_MAX_COLUMNS_PER_ROW = 20
 _DEFAULT_PROMPT_MAX_CELL_CHARS = 160
 
 
-def _try_parse_json_candidate(text: str) -> Any | None:
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError):
-        return None
-
-
-def _extract_fenced_json_candidates(text: str) -> list[str]:
-    candidates: list[str] = []
-    cursor = 0
-
-    while cursor < len(text):
-        fence_start = text.find("```", cursor)
-        if fence_start == -1:
-            break
-
-        content_start = fence_start + 3
-        newline_index = text.find("\n", content_start)
-        fence_end = text.find("```", content_start)
-        if fence_end == -1:
-            break
-
-        if newline_index != -1 and newline_index < fence_end:
-            language = text[content_start:newline_index].strip().lower()
-            candidate_start = newline_index + 1
-        else:
-            language = ""
-            candidate_start = content_start
-
-        if language in ("", "json"):
-            candidate = text[candidate_start:fence_end].strip()
-            if candidate:
-                candidates.append(candidate)
-
-        cursor = fence_end + 3
-
-    return candidates
-
-
-def _extract_outer_json_candidate(text: str) -> str | None:
-    object_start = text.find("{")
-    array_start = text.find("[")
-    starts = [index for index in (object_start, array_start) if index != -1]
-    if not starts:
-        return None
-
-    start = min(starts)
-    closing_char = "}" if start == object_start else "]"
-    end = text.rfind(closing_char)
-    if end <= start:
-        return None
-
-    return text[start : end + 1].strip()
-
-
-def _parse_json_output(output_text: str) -> Any:
-    parsed_output = _try_parse_json_candidate(output_text)
-    if parsed_output is not None:
-        return parsed_output
-
-    for candidate in _extract_fenced_json_candidates(output_text):
-        parsed_output = _try_parse_json_candidate(candidate)
-        if parsed_output is not None:
-            return parsed_output
-
-    outer_candidate = _extract_outer_json_candidate(output_text)
-    if outer_candidate is not None:
-        parsed_output = _try_parse_json_candidate(outer_candidate)
-        if parsed_output is not None:
-            return parsed_output
-
-    try:
-        json.loads(output_text)
-    except json.JSONDecodeError as exc:
-        raise OpenAIServiceError("OpenAI response is not valid JSON.") from exc
-    raise OpenAIServiceError("OpenAI response is not valid JSON.")
-
-
 def _truncate_text_cell(value: Any, max_chars: int) -> Any:
     if not isinstance(value, str):
         return value
@@ -378,7 +300,10 @@ class JsonGenerationService:
             generate_text_kwargs["system_prompt"] = system_prompt
 
         output_text = self.text_provider.generate_text(**generate_text_kwargs)
-        parsed_output = _parse_json_output(output_text)
+        try:
+            parsed_output = json.loads(output_text)
+        except json.JSONDecodeError as exc:
+            raise OpenAIServiceError("OpenAI response is not valid JSON.") from exc
 
         if not isinstance(parsed_output, (dict, list)):
             raise OpenAIServiceError("OpenAI response JSON must be an object or array.")

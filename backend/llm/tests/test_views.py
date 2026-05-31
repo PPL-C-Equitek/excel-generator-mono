@@ -2063,11 +2063,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
 
         self.assertEqual(response.status_code, 502)
-        self.assertEqual(
-            response.data["detail"],
-            "LLM provider returned invalid JSON. Try again with a smaller input or a larger output token limit.",
-        )
-        self.assertEqual(response.data["code"], "llm_invalid_json")
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
 
     @patch("llm.views.logger")
     @patch("llm.views.build_llm_generation_service")
@@ -2089,8 +2085,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
 
         self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.data["detail"], "LLM provider authentication failed.")
-        self.assertEqual(response.data["code"], "llm_authentication_failed")
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
         mock_logger.exception.assert_called_once_with("Upstream LLM provider error while handling llm_generate request.")
 
     @patch("llm.views.logger")
@@ -2113,11 +2108,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         )
 
         self.assertEqual(response.status_code, 429)
-        self.assertEqual(
-            response.data["detail"],
-            "LLM provider rate limit exceeded. Please try again later.",
-        )
-        self.assertEqual(response.data["code"], "llm_rate_limited")
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
         mock_logger.exception.assert_called_once_with("Upstream LLM provider error while handling llm_generate request.")
 
     @patch("llm.views.logger")
@@ -2133,8 +2124,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 504)
-        self.assertEqual(response.data["detail"], "LLM provider request timed out. Please try again.")
-        self.assertEqual(response.data["code"], "llm_timeout")
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
         mock_logger.exception.assert_called_once_with("Upstream LLM provider error while handling llm_generate request.")
 
     @patch("llm.views.logger")
@@ -2150,8 +2140,7 @@ class LlmGenerateEndpointTest(SimpleTestCase):
         response = client.post("/llm/generate/", {"input_json": {"hello": "world"}}, format="json")
 
         self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.data["detail"], "LLM provider request failed. Please try again.")
-        self.assertEqual(response.data["code"], "llm_provider_request_failed")
+        self.assertEqual(response.data["detail"], "Failed to generate response from LLM provider.")
         self.assertNotIn("raw upstream details", response.data["detail"])
         mock_logger.exception.assert_called_once_with(
             "Upstream LLM provider error while handling llm_generate request."
