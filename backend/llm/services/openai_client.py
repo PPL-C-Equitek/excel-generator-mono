@@ -22,12 +22,11 @@ from .settings_resolvers import (
 
 
 _LLM_PROVIDER_FAILED = "LLM provider request failed."
-_DEFAULT_OPENAI_TIMEOUT_SECONDS = 600.0
+_DEFAULT_OPENAI_TIMEOUT_SECONDS = 30.0
 _DEFAULT_OPENAI_MAX_RETRIES = 2
-_DEFAULT_OPENAI_MAX_OUTPUT_TOKENS = 16384
 _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_THRESHOLD_CHARS = 4000
 _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MIN = 512
-_DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MAX = 16384
+_DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_MAX = 4096
 _DEFAULT_ADAPTIVE_MAX_OUTPUT_TOKENS_RATIO = 1.0
 
 
@@ -254,11 +253,7 @@ def _resolve_optional_openai_seed() -> int | None:
 
 
 def _resolve_optional_openai_max_output_tokens() -> int | None:
-    raw_value = getattr(
-        settings,
-        "OPENAI_MAX_OUTPUT_TOKENS",
-        _DEFAULT_OPENAI_MAX_OUTPUT_TOKENS,
-    )
+    raw_value = getattr(settings, "OPENAI_MAX_OUTPUT_TOKENS", None)
     if raw_value in (None, "") or isinstance(raw_value, bool):
         return None
     if isinstance(raw_value, int):
