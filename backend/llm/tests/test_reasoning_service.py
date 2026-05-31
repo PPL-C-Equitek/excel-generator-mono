@@ -16,6 +16,8 @@ from llm.services.reasoning_service import (
     _extract_step_text,
     _fallback_narrative_steps,
     get_base_system_prompt,
+    get_reasoning_base_system_prompt,
+    get_reasoning_system_prompt,
     _get_positive_int_setting,
     _split_labeled_line,
     _try_parse_json_candidate,
@@ -33,6 +35,37 @@ class LlmReasoningServiceTest(SimpleTestCase):
         result = get_base_system_prompt()
 
         self.assertEqual(result, "")
+
+    @override_settings(
+        OPENAI_SYSTEM_PROMPT=(
+            "Return ONLY a valid JSON object with exactly three top-level keys: "
+            "document_info, summary, and content_data."
+        ),
+        OPENAI_REASONING_SYSTEM_PROMPT="",
+    )
+    def test_reasoning_service_does_not_reuse_extraction_system_prompt(self):
+        text_provider = Mock()
+        text_provider.generate_text.return_value = json.dumps(
+            {
+                "final_answer": "Answer",
+                "reasoning_steps": ["Step one"],
+                "thinking_log": "Summary",
+            }
+        )
+        service = LlmReasoningService(text_provider=text_provider)
+
+        service.generate("Explain this conversion")
+
+        text_provider.generate_text.assert_called_once_with(
+            prompt="Explain this conversion",
+            system_prompt=get_reasoning_system_prompt(),
+        )
+
+    @override_settings(OPENAI_REASONING_SYSTEM_PROMPT="  Keep details user-facing.  ")
+    def test_get_reasoning_base_system_prompt_strips_setting_value(self):
+        result = get_reasoning_base_system_prompt()
+
+        self.assertEqual(result, "Keep details user-facing.")
 
     # Positive
     def test_reasoning_service_returns_valid_reasoning_payload(self):

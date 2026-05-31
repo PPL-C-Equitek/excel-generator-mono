@@ -45,6 +45,13 @@ def get_base_system_prompt() -> str:
     return raw_prompt.strip()
 
 
+def get_reasoning_base_system_prompt() -> str:
+    raw_prompt = getattr(settings, "OPENAI_REASONING_SYSTEM_PROMPT", "")
+    if not isinstance(raw_prompt, str):
+        return ""
+    return raw_prompt.strip()
+
+
 def get_reasoning_system_prompt() -> str:
     return (
         "Return a valid JSON object with exactly these keys: "
@@ -557,7 +564,7 @@ class LlmReasoningService:
     ):
         self.text_provider = text_provider
         self.base_system_prompt_provider = (
-            base_system_prompt_provider or get_base_system_prompt
+            base_system_prompt_provider or get_reasoning_base_system_prompt
         )
         self.reasoning_system_prompt_provider = (
             reasoning_system_prompt_provider or get_reasoning_system_prompt
