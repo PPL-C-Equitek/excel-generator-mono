@@ -45,6 +45,22 @@ function isTemporaryOutputId(value: string): boolean {
   return value.startsWith("temp-output-");
 }
 
+function isLocalAssistantError(item: Extract<SessionResumeHistoryItem, { type: "message" }>) {
+  return item.role === "assistant" && item.id.startsWith("temp-error-");
+}
+
+function buildLocalAssistantErrorMessage(content: string): SessionResumeHistoryItem {
+  return {
+    type: "message",
+    id: `temp-error-${Date.now()}`,
+    role: "assistant",
+    content,
+    thinking_log: "",
+    target_output_id: null,
+    created_at: new Date().toISOString(),
+  };
+}
+
 function AssistantAvatar() {
   return (
     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-700 text-xs font-extrabold tracking-widest text-white shadow-md">
@@ -340,13 +356,23 @@ function SessionHistoryBubble({
     const isAssistant = item.role === "assistant";
 
     if (isAssistant) {
+      const isError = isLocalAssistantError(item);
+
       return (
         <article className="flex w-full items-start justify-start gap-3">
           <AssistantAvatar />
-          <div className="max-w-2xl rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-gray-700 shadow-sm ring-1 ring-gray-200 lg:max-w-3xl">
+          <div
+            className={[
+              "max-w-2xl rounded-2xl rounded-tl-sm p-4 text-sm shadow-sm ring-1 lg:max-w-3xl",
+              isError
+                ? "bg-red-50 text-red-700 ring-red-200"
+                : "bg-white text-gray-700 ring-gray-200",
+            ].join(" ")}
+            role={isError ? "alert" : undefined}
+          >
             <span className="sr-only">Assistant</span>
             <p className="whitespace-pre-wrap wrap-anywhere leading-6">{item.content}</p>
-            <p className="mt-3 text-[11px] text-gray-400">
+            <p className={`mt-3 text-[11px] ${isError ? "text-red-500" : "text-gray-400"}`}>
               {formatHistoryTimestamp(item.created_at)}
             </p>
           </div>
@@ -445,7 +471,6 @@ export default function SessionConversationView({
   const [localHistory, setLocalHistory] = useState<SessionResumeHistoryItem[]>([]);
   const [draftMessage, setDraftMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
   const [pendingThinking, setPendingThinking] = useState(false);
   const [pendingReasoningSteps, setPendingReasoningSteps] = useState<string[]>([]);
   const [pendingReasoningVisibleCount, setPendingReasoningVisibleCount] = useState(0);
@@ -623,23 +648,29 @@ export default function SessionConversationView({
       return;
     }
 
-    if (!latestOutput) {
-      setSendError("No output is available yet to continue this chat context.");
-      return;
-    }
-
     const optimisticUserMessage: SessionResumeHistoryItem = {
       type: "message",
       id: `temp-user-${Date.now()}`,
       role: "user",
       content: trimmedMessage,
       thinking_log: "",
-      target_output_id: latestOutput.id,
+      target_output_id: latestOutput?.id ?? null,
       created_at: new Date().toISOString(),
     };
 
+    if (!latestOutput) {
+      setDraftMessage("");
+      setLocalHistory((prev) => [
+        ...prev,
+        optimisticUserMessage,
+        buildLocalAssistantErrorMessage(
+          "No output is available yet to continue this chat context.",
+        ),
+      ]);
+      return;
+    }
+
     setDraftMessage("");
-    setSendError(null);
     setIsSending(true);
     setPendingThinking(true);
     setPendingReasoningSteps([]);
@@ -695,9 +726,7 @@ export default function SessionConversationView({
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to send follow-up message.";
-      setSendError(errorMessage);
-      setDraftMessage(trimmedMessage);
-      setLocalHistory((prev) => prev.filter((item) => item.id !== optimisticUserMessage.id));
+      setLocalHistory((prev) => [...prev, buildLocalAssistantErrorMessage(errorMessage)]);
       pendingGeneratedOutputRef.current = null;
       setPendingReasoningSteps([]);
       setPendingReasoningVisibleCount(0);
@@ -780,7 +809,6 @@ export default function SessionConversationView({
             <SendIcon />
           </button>
         </div>
-        {sendError ? <p className="mt-2 text-xs text-red-700">{sendError}</p> : null}
       </section>
     </section>
   );
