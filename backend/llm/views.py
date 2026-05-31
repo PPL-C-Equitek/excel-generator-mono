@@ -90,6 +90,15 @@ INTERNAL_FAILURE_DETAIL = "Internal server error."
 INVALID_INPUT_JSON_DETAIL = "Invalid input_json payload."
 INVALID_PROMPT_DETAIL = "Invalid prompt payload."
 CUSTOM_SCHEMA_NOT_FOUND_DETAIL = "Custom schema not found."
+LLM_AUTHENTICATION_FAILURE_DETAIL = "LLM provider authentication failed."
+LLM_RATE_LIMIT_DETAIL = "LLM provider rate limit exceeded. Please try again later."
+LLM_TIMEOUT_DETAIL = "LLM provider request timed out. Please try again."
+LLM_CONNECTION_FAILURE_DETAIL = "LLM provider request failed. Please try again."
+LLM_INVALID_JSON_DETAIL = (
+    "LLM provider returned invalid JSON. Try again with a smaller input or a larger output token limit."
+)
+LLM_INVALID_JSON_SHAPE_DETAIL = "LLM provider returned JSON in an unsupported shape."
+LLM_EMPTY_RESPONSE_DETAIL = "LLM provider returned an empty response."
 REASONING_META_KEYS = {"final_answer", "reasoning_steps", "thinking_log"}
 SESSION_NOT_FOUND_DETAIL = "Session not found."
 _SSE_DONE = "data: [DONE]\n\n"
@@ -1035,6 +1044,42 @@ def _run_basic_generation(
     }
 
 
+def _build_llm_provider_error_response(
+    detail: str,
+    code: str,
+    status_code: int,
+) -> Response:
+    return Response(
+        {
+            "detail": detail,
+            "code": code,
+        },
+        status=status_code,
+    )
+
+
+def _resolve_upstream_failure_detail(exc: OpenAIUpstreamError) -> tuple[str, str]:
+    message = str(exc).lower()
+    if exc.status_code == 429:
+        return LLM_RATE_LIMIT_DETAIL, "llm_rate_limited"
+    if exc.status_code == 504:
+        return LLM_TIMEOUT_DETAIL, "llm_timeout"
+    if "auth" in message:
+        return LLM_AUTHENTICATION_FAILURE_DETAIL, "llm_authentication_failed"
+    return LLM_CONNECTION_FAILURE_DETAIL, "llm_provider_request_failed"
+
+
+def _resolve_service_failure_detail(exc: OpenAIServiceError) -> tuple[str, str]:
+    message = str(exc).lower()
+    if "not valid json" in message:
+        return LLM_INVALID_JSON_DETAIL, "llm_invalid_json"
+    if "object or array" in message:
+        return LLM_INVALID_JSON_SHAPE_DETAIL, "llm_invalid_json_shape"
+    if "output_text" in message or "empty" in message:
+        return LLM_EMPTY_RESPONSE_DETAIL, "llm_empty_response"
+    return UPSTREAM_FAILURE_DETAIL, "llm_provider_failure"
+
+
 def _llm_generate_error_response(exc: Exception) -> Response:
     if isinstance(exc, CustomSchemaNotFoundError):
         return Response({"detail": CUSTOM_SCHEMA_NOT_FOUND_DETAIL}, status=404)
@@ -1042,9 +1087,19 @@ def _llm_generate_error_response(exc: Exception) -> Response:
         return Response({"detail": SERVICE_UNAVAILABLE_DETAIL}, status=503)
     if isinstance(exc, OpenAIUpstreamError):
         logger.exception("Upstream LLM provider error while handling llm_generate request.")
-        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=exc.status_code)
+        detail, code = _resolve_upstream_failure_detail(exc)
+        return _build_llm_provider_error_response(
+            detail=detail,
+            code=code,
+            status_code=exc.status_code,
+        )
     if isinstance(exc, OpenAIServiceError):
-        return Response({"detail": UPSTREAM_FAILURE_DETAIL}, status=502)
+        detail, code = _resolve_service_failure_detail(exc)
+        return _build_llm_provider_error_response(
+            detail=detail,
+            code=code,
+            status_code=502,
+        )
     if isinstance(exc, ValueError):
         logger.exception(INVALID_INPUT_JSON_DETAIL)
         return Response(

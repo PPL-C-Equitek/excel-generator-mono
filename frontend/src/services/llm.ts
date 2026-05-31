@@ -133,6 +133,10 @@ function rethrowMappedApiErrorWithDefault(err: unknown): never {
         throw new Error(userMessage);
       }
 
+      if (err.message.trim()) {
+        throw new Error(err.message);
+      }
+
       throw new Error(DEFAULT_API_ERROR_MESSAGE);
     }
   }
