@@ -603,9 +603,11 @@ describe('SessionConversationView', () => {
         await user.click(screen.getByRole('button', { name: 'Send' }))
 
         expect(mockGenerateJson).not.toHaveBeenCalled()
+        const alertBubble = screen.getByRole('alert')
         expect(
-            screen.getByText('No output is available yet to continue this chat context.')
+            within(alertBubble).getByText('No output is available yet to continue this chat context.')
         ).toBeInTheDocument()
+        expect(within(alertBubble.closest('article') as HTMLElement).getByText('AI')).toBeInTheDocument()
     })
 
     it('returns early when draft message is blank', () => {
@@ -686,7 +688,7 @@ describe('SessionConversationView', () => {
         expect(screen.getByText('balasan baru')).toBeInTheDocument()
     })
 
-    it('restores draft and shows fallback error when follow-up generation fails with non-Error', async () => {
+    it('shows fallback error as an assistant bubble when follow-up generation fails with non-Error', async () => {
         mockGenerateJson.mockRejectedValueOnce('failed')
 
         const user = userEvent.setup()
@@ -706,9 +708,11 @@ describe('SessionConversationView', () => {
         await user.click(screen.getByRole('button', { name: 'Send' }))
 
         await waitFor(() => {
-            expect(screen.getByText('Failed to send follow-up message.')).toBeInTheDocument()
-            expect(screen.getByRole('textbox', { name: 'Follow-up message' })).toHaveValue('fail case')
-            expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled()
+            const alertBubble = screen.getByRole('alert')
+            expect(within(alertBubble).getByText('Failed to send follow-up message.')).toBeInTheDocument()
+            expect(within(alertBubble.closest('article') as HTMLElement).getByText('AI')).toBeInTheDocument()
+            expect(screen.getByRole('textbox', { name: 'Follow-up message' })).toHaveValue('')
+            expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
         })
     })
 
@@ -732,7 +736,9 @@ describe('SessionConversationView', () => {
         await user.click(screen.getByRole('button', { name: 'Send' }))
 
         await waitFor(() => {
-            expect(screen.getByText('backend down')).toBeInTheDocument()
+            const alertBubble = screen.getByRole('alert')
+            expect(within(alertBubble).getByText('backend down')).toBeInTheDocument()
+            expect(within(alertBubble.closest('article') as HTMLElement).getByText('AI')).toBeInTheDocument()
         })
     })
 

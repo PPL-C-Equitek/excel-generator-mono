@@ -61,11 +61,17 @@ class LlmReasoningServiceTest(SimpleTestCase):
             system_prompt=get_reasoning_system_prompt(),
         )
 
-    @override_settings(OPENAI_REASONING_SYSTEM_PROMPT="  Keep details user-facing.  ")
+    @override_settings(OPENAI_REASONING_BASE_SYSTEM_PROMPT="  Keep details user-facing.  ")
     def test_get_reasoning_base_system_prompt_strips_setting_value(self):
         result = get_reasoning_base_system_prompt()
 
         self.assertEqual(result, "Keep details user-facing.")
+
+    @override_settings(OPENAI_REASONING_SYSTEM_PROMPT="  Return strict reasoning JSON.  ")
+    def test_get_reasoning_system_prompt_strips_setting_value(self):
+        result = get_reasoning_system_prompt()
+
+        self.assertEqual(result, "Return strict reasoning JSON.")
 
     # Positive
     def test_reasoning_service_returns_valid_reasoning_payload(self):

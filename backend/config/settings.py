@@ -10,12 +10,11 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -30,6 +29,7 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.2-codex")
 OPENAI_SYSTEM_PROMPT = os.environ.get("OPENAI_SYSTEM_PROMPT", "")
+OPENAI_REASONING_SYSTEM_PROMPT = os.environ.get("OPENAI_REASONING_SYSTEM_PROMPT", "")
 LLM_CACHE_TTL_SECONDS = int(os.environ.get("LLM_CACHE_TTL_SECONDS", "300"))
 CHAT_HISTORY_MAX_MESSAGES = int(os.environ.get("CHAT_HISTORY_MAX_MESSAGES", "20"))
 CHAT_CONTEXT_MAX_USER_INSTRUCTIONS = int(os.environ.get("CHAT_CONTEXT_MAX_USER_INSTRUCTIONS", "5"))

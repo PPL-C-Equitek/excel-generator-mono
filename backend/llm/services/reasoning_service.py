@@ -14,6 +14,12 @@ DEFAULT_REASONING_FINAL_ANSWER_MAX_CHARS = 4000
 DEFAULT_REASONING_THINKING_LOG_MAX_CHARS = 16000
 DEFAULT_REASONING_STEP_MAX_CHARS = 2000
 DEFAULT_REASONING_STEPS_MAX_ITEMS = 20
+DEFAULT_REASONING_SYSTEM_PROMPT = (
+    "Return a valid JSON object with exactly these keys: "
+    '"final_answer" (string), "reasoning_steps" (array of non-empty strings), '
+    'and "thinking_log" (string). Do not wrap the JSON in markdown or code fences. '
+    "Keep reasoning concise, safe for display, and do not reveal hidden chain-of-thought."
+)
 
 FALLBACK_FINAL_ANSWER = "Unable to parse final answer from model output."
 FALLBACK_REASONING_STEP = "Unable to parse structured reasoning steps from model output."
@@ -46,19 +52,23 @@ def get_base_system_prompt() -> str:
 
 
 def get_reasoning_base_system_prompt() -> str:
-    raw_prompt = getattr(settings, "OPENAI_REASONING_SYSTEM_PROMPT", "")
+    raw_prompt = getattr(settings, "OPENAI_REASONING_BASE_SYSTEM_PROMPT", "")
     if not isinstance(raw_prompt, str):
         return ""
     return raw_prompt.strip()
 
 
 def get_reasoning_system_prompt() -> str:
-    return (
-        "Return a valid JSON object with exactly these keys: "
-        '"final_answer" (string), "reasoning_steps" (array of non-empty strings), '
-        'and "thinking_log" (string). Do not wrap the JSON in markdown or code fences. '
-        "Keep reasoning concise, safe for display, and do not reveal hidden chain-of-thought."
+    raw_prompt = getattr(
+        settings,
+        "OPENAI_REASONING_SYSTEM_PROMPT",
+        DEFAULT_REASONING_SYSTEM_PROMPT,
     )
+    if not isinstance(raw_prompt, str):
+        return DEFAULT_REASONING_SYSTEM_PROMPT
+
+    normalized_prompt = raw_prompt.strip()
+    return normalized_prompt or DEFAULT_REASONING_SYSTEM_PROMPT
 
 
 def compose_system_prompt(
