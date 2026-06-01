@@ -34,7 +34,7 @@ def list_artifact_history_for_user(user, limit, offset):
     if not isinstance(offset, int) or offset < 0:
         raise ValueError("offset must be a non-negative integer.")
 
-    return ArtifactHistory.objects.filter(owner=user)[offset: offset + limit]
+    return ArtifactHistory.objects.defer("output_json").filter(owner=user)[offset: offset + limit]
 
 
 def get_artifact_history_for_user(user, history_id):
