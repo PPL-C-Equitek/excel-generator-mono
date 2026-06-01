@@ -17,7 +17,10 @@ from llm.services.generation_service import (
     _extract_section_context,
     _extract_section_label_from_item,
     _extract_section_label_from_text,
+    _extract_section_label_from_value,
+    _extract_section_label_from_values,
     _extract_section_labels_from_content_rows,
+    _extract_section_labels_from_page,
     _normalize_section_label,
     _normalize_user_prompt,
     _resolve_positive_int_setting as _resolve_generation_positive_int_setting,
@@ -1957,8 +1960,24 @@ class LlmGenerationServiceTest(SimpleTestCase):
     def test_section_context_builders_cover_extracted_and_content_variants(self):
         single_section = {"Only Section": [["header"]]}
         multi_section = {"Finance Department": [["header"]], "Sales Department": [["header"]]}
+        ocr_content_rows = [
+            {"page": 1, "text": ["Cover page", "Section: Finance", "Row A"]},
+            {
+                "page": 2,
+                "text": ["Section: Sales", "Row B"],
+                "ocr_metadata": {"confidence_score": 88.0},
+            },
+        ]
 
         self.assertIsNone(_build_section_context_from_extracted_map(single_section))
+        self.assertIsNone(
+            _build_section_context_from_extracted_map(
+                {
+                    "Only Section": [["header"]],
+                    "ocr_metadata": {"confidence_score": 91.0, "document_type": "pdf"},
+                }
+            )
+        )
         self.assertEqual(
             _build_section_context_from_extracted_map(multi_section),
             {
@@ -1973,6 +1992,18 @@ class LlmGenerationServiceTest(SimpleTestCase):
         )
 
         self.assertIsNone(_build_section_context_from_content_rows(["Only one section"]))
+        self.assertEqual(
+            _build_section_context_from_content_rows(ocr_content_rows),
+            {
+                "source_type": "page_content",
+                "section_count": 2,
+                "section_labels": ["Finance", "Sales"],
+                "section_markers": ["Finance", "Sales"],
+                "instruction": (
+                    "Use the markers above as conservative boundaries. Do not merge different business entities into one table when the section change is explicit."
+                ),
+            },
+        )
         content_context = _build_section_context_from_content_rows(
             [
                 "Section: Finance",
@@ -1992,11 +2023,40 @@ class LlmGenerationServiceTest(SimpleTestCase):
                 ),
             },
         )
+        self.assertEqual(
+            _build_section_context_from_payload({"extracted": multi_section}),
+            {
+                "source_type": "extracted_map",
+                "section_count": 2,
+                "section_labels": ["Finance Department", "Sales Department"],
+                "instruction": (
+                    "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+                    "Split only when the boundary is explicit; otherwise keep the table intact."
+                ),
+            },
+        )
 
         self.assertIsNone(_build_section_context_from_payload({"extracted": single_section}))
         self.assertEqual(
             _build_section_context_from_payload({"content": ["Section: Finance", "Section: Sales"]}),
             content_context,
+        )
+        self.assertEqual(
+            _build_section_context_from_payload(
+                {
+                    "content": ocr_content_rows,
+                    "ocr_metadata": {"confidence_score": 88.0, "document_type": "pdf"},
+                }
+            ),
+            {
+                "source_type": "page_content",
+                "section_count": 2,
+                "section_labels": ["Finance", "Sales"],
+                "section_markers": ["Finance", "Sales"],
+                "instruction": (
+                    "Use the markers above as conservative boundaries. Do not merge different business entities into one table when the section change is explicit."
+                ),
+            },
         )
 
         self.assertEqual(
@@ -2176,6 +2236,9 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertIsNone(
             _extract_section_label_from_text("random text")
         )
+        self.assertIsNone(
+            _extract_section_label_from_values(["Projected Revenue Q1"])
+        )
 
     def test_extract_section_label_from_item_covers_all_variants(self):
         self.assertEqual(
@@ -2201,6 +2264,16 @@ class LlmGenerationServiceTest(SimpleTestCase):
                 {"a": " ", "b": "Branch: Jakarta"}
             ),
             "Jakarta",
+        )
+
+        self.assertEqual(
+            _extract_section_label_from_item(
+                {
+                    "text": ["Cover page", "Section: Operations"],
+                    "ocr_metadata": {"confidence_score": 88.0},
+                }
+            ),
+            "Operations",
         )
 
         self.assertIsNone(
@@ -2266,6 +2339,18 @@ class LlmGenerationServiceTest(SimpleTestCase):
 
         self.assertIsNone(_extract_section_context(payload))
 
+    def test_extract_section_context_handles_nested_list_wrapper(self):
+        payload = {
+            "payload": [
+                {
+                    "content": ["Section: Finance", "Section: Sales"],
+                    "ocr_metadata": {"confidence_score": 90.0},
+                }
+            ]
+        }
+
+        self.assertIsNone(_extract_section_context(payload))
+
     def test_extract_section_labels_from_content_rows_returns_empty_for_non_list(self):
         self.assertEqual(
             _extract_section_labels_from_content_rows("not-a-list"),
@@ -2280,6 +2365,30 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(
             _extract_section_labels_from_content_rows({"a": 1}),
             [],
+        )
+
+    def test_extract_section_label_from_value_returns_none_for_unsupported_type(self):
+        self.assertIsNone(_extract_section_label_from_value(123))
+
+    def test_extract_section_labels_from_page_returns_empty_when_text_not_list(self):
+        self.assertEqual(
+            _extract_section_labels_from_page(
+                {
+                    "page": 1,
+                    "text": "Section: Finance",
+                }
+            ),
+            [],
+        )
+
+    def test_extract_section_label_from_value_with_mapping(self):
+        self.assertEqual(
+            _extract_section_label_from_value(
+                {
+                    "department": "Section: Finance",
+                }
+            ),
+            "Finance",
         )
 
 

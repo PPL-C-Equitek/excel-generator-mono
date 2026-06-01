@@ -19,6 +19,7 @@ _DEFAULT_PROMPT_MAX_TABLES = 12
 _DEFAULT_PROMPT_MAX_ROWS_PER_TABLE = 60
 _DEFAULT_PROMPT_MAX_COLUMNS_PER_ROW = 20
 _DEFAULT_PROMPT_MAX_CELL_CHARS = 160
+_SECTION_CONTEXT_RESERVED_KEYS = {"ocr_metadata"}
 _SECTION_LABEL_PATTERN = re.compile(
     r"^(?:section|entity|business\s+entity|business\s+unit|department|company|branch|project|customer|vendor)[ \t]*[:\-][ \t]*([^\n]{1,80})$",
     re.IGNORECASE,
@@ -249,39 +250,129 @@ def _extract_section_label_from_text(value: str) -> str | None:
     return None
 
 
+def _append_unique_section_label(section_labels: list[str], candidate: str | None) -> None:
+    if candidate and candidate not in section_labels:
+        section_labels.append(candidate)
+
+
+def _extract_section_label_from_values(values: list[Any]) -> str | None:
+    candidate_labels = []
+
+    for value in values:
+        candidate = _extract_section_label_from_value(value)
+        _append_unique_section_label(candidate_labels, candidate)
+
+    if len(candidate_labels) == 1:
+        explicit_matches = [
+            value
+            for value in values
+            if isinstance(value, str)
+            and _SECTION_LABEL_PATTERN.match(value.strip())
+        ]
+
+        if explicit_matches:
+            return candidate_labels[0]
+
+    non_empty_cells = [cell for cell in values if isinstance(cell, str) and cell.strip()]
+    if len(candidate_labels) == 0 and len(non_empty_cells) == 1:
+        return _extract_section_label_from_text(non_empty_cells[0])
+
+    return None
+
+
+def _extract_section_label_from_mapping(item: dict[str, Any]) -> str | None:
+    candidate_labels = []
+
+    text_value = item.get("text")
+    _append_unique_section_label(
+        candidate_labels,
+        _extract_section_label_from_value(text_value),
+    )
+
+    for key, value in item.items():
+        if key == "text" or key == "ocr_metadata":
+            continue
+
+        _append_unique_section_label(
+            candidate_labels,
+            _extract_section_label_from_value(value),
+        )
+
+    if len(candidate_labels) == 1:
+        return candidate_labels[0]
+
+    return None
+
+
+def _extract_section_label_from_value(value: Any) -> str | None:
+    if isinstance(value, str):
+        return _extract_section_label_from_text(value)
+
+    if isinstance(value, list):
+        return _extract_section_label_from_values(value)
+
+    if isinstance(value, dict):
+        return _extract_section_label_from_mapping(value)
+
+    return None
+
+
+def _extract_section_labels_from_page(
+    page: dict[str, Any],
+) -> list[str]:
+    labels = []
+
+    text_rows = page.get("text")
+    if not isinstance(text_rows, list):
+        return labels
+
+    for row in text_rows:
+        candidate = _extract_section_label_from_value(row)
+
+        if candidate and candidate not in labels:
+            labels.append(candidate)
+
+    return labels
+
+
 def _extract_section_label_from_item(item: Any) -> str | None:
     if isinstance(item, str):
         return _extract_section_label_from_text(item)
 
     if isinstance(item, list):
-        non_empty_cells = [cell for cell in item if isinstance(cell, str) and cell.strip()]
-        if len(non_empty_cells) == 1:
-            return _extract_section_label_from_text(non_empty_cells[0])
-        return None
+        return _extract_section_label_from_values(item)
 
     if isinstance(item, dict):
-        non_empty_values = [
-            value for value in item.values() if isinstance(value, str) and value.strip()
-        ]
-        if len(non_empty_values) == 1:
-            return _extract_section_label_from_text(non_empty_values[0])
+        return _extract_section_label_from_mapping(item)
 
     return None
 
 
+def _collect_section_labels_from_item(item: Any) -> list[str]:
+    if (
+        isinstance(item, dict)
+        and isinstance(item.get("page"), int)
+        and isinstance(item.get("text"), list)
+    ):
+        return _extract_section_labels_from_page(item)
+
+    candidate = _extract_section_label_from_item(item)
+    return [candidate] if candidate else []
+
+
 def _extract_section_labels_from_content_rows(content_rows: Any) -> list[str]:
+    if not isinstance(content_rows, list):
+        return []
+
     section_labels: list[str] = []
 
-    if not isinstance(content_rows, list):
-        return section_labels
-
     for item in content_rows[:40]:
-        candidate = _extract_section_label_from_item(item)
-        if candidate and candidate not in section_labels:
-            section_labels.append(candidate)
+        for label in _collect_section_labels_from_item(item):
+            if label not in section_labels:
+                section_labels.append(label)
 
-        if len(section_labels) >= 8:
-            break
+            if len(section_labels) >= 8:
+                return section_labels
 
     return section_labels
 
@@ -291,6 +382,8 @@ def _build_section_context_from_extracted_map(extracted: dict[str, Any]) -> dict
     for key in extracted.keys():
         if not isinstance(key, str):
             key = str(key)
+        if key.strip().lower() in _SECTION_CONTEXT_RESERVED_KEYS:
+            continue
         candidate = _extract_section_label_from_text(key)
         if candidate and candidate not in section_labels:
             section_labels.append(candidate)
