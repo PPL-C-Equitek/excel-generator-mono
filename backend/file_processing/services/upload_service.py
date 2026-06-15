@@ -14,6 +14,15 @@ from file_processing.extractors.image_extractor import ImageExtractor
 from file_processing.services.ocr_service import OCRService
 from file_processing.services.non_ocr_pdf_service import NonOCRPDFService
 from file_processing.services import word_validation_service
+from file_processing.services.file_validation_strategy import (
+    FileValidator,
+    UnsupportedExtensionValidationStrategy,
+    ImageValidationStrategy,
+    FileSizeValidationStrategy,
+    MimeTypeValidationStrategy,
+    ExcelSheetValidationStrategy,
+    WordValidationStrategy,
+)
 from file_processing.services.image_validation_service import validate_image
 from file_processing.services.word_extraction_service import WordExtractionService
 from file_processing.utils.upload_constants import MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR
@@ -306,38 +315,23 @@ def process_upload(uploaded_file):
 
 
 def validate_file(uploaded_file):
-    filename = uploaded_file.name
-    ext = os.path.splitext(filename)[1].lower()
-
-    if ext not in ALLOWED_EXTENSIONS:
-        return (
-            False,
-            "Unsupported file type. Only PDF, XLS, XLSX, TXT, CSV, PNG, JPG, JPEG, DOC, and DOCX are allowed.",
-        )
-
-    if ext in IMAGE_EXTENSIONS:
-        return validate_image(uploaded_file)
-
-    if uploaded_file.size > MAX_FILE_SIZE:
-        return False, FILE_TOO_LARGE_ERROR
-
-    is_valid_mime, mime_error = validate_mime_type(uploaded_file, ext)
-    if not is_valid_mime:
-        return False, mime_error
-
-    if ext in {EXT_XLS, EXT_XLSX}:
-        is_valid_excel, excel_error = validate_excel_sheet_count(uploaded_file, ext)
-        if not is_valid_excel:
-            return False, excel_error
-
-    if ext in {EXT_DOC, EXT_DOCX}:
-        is_valid_word, word_error = word_validation_service.validate_word(
-            uploaded_file, ext
-        )
-        if not is_valid_word:
-            return False, word_error
-
-    return True, None
+    validator = FileValidator(
+        strategies=[
+            UnsupportedExtensionValidationStrategy(ALLOWED_EXTENSIONS),
+            ImageValidationStrategy(IMAGE_EXTENSIONS, validate_image),
+            FileSizeValidationStrategy(MAX_FILE_SIZE, FILE_TOO_LARGE_ERROR),
+            MimeTypeValidationStrategy(validate_mime_type),
+            ExcelSheetValidationStrategy(
+                {EXT_XLS, EXT_XLSX},
+                validate_excel_sheet_count,
+            ),
+            WordValidationStrategy(
+                {EXT_DOC, EXT_DOCX},
+                word_validation_service.validate_word,
+            ),
+        ]
+    )
+    return validator.validate(uploaded_file)
 
 
 def validate_pdf(uploaded_file):
