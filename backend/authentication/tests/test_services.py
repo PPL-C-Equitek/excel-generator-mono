@@ -19,6 +19,7 @@ from authentication.services import (
     decode_verification_token,
     generate_tokens,
     generate_verification_token,
+    send_password_reset_email,
     send_password_changed_email,
     send_verification_email,
 )
@@ -66,8 +67,9 @@ class SendVerificationEmailTest(TestCase):
             send_verification_email("user@example.com")
 
         log_text = "\n".join(log.output)
-        self.assertIn("Verification link", log_text)
-        self.assertIn("verify-email?token=", log_text)
+        self.assertIn("Verification email requested for user@example.com", log_text)
+        self.assertIn("verification link not logged", log_text)
+        self.assertNotIn("verify-email?token=", log_text)
 
     @override_settings(
         RESEND_API_KEY="re_test_key",
@@ -104,12 +106,13 @@ class SendVerificationEmailTest(TestCase):
         self.assertTrue(any("Failed to send" in msg for msg in log.output))
 
     @override_settings(RESEND_API_KEY="", FRONTEND_URL="https://myapp.com")
-    def test_uses_frontend_url_setting(self):
+    def test_fallback_log_does_not_expose_frontend_verification_url(self):
         with self.assertLogs("authentication.services", level="INFO") as log:
             send_verification_email("user@example.com")
 
         log_text = "\n".join(log.output)
-        self.assertIn("https://myapp.com/auth/verify-email?token=", log_text)
+        self.assertNotIn("https://myapp.com/auth/verify-email?token=", log_text)
+        self.assertIn("Verification email requested for user@example.com", log_text)
 
     @override_settings(RESEND_API_KEY="", FRONTEND_URL="http://localhost:3000")
     def test_rotates_email_verification_nonce_before_logging_link(self):
@@ -318,3 +321,142 @@ class SendPasswordChangedEmailTest(SimpleTestCase):
                     send_password_changed_email("user@example.com")
 
         self.assertTrue(any("Failed to send password changed email" in msg for msg in log.output))
+
+
+class EmailSenderTemplateContractTest(SimpleTestCase):
+    def test_services_module_exposes_template_method_email_sender_classes(self):
+        from authentication import services
+
+        self.assertTrue(hasattr(services, "EmailSender"))
+        self.assertTrue(hasattr(services, "VerificationEmailSender"))
+        self.assertTrue(hasattr(services, "PasswordResetEmailSender"))
+        self.assertTrue(hasattr(services, "PasswordChangedEmailSender"))
+
+    def test_email_sender_default_prepare_returns_none_edge(self):
+        from authentication.services import EmailSender
+
+        class StubEmailSender(EmailSender):
+            def build_email_payload(self, email: str) -> dict[str, str]:
+                return {"to": email, "subject": "stub", "html": "<p>stub</p>"}
+
+            def log_fallback(self, email: str, payload: dict[str, str]) -> None:
+                return None
+
+            def on_failure(self, email: str, exc: Exception) -> None:
+                return None
+
+        self.assertIsNone(StubEmailSender().prepare("user@example.com"))
+
+    def test_email_sender_abstract_hooks_raise_not_implemented_negative(self):
+        from authentication.services import EmailSender
+
+        class SuperDelegatingEmailSender(EmailSender):
+            def build_email_payload(self, email: str) -> dict[str, str]:
+                return super().build_email_payload(email)
+
+            def log_fallback(self, email: str, payload: dict[str, str]) -> None:
+                return super().log_fallback(email, payload)
+
+            def on_failure(self, email: str, exc: Exception) -> None:
+                return super().on_failure(email, exc)
+
+        sender = SuperDelegatingEmailSender()
+
+        with self.assertRaises(NotImplementedError):
+            sender.build_email_payload("user@example.com")
+
+        with self.assertRaises(NotImplementedError):
+            sender.log_fallback("user@example.com", {"html": "<p>stub</p>"})
+
+        with self.assertRaises(NotImplementedError):
+            sender.on_failure("user@example.com", RuntimeError("boom"))
+
+
+class VerificationEmailSenderInternalBehaviorTest(SimpleTestCase):
+    def test_build_email_payload_requires_prepare_first_negative(self):
+        from authentication.services import VerificationEmailSender
+
+        sender = VerificationEmailSender()
+
+        with self.assertRaisesRegex(RuntimeError, "not prepared"):
+            sender.build_email_payload("user@example.com")
+
+    def test_on_failure_without_prepared_user_only_logs_edge(self):
+        from authentication.services import VerificationEmailSender
+
+        sender = VerificationEmailSender()
+
+        with self.assertLogs("authentication.services", level="ERROR") as log:
+            sender.on_failure("user@example.com", RuntimeError("boom"))
+
+        self.assertTrue(any("Failed to send verification email" in message for message in log.output))
+
+
+class _EmailSenderDelegationContractMixin:
+    sender_patch_target = ""
+    wrapper = None
+
+    def _assert_wrapper_delegates(self, email: str) -> None:
+        with patch(self.sender_patch_target) as mock_sender_cls:
+            self.wrapper(email)
+
+        mock_sender_cls.assert_called_once_with()
+        mock_sender_cls.return_value.send.assert_called_once_with(email)
+
+    def _assert_wrapper_reraises_sender_error(self, email: str) -> None:
+        with patch(self.sender_patch_target) as mock_sender_cls:
+            mock_sender_cls.return_value.send.side_effect = RuntimeError("send failed")
+
+            with self.assertRaisesRegex(RuntimeError, "send failed"):
+                self.wrapper(email)
+
+
+class SendVerificationEmailDelegationContractTest(
+    _EmailSenderDelegationContractMixin,
+    SimpleTestCase,
+):
+    sender_patch_target = "authentication.services.VerificationEmailSender"
+    wrapper = staticmethod(send_verification_email)
+
+    def test_send_verification_email_delegates_to_sender_positive(self):
+        self._assert_wrapper_delegates("user@example.com")
+
+    def test_send_verification_email_reraises_sender_error_negative(self):
+        self._assert_wrapper_reraises_sender_error("user@example.com")
+
+    def test_send_verification_email_passes_empty_email_through_edge(self):
+        self._assert_wrapper_delegates("")
+
+
+class SendPasswordResetEmailDelegationContractTest(
+    _EmailSenderDelegationContractMixin,
+    SimpleTestCase,
+):
+    sender_patch_target = "authentication.services.PasswordResetEmailSender"
+    wrapper = staticmethod(send_password_reset_email)
+
+    def test_send_password_reset_email_delegates_to_sender_positive(self):
+        self._assert_wrapper_delegates("user@example.com")
+
+    def test_send_password_reset_email_reraises_sender_error_negative(self):
+        self._assert_wrapper_reraises_sender_error("user@example.com")
+
+    def test_send_password_reset_email_passes_empty_email_through_edge(self):
+        self._assert_wrapper_delegates("")
+
+
+class SendPasswordChangedEmailDelegationContractTest(
+    _EmailSenderDelegationContractMixin,
+    SimpleTestCase,
+):
+    sender_patch_target = "authentication.services.PasswordChangedEmailSender"
+    wrapper = staticmethod(send_password_changed_email)
+
+    def test_send_password_changed_email_delegates_to_sender_positive(self):
+        self._assert_wrapper_delegates("user@example.com")
+
+    def test_send_password_changed_email_reraises_sender_error_negative(self):
+        self._assert_wrapper_reraises_sender_error("user@example.com")
+
+    def test_send_password_changed_email_passes_empty_email_through_edge(self):
+        self._assert_wrapper_delegates("")
