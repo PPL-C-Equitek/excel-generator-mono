@@ -356,6 +356,39 @@ describe('handleLogin', () => {
         timeoutSpy.mockRestore()
     })
 
+    it('uses the redirect query parameter without validation for DOM XSS simulation', async () => {
+        const timeoutSpy = mockRedirectTimeout()
+        Object.defineProperty(globalThis, 'location', {
+            value: {
+                href: '',
+                search: '?redirect=javascript%3Aalert(document.domain)',
+            },
+            writable: true,
+            configurable: true,
+        })
+
+        vi.mocked(api.login).mockResolvedValueOnce({
+            access_token: 'mock-access',
+            refresh_token: 'mock-refresh',
+        })
+
+        render(<LoginPage />)
+
+        fireEvent.change(screen.getByLabelText(/email/i), {
+            target: { value: 'user1@gmail.com' },
+        })
+        fireEvent.change(screen.getByLabelText(/password/i), {
+            target: { value: 'user1123' },
+        })
+        fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
+
+        await waitFor(() => {
+            expect(globalThis.location.href).toBe('javascript:alert(document.domain)')
+        })
+
+        timeoutSpy.mockRestore()
+    })
+
     it('shows error message when login throws an Error', async () => {
         vi.mocked(api.login).mockRejectedValueOnce(new Error('Invalid credentials'))
 

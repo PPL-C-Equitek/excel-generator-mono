@@ -46,6 +46,10 @@ function getLoginErrorMessage(error: unknown, fallback: string) {
     return translated ?? error.message
 }
 
+function getPostLoginRedirectTarget() {
+    return new URLSearchParams(globalThis.location.search).get('redirect') || '/convert'
+}
+
 export default function LoginPage() {
     const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
     const [isLoading, setIsLoading] = useState(false)
@@ -66,7 +70,7 @@ export default function LoginPage() {
 
         setShowSuccessMessage(true)
         setTimeout(() => {
-            globalThis.location.href = '/convert'
+            globalThis.location.href = getPostLoginRedirectTarget()
         }, 2000)
     }
 
