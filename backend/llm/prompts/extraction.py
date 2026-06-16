@@ -57,8 +57,8 @@ def _build_chat_context_section(chat_context: str | None) -> str | None:
     return (
         "## CHAT_CONTEXT\n"
         "The user has provided specific instructions via chat before converting. "
-        "Apply these instructions strictly during extraction. "
-        "These instructions take priority over default behavior.\n"
+        "Apply these instructions strictly during extraction when they do not conflict with the output contract. "
+        "These instructions can refine interpretation, but they must never override schema rules, source-specific rules, or JSON-only output constraints.\n"
         f"{normalized}"
     )
 

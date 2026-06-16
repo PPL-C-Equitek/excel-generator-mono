@@ -1,6 +1,8 @@
 import json
 from typing import Any
 
+from .base import EXTRACTION_TOP_LEVEL_KEYS, NORMALIZED_TABLE_COLUMNS
+
 
 MAX_REASONING_CONTEXT_CHARS = 12000
 MAX_REASONING_TABLES = 5
@@ -8,17 +10,17 @@ MAX_REASONING_HEADERS = 20
 MAX_REASONING_KEY_SAMPLE = 20
 MAX_REASONING_TEXT_PREVIEW_CHARS = 300
 
-EXTRACTION_OUTPUT_SCHEMA_KEYS = [
-  "document_info",
-  "summary",
-  "content_data",
-]
+EXTRACTION_OUTPUT_SCHEMA_KEYS = list(EXTRACTION_TOP_LEVEL_KEYS)
+
+EXTRACTION_OUTPUT_SCHEMA_KEYS_TEXT = ", ".join(EXTRACTION_OUTPUT_SCHEMA_KEYS)
+NORMALIZED_TABLE_COLUMNS_TEXT = "\n".join(
+    [f'  "{column}",' for column in NORMALIZED_TABLE_COLUMNS[:-1]]
+    + [f'  "{NORMALIZED_TABLE_COLUMNS[-1]}"']
+)
 
 OUTPUT_FORMAT_SECTION = """## OUTPUT_FORMAT
 Return ONLY valid JSON object with exactly these keys:
-- "document_info" (object)
-- "summary" (object)
-- "content_data" (non-empty array of table objects)
+- {top_level_keys}
 
 Required structure:
 - document_info.source_type: "Excel" or "PDF" (case-sensitive)
@@ -36,14 +38,17 @@ Rules:
 - no extra explanation outside JSON
 - no top-level keys besides: document_info, summary, content_data
 - no nested objects/arrays inside summary values or row cell values
-"""
+-""".format(
+  top_level_keys="\n- ".join(f'"{key}"' for key in EXTRACTION_OUTPUT_SCHEMA_KEYS),
+)
 
 AMBIGUOUS_CASE_SECTION = """## AMBIGUOUS_CASE
 If extraction is ambiguous or insufficient:
 - keep the same required output contract
 - never switch to free-form text
 - do not invent values
-- use conservative scalar values and empty collections only when truly unsupported by the input
+- use conservative scalar values such as null only for optional fields when needed
+- keep required tables and required arrays populated from the source instead of fabricating empty placeholders
 """
 
 MESSY_RECOVERABLE_CASE_SECTION = """## MESSY_BUT_RECOVERABLE

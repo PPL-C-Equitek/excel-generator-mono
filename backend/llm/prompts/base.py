@@ -1,3 +1,18 @@
+EXTRACTION_TOP_LEVEL_KEYS = ("document_info", "summary", "content_data")
+NORMALIZED_TABLE_COLUMNS = (
+  "unit",
+  "item",
+  "num_type",
+  "status_type",
+  "value",
+)
+
+EXTRACTION_TOP_LEVEL_KEYS_TEXT = ", ".join(EXTRACTION_TOP_LEVEL_KEYS)
+NORMALIZED_TABLE_COLUMNS_TEXT = "\n".join(
+  [f'  "{column}",' for column in NORMALIZED_TABLE_COLUMNS[:-1]]
+  + [f'  "{NORMALIZED_TABLE_COLUMNS[-1]}"']
+)
+
 ROLE_SECTION = """## ROLE
 You are a document parsing assistant.
 
@@ -19,7 +34,7 @@ Do not fabricate rows, fields, or values.
 
 QUALITY_SECTION = """## QUALITY_RULES
 ### Output Contract
-- top-level keys must be exactly: document_info, summary, content_data
+- top-level keys must be exactly: {top_level_keys}
 - document_info.source_type must be exactly: Excel or PDF (case-sensitive)
 - document_info.filename must be a non-empty string
 
@@ -59,18 +74,14 @@ Do not use unpivoting as a reason to merge multiple distinct tables into one con
 
 The normalized table must use these exact column names:
 [
-  "unit",
-  "item",
-  "num_type",
-  "status_type",
-  "value"
+{normalized_table_columns}
 ]
 
 Never use translated or alternative names such as:
 - Nilai
 - Tipe
 - Status
-- Item
+- Item as a source header label
 - any other language variant
 
 Exclude rows where value is 0 or null after unpivoting.
@@ -79,7 +90,10 @@ Exclude rows where value is 0 or null after unpivoting.
 - always return data derived from the real uploaded content
 - infer conservatively when data is unclear
 - keep output internally consistent and schema compliant
-"""
+""".format(
+  top_level_keys=EXTRACTION_TOP_LEVEL_KEYS_TEXT,
+  normalized_table_columns=NORMALIZED_TABLE_COLUMNS_TEXT,
+)
 
 INPUT_SECTION_TEMPLATE = """## INPUT
 {sanitized_user_input}

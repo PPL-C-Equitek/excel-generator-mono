@@ -22,7 +22,7 @@ class BuildChatContextSectionTest(SimpleTestCase):
         result = _build_chat_context_section("Gunakan nama kolom Bahasa Indonesia")
 
         self.assertIn("Apply these instructions strictly", result)
-        self.assertIn("take priority over default behavior", result)
+        self.assertIn("must never override schema rules", result)
 
     def test_positive_multiline_context_preserved(self):
         ctx = "USER: Tanggal DD/MM/YYYY\nASSISTANT: Siap\nUSER: Gunakan Bahasa Indonesia"

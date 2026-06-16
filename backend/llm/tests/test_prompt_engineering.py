@@ -27,6 +27,7 @@ class ExtractionPromptBuilderTest(SimpleTestCase):
         self.assertIn("If extraction is ambiguous or insufficient", prompt)
         self.assertIn("keep the same required output contract", prompt)
         self.assertIn("do not invent values", prompt)
+        self.assertIn("required tables and required arrays populated from the source", prompt)
         self.assertIn("no markdown", prompt)
         self.assertIn("no code fences", prompt)
         self.assertIn("no extra explanation outside JSON", prompt)
