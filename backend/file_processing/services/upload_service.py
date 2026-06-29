@@ -129,15 +129,15 @@ EXCEL_PASSWORD_PROTECTED_ERROR = (
 )
 MAX_WORD_PAGES = word_validation_service.MAX_WORD_PAGES
 WORD_CORRUPT_ERROR = word_validation_service.WORD_CORRUPT_ERROR
-TXT_CORRUPT_ERROR = "File teks tidak dapat dibaca atau rusak (corrupt)."
+TXT_CORRUPT_ERROR = "Text file cannot be read or is corrupted."
 TXT_PROTECTED_ERROR = (
-    "File terdeteksi sebagai format terproteksi atau terenkripsi. "
-    "Pastikan file adalah teks biasa (.txt) yang tidak diproteksi."
+    "File detected as a protected or encrypted format. "
+    "Ensure the file is plain text (.txt) and unprotected."
 )
-CSV_CORRUPT_ERROR = "File CSV tidak dapat dibaca atau rusak (corrupt)."
+CSV_CORRUPT_ERROR = "CSV file cannot be read or is corrupted."
 CSV_PROTECTED_ERROR = (
-    "File CSV terdeteksi sebagai format terproteksi atau terenkripsi. "
-    "Pastikan file adalah CSV biasa yang tidak diproteksi."
+    "CSV file detected as a protected or encrypted format. "
+    "Ensure the file is a standard, unprotected CSV."
 )
 FILE_EXTENSION_MISMATCH_ERROR = "File content does not match its extension."
 ZIP_SIGNATURE_PREFIX = b"PK"
