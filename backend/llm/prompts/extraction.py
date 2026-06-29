@@ -33,6 +33,74 @@ def _build_schema_hint_section(schema_hint: str | None) -> str | None:
     )
 
 
+def _append_section_context_values(
+    lines: list[str],
+    title: str,
+    values: list[str],
+) -> None:
+    if not values:
+        return
+
+    lines.append(title)
+    for value in values[:8]:
+        normalized_value = value.strip()
+        if normalized_value:
+            lines.append(f"- {normalized_value}")
+
+
+def _normalize_section_context_values(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+
+    normalized_values: list[str] = []
+    for value in values:
+        if isinstance(value, str):
+            normalized_value = value.strip()
+            if normalized_value:
+                normalized_values.append(normalized_value)
+    return normalized_values
+
+
+def _build_section_context_section(section_context: dict | str | None) -> str | None:
+    if isinstance(section_context, str):
+        normalized = section_context.strip()
+        if not normalized:
+            return None
+        return (
+            "## SECTION_CONTEXT\n"
+            "Conservative section hints derived from the extracted document.\n"
+            f"{normalized}"
+        )
+
+    if not isinstance(section_context, dict) or not section_context:
+        return None
+
+    lines = [
+        "## SECTION_CONTEXT",
+        "Conservative section hints derived from the extracted document.",
+    ]
+
+    source_type = section_context.get("source_type")
+    if isinstance(source_type, str) and source_type.strip():
+        lines.append(f"Source: {source_type.strip()}")
+
+    section_count = section_context.get("section_count")
+    if isinstance(section_count, int) and section_count > 0:
+        lines.append(f"Likely Sections: {section_count}")
+
+    section_labels = _normalize_section_context_values(section_context.get("section_labels"))
+    _append_section_context_values(lines, "Section Labels:", section_labels)
+
+    section_markers = _normalize_section_context_values(section_context.get("section_markers"))
+    _append_section_context_values(lines, "Section Markers:", section_markers)
+
+    instruction = section_context.get("instruction")
+    if isinstance(instruction, str) and instruction.strip():
+        lines.extend(["", instruction.strip()])
+
+    return "\n".join(lines)
+
+
 def _build_refinement_section(refinement_instruction: str | None) -> str | None:
     normalized_instruction = (
         refinement_instruction.strip() if isinstance(refinement_instruction, str) else ""
@@ -112,6 +180,7 @@ def _build_ocr_context_section(ocr_context: dict | str | None) -> str | None:
 
 def build_extraction_prompt(
     schema_hint: str | None = None,
+    section_context: dict | str | None = None,
     refinement_instruction: str | None = None,
     chat_context: str | None = None,
     ocr_context: dict | str | None = None,
@@ -121,6 +190,10 @@ def build_extraction_prompt(
     schema_hint_section = _build_schema_hint_section(schema_hint)
     if schema_hint_section:
         sections.append(schema_hint_section.strip())
+
+    section_context_section = _build_section_context_section(section_context)
+    if section_context_section:
+        sections.append(section_context_section.strip())
 
     ocr_context_section = _build_ocr_context_section(ocr_context)
     if ocr_context_section:

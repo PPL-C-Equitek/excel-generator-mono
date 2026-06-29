@@ -188,7 +188,7 @@ class ExportServiceTest(SimpleTestCase):
         self.assertEqual(
             export_output_json["document_info"],
             {
-                "source_type": "Excel",
+                "source_type": "DOCX",
                 "filename": "invoice.docx",
             },
         )
@@ -380,6 +380,28 @@ class ResolveExportSourceTypeTest(SimpleTestCase):
         )
         self.assertEqual(result, "PDF")
 
+    def test_positive_reads_extended_source_type_from_input_json(self):
+        result = _resolve_export_source_type(
+            {"document_info": {"source_type": "DOCX"}},
+            {},
+        )
+        self.assertEqual(result, "DOCX")
+
+    def test_positive_reads_additional_source_types_from_input_json(self):
+        cases = [
+            ("CSV", "CSV"),
+            ("TXT", "TXT"),
+            ("image", "Image"),
+            ("JPG", "Image"),
+        ]
+        for raw_value, expected in cases:
+            with self.subTest(source_type=raw_value):
+                result = _resolve_export_source_type(
+                    {"document_info": {"source_type": raw_value}},
+                    {},
+                )
+                self.assertEqual(result, expected)
+
     def test_positive_falls_back_to_output_json_when_input_json_has_no_source_type(self):
         result = _resolve_export_source_type(
             {},
@@ -400,6 +422,13 @@ class ResolveExportSourceTypeTest(SimpleTestCase):
             {},
         )
         self.assertEqual(result, "PDF")
+
+    def test_positive_falls_back_to_non_pdf_filename_extension(self):
+        result = _resolve_export_source_type(
+            {"filename": "report.csv"},
+            {},
+        )
+        self.assertEqual(result, "CSV")
 
     def test_negative_defaults_to_excel_when_no_source_type_info_available(self):
         result = _resolve_export_source_type({}, {})

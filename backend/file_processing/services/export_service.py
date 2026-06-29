@@ -53,7 +53,7 @@ class CSVFileNamePolicy:
 
 
 _SCALAR_TYPES = (str, int, float, bool, type(None))
-_ALLOWED_SOURCE_TYPES = {"Excel", "PDF"}
+_ALLOWED_SOURCE_TYPES = {"Excel", "PDF", "DOCX", "CSV", "TXT", "Image"}
 _REQUIRED_TOP_LEVEL_KEYS = {"document_info", "summary", "content_data"}
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 _CSV_FILENAME_INVALID_CHARS = re.compile(r"[\\/*?:\"<>|]")
@@ -107,7 +107,9 @@ def _validate_document_info(document_info):
 
     source_type = document_info["source_type"]
     if not isinstance(source_type, str) or source_type not in _ALLOWED_SOURCE_TYPES:
-        raise OutputLLMValidationError("document_info.source_type must be Excel or PDF.")
+        raise OutputLLMValidationError(
+            "document_info.source_type must be Excel, PDF, DOCX, CSV, TXT, or Image."
+        )
 
     filename = document_info["filename"]
     if not isinstance(filename, str) or not filename.strip():

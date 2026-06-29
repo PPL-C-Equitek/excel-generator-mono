@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, Callable, Protocol
 
 from custom_schemas.models import CustomSchema
@@ -18,6 +19,15 @@ _DEFAULT_PROMPT_MAX_TABLES = 12
 _DEFAULT_PROMPT_MAX_ROWS_PER_TABLE = 60
 _DEFAULT_PROMPT_MAX_COLUMNS_PER_ROW = 20
 _DEFAULT_PROMPT_MAX_CELL_CHARS = 160
+_SECTION_CONTEXT_RESERVED_KEYS = {"ocr_metadata"}
+_SECTION_LABEL_PATTERN = re.compile(
+    r"^(?:section|entity|business\s+entity|business\s+unit|department|company|branch|project|customer|vendor)[ \t]*[:\-][ \t]*([^\n]{1,80})$",
+    re.IGNORECASE,
+)
+_SECTION_KEYWORD_PATTERN = re.compile(
+    r"\b(?:section|entity|business\s+entity|business\s+unit|department|company|branch|project|customer|vendor)\b",
+    re.IGNORECASE,
+)
 
 
 def _truncate_text_cell(value: Any, max_chars: int) -> Any:
@@ -218,6 +228,227 @@ def _extract_ocr_context(payload: dict[str, Any] | list[Any] | None) -> dict[str
     return None
 
 
+def _normalize_section_label(value: str) -> str | None:
+    normalized = " ".join(value.strip().split())
+    if not normalized:
+        return None
+    return normalized
+
+
+def _extract_section_label_from_text(value: str) -> str | None:
+    normalized_value = value.strip()
+    if not normalized_value:
+        return None
+
+    keyword_match = _SECTION_LABEL_PATTERN.match(normalized_value)
+    if keyword_match:
+        return _normalize_section_label(keyword_match.group(1))
+
+    if _SECTION_KEYWORD_PATTERN.search(normalized_value) and len(normalized_value) <= 80:
+        return _normalize_section_label(normalized_value)
+
+    return None
+
+
+def _append_unique_section_label(section_labels: list[str], candidate: str | None) -> None:
+    if candidate and candidate not in section_labels:
+        section_labels.append(candidate)
+
+
+def _extract_section_label_from_values(values: list[Any]) -> str | None:
+    candidate_labels = []
+
+    for value in values:
+        candidate = _extract_section_label_from_value(value)
+        _append_unique_section_label(candidate_labels, candidate)
+
+    if len(candidate_labels) == 1:
+        explicit_matches = [
+            value
+            for value in values
+            if isinstance(value, str)
+            and _SECTION_LABEL_PATTERN.match(value.strip())
+        ]
+
+        if explicit_matches:
+            return candidate_labels[0]
+
+    non_empty_cells = [cell for cell in values if isinstance(cell, str) and cell.strip()]
+    if len(candidate_labels) == 0 and len(non_empty_cells) == 1:
+        return _extract_section_label_from_text(non_empty_cells[0])
+
+    return None
+
+
+def _extract_section_label_from_mapping(item: dict[str, Any]) -> str | None:
+    candidate_labels = []
+
+    text_value = item.get("text")
+    _append_unique_section_label(
+        candidate_labels,
+        _extract_section_label_from_value(text_value),
+    )
+
+    for key, value in item.items():
+        if key == "text" or key == "ocr_metadata":
+            continue
+
+        _append_unique_section_label(
+            candidate_labels,
+            _extract_section_label_from_value(value),
+        )
+
+    if len(candidate_labels) == 1:
+        return candidate_labels[0]
+
+    return None
+
+
+def _extract_section_label_from_value(value: Any) -> str | None:
+    if isinstance(value, str):
+        return _extract_section_label_from_text(value)
+
+    if isinstance(value, list):
+        return _extract_section_label_from_values(value)
+
+    if isinstance(value, dict):
+        return _extract_section_label_from_mapping(value)
+
+    return None
+
+
+def _extract_section_labels_from_page(
+    page: dict[str, Any],
+) -> list[str]:
+    labels = []
+
+    text_rows = page.get("text")
+    if not isinstance(text_rows, list):
+        return labels
+
+    for row in text_rows:
+        candidate = _extract_section_label_from_value(row)
+
+        if candidate and candidate not in labels:
+            labels.append(candidate)
+
+    return labels
+
+
+def _extract_section_label_from_item(item: Any) -> str | None:
+    if isinstance(item, str):
+        return _extract_section_label_from_text(item)
+
+    if isinstance(item, list):
+        return _extract_section_label_from_values(item)
+
+    if isinstance(item, dict):
+        return _extract_section_label_from_mapping(item)
+
+    return None
+
+
+def _collect_section_labels_from_item(item: Any) -> list[str]:
+    if (
+        isinstance(item, dict)
+        and isinstance(item.get("page"), int)
+        and isinstance(item.get("text"), list)
+    ):
+        return _extract_section_labels_from_page(item)
+
+    candidate = _extract_section_label_from_item(item)
+    return [candidate] if candidate else []
+
+
+def _extract_section_labels_from_content_rows(content_rows: Any) -> list[str]:
+    if not isinstance(content_rows, list):
+        return []
+
+    section_labels: list[str] = []
+
+    for item in content_rows[:40]:
+        for label in _collect_section_labels_from_item(item):
+            if label not in section_labels:
+                section_labels.append(label)
+
+            if len(section_labels) >= 8:
+                return section_labels
+
+    return section_labels
+
+
+def _build_section_context_from_extracted_map(extracted: dict[str, Any]) -> dict[str, Any] | None:
+    section_labels = []
+    for key in extracted.keys():
+        if not isinstance(key, str):
+            key = str(key)
+        if key.strip().lower() in _SECTION_CONTEXT_RESERVED_KEYS:
+            continue
+        candidate = _extract_section_label_from_text(key)
+        if candidate and candidate not in section_labels:
+            section_labels.append(candidate)
+    if len(section_labels) <= 1:
+        return None
+
+    return {
+        "source_type": "extracted_map",
+        "section_count": len(section_labels),
+        "section_labels": section_labels[:8],
+        "instruction": (
+            "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+            "Split only when the boundary is explicit; otherwise keep the table intact."
+        ),
+    }
+
+
+def _build_section_context_from_content_rows(content_rows: list[Any]) -> dict[str, Any] | None:
+    section_labels = _extract_section_labels_from_content_rows(content_rows)
+    if len(section_labels) <= 1:
+        return None
+
+    return {
+        "source_type": "page_content",
+        "section_count": len(section_labels),
+        "section_labels": section_labels,
+        "section_markers": section_labels,
+        "instruction": (
+            "Use the markers above as conservative boundaries. Do not merge different business entities into one table when the section change is explicit."
+        ),
+    }
+
+
+def _build_section_context_from_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    direct_sections = payload.get("extracted")
+    if isinstance(direct_sections, dict):
+        extracted_context = _build_section_context_from_extracted_map(direct_sections)
+        if extracted_context:
+            return extracted_context
+
+    content_rows = payload.get("content")
+    if isinstance(content_rows, list):
+        content_context = _build_section_context_from_content_rows(content_rows)
+        if content_context:
+            return content_context
+
+    return None
+
+
+def _extract_section_context(payload: dict[str, Any] | list[Any] | None) -> dict[str, Any] | None:
+    if isinstance(payload, dict):
+        section_context = _build_section_context_from_payload(payload)
+        if section_context:
+            return section_context
+
+        for nested_key in ("original_input_json", "input_json", "payload"):
+            nested_payload = payload.get(nested_key)
+            if isinstance(nested_payload, (dict, list)):
+                nested_context = _extract_section_context(nested_payload)
+                if nested_context:
+                    return nested_context
+
+    return None
+
+
 def _normalize_user_prompt(payload: dict[str, Any]) -> None:
     user_prompt = payload.get("user_prompt")
     if not isinstance(user_prompt, str):
@@ -361,6 +592,7 @@ class LlmGenerationService:
 
         extraction_prompt = build_extraction_prompt(
             schema_hint=schema_prompt_fragment,
+            section_context=_extract_section_context(input_json),
             refinement_instruction=refinement_instruction,
             chat_context=chat_context,
             ocr_context=_extract_ocr_context(input_json),

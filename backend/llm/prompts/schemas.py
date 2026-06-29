@@ -21,7 +21,7 @@ Return ONLY valid JSON object with exactly these keys:
 - "content_data" (non-empty array of table objects)
 
 Required structure:
-- document_info.source_type: "Excel" or "PDF" (case-sensitive)
+- document_info.source_type: "Excel", "PDF", "DOCX", "CSV", "TXT", or "Image" (case-sensitive)
 - document_info.filename: non-empty string
 - summary: object with non-empty string keys and scalar values only
 - content_data[*].table_name: non-empty unique string

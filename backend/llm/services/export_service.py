@@ -55,6 +55,14 @@ def _format_export_source_type(value: str) -> str:
         return "PDF"
     if normalized in {"excel", "xlsx", "xls"}:
         return "Excel"
+    if normalized in {"docx"}:
+        return "DOCX"
+    if normalized in {"csv"}:
+        return "CSV"
+    if normalized in {"txt"}:
+        return "TXT"
+    if normalized in {"image", "png", "jpg", "jpeg", "webp", "gif", "tiff", "bmp"}:
+        return "Image"
     return ""
 
 
@@ -68,8 +76,24 @@ def _resolve_export_source_type(input_json, output_json) -> str:
         return source_type
 
     filename = extract_original_name(input_json, output_json).lower()
-    if filename.endswith(".pdf"):
-        return "PDF"
+    extension_map = {
+        ".pdf": "PDF",
+        ".xlsx": "Excel",
+        ".xls": "Excel",
+        ".docx": "DOCX",
+        ".csv": "CSV",
+        ".txt": "TXT",
+        ".png": "Image",
+        ".jpg": "Image",
+        ".jpeg": "Image",
+        ".webp": "Image",
+        ".gif": "Image",
+        ".tiff": "Image",
+        ".bmp": "Image",
+    }
+    for extension, source_type in extension_map.items():
+        if filename.endswith(extension):
+            return source_type
 
     return "Excel"
 

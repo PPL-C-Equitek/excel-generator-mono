@@ -9,8 +9,19 @@ from llm.services.generation_service import (
     _apply_extracted_payload_budget,
     _apply_prompt_payload_budget,
     _build_prompt_budget_summary,
+    _build_section_context_from_content_rows,
+    _build_section_context_from_extracted_map,
+    _build_section_context_from_payload,
     _compact_input_json_for_prompt,
     _extract_ocr_context,
+    _extract_section_context,
+    _extract_section_label_from_item,
+    _extract_section_label_from_text,
+    _extract_section_label_from_value,
+    _extract_section_label_from_values,
+    _extract_section_labels_from_content_rows,
+    _extract_section_labels_from_page,
+    _normalize_section_label,
     _normalize_user_prompt,
     _resolve_positive_int_setting as _resolve_generation_positive_int_setting,
     _truncate_table_rows,
@@ -746,11 +757,10 @@ class OpenAIClientServiceTest(SimpleTestCase):
         )
 
     @override_settings(OPENAI_MAX_OUTPUT_TOKENS=256)
-    def test_response_generation_options_include_system_prompt_context(self):
+    def test_response_generation_options_ignore_system_prompt_context(self):
         self.assertEqual(
             _build_response_generation_options(
                 "Prompt",
-                system_prompt="  System  ",
             ),
             {"max_output_tokens": 256},
         )
@@ -1662,6 +1672,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
@@ -1694,6 +1705,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="Use only invoice_number and total_amount.",
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
@@ -1724,6 +1736,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="   ",
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
@@ -1752,6 +1765,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
@@ -1784,6 +1798,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction="Fix validation errors",
             chat_context=None,
             ocr_context=None,
@@ -1818,6 +1833,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint="Use only invoice_number and total_amount.",
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context=None,
@@ -1880,6 +1896,7 @@ class LlmGenerationServiceTest(SimpleTestCase):
         self.assertEqual(result, {"status": "ok"})
         mock_build_extraction_prompt.assert_called_once_with(
             schema_hint=None,
+            section_context=None,
             refinement_instruction=None,
             chat_context=None,
             ocr_context={
@@ -1890,6 +1907,266 @@ class LlmGenerationServiceTest(SimpleTestCase):
         )
         schema_prompt_source.get_prompt_fragment.assert_not_called()
         self.assertEqual(json_generator.generate.call_count, 1)
+
+    @patch("llm.services.generation_service.build_extraction_prompt")
+    def test_llm_generation_service_passes_section_context_for_multi_section_input(
+        self, mock_build_extraction_prompt
+    ):
+        json_generator = Mock()
+        json_generator.generate.return_value = {"status": "ok"}
+        schema_prompt_source = Mock()
+        mock_build_extraction_prompt.return_value = "Extraction prompt."
+        service = LlmGenerationService(
+            json_generator=json_generator,
+            schema_prompt_source=schema_prompt_source,
+            base_system_prompt_provider=lambda: "Base prompt.",
+        )
+
+        result = service.generate(
+            {
+                "extracted": {
+                    "Finance Department": [["header"]],
+                    "Sales Department": [["header"]],
+                }
+            }
+        )
+
+        self.assertEqual(result, {"status": "ok"})
+        mock_build_extraction_prompt.assert_called_once_with(
+            schema_hint=None,
+            section_context={
+                "source_type": "extracted_map",
+                "section_count": 2,
+                "section_labels": ["Finance Department", "Sales Department"],
+                "instruction": (
+                    "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+                    "Split only when the boundary is explicit; otherwise keep the table intact."
+                ),
+            },
+            refinement_instruction=None,
+            chat_context=None,
+            ocr_context=None,
+        )
+        json_generator.generate.assert_called_once_with(
+            input_json={
+                "extracted": {
+                    "Finance Department": [["header"]],
+                    "Sales Department": [["header"]],
+                }
+            },
+            system_prompt="Base prompt.\n\nExtraction prompt.",
+        )
+
+    def test_extract_ocr_context_prefers_direct_and_nested_metadata(self):
+        self.assertEqual(
+            _extract_ocr_context({"ocr_metadata": {"confidence_score": 88.5}}),
+            {"confidence_score": 88.5},
+        )
+        self.assertEqual(
+            _extract_ocr_context(
+                {
+                    "payload": {
+                        "original_input_json": {
+                            "input_json": {
+                                "extracted": {
+                                    "Sheet1": [["header"]],
+                                },
+                                "payload": {
+                                    "ocr_metadata": {
+                                        "confidence_score": 42.0,
+                                        "document_type": "pdf",
+                                    }
+                                },
+                            }
+                        }
+                    }
+                }
+            ),
+            {"confidence_score": 42.0, "document_type": "pdf"},
+        )
+        self.assertIsNone(_extract_ocr_context({"ocr_metadata": "invalid"}))
+        self.assertIsNone(_extract_ocr_context(None))
+
+    def test_section_context_builders_cover_extracted_and_content_variants(self):
+        single_section = {"Only Section": [["header"]]}
+        multi_section = {"Finance Department": [["header"]], "Sales Department": [["header"]]}
+        ocr_content_rows = [
+            {"page": 1, "text": ["Cover page", "Section: Finance", "Row A"]},
+            {
+                "page": 2,
+                "text": ["Section: Sales", "Row B"],
+                "ocr_metadata": {"confidence_score": 88.0},
+            },
+        ]
+
+        self.assertIsNone(_build_section_context_from_extracted_map(single_section))
+        self.assertIsNone(
+            _build_section_context_from_extracted_map(
+                {
+                    "Only Section": [["header"]],
+                    "ocr_metadata": {"confidence_score": 91.0, "document_type": "pdf"},
+                }
+            )
+        )
+        self.assertEqual(
+            _build_section_context_from_extracted_map(multi_section),
+            {
+                "source_type": "extracted_map",
+                "section_count": 2,
+                "section_labels": ["Finance Department", "Sales Department"],
+                "instruction": (
+                    "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+                    "Split only when the boundary is explicit; otherwise keep the table intact."
+                ),
+            },
+        )
+
+        self.assertIsNone(_build_section_context_from_content_rows(["Only one section"]))
+        self.assertEqual(
+            _build_section_context_from_content_rows(ocr_content_rows),
+            {
+                "source_type": "page_content",
+                "section_count": 2,
+                "section_labels": ["Finance", "Sales"],
+                "section_markers": ["Finance", "Sales"],
+                "instruction": (
+                    "Use the markers above as conservative boundaries. Do not merge different business entities into one table when the section change is explicit."
+                ),
+            },
+        )
+        content_context = _build_section_context_from_content_rows(
+            [
+                "Section: Finance",
+                {"department": "Section: Sales"},
+                ["Branch", "Ignored"],
+            ]
+        )
+        self.assertEqual(
+            content_context,
+            {
+                "source_type": "page_content",
+                "section_count": 2,
+                "section_labels": ["Finance", "Sales"],
+                "section_markers": ["Finance", "Sales"],
+                "instruction": (
+                    "Use the markers above as conservative boundaries. Do not merge different business entities into one table when the section change is explicit."
+                ),
+            },
+        )
+        self.assertEqual(
+            _build_section_context_from_payload({"extracted": multi_section}),
+            {
+                "source_type": "extracted_map",
+                "section_count": 2,
+                "section_labels": ["Finance Department", "Sales Department"],
+                "instruction": (
+                    "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+                    "Split only when the boundary is explicit; otherwise keep the table intact."
+                ),
+            },
+        )
+
+        self.assertIsNone(_build_section_context_from_payload({"extracted": single_section}))
+        self.assertEqual(
+            _build_section_context_from_payload({"content": ["Section: Finance", "Section: Sales"]}),
+            content_context,
+        )
+        self.assertEqual(
+            _build_section_context_from_payload(
+                {
+                    "content": ocr_content_rows,
+                    "ocr_metadata": {"confidence_score": 88.0, "document_type": "pdf"},
+                }
+            ),
+            {
+                "source_type": "page_content",
+                "section_count": 2,
+                "section_labels": ["Finance", "Sales"],
+                "section_markers": ["Finance", "Sales"],
+                "instruction": (
+                    "Use the markers above as conservative boundaries. Do not merge different business entities into one table when the section change is explicit."
+                ),
+            },
+        )
+
+        self.assertEqual(
+            _extract_section_context(
+                {
+                    "payload": {
+                        "original_input_json": {
+                            "input_json": {
+                                "extracted": multi_section,
+                            }
+                        }
+                    }
+                }
+            ),
+            {
+                "source_type": "extracted_map",
+                "section_count": 2,
+                "section_labels": ["Finance Department", "Sales Department"],
+                "instruction": (
+                    "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+                    "Split only when the boundary is explicit; otherwise keep the table intact."
+                ),
+            },
+        )
+
+        self.assertEqual(
+            _extract_section_context(
+                {
+                    "input_json": {
+                        "content": ["Section: Finance", {"department": "Section: Sales"}],
+                    }
+                }
+            ),
+            content_context,
+        )
+
+    def test_extract_section_label_from_text_requires_whole_keyword_match(self):
+        self.assertIsNone(_extract_section_label_from_text("Projected Revenue Q1"))
+        self.assertIsNone(_extract_section_label_from_text("Companywide Total"))
+
+        self.assertEqual(_extract_section_label_from_text("Project Alpha"), "Project Alpha")
+        self.assertEqual(_extract_section_label_from_text("Company: EMEA"), "EMEA")
+
+    def test_section_context_from_extracted_map_ignores_generic_keys(self):
+        self.assertIsNone(
+            _build_section_context_from_extracted_map(
+                {
+                    "Sheet1": [["header"]],
+                    "Sheet2": [["header"]],
+                }
+            )
+        )
+
+    def test_section_context_from_extracted_map_handles_non_string_keys(self):
+        self.assertEqual(
+            _build_section_context_from_extracted_map(
+                {
+                    1: [["header"]],
+                    "Section: Finance": [["header"]],
+                    "Section: Sales": [["header"]],
+                }
+            ),
+            {
+                "source_type": "extracted_map",
+                "section_count": 2,
+                "section_labels": ["Finance", "Sales"],
+                "instruction": (
+                    "Keep each clearly separated business entity, document section, or sheet as a distinct content_data entry. "
+                    "Split only when the boundary is explicit; otherwise keep the table intact."
+                ),
+            },
+        )
+        self.assertIsNone(
+            _build_section_context_from_extracted_map(
+                {
+                    "Projected Revenue Q1": [["header"]],
+                    "Companywide Total": [["header"]],
+                }
+            )
+        )
 
     @patch("llm.services.generation_service.build_extraction_prompt")
     def test_llm_generation_service_fetches_schema_fragment_for_distinct_schema_ids(
@@ -1957,6 +2234,192 @@ class LlmGenerationServiceTest(SimpleTestCase):
             prompt_source.get_prompt_fragment("schema-1")
 
         mock_get.assert_not_called()
+
+    def test_extract_section_label_helpers_cover_edge_cases(self):
+        self.assertIsNone(_normalize_section_label("   "))
+        self.assertEqual(
+            _normalize_section_label("  Finance   Department  "),
+            "Finance Department",
+        )
+
+        self.assertIsNone(_extract_section_label_from_text("   "))
+        self.assertEqual(
+            _extract_section_label_from_text("Section: Finance"),
+            "Finance",
+        )
+        self.assertEqual(
+            _extract_section_label_from_text("Business Unit - Retail"),
+            "Retail",
+        )
+
+        self.assertEqual(
+            _extract_section_label_from_text("Finance Department"),
+            "Finance Department",
+        )
+
+        self.assertIsNone(
+            _extract_section_label_from_text(
+                "department " + ("x" * 100)
+            )
+        )
+
+        self.assertIsNone(
+            _extract_section_label_from_text("random text")
+        )
+        self.assertIsNone(
+            _extract_section_label_from_values(["Projected Revenue Q1"])
+        )
+
+    def test_extract_section_label_from_item_covers_all_variants(self):
+        self.assertEqual(
+            _extract_section_label_from_item("Section: Finance"),
+            "Finance",
+        )
+
+        self.assertEqual(
+            _extract_section_label_from_item(
+                ["   ", "Department: Sales", ""]
+            ),
+            "Sales",
+        )
+
+        self.assertIsNone(
+            _extract_section_label_from_item(
+                ["Finance", "Sales"]
+            )
+        )
+
+        self.assertEqual(
+            _extract_section_label_from_item(
+                {"a": " ", "b": "Branch: Jakarta"}
+            ),
+            "Jakarta",
+        )
+
+        self.assertEqual(
+            _extract_section_label_from_item(
+                {
+                    "text": ["Cover page", "Section: Operations"],
+                    "ocr_metadata": {"confidence_score": 88.0},
+                }
+            ),
+            "Operations",
+        )
+
+        self.assertIsNone(
+            _extract_section_label_from_item(
+                {"a": "Finance", "b": "Sales"}
+            )
+        )
+
+        self.assertIsNone(
+            _extract_section_label_from_item(123)
+        )
+
+    def test_extract_section_labels_from_content_rows_limits_and_deduplicates(self):
+        rows = [
+            "Section: Finance",
+            "Section: Finance",
+            "Section: Sales",
+            "Section: HR",
+            "Section: Ops",
+            "Section: Legal",
+            "Section: IT",
+            "Section: Audit",
+            "Section: Marketing",
+            "Section: Extra",
+        ]
+
+        result = _extract_section_labels_from_content_rows(rows)
+        self.assertEqual(len(result), 8)
+        self.assertEqual(result[0], "Finance")
+        self.assertNotIn("Extra", result)
+
+    def test_extract_section_context_returns_none_for_non_dict_payloads(self):
+        self.assertIsNone(_extract_section_context(None))
+        self.assertIsNone(_extract_section_context([]))
+        self.assertIsNone(_extract_section_context("invalid"))
+
+    def test_build_section_context_from_payload_returns_none_when_no_context_found(self):
+        self.assertIsNone(
+            _build_section_context_from_payload(
+                {"content": ["random text"]}
+            )
+        )
+
+    def test_extract_section_labels_from_content_rows_breaks_after_eight_labels(self):
+        rows = [f"Section: Label{i}" for i in range(20)]
+
+        result = _extract_section_labels_from_content_rows(rows)
+
+        self.assertEqual(len(result), 8)
+        self.assertEqual(result[0], "Label0")
+        self.assertEqual(result[-1], "Label7")
+
+    def test_extract_section_context_handles_nested_payload_without_context(self):
+        payload = {
+            "payload": {
+                "original_input_json": {
+                    "input_json": {
+                        "content": ["random text without section keywords"],
+                    }
+                }
+            }
+        }
+
+        self.assertIsNone(_extract_section_context(payload))
+
+    def test_extract_section_context_handles_nested_list_wrapper(self):
+        payload = {
+            "payload": [
+                {
+                    "content": ["Section: Finance", "Section: Sales"],
+                    "ocr_metadata": {"confidence_score": 90.0},
+                }
+            ]
+        }
+
+        self.assertIsNone(_extract_section_context(payload))
+
+    def test_extract_section_labels_from_content_rows_returns_empty_for_non_list(self):
+        self.assertEqual(
+            _extract_section_labels_from_content_rows("not-a-list"),
+            [],
+        )
+
+        self.assertEqual(
+            _extract_section_labels_from_content_rows(None),
+            [],
+        )
+
+        self.assertEqual(
+            _extract_section_labels_from_content_rows({"a": 1}),
+            [],
+        )
+
+    def test_extract_section_label_from_value_returns_none_for_unsupported_type(self):
+        self.assertIsNone(_extract_section_label_from_value(123))
+
+    def test_extract_section_labels_from_page_returns_empty_when_text_not_list(self):
+        self.assertEqual(
+            _extract_section_labels_from_page(
+                {
+                    "page": 1,
+                    "text": "Section: Finance",
+                }
+            ),
+            [],
+        )
+
+    def test_extract_section_label_from_value_with_mapping(self):
+        self.assertEqual(
+            _extract_section_label_from_value(
+                {
+                    "department": "Section: Finance",
+                }
+            ),
+            "Finance",
+        )
 
 
 class GenerateChatResponseServiceTest(SimpleTestCase):

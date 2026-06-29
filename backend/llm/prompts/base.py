@@ -20,7 +20,7 @@ Do not fabricate rows, fields, or values.
 QUALITY_SECTION = """## QUALITY_RULES
 ### Output Contract
 - top-level keys must be exactly: document_info, summary, content_data
-- document_info.source_type must be exactly: Excel or PDF (case-sensitive)
+- document_info.source_type must be exactly: Excel, PDF, DOCX, CSV, TXT, or Image (case-sensitive)
 - document_info.filename must be a non-empty string
 
 ### Summary Rules
@@ -46,32 +46,25 @@ QUALITY_SECTION = """## QUALITY_RULES
 - Excel: if multiple sheets exist, each sheet must be a separate table in content_data
 - Excel: table_name must use the real sheet name
 - Excel: do not merge sheets together
+- Non-Excel documents: if a clear business entity or document section boundary is present, emit a separate content_data entry for each section in source order
+- Non-Excel documents: split conservatively; only separate sections when the boundary is explicit enough to avoid merging different business entities
 - PDF: if distinct tables are present, represent each as a separate table in content_data
 - PDF: if table boundaries are unclear, group conservatively rather than inventing splits
 - PDF: only merge rows when they are clearly part of the same visual table across pages; otherwise preserve separate tables
 
 ### Normalization / Unpivot Rules
 If columns represent categorical groupings (department names, regions, units, or similar),
-unpivot those columns into long-format rows.
+you may unpivot those columns into long-format rows, but only when the input clearly requires it.
 
 Apply unpivoting only within a single detected table.
 Do not use unpivoting as a reason to merge multiple distinct tables into one content_data item.
 
-The normalized table must use these exact column names:
-[
-  "unit",
-  "item",
-  "num_type",
-  "status_type",
-  "value"
-]
+Only when unpivoting is actually used, the normalized table must use these exact column names:
+["unit", "item", "num_type", "status_type", "value"]
 
-Never use translated or alternative names such as:
-- Nilai
-- Tipe
-- Status
-- Item
-- any other language variant
+If unpivoting is not used, keep the original headers from the source.
+Never invent unit/item/num_type/status_type/value headers unless unpivoting is required.
+Never use translated or alternative names such as Nilai, Tipe, Status, Item, or any other language variant.
 
 Exclude rows where value is 0 or null after unpivoting.
 
