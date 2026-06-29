@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import os
 import logging
 from uuid import uuid4
@@ -157,6 +158,66 @@ BINARY_SIGNATURES: list[tuple[bytes, str]] = [
 ]
 
 
+class UploadProcessingStrategy(ABC):
+    @abstractmethod
+    def process(self, file_path, uploaded_file):
+        raise NotImplementedError
+
+
+class PdfUploadStrategy(UploadProcessingStrategy):
+    def process(self, file_path, uploaded_file):
+        return _process_pdf(file_path, uploaded_file)
+
+
+class ExcelUploadStrategy(UploadProcessingStrategy):
+    def process(self, file_path, uploaded_file):
+        return process_uploaded_excel(file_path)
+
+
+class CsvUploadStrategy(UploadProcessingStrategy):
+    def process(self, file_path, uploaded_file):
+        return process_uploaded_csv(file_path)
+
+
+class TxtUploadStrategy(UploadProcessingStrategy):
+    def process(self, file_path, uploaded_file):
+        return process_uploaded_txt(file_path)
+
+
+class WordUploadStrategy(UploadProcessingStrategy):
+    def __init__(self, extension):
+        self.extension = extension
+
+    def process(self, file_path, uploaded_file):
+        return process_word(file_path, self.extension)
+
+
+class ImageUploadStrategy(UploadProcessingStrategy):
+    def process(self, file_path, uploaded_file):
+        return _process_image(file_path)
+
+
+def get_upload_processing_strategy(ext):
+    strategies = {
+        EXT_PDF: PdfUploadStrategy,
+        EXT_XLS: ExcelUploadStrategy,
+        EXT_XLSX: ExcelUploadStrategy,
+        EXT_DOC: lambda: WordUploadStrategy(EXT_DOC),
+        EXT_DOCX: lambda: WordUploadStrategy(EXT_DOCX),
+        EXT_TXT: TxtUploadStrategy,
+        EXT_CSV: CsvUploadStrategy,
+        EXT_PNG: ImageUploadStrategy,
+        EXT_JPG: ImageUploadStrategy,
+        EXT_JPEG: ImageUploadStrategy,
+    }
+
+    strategy_factory = strategies.get(ext)
+    if strategy_factory is None:
+        raise ValueError("Unsupported file type")
+
+    return strategy_factory()
+
+
 def _has_extracted_text(extracted_data):
     if not extracted_data or "content" not in extracted_data:
         return False
@@ -257,24 +318,16 @@ def process_word(file_path, ext):
 
 
 def _dispatch_upload_processing(ext, file_path, uploaded_file):
-    processors = {
-        EXT_PDF: lambda: _process_pdf(file_path, uploaded_file),
-        EXT_XLS: lambda: process_uploaded_excel(file_path),
-        EXT_XLSX: lambda: process_uploaded_excel(file_path),
-        EXT_DOC: lambda: process_word(file_path, EXT_DOC),
-        EXT_DOCX: lambda: process_word(file_path, EXT_DOCX),
-        EXT_TXT: lambda: process_uploaded_txt(file_path),
-        EXT_CSV: lambda: process_uploaded_csv(file_path),
-        EXT_PNG: lambda: _process_image(file_path),
-        EXT_JPG: lambda: _process_image(file_path),
-        EXT_JPEG: lambda: _process_image(file_path),
-    }
-
-    processor = processors.get(ext)
-    if processor is None:
+    try:
+        strategy = get_upload_processing_strategy(ext)
+    except ValueError:
         return False, "Unsupported file type", None
 
-    return processor()
+    return strategy.process(file_path, uploaded_file)
+
+
+def _process_upload_with_strategy(ext, file_path, uploaded_file):
+    return _dispatch_upload_processing(ext, file_path, uploaded_file)
 
 
 def process_upload(uploaded_file):
@@ -287,7 +340,7 @@ def process_upload(uploaded_file):
     file_path = save_temp_file(uploaded_file)
 
     try:
-        success, error, extracted_data = _dispatch_upload_processing(
+        success, error, extracted_data = _process_upload_with_strategy(
             ext,
             file_path,
             uploaded_file,
