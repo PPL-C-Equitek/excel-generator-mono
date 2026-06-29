@@ -1,7 +1,7 @@
 import io
 import builtins
 from unittest.mock import patch
-from django.test import TestCase
+from django.test import TestCase, SimpleTestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from file_processing.services.excel_service import process_uploaded_excel, _load_workbook
 
@@ -244,7 +244,7 @@ class ExcelDataExtractionTests(TestCase):
 
         self.assertFalse(success)
         self.assertIsNone(data)
-        self.assertIn("File tidak ditemukan", error)
+        self.assertIn("File not found", error)
 
     def test_openpyxl_not_installed_raises_runtime_error(self):
         real_import = builtins.__import__
@@ -600,3 +600,147 @@ class FileValidationTests(TestCase):
             response.json().get("message"),
             "Excel has too many sheets (maximum 100).",
         )
+
+
+class ExcelServiceDirectUnitTests(SimpleTestCase):
+    def test_load_workbook_corrupted_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            _load_workbook(io.BytesIO(b"corrupt data"))
+
+    def test_empty_xls_sheet_returns_empty_rows(self):
+        from file_processing.services.excel_service import parse_xls
+        import tempfile
+        import os
+        data = _build_xls({"Sheet1": []})
+        with tempfile.NamedTemporaryFile(suffix=".xls", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        try:
+            result = parse_xls(tmp_path)
+            self.assertEqual(result, {"Sheet1": []})
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_process_uploaded_excel_xlsx_with_ole_signature(self):
+        import tempfile
+        import os
+        data = _build_xls({"Sheet1": [["A", "B"], [1, 2]]})
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        try:
+            success, error, result = process_uploaded_excel(tmp_path)
+            self.assertTrue(success)
+            self.assertIsNone(error)
+            self.assertIn("Sheet1", result)
+            self.assertEqual(result["Sheet1"], [["A", "B"], ["1", "2"]])
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    @patch("file_processing.services.excel_service.parse_excel", side_effect=Exception("mocked exception"))
+    def test_process_uploaded_excel_general_exception(self, mock_parse):
+        success, error, data = process_uploaded_excel(io.BytesIO(b"some data"))
+        self.assertFalse(success)
+        self.assertEqual(error, "Invalid or corrupted Excel file.")
+        self.assertIsNone(data)
+
+    def test_xls_sheet_to_rows_with_zero_columns(self):
+        from unittest.mock import MagicMock
+        from file_processing.services.excel_service import _xls_sheet_to_rows
+        mock_sheet = MagicMock()
+        mock_sheet.nrows = 1
+        mock_sheet.ncols = 0
+        mock_sheet.cell_value = MagicMock()
+
+        result = _xls_sheet_to_rows(mock_sheet)
+        self.assertEqual(result, [])
+
+    def test_has_ole_signature_handles_exception_and_returns_false(self):
+        from file_processing.services.excel_service import _has_ole_signature
+        result = _has_ole_signature("/nonexistent_path_that_should_fail.xlsx")
+        self.assertIs(result, False)
+
+    def test_process_uploaded_excel_xls_with_file_object(self):
+        xls_bytes = _build_xls({
+            "Sheet1": [["Kolom A", "Kolom B"], ["Nilai 1", "Nilai 2"]]
+        })
+        f = io.BytesIO(xls_bytes)
+        f.name = "test.xls"
+
+        success, error, data = process_uploaded_excel(f)
+        self.assertTrue(success, f"Expected success but got error: {error}")
+        self.assertIsNone(error)
+        self.assertIsNotNone(data)
+        self.assertIn("Sheet1", data)
+        self.assertEqual(data["Sheet1"], [["Kolom A", "Kolom B"], ["Nilai 1", "Nilai 2"]])
+
+    def test_has_ole_signature_with_file_like_object(self):
+        from file_processing.services.excel_service import _has_ole_signature
+        from file_processing.services.excel_service import OLE_SIGNATURE
+        
+        f_correct = io.BytesIO(OLE_SIGNATURE + b"extra data")
+        self.assertTrue(_has_ole_signature(f_correct))
+        
+        f_incorrect = io.BytesIO(b"incorrect signature data")
+        self.assertFalse(_has_ole_signature(f_incorrect))
+
+    def test_xls_with_ole_signature_file_object(self):
+        xls_bytes = _build_xls({
+            "Sheet1": [["Val1"]]
+        })
+        f = io.BytesIO(xls_bytes)
+        f.name = "legacy.xlsx"
+
+        success, error, data = process_uploaded_excel(f)
+        self.assertTrue(success, f"Expected success but got error: {error}")
+        self.assertIsNone(error)
+        self.assertIsNotNone(data)
+        self.assertIn("Sheet1", data)
+
+    def test_has_ole_signature_no_seek_file_object(self):
+        from file_processing.services.excel_service import _has_ole_signature, OLE_SIGNATURE
+        class MockFileNoSeek:
+            def __init__(self, data):
+                self.data = data
+            def read(self, n=-1):
+                if n == -1:
+                    return self.data
+                return self.data[:n]
+        f = MockFileNoSeek(OLE_SIGNATURE + b"data")
+        self.assertTrue(_has_ole_signature(f))
+
+    def test_has_ole_signature_read_exception(self):
+        from file_processing.services.excel_service import _has_ole_signature
+        class MockFileReadError:
+            def seek(self, offset, whence=0):
+                pass
+            def read(self, n=-1):
+                raise RuntimeError("read error")
+        f = MockFileReadError()
+        self.assertFalse(_has_ole_signature(f))
+
+    def test_load_xls_workbook_no_seek_file_object(self):
+        from file_processing.services.excel_service import _load_xls_workbook
+        xls_bytes = _build_xls({"Sheet1": [["A"]]})
+        class MockXlsFileNoSeek:
+            def __init__(self, data):
+                self.data = data
+            def read(self):
+                return self.data
+        f = MockXlsFileNoSeek(xls_bytes)
+        wb = _load_xls_workbook(f)
+        self.assertIsNotNone(wb)
+
+    def test_load_xls_workbook_read_exception(self):
+        from file_processing.services.excel_service import _load_xls_workbook
+        class MockFileReadError:
+            def read(self):
+                raise RuntimeError("read error")
+        f = MockFileReadError()
+        with self.assertRaises(ValueError):
+            _load_xls_workbook(f)
+
+
+
