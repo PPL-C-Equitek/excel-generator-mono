@@ -1,6 +1,6 @@
 asgiref==3.11.1
 bcrypt==4.2.1
-coverage==7.13.4
+coverage==7.13.5
 Django==6.0.3
 django-cors-headers==4.9.0
 djangorestframework==3.16.1
